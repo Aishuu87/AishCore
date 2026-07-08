@@ -2,6 +2,7 @@
 -- 3D Effects menu: spell list + per-layer (bar/icon/spark) editing
 ------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
 
 local TC = 0.07
@@ -12,12 +13,12 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
     local FONT = ns.Media.font
     local panel = ns.SettingsPanel.panel
 
-    local hdr=SW.CreateSectionHeader(p,"Module Effets 3D",cw-20); hdr:SetPoint("TOPLEFT",10,0)
-    local cbFx=SW.CreateCheckbox(p,"Activer les effets 3D",cw-30)
+    local hdr=SW.CreateSectionHeader(p,L["AURASMENU_EFFECTS_MODULE_HEADER"],cw-20); hdr:SetPoint("TOPLEFT",10,0)
+    local cbFx=SW.CreateCheckbox(p,L["AURASMENU_EFFECTS_ENABLE_3D"],cw-30)
     cbFx:SetPoint("TOPLEFT",15,-22); cbFx:SetChecked(ns.db and ns.db.effectsEnabled)
     -- Option auto-disable en raid : utile pour économiser GPU dans les combats denses
     -- (8 DoTs × 3 modèles 3D par bar = 24 rendus 3D par frame). Opt-in, false par défaut.
-    local cbAutoRaid=SW.CreateCheckbox(p,"Desactiver auto en raid",cw-30)
+    local cbAutoRaid=SW.CreateCheckbox(p,L["AURASMENU_EFFECTS_AUTO_DISABLE_RAID"],cw-30)
     cbAutoRaid:SetPoint("TOPLEFT",15,-44); cbAutoRaid:SetChecked(ns.db and ns.db.effects3DAutoDisableInRaid or false)
     cbAutoRaid.onChanged=function(v)
         if ns.db then ns.db.effects3DAutoDisableInRaid = v end
@@ -129,8 +130,8 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         local lf=CreateFrame("Frame",nil,fxCont); lf:SetPoint("TOPLEFT"); lf:SetPoint("BOTTOMLEFT"); lf:SetWidth(LEFT_W)
         -- Pas de fond gris fonce ici : on herite du fond du panel principal pour
         -- coherence visuelle avec les autres menus (Debuffs, Cooldowns, etc.)
-        local lfH=lf:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lfH,FONT,10); lfH:SetPoint("TOPLEFT",10,-8); lfH:SetTextColor(_gdL[1],_gdL[2],_gdL[3]); lfH:SetText("Sorts actifs")
-        local lfS=lf:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lfS,FONT,9); lfS:SetPoint("TOPLEFT",10,-22); lfS:SetTextColor(unpack(Theme.textDim)); lfS:SetText("Auto depuis Tactics + War Gear")
+        local lfH=lf:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lfH,FONT,10); lfH:SetPoint("TOPLEFT",10,-8); lfH:SetTextColor(_gdL[1],_gdL[2],_gdL[3]); lfH:SetText(L["AURASMENU_EFFECTS_ACTIVE_SPELLS"])
+        local lfS=lf:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lfS,FONT,9); lfS:SetPoint("TOPLEFT",10,-22); lfS:SetTextColor(unpack(Theme.textDim)); lfS:SetText(L["AURASMENU_EFFECTS_AUTO_FROM_TACTICS"])
         local ly=38
 
         -- RIGHT PANEL
@@ -140,7 +141,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         local rfIco=rf:CreateTexture(nil,"ARTWORK"); rfIco:SetSize(36,36); rfIco:SetPoint("TOPLEFT",8,-3); rfIco:SetTexCoord(TC,1-TC,TC,1-TC)
         rfIco:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         local rfNm=rf:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(rfNm,FONT,12); rfNm:SetPoint("TOPLEFT",50,-8)
-        rfNm:SetPoint("RIGHT",rf,"RIGHT",-140,0); rfNm:SetTextColor(1,1,1); rfNm:SetText("Selectionnez un sort"); rfNm:SetJustifyH("LEFT")
+        rfNm:SetPoint("RIGHT",rf,"RIGHT",-140,0); rfNm:SetTextColor(1,1,1); rfNm:SetText(L["AURASMENU_EFFECTS_SELECT_A_SPELL"]); rfNm:SetJustifyH("LEFT")
 
         -- Forward declare RefreshTabVisibility : appele par le OnClick des view tabs
         -- pour cacher/montrer les onglets ANIMS selon la matrice de compatibilite.
@@ -158,7 +159,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         --
         -- Libelles courts pour eviter le wrap sur 2 lignes (CD au lieu de COOLDOWNS,
         -- EQUIP au lieu de EQUIPMENT). 6 onglets * 86 = 516px, tient sur la largeur.
-        local viewNames={"[L] LISTE","[C] CERCLE","[B] LIBRES","[I] ICONES","[E] EQUIP","TOUTES"}
+        local viewNames={L["AURASMENU_EFFECTS_VIEW_LIST"],L["AURASMENU_EFFECTS_VIEW_CIRCLE"],L["AURASMENU_EFFECTS_VIEW_FREE"],L["AURASMENU_EFFECTS_VIEW_ICONS"],L["AURASMENU_EFFECTS_VIEW_EQUIP"],L["AURASMENU_EFFECTS_VIEW_ALL"]}
         local viewKeys={"iconlist","freebars","circlebars","icons","equipment","all"}
         local LAYER_COMPAT = {
             all        = { icon=true,  bar=true,  spark=true  },
@@ -226,7 +227,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
 
         -- Anim tabs (ICONE first, then BARRE, SPARK)
         local tabBtns={}
-        local tabs={{"icon","ANIMS ICONE"},{"bar","ANIMS BARRE"},{"spark","ANIMS SPARK"}}
+        local tabs={{"icon",L["AURASMENU_EFFECTS_TAB_ICON"]},{"bar",L["AURASMENU_EFFECTS_TAB_BAR"]},{"spark",L["AURASMENU_EFFECTS_TAB_SPARK"]}}
         for ti,td in ipairs(tabs) do
             local tab=CreateFrame("Button",nil,rf); tab:SetSize(133,28); tab:SetPoint("TOPLEFT",(ti-1)*133,-92)
             local tBg=tab:CreateTexture(nil,"BACKGROUND"); tBg:SetAllPoints()
@@ -303,7 +304,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         pvArea:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
         pvArea:SetBackdropColor(0.025,0.025,0.035,0.92); pvArea:SetBackdropBorderColor(_gd[1],_gd[2],_gd[3],0.45)
         local pvLbl=pvArea:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(pvLbl,FONT,8)
-        pvLbl:SetPoint("TOPLEFT",6,-3); pvLbl:SetTextColor(unpack(Theme.textDim)); pvLbl:SetText("MODELE 3D")
+        pvLbl:SetPoint("TOPLEFT",6,-3); pvLbl:SetTextColor(unpack(Theme.textDim)); pvLbl:SetText(L["AURASMENU_EFFECTS_MODEL_3D_LABEL"])
         local pvModelView=CreateFrame("PlayerModel",nil,pvArea)
         pvModelView:SetPoint("TOPLEFT",2,-14); pvModelView:SetPoint("BOTTOMRIGHT",-2,2)
         pvModelView:SetKeepModelOnHide(true); pvModelView:SetFrameLevel(pvArea:GetFrameLevel()+3)
@@ -319,7 +320,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         -- Agrandir button
         local pvPopBtn=CreateFrame("Button",nil,pvArea); pvPopBtn:SetSize(60,14); pvPopBtn:SetPoint("TOPRIGHT",-4,-3)
         local pvPopTx=pvPopBtn:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(pvPopTx,FONT,8); pvPopTx:SetAllPoints(); pvPopTx:SetJustifyH("RIGHT")
-        pvPopTx:SetTextColor(unpack(Theme.accent)); pvPopTx:SetText("Agrandir")
+        pvPopTx:SetTextColor(unpack(Theme.accent)); pvPopTx:SetText(L["AURASMENU_EFFECTS_ENLARGE"])
         pvPopBtn:SetScript("OnEnter",function() pvPopTx:SetTextColor(1,1,1) end)
         pvPopBtn:SetScript("OnLeave",function() pvPopTx:SetTextColor(unpack(Theme.accent)) end)
         pvPopBtn:SetScript("OnClick",function()
@@ -377,7 +378,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
             pp._pIco:Hide(); pp._pIcoMdl:Hide(); pp._pIcoMdl:ClearModel()
             pp._pBarWr:Hide(); pp._pBarMdl:Hide(); pp._pBarMdl:ClearModel()
             pp:Show()
-            if not selectedSpellID or not ns.SpellFX then pp._title:SetText("PREVIEW 3D"); return end
+            if not selectedSpellID or not ns.SpellFX then pp._title:SetText(L["AURASMENU_EFFECTS_PREVIEW_3D_TITLE"]); return end
             local rk2 = (activeView == "circlebars" and "circlebars") or (activeView == "icons" and "icons") or "iconlist"
             local rcfg = ns.db and ns.db[rk2] or {}
             local iW, iH = rcfg.iconW or 26, rcfg.iconH or 26
@@ -388,7 +389,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                 local isWG = ns._selectedFx3dIsWG
                 local icoW, icoH = iW, iH
                 if isWG then icoW=36; icoH=36 end
-                pp._title:SetText(isWG and "PREVIEW WG ICONE" or "PREVIEW ICONE ("..icoW.."x"..icoH..")")
+                pp._title:SetText(isWG and L["AURASMENU_EFFECTS_PREVIEW_WG_ICON"] or string.format(L["AURASMENU_EFFECTS_PREVIEW_ICON_SIZE"], icoW, icoH))
                 local scale = math.min(4, 200/math.max(icoW,icoH))
                 pp._pIco:SetSize(icoW*scale, icoH*scale); pp._pIco:Show()
                 -- Try spell texture first, then item texture
@@ -405,7 +406,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                     pp._pIcoMdl:SetAlpha(layer.alpha or 0.5); pp._pIcoMdl:Show()
                 end) end) end
             else
-                pp._title:SetText(activeTab == "spark" and "PREVIEW SPARK ("..bW.."x"..bH..")" or "PREVIEW BARRE ("..bW.."x"..bH..")")
+                pp._title:SetText(activeTab == "spark" and string.format(L["AURASMENU_EFFECTS_PREVIEW_SPARK_SIZE"], bW, bH) or string.format(L["AURASMENU_EFFECTS_PREVIEW_BAR_SIZE"], bW, bH))
                 local bScale = math.min(3, 280/math.max(bW,1))
                 pp._pBarWr:SetSize(bW*bScale, math.max(bH*bScale, 8)); pp._pBarWr:Show()
                 if layer then C_Timer.After(0.1, function() pcall(function()
@@ -427,7 +428,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
             pvZoom = 1.0
             -- Cache aussi la texture preview eventuelle (cleanup entre changements)
             if pvFillPreview then pvFillPreview:Hide() end
-            if not selectedSpellID or not ns.SpellFX then pvLbl:SetText("APERCU"); return end
+            if not selectedSpellID or not ns.SpellFX then pvLbl:SetText(L["AURASMENU_EFFECTS_PREVIEW_LABEL"]); return end
             local layers = ns.SpellFX:GetSpellLayers(selectedSpellID, activeView, activeTab)
             local layer
             -- Trouve le layer actif courant : prefere le selectionne, sinon le 1er actif
@@ -443,11 +444,11 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
             else
                 for _, l in ipairs(layers) do if IsLayerActive(l) then layer = l; break end end
             end
-            if not layer then pvLbl:SetText("APERCU — aucun ("..activeTab..")"); return end
+            if not layer then pvLbl:SetText(string.format(L["AURASMENU_EFFECTS_PREVIEW_NONE"], activeTab)); return end
             -- Mode Fill 2D : preview en texture statique
             if (layer.mode or "front") == "mid" and layer.fillTex and layer.fillTex ~= "" then
-                local label = ns.GetFillTextureLabel and ns.GetFillTextureLabel(layer.fillTex) or "Fill"
-                pvLbl:SetText("TEXTURE 2D — "..label.." ("..activeTab..")")
+                local label = ns.GetFillTextureLabel and ns.GetFillTextureLabel(layer.fillTex) or L["AURASMENU_EFFECTS_FILL_FALLBACK"]
+                pvLbl:SetText(string.format(L["AURASMENU_EFFECTS_PREVIEW_TEXTURE_2D"], label, activeTab))
                 -- Lazy create de la texture preview (1 seule par UI)
                 if not pvFillPreview then
                     pvFillPreview = pvModelView:GetParent():CreateTexture(nil, "ARTWORK")
@@ -461,7 +462,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                 return
             end
             -- Mode 3D : preview en PlayerModel (comportement classique)
-            pvLbl:SetText("MODELE 3D — "..ns.SpellFX:GetModelName(layer.modelID).." ("..activeTab..")")
+            pvLbl:SetText(string.format(L["AURASMENU_EFFECTS_PREVIEW_MODEL_3D"], ns.SpellFX:GetModelName(layer.modelID), activeTab))
             C_Timer.After(0.05, function() pcall(function()
                 pvModelView:SetModel(layer.modelID)
                 pvModelView:SetPosition(layer.z or 0, layer.x or 0, layer.y or 0)
@@ -484,11 +485,11 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
             if not selectedSpellID or not ns.SpellFX then
                 local emT=layerChild:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(emT,FONT,11)
                 emT:SetPoint("TOP",0,-60); emT:SetTextColor(unpack(Theme.textDim)); emT:SetJustifyH("CENTER")
-                emT:SetText("Aucune couche.\nCliquez sur + pour ajouter un effet 3D.")
+                emT:SetText(L["AURASMENU_EFFECTS_NO_LAYER"])
                 local addB=CreateFrame("Button",nil,layerChild,"BackdropTemplate"); addB:SetHeight(28)
                 addB:SetPoint("TOPLEFT",10,-130); addB:SetPoint("TOPRIGHT",-10,-130)
                 addB:SetBackdrop({edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1}); addB:SetBackdropBorderColor(Theme.accent[1],Theme.accent[2],Theme.accent[3],0.3)
-                local addT=addB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(addT,FONT,11); addT:SetAllPoints(); addT:SetJustifyH("CENTER"); addT:SetTextColor(unpack(Theme.accent)); addT:SetText("+ Ajouter une couche")
+                local addT=addB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(addT,FONT,11); addT:SetAllPoints(); addT:SetJustifyH("CENTER"); addT:SetTextColor(unpack(Theme.accent)); addT:SetText(L["AURASMENU_EFFECTS_ADD_LAYER"])
                 addB:SetScript("OnClick",function() if selectedSpellID and ns.SpellFX then ns.SpellFX:AddLayer(selectedSpellID,activeView,activeTab); selectedLayerIdx=1; ns._selectedFx3dLayerIdx=selectedLayerIdx; RefreshInlinePreview(); RefreshLayers() end end)
                 layerChild:SetHeight(170); return
             end
@@ -497,7 +498,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
             if #layers == 0 then
                 local emT=layerChild:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(emT,FONT,11)
                 emT:SetPoint("TOP",0,-40); emT:SetTextColor(unpack(Theme.textDim)); emT:SetJustifyH("CENTER")
-                emT:SetText("Aucune couche.\nCliquez sur + pour ajouter un effet 3D."); cy=cy+80
+                emT:SetText(L["AURASMENU_EFFECTS_NO_LAYER"]); cy=cy+80
             else
                 if selectedLayerIdx > #layers then selectedLayerIdx = #layers end
                 for li, layer in ipairs(layers) do
@@ -513,7 +514,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                     lf2:EnableMouse(true)
                     lf2:SetScript("OnMouseDown",function() selectedLayerIdx=li; ns._selectedFx3dLayerIdx=selectedLayerIdx; RefreshInlinePreview(); RefreshLayers() end)
                     local lhdr=lf2:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lhdr,FONT,10); lhdr:SetPoint("TOPLEFT",8,-5)
-                    lhdr:SetTextColor(unpack(Theme.accent)); lhdr:SetText("Effet "..li)
+                    lhdr:SetTextColor(unpack(Theme.accent)); lhdr:SetText(string.format(L["AURASMENU_EFFECTS_EFFECT_NUM"], li))
                     -- Status badge (right side, near X)
                     local stB=CreateFrame("Frame",nil,lf2); stB:SetSize(62,14); stB:SetPoint("TOPRIGHT",-24,-4)
                     local stBg=stB:CreateTexture(nil,"BACKGROUND"); stBg:SetAllPoints()
@@ -522,14 +523,14 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                     if layer.modelID and layer.modelID > 0 then
                         stBg:SetColorTexture(_gold[1]*0.2, _gold[2]*0.2, _gold[3]*0.2, 0.8); stTx:SetText(ns.SpellFX:GetModelName(layer.modelID)); stTx:SetTextColor(_gold[1], _gold[2], _gold[3])
                     else
-                        stBg:SetColorTexture(0.10, 0.10, 0.11, 0.85); stTx:SetText("non applique"); stTx:SetTextColor(0.55, 0.55, 0.58)
+                        stBg:SetColorTexture(0.10, 0.10, 0.11, 0.85); stTx:SetText(L["AURASMENU_EFFECTS_NOT_APPLIED"]); stTx:SetTextColor(0.55, 0.55, 0.58)
                     end
                     local delB=CreateFrame("Button",nil,lf2); delB:SetSize(16,16); delB:SetPoint("TOPRIGHT",-4,-3)
                     local delT=delB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(delT,FONT,11); delT:SetAllPoints(); delT:SetText("x"); delT:SetTextColor(0.5, 0.5, 0.55)
                     delB:SetScript("OnClick",function() ns.SpellFX:RemoveLayer(selectedSpellID,activeView,activeTab,li); selectedLayerIdx=1; ns._selectedFx3dLayerIdx=selectedLayerIdx; RefreshInlinePreview(); RefreshLayers()
                         pcall(function() if ns._rebuildCurrentMenu then ns._rebuildCurrentMenu() end end) end)
                     delB:SetScript("OnEnter",function() delT:SetTextColor(_gold[1], _gold[2], _gold[3]) end); delB:SetScript("OnLeave",function() delT:SetTextColor(0.5, 0.5, 0.55) end)
-                    local mLbl=lf2:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(mLbl,FONT,9); mLbl:SetPoint("TOPLEFT",8,-22); mLbl:SetTextColor(unpack(Theme.textDim)); mLbl:SetText("Plan :")
+                    local mLbl=lf2:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(mLbl,FONT,9); mLbl:SetPoint("TOPLEFT",8,-22); mLbl:SetTextColor(unpack(Theme.textDim)); mLbl:SetText(L["AURASMENU_EFFECTS_PLANE_LABEL"])
                     local mNames, mLabels, mCols
                     if isBar then
                         -- Plans pour les BARRES (vue ANIMS BARRE) :
@@ -537,12 +538,12 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                         --   - "Remplissage 3D" = mode `back`  : modele 3D qui suit la zone remplie (rogne par le clip)
                         --   - "Fond"           = mode `front` : modele 3D fixe pleine largeur, ne suit pas le remplissage
                         mNames={"mid","back","front"}
-                        mLabels={"Remplissage 2D","Remplissage 3D","Fond"}
+                        mLabels={L["AURASMENU_EFFECTS_FILL_2D"],L["AURASMENU_EFFECTS_FILL_3D"],L["AURASMENU_EFFECTS_BACKGROUND"]}
                         mCols={{_gold[1], _gold[2], _gold[3]},
                                {_gold[1]*0.85, _gold[2]*0.85, _gold[3]*0.85},
                                {_gold[1]*1.10, _gold[2]*1.10, _gold[3]*1.10}}
                     else
-                        mNames={"back","mid","front"}; mLabels={"Arriere-plan","Moyen plan","Premier plan"}
+                        mNames={"back","mid","front"}; mLabels={L["AURASMENU_EFFECTS_BACK_PLANE"],L["AURASMENU_EFFECTS_MID_PLANE"],L["AURASMENU_EFFECTS_FRONT_PLANE"]}
                         mCols={{_gold[1]*0.55, _gold[2]*0.55, _gold[3]*0.55}, {_gold[1], _gold[2], _gold[3]}, {_gold[1]*1.10, _gold[2]*1.10, _gold[3]*1.10}}
                     end
                     for mi,mk in ipairs(mNames) do
@@ -562,7 +563,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                         -- ===== MODE REMPLISSAGE (Texture 2D) =====
                         -- Dropdown des 15 textures Fill 2D
                         local opts = {}
-                        opts[#opts+1] = { value = "", text = "(aucune)" }
+                        opts[#opts+1] = { value = "", text = L["AURASMENU_EFFECTS_NONE_FEM"] }
                         for _, t in ipairs(ns.FillTextures or {}) do
                             opts[#opts+1] = { value = t.id, text = t.label }
                         end
@@ -589,7 +590,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                         end
                     else
                         -- ===== MODE FOND (PlayerModel 3D) ou icon/spark/glow =====
-                        pickB = SW.CreateActionBtn(lf2,"Choisir modele",130,{0.05,0.05,0.06},{_gold[1],_gold[2],_gold[3],0.55},{_gold[1],_gold[2],_gold[3]})
+                        pickB = SW.CreateActionBtn(lf2,L["AURASMENU_EFFECTS_CHOOSE_MODEL"],130,{0.05,0.05,0.06},{_gold[1],_gold[2],_gold[3],0.55},{_gold[1],_gold[2],_gold[3]})
                         pickB:SetPoint("TOPLEFT",8,-40); pickB:SetSize(130,18)
                         pickB:SetScript("OnClick",function()
                             if ns.ModelPicker and ns.ModelPicker.Open then
@@ -608,7 +609,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                                 end, layer.modelID)
                             end end)
                         idLbl=lf2:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(idLbl,FONT,8); idLbl:SetPoint("LEFT",pickB,"RIGHT",8,0)
-                        idLbl:SetTextColor(unpack(Theme.textDim)); idLbl:SetText("ID: "..(layer.modelID or 0))
+                        idLbl:SetTextColor(unpack(Theme.textDim)); idLbl:SetText(string.format(L["AURASMENU_EFFECTS_ID_LABEL"], tostring(layer.modelID or 0)))
                     end
                     local slW=math.max(70, math.floor((lf2:GetWidth()-25)/3))
                     local function OnLayerChange(key, v)
@@ -623,10 +624,10 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                         if isFillMode then
                             -- ===== Sliders pour Fill 2D (texture qui se tronque) =====
                             local LH2 = 200; lf2:SetHeight(LH2)
-                            MkSl("Opacite", 0, 1, 0.05, 0, 0, "fillAlpha")
-                            MkSl("Vitesse scroll", 0, 2, 0.05, 1, 0, "fillScroll")
+                            MkSl(L["AURASMENU_EQUIPMENT_OPACITY"], 0, 1, 0.05, 0, 0, "fillAlpha")
+                            MkSl(L["AURASMENU_EFFECTS_SCROLL_SPEED"], 0, 2, 0.05, 1, 0, "fillScroll")
                             -- Color picker pour la teinte
-                            local cb = SW.CreateColorButton(lf2, "Teinte", slW)
+                            local cb = SW.CreateColorButton(lf2, L["AURASMENU_EFFECTS_TINT"], slW)
                             cb:SetPoint("TOPLEFT", 5+2*(slW+5), -65)
                             cb:SetColor(layer.fillTintR or 1, layer.fillTintG or 1, layer.fillTintB or 1)
                             cb.onChanged = function(rgb)
@@ -642,7 +643,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                             local rB=CreateFrame("Button",nil,lf2,"BackdropTemplate"); rB:SetSize(90,20); rB:SetPoint("BOTTOMLEFT",5,5)
                             rB:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
                             rB:SetBackdropColor(0.05,0.05,0.06,0.9); rB:SetBackdropBorderColor(0.78,0.62,0.30,0.55)
-                            local rT=rB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(rT,FONT,9); rT:SetAllPoints(); rT:SetJustifyH("CENTER"); rT:SetText("Reset"); rT:SetTextColor(0.78,0.62,0.30)
+                            local rT=rB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(rT,FONT,9); rT:SetAllPoints(); rT:SetJustifyH("CENTER"); rT:SetText(L["AURASMENU_EFFECTS_RESET"]); rT:SetTextColor(0.78,0.62,0.30)
                             rB:SetScript("OnClick",function()
                                 layer.fillAlpha=0.7; layer.fillScroll=nil
                                 layer.fillTintR=1; layer.fillTintG=1; layer.fillTintB=1
@@ -652,48 +653,48 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                             local dB=CreateFrame("Button",nil,lf2,"BackdropTemplate"); dB:SetSize(90,20); dB:SetPoint("LEFT",rB,"RIGHT",4,0)
                             dB:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
                             dB:SetBackdropColor(0.10,0.04,0.04,0.9); dB:SetBackdropBorderColor(0.65,0.45,0.20,0.55)
-                            local dT=dB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(dT,FONT,9); dT:SetAllPoints(); dT:SetJustifyH("CENTER"); dT:SetText("Supprimer"); dT:SetTextColor(0.85,0.65,0.30)
+                            local dT=dB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(dT,FONT,9); dT:SetAllPoints(); dT:SetJustifyH("CENTER"); dT:SetText(L["AURASMENU_EFFECTS_DELETE"]); dT:SetTextColor(0.85,0.65,0.30)
                             dB:SetScript("OnClick",function() ns.SpellFX:RemoveLayer(selectedSpellID,activeView,activeTab,li); selectedLayerIdx=1; ns._selectedFx3dLayerIdx=selectedLayerIdx; RefreshInlinePreview(); RefreshLayers()
                                 pcall(function() if ns._rebuildCurrentMenu then ns._rebuildCurrentMenu() end end) end)
                             cy=cy+LH2+8
                         else
                             -- ===== Sliders pour Bar 3D (PlayerModel mode Fond) =====
                             local LH2 = 290; lf2:SetHeight(LH2)
-                            MkSl("Echelle",0.10,5.00,0.05,0,0,"scale"); MkSl("Rotation",0,360,5,1,0,"rotation"); MkSl("Opacite",0,1,0.05,2,0,"alpha")
-                            MkSl("Largeur FX",5,400,1,0,1,"fxW"); MkSl("Hauteur FX",2,100,1,1,1,"fxH"); MkSl("Z (prof.)",-30,30,0.5,2,1,"z")
-                            MkSl("X (modele)",-30,30,0.5,0,2,"x"); MkSl("Y (modele)",-30,30,0.5,1,2,"y")
+                            MkSl(L["AURASMENU_EFFECTS_SCALE"],0.10,5.00,0.05,0,0,"scale"); MkSl(L["AURASMENU_EFFECTS_ROTATION"],0,360,5,1,0,"rotation"); MkSl(L["AURASMENU_EQUIPMENT_OPACITY"],0,1,0.05,2,0,"alpha")
+                            MkSl(L["AURASMENU_EFFECTS_FX_WIDTH"],5,400,1,0,1,"fxW"); MkSl(L["AURASMENU_EFFECTS_FX_HEIGHT"],2,100,1,1,1,"fxH"); MkSl(L["AURASMENU_EFFECTS_Z_DEPTH"],-30,30,0.5,2,1,"z")
+                            MkSl(L["AURASMENU_EFFECTS_X_MODEL"],-30,30,0.5,0,2,"x"); MkSl(L["AURASMENU_EFFECTS_Y_MODEL"],-30,30,0.5,1,2,"y")
                             -- Buttons inside card
                             local rB=CreateFrame("Button",nil,lf2,"BackdropTemplate"); rB:SetSize(90,20); rB:SetPoint("BOTTOMLEFT",5,5)
                             rB:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
                             rB:SetBackdropColor(0.05,0.05,0.06,0.9); rB:SetBackdropBorderColor(0.78,0.62,0.30,0.55)
-                            local rT=rB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(rT,FONT,9); rT:SetAllPoints(); rT:SetJustifyH("CENTER"); rT:SetText("Reset"); rT:SetTextColor(0.78,0.62,0.30)
+                            local rT=rB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(rT,FONT,9); rT:SetAllPoints(); rT:SetJustifyH("CENTER"); rT:SetText(L["AURASMENU_EFFECTS_RESET"]); rT:SetTextColor(0.78,0.62,0.30)
                             rB:SetScript("OnClick",function() layer.x=0;layer.y=0;layer.z=0;layer.scale=1;layer.rotation=0;layer.alpha=0.5;layer.posX=0;layer.posY=0;layer.fxW=nil;layer.fxH=nil
                                 pcall(function() ns.SpellFX:SyncToSpell(selectedSpellID) end); RefreshInlinePreview(); RefreshLayers(); pcall(ns.ScanAuras) end)
                             local dB=CreateFrame("Button",nil,lf2,"BackdropTemplate"); dB:SetSize(90,20); dB:SetPoint("LEFT",rB,"RIGHT",4,0)
                             dB:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
                             dB:SetBackdropColor(0.10,0.04,0.04,0.9); dB:SetBackdropBorderColor(0.65,0.45,0.20,0.55)
-                            local dT=dB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(dT,FONT,9); dT:SetAllPoints(); dT:SetJustifyH("CENTER"); dT:SetText("Supprimer"); dT:SetTextColor(0.85,0.65,0.30)
+                            local dT=dB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(dT,FONT,9); dT:SetAllPoints(); dT:SetJustifyH("CENTER"); dT:SetText(L["AURASMENU_EFFECTS_DELETE"]); dT:SetTextColor(0.85,0.65,0.30)
                             dB:SetScript("OnClick",function() ns.SpellFX:RemoveLayer(selectedSpellID,activeView,activeTab,li); selectedLayerIdx=1; ns._selectedFx3dLayerIdx=selectedLayerIdx; RefreshInlinePreview(); RefreshLayers()
                                 pcall(function() if ns._rebuildCurrentMenu then ns._rebuildCurrentMenu() end end) end)
                             cy=cy+LH2+8
                         end
                     else
                         local LH2 = 330; lf2:SetHeight(LH2)
-                        MkSl("Echelle",0.10,5.00,0.05,0,0,"scale"); MkSl("Rotation",0,360,5,1,0,"rotation"); MkSl("Opacite",0,1,0.05,2,0,"alpha")
-                        MkSl("Largeur FX",5,400,1,0,1,"fxW"); MkSl("Hauteur FX",2,400,1,1,1,"fxH"); MkSl("Z (prof.)",-30,30,0.5,2,1,"z")
-                        MkSl("X Offset",-30,30,0.5,0,2,"x"); MkSl("Y Offset",-30,30,0.5,1,2,"y"); MkSl("Pos. X",-800,800,1,2,2,"posX")
-                        MkSl("Pos. Y",-800,800,1,0,3,"posY")
+                        MkSl(L["AURASMENU_EFFECTS_SCALE"],0.10,5.00,0.05,0,0,"scale"); MkSl(L["AURASMENU_EFFECTS_ROTATION"],0,360,5,1,0,"rotation"); MkSl(L["AURASMENU_EQUIPMENT_OPACITY"],0,1,0.05,2,0,"alpha")
+                        MkSl(L["AURASMENU_EFFECTS_FX_WIDTH"],5,400,1,0,1,"fxW"); MkSl(L["AURASMENU_EFFECTS_FX_HEIGHT"],2,400,1,1,1,"fxH"); MkSl(L["AURASMENU_EFFECTS_Z_DEPTH"],-30,30,0.5,2,1,"z")
+                        MkSl(L["AURASMENU_EFFECTS_X_OFFSET"],-30,30,0.5,0,2,"x"); MkSl(L["AURASMENU_EFFECTS_Y_OFFSET"],-30,30,0.5,1,2,"y"); MkSl(L["AURASMENU_EFFECTS_POS_X"],-800,800,1,2,2,"posX")
+                        MkSl(L["AURASMENU_EFFECTS_POS_Y"],-800,800,1,0,3,"posY")
                         -- Buttons inside card
                         local rB=CreateFrame("Button",nil,lf2,"BackdropTemplate"); rB:SetSize(90,20); rB:SetPoint("BOTTOMLEFT",5,5)
                         rB:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
                         rB:SetBackdropColor(0.05,0.05,0.06,0.9); rB:SetBackdropBorderColor(0.78,0.62,0.30,0.55)
-                        local rT=rB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(rT,FONT,9); rT:SetAllPoints(); rT:SetJustifyH("CENTER"); rT:SetText("Reset"); rT:SetTextColor(0.78,0.62,0.30)
+                        local rT=rB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(rT,FONT,9); rT:SetAllPoints(); rT:SetJustifyH("CENTER"); rT:SetText(L["AURASMENU_EFFECTS_RESET"]); rT:SetTextColor(0.78,0.62,0.30)
                         rB:SetScript("OnClick",function() layer.x=0;layer.y=0;layer.z=0;layer.scale=1;layer.rotation=0;layer.alpha=0.5;layer.posX=0;layer.posY=0;layer.fxW=nil;layer.fxH=nil
                             pcall(function() ns.SpellFX:SyncToSpell(selectedSpellID) end); RefreshInlinePreview(); RefreshLayers(); pcall(ns.ScanAuras) end)
                         local dB=CreateFrame("Button",nil,lf2,"BackdropTemplate"); dB:SetSize(90,20); dB:SetPoint("LEFT",rB,"RIGHT",4,0)
                         dB:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
                         dB:SetBackdropColor(0.10,0.04,0.04,0.9); dB:SetBackdropBorderColor(0.65,0.45,0.20,0.55)
-                        local dT=dB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(dT,FONT,9); dT:SetAllPoints(); dT:SetJustifyH("CENTER"); dT:SetText("Supprimer"); dT:SetTextColor(0.85,0.65,0.30)
+                        local dT=dB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(dT,FONT,9); dT:SetAllPoints(); dT:SetJustifyH("CENTER"); dT:SetText(L["AURASMENU_EFFECTS_DELETE"]); dT:SetTextColor(0.85,0.65,0.30)
                         dB:SetScript("OnClick",function() ns.SpellFX:RemoveLayer(selectedSpellID,activeView,activeTab,li); selectedLayerIdx=1; ns._selectedFx3dLayerIdx=selectedLayerIdx; RefreshInlinePreview(); RefreshLayers()
                             pcall(function() if ns._rebuildCurrentMenu then ns._rebuildCurrentMenu() end end) end)
                         cy=cy+LH2+8
@@ -703,19 +704,19 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
             local addB=CreateFrame("Button",nil,layerChild,"BackdropTemplate"); addB:SetHeight(28)
             addB:SetPoint("TOPLEFT",5,-cy); addB:SetPoint("TOPRIGHT",-5,-cy)
             addB:SetBackdrop({edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1}); addB:SetBackdropBorderColor(Theme.accent[1],Theme.accent[2],Theme.accent[3],0.3)
-            local addT=addB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(addT,FONT,11); addT:SetAllPoints(); addT:SetJustifyH("CENTER"); addT:SetTextColor(unpack(Theme.accent)); addT:SetText("+ Ajouter une couche")
+            local addT=addB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(addT,FONT,11); addT:SetAllPoints(); addT:SetJustifyH("CENTER"); addT:SetTextColor(unpack(Theme.accent)); addT:SetText(L["AURASMENU_EFFECTS_ADD_LAYER"])
             addB:SetScript("OnClick",function() if selectedSpellID and ns.SpellFX then ns.SpellFX:AddLayer(selectedSpellID,activeView,activeTab); selectedLayerIdx=#layers+1; ns._selectedFx3dLayerIdx=selectedLayerIdx; RefreshInlinePreview(); RefreshLayers() end end)
             -- OVERLAY ANIME section (bar tab only)
             if activeTab == "bar" and selectedSpellID then
                 cy = cy + 38
                 local ovH = layerChild:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(ovH,FONT,10)
-                ovH:SetPoint("TOPLEFT",8,-cy); ovH:SetTextColor(0.4,0.75,0.5); ovH:SetText("OVERLAY ANIME (texture defilante)")
+                ovH:SetPoint("TOPLEFT",8,-cy); ovH:SetTextColor(0.4,0.75,0.5); ovH:SetText(L["AURASMENU_EFFECTS_OVERLAY_ANIM"])
                 cy = cy + 18
                 local si = spells and spells[selectedSpellID]
                 -- Texture dropdown
                 local texLbl=layerChild:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(texLbl,FONT,9)
-                texLbl:SetPoint("TOPLEFT",8,-cy); texLbl:SetTextColor(unpack(Theme.textDim)); texLbl:SetText("Texture :")
-                local texNames = {"(aucun)"}; local texPaths = {""}
+                texLbl:SetPoint("TOPLEFT",8,-cy); texLbl:SetTextColor(unpack(Theme.textDim)); texLbl:SetText(L["AURASMENU_EFFECTS_TEXTURE_LABEL"])
+                local texNames = {L["AURASMENU_EFFECTS_NONE_MASC"]}; local texPaths = {""}
                 for _,bt in ipairs(ns.BAR_TEXTURES) do texNames[#texNames+1]=bt.text; texPaths[#texPaths+1]=ns.ResolveLSMTexture and ns.ResolveLSMTexture(bt) or bt.path or "" end
                 local curTex = si and si.overlayTex or ""
                 local curIdx = 1
@@ -735,10 +736,10 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                 cy = cy + 22
                 -- Speed + Alpha sliders
                 local slW2 = math.max(80, math.floor((layerChild:GetWidth()-20)/2))
-                local sSpd=SW.CreateSlider(layerChild,"Vitesse",0.05,3.0,0.05,slW2); sSpd:SetPoint("TOPLEFT",5,-cy)
+                local sSpd=SW.CreateSlider(layerChild,L["AURASMENU_EFFECTS_SPEED"],0.05,3.0,0.05,slW2); sSpd:SetPoint("TOPLEFT",5,-cy)
                 sSpd:SetValue(si and si.overlaySpeed or 0.5)
                 sSpd.onChanged=function(v) if si then si.overlaySpeed=v end; if ns.SpellFX and selectedSpellID then pcall(function() ns.SpellFX:SyncToSpell(selectedSpellID) end) end; pcall(ns.ScanAuras) end
-                local sAlp=SW.CreateSlider(layerChild,"Opacite overlay",0,1,0.05,slW2); sAlp:SetPoint("TOPLEFT",slW2+10,-cy)
+                local sAlp=SW.CreateSlider(layerChild,L["AURASMENU_EFFECTS_OVERLAY_OPACITY"],0,1,0.05,slW2); sAlp:SetPoint("TOPLEFT",slW2+10,-cy)
                 sAlp:SetValue(si and si.overlayAlpha or 0.3)
                 sAlp.onChanged=function(v) if si then si.overlayAlpha=v end; if ns.SpellFX and selectedSpellID then pcall(function() ns.SpellFX:SyncToSpell(selectedSpellID) end) end; pcall(ns.ScanAuras) end
                 cy = cy + 55
@@ -832,7 +833,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                         tb.btn:Show()
                         -- Rename tab for WG items
                         if tb.key == "icon" then
-                            tb.tx:SetText(entry.isWG and "ANIMS ICONE [E]" or "ANIMS ICONE")
+                            tb.tx:SetText(entry.isWG and L["AURASMENU_EFFECTS_TAB_ICON_WG"] or L["AURASMENU_EFFECTS_TAB_ICON"])
                         end
                     end
                 end
@@ -929,7 +930,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                     for ti, tb in ipairs(tabBtns) do
                         if entry.isWG and tb.key ~= "icon" then tb.btn:Hide()
                         else tb.btn:Show()
-                            if tb.key == "icon" then tb.tx:SetText(entry.isWG and "ANIMS ICONE [E]" or "ANIMS ICONE") end
+                            if tb.key == "icon" then tb.tx:SetText(entry.isWG and L["AURASMENU_EFFECTS_TAB_ICON_WG"] or L["AURASMENU_EFFECTS_TAB_ICON"]) end
                         end
                     end
                     -- Reset systematique de TOUS les tabBtns (visibles ou non)
@@ -968,7 +969,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
 
         -- Bottom: only Vider sort (auto-save on close, no need for Valider/Annuler)
         local btnDefs = {
-            {label="Vider sort",  w=150, bg={0.18,0.14,0.06}, bdr={0.6,0.5,0.3,0.5}, tx={1.0,0.75,0.4}},
+            {label=L["AURASMENU_EFFECTS_CLEAR_SPELL"],  w=150, bg={0.18,0.14,0.06}, bdr={0.6,0.5,0.3,0.5}, tx={1.0,0.75,0.4}},
         }
         local actBtns = {}
         for bi, bd in ipairs(btnDefs) do

@@ -16,6 +16,7 @@
 -- ============================================================================
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 ns.ScrollBar = ns.ScrollBar or {}
 
 local CreateFrame = CreateFrame

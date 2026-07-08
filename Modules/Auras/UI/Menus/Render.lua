@@ -415,66 +415,66 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
 
     -- SPARK: skip for Procs (no spark in Fury layout)
     if rk ~= "icons" then
-    sections[#sections+1] = {name="ETINCELLE (SPARK)",category="APPARENCE",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
-            local cb=SW.CreateCheckbox(c,"Activer spark",w-30); cb:SetPoint("TOPLEFT",15,-cy); cb:SetChecked(cf.sparkEnabled~=false)
+    sections[#sections+1] = {id="ETINCELLE_SPARK",name=L["AURASMENU_RENDER_SECTION_SPARK"],category="APPARENCE",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+            local cb=SW.CreateCheckbox(c,L["AURASMENU_RENDER_ENABLE_SPARK"],w-30); cb:SetPoint("TOPLEFT",15,-cy); cb:SetChecked(cf.sparkEnabled~=false)
             cb.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].sparkEnabled=v end; pcall(ns.RebuildDisplay) end; cy=cy+30
-            local s1=SW.CreateSlider(c,"Largeur",1,40,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.sparkW or 17)
+            local s1=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_WIDTH"],1,40,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.sparkW or 17)
             s1.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].sparkW=v end; pcall(ns.RebuildDisplay) end
-            local s2=SW.CreateSlider(c,"Hauteur",1,20,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.sparkH or 6)
+            local s2=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_HEIGHT"],1,20,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.sparkH or 6)
             s2.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].sparkH=v end; pcall(ns.RebuildDisplay) end; cy=cy+60
-            local s3=SW.CreateSlider(c,"Opacite",0,1,0.05,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(cf.sparkAlpha or 0.9)
+            local s3=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_OPACITY"],0,1,0.05,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(cf.sparkAlpha or 0.9)
             s3.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].sparkAlpha=v end; pcall(ns.RebuildDisplay) end
-            local s4=SW.CreateSlider(c,"Offset Y",-20,20,1,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(cf.sparkOffY or 0)
+            local s4=SW.CreateSlider(c,L["AURASMENU_RENDER_OFFSET_Y"],-20,20,1,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(cf.sparkOffY or 0)
             s4.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].sparkOffY=v end; pcall(ns.RebuildDisplay) end; cy=cy+60
-            local cc=SW.CreateColorButton(c,"Couleur spark",w-30); cc:SetPoint("TOPLEFT",15,-cy)
+            local cc=SW.CreateColorButton(c,L["AURASMENU_RENDER_SPARK_COLOR"],w-30); cc:SetPoint("TOPLEFT",15,-cy)
             cc:SetColor(cf.sparkColorR or ns.sparkColor[1], cf.sparkColorG or ns.sparkColor[2], cf.sparkColorB or ns.sparkColor[3])
             cc.onChanged=function(col) if ns.db and ns.db[rk] then ns.db[rk].sparkColorR=col[1]; ns.db[rk].sparkColorG=col[2]; ns.db[rk].sparkColorB=col[3] end; pcall(ns.RebuildDisplay) end; cy=cy+30
-            local cbSG=SW.CreateCheckbox(c,"Degrade spark",slW); cbSG:SetPoint("TOPLEFT",ox,-cy); cbSG:SetChecked(cf.sparkGradient or false)
+            local cbSG=SW.CreateCheckbox(c,L["AURASMENU_RENDER_SPARK_GRADIENT"],slW); cbSG:SetPoint("TOPLEFT",ox,-cy); cbSG:SetChecked(cf.sparkGradient or false)
             cbSG.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].sparkGradient=v end; pcall(ns.RebuildDisplay) end; cy=cy+25
             local sc2=ns.sparkColor
-            local cc2=SW.CreateColorButton(c,"Couleur fin degrade spark",slW*2+gap); cc2:SetPoint("TOPLEFT",ox,-cy)
+            local cc2=SW.CreateColorButton(c,L["AURASMENU_RENDER_SPARK_GRADIENT_END_COLOR"],slW*2+gap); cc2:SetPoint("TOPLEFT",ox,-cy)
             cc2:SetColor(cf.sparkGradR2 or sc2[1]*0.2, cf.sparkGradG2 or sc2[2]*0.2, cf.sparkGradB2 or sc2[3]*0.2)
             cc2.onChanged=function(col) if ns.db and ns.db[rk] then ns.db[rk].sparkGradR2=col[1]; ns.db[rk].sparkGradG2=col[2]; ns.db[rk].sparkGradB2=col[3] end; pcall(ns.RebuildDisplay) end; cy=cy+30
             local sparkTexOpts={
-                {value="",text="CastingBar (defaut)"},
-                {value="Interface\\CastingBar\\UI-CastingBar-Spark",text="CastingBar Spark"},
-                {value="atlas:UI-CastingBar-Spark-Small",text="Spark Petit"},
-                {value="atlas:honorsystem-bar-spark",text="Honor Spark (dore)"},
-                {value="Interface\\Buttons\\WHITE8x8",text="Carre"},
-                {value="Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_gradient",text="Gradient"},
+                {value="",text=L["AURASMENU_RENDER_SPARK_TEX_CASTINGBAR"]},
+                {value="Interface\\CastingBar\\UI-CastingBar-Spark",text=L["AURASMENU_RENDER_SPARK_TEX_CASTINGBAR_SPARK"]},
+                {value="atlas:UI-CastingBar-Spark-Small",text=L["AURASMENU_RENDER_SPARK_TEX_SMALL"]},
+                {value="atlas:honorsystem-bar-spark",text=L["AURASMENU_RENDER_SPARK_TEX_HONOR"]},
+                {value="Interface\\Buttons\\WHITE8x8",text=L["AURASMENU_EQUIPMENT_BORDER_SQUARE"]},
+                {value="Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_gradient",text=L["AURASMENU_RENDER_SPARK_TEX_GRADIENT"]},
             }
-            local stdd=SW.CreateDropdown(c,"Texture spark",sparkTexOpts,w-30); stdd:SetPoint("TOPLEFT",15,-cy)
+            local stdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_SPARK_TEXTURE"],sparkTexOpts,w-30); stdd:SetPoint("TOPLEFT",15,-cy)
             stdd:SetValue(cf.sparkTexture or "")
             stdd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].sparkTexture=(v~="" and v or nil) end; pcall(ns.RebuildDisplay) end
             cy=cy+50
             -- Position du spark : devant ou derrière le statusbar
             local sparkLayerOpts={
-                {value="front", text="Devant la barre"},
-                {value="back",  text="Derriere la barre"},
+                {value="front", text=L["AURASMENU_RENDER_SPARK_LAYER_FRONT"]},
+                {value="back",  text=L["AURASMENU_RENDER_SPARK_LAYER_BACK"]},
             }
-            local sld=SW.CreateDropdown(c,"Position du spark",sparkLayerOpts,w-30); sld:SetPoint("TOPLEFT",15,-cy)
+            local sld=SW.CreateDropdown(c,L["AURASMENU_RENDER_SPARK_POSITION"],sparkLayerOpts,w-30); sld:SetPoint("TOPLEFT",15,-cy)
             sld:SetValue(cf.sparkLayer or "front")
             sld.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].sparkLayer=v end; pcall(ns.RebuildDisplay) end
             cy=cy+50; c:SetHeight(cy) end}
     end
-    sections[#sections+1] = {name="BARRE (COULEUR & TEXTURE)",category="APPARENCE",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+    sections[#sections+1] = {id="BARRE_COULEUR_TEXTURE",name=L["AURASMENU_RENDER_SECTION_BAR_COLOR_TEXTURE"],category="APPARENCE",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
             local bc=ns.barColor
-            local cc1=SW.CreateColorButton(c,"Couleur barre",slW); cc1:SetPoint("TOPLEFT",ox,-cy)
+            local cc1=SW.CreateColorButton(c,L["AURASMENU_RENDER_BAR_COLOR"],slW); cc1:SetPoint("TOPLEFT",ox,-cy)
             cc1:SetColor(cf.barColorR or bc[1], cf.barColorG or bc[2], cf.barColorB or bc[3])
             cc1.onChanged=function(col) if ns.db and ns.db[rk] then ns.db[rk].barColorR=col[1]; ns.db[rk].barColorG=col[2]; ns.db[rk].barColorB=col[3] end; pcall(ns.ScanAuras) end
-            local cbG=SW.CreateCheckbox(c,"Degrade horizontal",slW); cbG:SetPoint("TOPLEFT",ox+slW+gap,-cy); cbG:SetChecked(cf.gradientEnabled or false)
+            local cbG=SW.CreateCheckbox(c,L["AURASMENU_RENDER_HORIZONTAL_GRADIENT"],slW); cbG:SetPoint("TOPLEFT",ox+slW+gap,-cy); cbG:SetChecked(cf.gradientEnabled or false)
             cbG.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].gradientEnabled=v end; pcall(ns.ScanAuras) end; cy=cy+30
-            local cc2=SW.CreateColorButton(c,"Couleur fin degrade",slW); cc2:SetPoint("TOPLEFT",ox,-cy)
+            local cc2=SW.CreateColorButton(c,L["AURASMENU_RENDER_GRADIENT_END_COLOR"],slW); cc2:SetPoint("TOPLEFT",ox,-cy)
             cc2:SetColor(cf.gradientR2 or bc[1]*0.3, cf.gradientG2 or bc[2]*0.3, cf.gradientB2 or bc[3]*0.3)
             cc2.onChanged=function(col) if ns.db and ns.db[rk] then ns.db[rk].gradientR2=col[1]; ns.db[rk].gradientG2=col[2]; ns.db[rk].gradientB2=col[3] end; pcall(ns.ScanAuras) end; cy=cy+30
             -- Fond de barre
-            local ccBg=SW.CreateColorButton(c,"Couleur fond barre",slW); ccBg:SetPoint("TOPLEFT",ox,-cy)
+            local ccBg=SW.CreateColorButton(c,L["AURASMENU_RENDER_BAR_BG_COLOR"],slW); ccBg:SetPoint("TOPLEFT",ox,-cy)
             ccBg:SetColor(cf.barBgR or 0.055, cf.barBgG or 0.055, cf.barBgB or 0.055)
             ccBg.onChanged=function(col) if ns.db and ns.db[rk] then ns.db[rk].barBgR=col[1]; ns.db[rk].barBgG=col[2]; ns.db[rk].barBgB=col[3] end; pcall(ns.RebuildDisplay) end
-            local sBgA=SW.CreateSlider(c,"Opacite fond (0=transparent)",0,1,0.05,slW); sBgA:SetPoint("TOPLEFT",ox+slW+gap,-cy); sBgA:SetValue(cf.barBgAlpha or 0)
+            local sBgA=SW.CreateSlider(c,L["AURASMENU_RENDER_BG_OPACITY"],0,1,0.05,slW); sBgA:SetPoint("TOPLEFT",ox+slW+gap,-cy); sBgA:SetValue(cf.barBgAlpha or 0)
             sBgA.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].barBgAlpha=v end; pcall(ns.RebuildDisplay) end; cy=cy+60
             local texOpts={}; for _,t in ipairs(ns.BAR_TEXTURES) do texOpts[#texOpts+1]={value=t.value,text=t.text} end
-            local tdd=SW.CreateDropdown(c,"Texture barre",texOpts,w-30); tdd:SetPoint("TOPLEFT",15,-cy)
+            local tdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_BAR_TEXTURE"],texOpts,w-30); tdd:SetPoint("TOPLEFT",15,-cy)
             tdd:SetValue(cf.texture or ns.BAR_TEXTURES[1].value)
             tdd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].texture=v end; pcall(ns.RebuildDisplay) end
             cy=cy+50; c:SetHeight(cy) end}
@@ -483,26 +483,26 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
     -- (Buffs, Debuffs, Cooldowns). Pas pour Procs (icones petites, animation
     -- non pertinente).
     if rk == "freebars" or rk == "iconlist" or rk == "circlebars" then
-        sections[#sections+1] = {name="ANIMATION D'APPARITION",category="ANIMATION",build=function(c,w)
+        sections[#sections+1] = {id="ANIMATION_APPARITION",name=L["AURASMENU_RENDER_SECTION_ANIM_APPEARANCE"],category="ANIMATION",build=function(c,w)
             local cy=0; local cf=ns.db and ns.db[rk] or {}
             local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
 
             -- Ligne 1 : checkboxes Activee + Fade alpha
-            local cbOn = SW.CreateCheckbox(c,"Animation activee",slW)
+            local cbOn = SW.CreateCheckbox(c,L["AURASMENU_RENDER_ANIM_ENABLED"],slW)
             cbOn:SetPoint("TOPLEFT",ox,-cy); cbOn:SetChecked(cf.popEnabled ~= false)
             cbOn.onChanged = function(v) if ns.db and ns.db[rk] then ns.db[rk].popEnabled = v end end
 
-            local cbAlpha = SW.CreateCheckbox(c,"Fade alpha",slW)
+            local cbAlpha = SW.CreateCheckbox(c,L["AURASMENU_RENDER_FADE_ALPHA"],slW)
             cbAlpha:SetPoint("TOPLEFT",ox+slW+gap,-cy); cbAlpha:SetChecked(cf.popAlphaFade ~= false)
             cbAlpha.onChanged = function(v) if ns.db and ns.db[rk] then ns.db[rk].popAlphaFade = v end end
             cy = cy + 30
 
             -- Ligne 2 : sliders Duree + Intensite
-            local sDur = SW.CreateSlider(c,"Duree (s)",0.1,2.5,0.05,slW)
+            local sDur = SW.CreateSlider(c,L["AURASMENU_RENDER_DURATION_SECONDS"],0.1,2.5,0.05,slW)
             sDur:SetPoint("TOPLEFT",ox,-cy); sDur:SetValue(cf.popDuration or 1.0)
             sDur.onChanged = function(v) if ns.db and ns.db[rk] then ns.db[rk].popDuration = v end end
 
-            local sStr = SW.CreateSlider(c,"Intensite easing",1,12,1,slW)
+            local sStr = SW.CreateSlider(c,L["AURASMENU_RENDER_EASING_INTENSITY"],1,12,1,slW)
             sStr:SetPoint("TOPLEFT",ox+slW+gap,-cy); sStr:SetValue(cf.popEaseStrength or 5)
             sStr.onChanged = function(v) if ns.db and ns.db[rk] then ns.db[rk].popEaseStrength = math.floor(v + 0.5) end end
             cy = cy + 50
@@ -512,29 +512,29 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
     end
 
     -- ANIMATION ICONE
-    sections[#sections+1] = {name="ANIMATION ICONE",category="ANIMATION",build=function(c,w)
+    sections[#sections+1] = {id="ANIMATION_ICONE",name=L["AURASMENU_RENDER_SECTION_ANIM_ICON"],category="ANIMATION",build=function(c,w)
         local cy=0; local cf=ns.db and ns.db[rk] or {}
         local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
         local SW = ns.SharedWidgets or {}
         local styleOpts = {
-            {value="standard", text="Standard (fade+glisse)"},
-            {value="surge",    text="Surge (scale+montee)"},
-            {value="slide",    text="Slide (depuis droite)"},
-            {value="pop",      text="Pop (echelle+fade)"},
-            {value="none",     text="Aucune"},
+            {value="standard", text=L["AURASMENU_RENDER_ANIM_STYLE_STANDARD"]},
+            {value="surge",    text=L["AURASMENU_RENDER_ANIM_STYLE_SURGE"]},
+            {value="slide",    text=L["AURASMENU_RENDER_ANIM_STYLE_SLIDE"]},
+            {value="pop",      text=L["AURASMENU_RENDER_ANIM_STYLE_POP"]},
+            {value="none",     text=L["AURASMENU_RENDER_ANIM_STYLE_NONE"]},
         }
-        local dd = SW.CreateDropdown and SW.CreateDropdown(c,"Style",styleOpts,w-30) or nil
+        local dd = SW.CreateDropdown and SW.CreateDropdown(c,L["AURASMENU_EQUIPMENT_STYLE"],styleOpts,w-30) or nil
         if dd then
             dd:SetPoint("TOPLEFT",15,-cy); dd:SetValue(cf.iconAnimStyle or "standard")
             dd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].iconAnimStyle=v end end
             cy=cy+50
         end
-        local sDur = SW.CreateSlider and SW.CreateSlider(c,"Duree (s)",0.1,1.5,0.05,slW) or nil
+        local sDur = SW.CreateSlider and SW.CreateSlider(c,L["AURASMENU_RENDER_DURATION_SECONDS"],0.1,1.5,0.05,slW) or nil
         if sDur then
             sDur:SetPoint("TOPLEFT",ox,-cy); sDur:SetValue(cf.iconAnimDuration or 0.4)
             sDur.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].iconAnimDuration=v end end
         end
-        local cbOut = SW.CreateCheckbox and SW.CreateCheckbox(c,"Animer sortie",slW) or nil
+        local cbOut = SW.CreateCheckbox and SW.CreateCheckbox(c,L["AURASMENU_RENDER_ANIMATE_EXIT"],slW) or nil
         if cbOut then
             cbOut:SetPoint("TOPLEFT",ox+slW+gap,-cy); cbOut:SetChecked(cf.iconAnimOut ~= false)
             cbOut.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].iconAnimOut=v end end
@@ -548,7 +548,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
     -- Si une entree est definie pour un sort, sa couleur/gradient override TOUT (cf.
     -- ApplyBarColor priorite 1). Sinon comportement standard.
     if rk == "freebars" then
-        sections[#sections+1] = {name="COULEUR PAR SORT",category="APPARENCE",build=function(c,w)
+        sections[#sections+1] = {id="COULEUR_PAR_SORT",name=L["AURASMENU_RENDER_SECTION_COLOR_PER_SPELL"],category="APPARENCE",build=function(c,w)
             local cy = 4
             local cf = ns.db and ns.db[rk] or {}
             cf.spellGradients = cf.spellGradients or {}
@@ -573,7 +573,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
             if #list == 0 then
                 local fs1 = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
                 fs1:SetPoint("TOP", c, "TOP", 0, -cy - 10)
-                fs1:SetText("Aucun sort a personnaliser pour l'instant")
+                fs1:SetText(L["AURASMENU_RENDER_NO_SPELL_TO_CUSTOMIZE"])
                 fs1:SetTextColor(1, 0.85, 0.3)
                 cy = cy + 40
                 c:SetHeight(cy); return
@@ -582,7 +582,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
             -- Header (sans point final)
             local fsHdr = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             fsHdr:SetPoint("TOP", c, "TOP", 0, -cy)
-            fsHdr:SetText("Personnalisez la couleur ou le degrade par sort")
+            fsHdr:SetText(L["AURASMENU_RENDER_CUSTOMIZE_COLOR_HEADER"])
             cy = cy + 24
 
             -- ============== Layout en colonnes alignees ==============
@@ -652,7 +652,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
                 end)
                 sw:SetScript("OnEnter", function()
                     GameTooltip:SetOwner(sw, "ANCHOR_TOP")
-                    GameTooltip:SetText("Cliquer pour choisir la couleur")
+                    GameTooltip:SetText(L["AURASMENU_RENDER_CLICK_CHOOSE_COLOR"])
                     GameTooltip:Show()
                 end)
                 sw:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -670,7 +670,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
                 btn:SetScript("OnEnter", function()
                     txt:SetTextColor(1, 0.4, 0.4)
                     GameTooltip:SetOwner(btn, "ANCHOR_TOP")
-                    GameTooltip:SetText("Reinitialiser cette personnalisation")
+                    GameTooltip:SetText(L["AURASMENU_RENDER_RESET_CUSTOMIZATION"])
                     GameTooltip:Show()
                 end)
                 btn:SetScript("OnLeave", function()
@@ -731,7 +731,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
                 end
 
                 -- Checkbox DEGRADE
-                local cbGrad = SW.CreateCheckbox(c, "Degrade", CB_W)
+                local cbGrad = SW.CreateCheckbox(c, L["AURASMENU_RENDER_GRADIENT_LABEL"], CB_W)
                 cbGrad:SetPoint("TOPLEFT", COL_DEGRADE, -cy + 2)
                 cbGrad:SetChecked(gradInit)
                 cbGrad.onChanged = function(v)
@@ -761,81 +761,81 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
             c:SetHeight(cy)
         end}
     end
-    sections[#sections+1] = {name="OPACITE & FADE",category="STRUCTURE",build=function(c,w) local cy,cf=0,ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
-            local s1=SW.CreateSlider(c,"Opacite Combat",0,1,0.05,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.fadeIC or 1.0)
+    sections[#sections+1] = {id="OPACITE_FADE",name=L["AURASMENU_RENDER_SECTION_OPACITY_FADE"],category="STRUCTURE",build=function(c,w) local cy,cf=0,ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+            local s1=SW.CreateSlider(c,L["AURASMENU_RENDER_OPACITY_COMBAT"],0,1,0.05,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.fadeIC or 1.0)
             s1.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].fadeIC=v end; pcall(function() ns.UpdateRenderFade(rk) end) end
-            local s2=SW.CreateSlider(c,"Opacite Hors Combat",0,1,0.05,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.fadeOOC or 0.4)
+            local s2=SW.CreateSlider(c,L["AURASMENU_RENDER_OPACITY_OOC"],0,1,0.05,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.fadeOOC or 0.4)
             s2.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].fadeOOC=v end; pcall(function() ns.UpdateRenderFade(rk) end) end; cy=cy+60
-            local s3=SW.CreateSlider(c,"Opacite icone",0,1,0.05,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(cf.iconAlpha or 1.0)
+            local s3=SW.CreateSlider(c,L["AURASMENU_RENDER_ICON_OPACITY"],0,1,0.05,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(cf.iconAlpha or 1.0)
             s3.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].iconAlpha=v end; pcall(ns.RebuildDisplay) end
-            local s4=SW.CreateSlider(c,"Opacite barre",0,1,0.05,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(cf.barAlpha or 1.0)
+            local s4=SW.CreateSlider(c,L["AURASMENU_RENDER_BAR_OPACITY"],0,1,0.05,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(cf.barAlpha or 1.0)
             s4.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].barAlpha=v end; pcall(ns.RebuildDisplay) end
             cy=cy+60
             -- v281 : opacite de la statusbar quand un modele 3D est actif en mode "back"
             -- (Remplissage 3D). Defaut 1.0 = statusbar opaque, modele 3D devant. Baisser
             -- pour avoir l'effet "ArcDot3D-like" (statusbar semi-transparente).
-            local s5=SW.CreateSlider(c,"Opacite barre quand 3D",0,1,0.05,slW); s5:SetPoint("TOPLEFT",ox,-cy); s5:SetValue(cf.barAlphaWith3D or 1.0)
+            local s5=SW.CreateSlider(c,L["AURASMENU_RENDER_BAR_OPACITY_3D"],0,1,0.05,slW); s5:SetPoint("TOPLEFT",ox,-cy); s5:SetValue(cf.barAlphaWith3D or 1.0)
             s5.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].barAlphaWith3D=v end; pcall(ns.RebuildDisplay) end
             cy=cy+60; c:SetHeight(cy) end}
     -- TEXTE DE DUREE : texte de duree centre sur l'icone (ou centre sur la row pour freebars, qui n'a pas d'icone).
     -- Layout calque sur la section "Texte de Cooldown" de la PriorityBar : checkbox + slider taille + couleur,
     -- empiles verticalement en pleine largeur, sans choix de police ni offsets (toujours centre).
     if HasSection(rk, "timerIcon") then
-        local checkboxLabel = (rk == "freebars") and "Afficher la duree" or "Afficher la duree sur l'icone"
-        sections[#sections+1] = {name="TEXTE DE DUREE",category="INFO",build=function(c,w) local cy,cf=0,ns.db and ns.db[rk] or {}
+        local checkboxLabel = (rk == "freebars") and L["AURASMENU_RENDER_SHOW_DURATION"] or L["AURASMENU_RENDER_SHOW_DURATION_ON_ICON"]
+        sections[#sections+1] = {id="TEXTE_DUREE",name=L["AURASMENU_RENDER_SECTION_DURATION_TEXT"],category="INFO",build=function(c,w) local cy,cf=0,ns.db and ns.db[rk] or {}
             local cbI=SW.CreateCheckbox(c,checkboxLabel,w-30); cbI:SetPoint("TOPLEFT",15,-cy); cbI:SetChecked(cf.timerIconEnabled or false)
             cbI.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].timerIconEnabled=v end; pcall(ns.ScanAuras) end; cy=cy+28
-            local s1=SW.CreateSlider(c,"Taille police",8,24,1,w-30); s1:SetPoint("TOPLEFT",15,-cy); s1:SetValue(cf.timerSize or 12)
+            local s1=SW.CreateSlider(c,L["AURASMENU_RENDER_FONT_SIZE"],8,24,1,w-30); s1:SetPoint("TOPLEFT",15,-cy); s1:SetValue(cf.timerSize or 12)
             s1.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].timerSize=v end; pcall(ns.RebuildDisplay) end; cy=cy+50
-            local cc=SW.CreateColorButton(c,"Couleur du texte",w-30); cc:SetPoint("TOPLEFT",15,-cy)
+            local cc=SW.CreateColorButton(c,L["AURASMENU_RENDER_TEXT_COLOR"],w-30); cc:SetPoint("TOPLEFT",15,-cy)
             cc:SetColor(cf.timerColorR or 1, cf.timerColorG or 1, cf.timerColorB or 1)
             cc.onChanged=function(col) if ns.db and ns.db[rk] then ns.db[rk].timerColorR=col[1]; ns.db[rk].timerColorG=col[2]; ns.db[rk].timerColorB=col[3] end; pcall(ns.ScanAuras) end; cy=cy+50
             c:SetHeight(cy) end}
     end
 
     if HasSection(rk, "stacks") then
-        sections[#sections+1] = {name="STACKS",category="INFO",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
-            local cb=SW.CreateCheckbox(c,"Afficher les stacks",w-30); cb:SetPoint("TOPLEFT",15,-cy); cb:SetChecked(cf.stackEnabled ~= false)
+        sections[#sections+1] = {id="STACKS",name=L["AURASMENU_RENDER_SECTION_STACKS"],category="INFO",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+            local cb=SW.CreateCheckbox(c,L["AURASMENU_RENDER_SHOW_STACKS"],w-30); cb:SetPoint("TOPLEFT",15,-cy); cb:SetChecked(cf.stackEnabled ~= false)
             cb.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].stackEnabled=v end; pcall(ns.RebuildDisplay) end; cy=cy+28
             local sfOpts={}; for _,f in ipairs(ns.GetFontList() or {}) do sfOpts[#sfOpts+1]={value=f.value,text=f.text} end
-            local sfd=SW.CreateDropdown(c,"Police",sfOpts,w-30); sfd:SetPoint("TOPLEFT",15,-cy)
+            local sfd=SW.CreateDropdown(c,L["AURASMENU_RENDER_FONT_LABEL"],sfOpts,w-30); sfd:SetPoint("TOPLEFT",15,-cy)
             sfd:SetValue(cf.stackFont or ns.Media.font)
             sfd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].stackFont=v end; pcall(ns.RebuildDisplay) end; cy=cy+50
-            local posOpts={{value="BOTTOMRIGHT",text="Bas droite"},{value="BOTTOMLEFT",text="Bas gauche"},{value="TOPRIGHT",text="Haut droite"},{value="TOPLEFT",text="Haut gauche"},{value="CENTER",text="Centre"}}
-            local pdd=SW.CreateDropdown(c,"Position",posOpts,slW); pdd:SetPoint("TOPLEFT",ox,-cy)
+            local posOpts={{value="BOTTOMRIGHT",text=L["AURASMENU_RENDER_POS_BOTTOM_RIGHT"]},{value="BOTTOMLEFT",text=L["AURASMENU_RENDER_POS_BOTTOM_LEFT"]},{value="TOPRIGHT",text=L["AURASMENU_RENDER_POS_TOP_RIGHT"]},{value="TOPLEFT",text=L["AURASMENU_RENDER_POS_TOP_LEFT"]},{value="CENTER",text=L["AURASMENU_RENDER_POS_CENTER"]}}
+            local pdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_POSITION_LABEL"],posOpts,slW); pdd:SetPoint("TOPLEFT",ox,-cy)
             pdd:SetValue(cf.stackPos or "BOTTOMRIGHT")
             pdd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].stackPos=v end; pcall(ns.RebuildDisplay) end
-            local ss=SW.CreateSlider(c,"Taille police",6,24,1,slW); ss:SetPoint("TOPLEFT",ox+slW+gap,-cy); ss:SetValue(cf.stackSize or 10)
+            local ss=SW.CreateSlider(c,L["AURASMENU_RENDER_FONT_SIZE"],6,24,1,slW); ss:SetPoint("TOPLEFT",ox+slW+gap,-cy); ss:SetValue(cf.stackSize or 10)
             ss.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].stackSize=v end; pcall(ns.RebuildDisplay) end; cy=cy+50
-            local sox=SW.CreateSlider(c,"Offset X",-20,20,1,slW); sox:SetPoint("TOPLEFT",ox,-cy); sox:SetValue(cf.stackOffX or 0)
+            local sox=SW.CreateSlider(c,L["AURASMENU_RENDER_OFFSET_X"],-20,20,1,slW); sox:SetPoint("TOPLEFT",ox,-cy); sox:SetValue(cf.stackOffX or 0)
             sox.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].stackOffX=v end; pcall(ns.RebuildDisplay) end
-            local soy=SW.CreateSlider(c,"Offset Y",-20,20,1,slW); soy:SetPoint("TOPLEFT",ox+slW+gap,-cy); soy:SetValue(cf.stackOffY or 0)
+            local soy=SW.CreateSlider(c,L["AURASMENU_RENDER_OFFSET_Y"],-20,20,1,slW); soy:SetPoint("TOPLEFT",ox+slW+gap,-cy); soy:SetValue(cf.stackOffY or 0)
             soy.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].stackOffY=v end; pcall(ns.RebuildDisplay) end; cy=cy+60
-            local scc=SW.CreateColorButton(c,"Couleur des stacks",w-30); scc:SetPoint("TOPLEFT",15,-cy)
+            local scc=SW.CreateColorButton(c,L["AURASMENU_RENDER_STACKS_COLOR"],w-30); scc:SetPoint("TOPLEFT",15,-cy)
             scc:SetColor(cf.stackColorR or 1, cf.stackColorG or 1, cf.stackColorB or 1)
             scc.onChanged=function(col) if ns.db and ns.db[rk] then ns.db[rk].stackColorR=col[1]; ns.db[rk].stackColorG=col[2]; ns.db[rk].stackColorB=col[3] end; pcall(ns.RebuildDisplay) end
             cy=cy+30; c:SetHeight(cy) end}
     end
 
     if HasSection(rk, "charges") then
-        sections[#sections+1] = {name="CHARGES",category="INFO",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
-            local cb=SW.CreateCheckbox(c,"Afficher les charges",w-30); cb:SetPoint("TOPLEFT",15,-cy); cb:SetChecked(cf.chargesEnabled ~= false)
+        sections[#sections+1] = {id="CHARGES",name=L["AURASMENU_RENDER_SECTION_CHARGES"],category="INFO",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+            local cb=SW.CreateCheckbox(c,L["AURASMENU_RENDER_SHOW_CHARGES"],w-30); cb:SetPoint("TOPLEFT",15,-cy); cb:SetChecked(cf.chargesEnabled ~= false)
             cb.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].chargesEnabled=v end; pcall(ns.RebuildDisplay) end; cy=cy+28
             local cfOpts={}; for _,f in ipairs(ns.GetFontList() or {}) do cfOpts[#cfOpts+1]={value=f.value,text=f.text} end
-            local cfd=SW.CreateDropdown(c,"Police",cfOpts,w-30); cfd:SetPoint("TOPLEFT",15,-cy)
+            local cfd=SW.CreateDropdown(c,L["AURASMENU_RENDER_FONT_LABEL"],cfOpts,w-30); cfd:SetPoint("TOPLEFT",15,-cy)
             cfd:SetValue(cf.chargesFont or ns.Media.font)
             cfd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].chargesFont=v end; pcall(ns.RebuildDisplay) end; cy=cy+50
-            local cposOpts={{value="BOTTOMRIGHT",text="Bas droite"},{value="BOTTOMLEFT",text="Bas gauche"},{value="TOPRIGHT",text="Haut droite"},{value="TOPLEFT",text="Haut gauche"},{value="CENTER",text="Centre"}}
-            local cpdd=SW.CreateDropdown(c,"Position",cposOpts,slW); cpdd:SetPoint("TOPLEFT",ox,-cy)
+            local cposOpts={{value="BOTTOMRIGHT",text=L["AURASMENU_RENDER_POS_BOTTOM_RIGHT"]},{value="BOTTOMLEFT",text=L["AURASMENU_RENDER_POS_BOTTOM_LEFT"]},{value="TOPRIGHT",text=L["AURASMENU_RENDER_POS_TOP_RIGHT"]},{value="TOPLEFT",text=L["AURASMENU_RENDER_POS_TOP_LEFT"]},{value="CENTER",text=L["AURASMENU_RENDER_POS_CENTER"]}}
+            local cpdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_POSITION_LABEL"],cposOpts,slW); cpdd:SetPoint("TOPLEFT",ox,-cy)
             cpdd:SetValue(cf.chargesPos or "TOPLEFT")
             cpdd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].chargesPos=v end; pcall(ns.RebuildDisplay) end
-            local css=SW.CreateSlider(c,"Taille police",6,24,1,slW); css:SetPoint("TOPLEFT",ox+slW+gap,-cy); css:SetValue(cf.chargesSize or 10)
+            local css=SW.CreateSlider(c,L["AURASMENU_RENDER_FONT_SIZE"],6,24,1,slW); css:SetPoint("TOPLEFT",ox+slW+gap,-cy); css:SetValue(cf.chargesSize or 10)
             css.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].chargesSize=v end; pcall(ns.RebuildDisplay) end; cy=cy+50
-            local csox=SW.CreateSlider(c,"Offset X",-20,20,1,slW); csox:SetPoint("TOPLEFT",ox,-cy); csox:SetValue(cf.chargesOffX or 0)
+            local csox=SW.CreateSlider(c,L["AURASMENU_RENDER_OFFSET_X"],-20,20,1,slW); csox:SetPoint("TOPLEFT",ox,-cy); csox:SetValue(cf.chargesOffX or 0)
             csox.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].chargesOffX=v end; pcall(ns.RebuildDisplay) end
-            local csoy=SW.CreateSlider(c,"Offset Y",-20,20,1,slW); csoy:SetPoint("TOPLEFT",ox+slW+gap,-cy); csoy:SetValue(cf.chargesOffY or 0)
+            local csoy=SW.CreateSlider(c,L["AURASMENU_RENDER_OFFSET_Y"],-20,20,1,slW); csoy:SetPoint("TOPLEFT",ox+slW+gap,-cy); csoy:SetValue(cf.chargesOffY or 0)
             csoy.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].chargesOffY=v end; pcall(ns.RebuildDisplay) end; cy=cy+60
-            local ccc=SW.CreateColorButton(c,"Couleur des charges",w-30); ccc:SetPoint("TOPLEFT",15,-cy)
+            local ccc=SW.CreateColorButton(c,L["AURASMENU_RENDER_CHARGES_COLOR"],w-30); ccc:SetPoint("TOPLEFT",15,-cy)
             ccc:SetColor(cf.chargesColorR or 0.4, cf.chargesColorG or 0.7, cf.chargesColorB or 1.0)
             ccc.onChanged=function(col) if ns.db and ns.db[rk] then ns.db[rk].chargesColorR=col[1]; ns.db[rk].chargesColorG=col[2]; ns.db[rk].chargesColorB=col[3] end; pcall(ns.RebuildDisplay) end
             cy=cy+30; c:SetHeight(cy) end}
@@ -846,8 +846,8 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
     -- config indépendante : checkbox + 2 color pickers.
     -- Quand l'utilisateur change une couleur, InvalidateUrgencyCurves() vide le
     -- cache de curves pour que la prochaine build utilise les nouvelles couleurs.
-    sections[#sections+1] = {name="COULEURS D'URGENCE",category="ANIMATION",build=function(c,w) local cy=10; local cf=ns.db and ns.db[rk] or {}
-        local cb = SW.CreateCheckbox(c, "Activer color curve", w-30)
+    sections[#sections+1] = {id="COULEURS_URGENCE",name=L["AURASMENU_RENDER_SECTION_URGENCY_COLORS"],category="ANIMATION",build=function(c,w) local cy=10; local cf=ns.db and ns.db[rk] or {}
+        local cb = SW.CreateCheckbox(c, L["AURASMENU_RENDER_ENABLE_COLOR_CURVE"], w-30)
         cb:SetPoint("TOPLEFT", 15, -cy)
         cb:SetChecked(cf.urgencyEnabled ~= false)
         cb.onChanged = function(v)
@@ -857,7 +857,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
         end
         cy = cy + 32
 
-        local cm = SW.CreateColorButton(c, "Couleur medium (~20% restant)", w-30)
+        local cm = SW.CreateColorButton(c, L["AURASMENU_RENDER_MEDIUM_COLOR"], w-30)
         cm:SetPoint("TOPLEFT", 15, -cy)
         cm:SetColor(cf.urgencyMediumR or 1.0, cf.urgencyMediumG or 0.5, cf.urgencyMediumB or 0.0)
         cm.onChanged = function(col)
@@ -871,7 +871,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
         end
         cy = cy + 30
 
-        local cc = SW.CreateColorButton(c, "Couleur critique (fin d'aura)", w-30)
+        local cc = SW.CreateColorButton(c, L["AURASMENU_RENDER_CRITICAL_COLOR"], w-30)
         cc:SetPoint("TOPLEFT", 15, -cy)
         cc:SetColor(cf.urgencyCriticalR or 1.0, cf.urgencyCriticalG or 0.15, cf.urgencyCriticalB or 0.05)
         cc.onChanged = function(col)
@@ -892,22 +892,24 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
     -- Categories dans l'ordre : STRUCTURE > APPARENCE > ANIMATION > INFO.
     -- Dans chaque categorie, ordre custom pour que les plus utilisees soient en haut.
     local CATEGORY_ORDER = { STRUCTURE = 1, APPARENCE = 2, ANIMATION = 3, INFO = 4 }
+    -- NOTE: keyed by the stable (non-localized) `id` field of each section, not by
+    -- the (now localized) `name` field, so sorting doesn't break across locales.
     local NAME_ORDER = {
         -- STRUCTURE
         ["POSITION"]                 = 1,
         ["DIMENSIONS"]               = 2,
-        ["ICONES & DIMENSIONS"]      = 2,
-        ["OPACITE & FADE"]           = 3,
+        ["ICONES_DIMENSIONS"]        = 2,
+        ["OPACITE_FADE"]             = 3,
         -- APPARENCE
-        ["BARRE (COULEUR & TEXTURE)"]= 1,
-        ["ETINCELLE (SPARK)"]        = 2,
+        ["BARRE_COULEUR_TEXTURE"]    = 1,
+        ["ETINCELLE_SPARK"]          = 2,
         ["GLOW"]                     = 3,
-        ["PRESETS BARRES"]           = 4,
-        ["COULEUR PAR SORT"]         = 5,
+        ["PRESETS_BARRES"]           = 4,
+        ["COULEUR_PAR_SORT"]         = 5,
         -- ANIMATION
-        ["ANIMATION D'APPARITION"]   = 1,
-        ["ANIMATION ICONE"]          = 2,
-        ["COULEURS D'URGENCE"]       = 3,
+        ["ANIMATION_APPARITION"]     = 1,
+        ["ANIMATION_ICONE"]          = 2,
+        ["COULEURS_URGENCE"]         = 3,
         -- INFO
         ["TIMER ICONE"]              = 1,
         ["STACKS"]                   = 2,
@@ -917,8 +919,8 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
         local ca = CATEGORY_ORDER[a.category or ""] or 99
         local cb = CATEGORY_ORDER[b.category or ""] or 99
         if ca ~= cb then return ca < cb end
-        local na = NAME_ORDER[a.name or ""] or 99
-        local nb = NAME_ORDER[b.name or ""] or 99
+        local na = NAME_ORDER[a.id or ""] or 99
+        local nb = NAME_ORDER[b.id or ""] or 99
         return na < nb
     end)
 

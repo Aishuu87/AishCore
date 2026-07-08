@@ -15,6 +15,7 @@
 -- ============================================================================
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 ns.InfoPanel = ns.InfoPanel or {}
 
 local CreateFrame = CreateFrame
@@ -140,7 +141,7 @@ function ns.InfoPanel.Create(parent, width)
             self._previewImg:Hide()
             -- Fallback neutre : "Aperçu à venir" au lieu du label de la section.
             -- Évite le doublon avec le vrai titre de section affiché juste en dessous.
-            self._fallback:SetText("Aperçu à venir")
+            self._fallback:SetText(L["AURASMENU_INFOPANEL_PREVIEW_COMING_SOON"])
         end
 
         -- Tag "À venir" supprimé de la preview : l'info est déjà dans le panneau

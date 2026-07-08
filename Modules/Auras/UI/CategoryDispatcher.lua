@@ -13,6 +13,7 @@
 -- ============================================================================
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
 ns.CategoryDispatcher = {}
 
@@ -45,7 +46,7 @@ local function BuildPlaceholder(parent, contentW, section)
     ns.ApplyFont(title, FONT, 16)
     title:SetPoint("TOP", 0, -30)
     title:SetTextColor(gold[1], gold[2], gold[3], 1)
-    title:SetText("À venir")
+    title:SetText(L["AURASMENU_CATDISP_COMING_SOON"])
 
     -- Nom de la section
     local name = card:CreateFontString(nil, "OVERLAY")
@@ -61,7 +62,7 @@ local function BuildPlaceholder(parent, contentW, section)
     desc:SetPoint("LEFT", 20, 0); desc:SetPoint("RIGHT", -20, 0)
     desc:SetJustifyH("CENTER")
     desc:SetTextColor(unpack(Theme.textDim))
-    desc:SetText("Cette section sera disponible\nquand Aishaddon sera intégré à AishUI.")
+    desc:SetText(L["AURASMENU_CATDISP_COMING_SOON_DESC"])
 
     -- Source tag
     local textDisabled = Theme.textDisabled or { 0.40, 0.40, 0.42 }
@@ -69,7 +70,7 @@ local function BuildPlaceholder(parent, contentW, section)
     ns.ApplyFont(source, FONT, 9)
     source:SetPoint("BOTTOM", 0, 14)
     source:SetTextColor(textDisabled[1], textDisabled[2], textDisabled[3], 1)
-    source:SetText("Source : " .. (section.source or "?"))
+    source:SetText(string.format(L["AURASMENU_CATDISP_SOURCE_LABEL"], (section.source or "?")))
 
     return card
 end
@@ -96,7 +97,7 @@ function ns.CategoryDispatcher.ShowSection(parent, contentW, catId, sectionId)
         ns.ApplyFont(err, ns.Media.font, 12)
         err:SetPoint("TOP", 0, -40)
         err:SetTextColor(Theme.textDim[1], Theme.textDim[2], Theme.textDim[3], 1)
-        err:SetText("Section introuvable : " .. tostring(catId) .. " / " .. tostring(sectionId))
+        err:SetText(string.format(L["AURASMENU_CATDISP_SECTION_NOT_FOUND"], tostring(catId), tostring(sectionId)))
         return err
     end
 
@@ -127,7 +128,7 @@ function ns.CategoryDispatcher.ShowSection(parent, contentW, catId, sectionId)
             ns.ApplyFont(err, ns.Media.font, 11)
             err:SetPoint("TOPLEFT", 10, -10)
             err:SetTextColor(1, 0.4, 0.4, 1)
-            err:SetText("Erreur Build" .. tostring(section.builder) .. ": " .. tostring(frameOrErr))
+            err:SetText(string.format(L["AURASMENU_CATDISP_BUILD_ERROR"], tostring(section.builder), tostring(frameOrErr)))
             return err
         end
     end
@@ -155,17 +156,17 @@ end
 -- Utilisation : /run ns.CategoryDispatcher.PrintStatus()
 -- ============================================================================
 function ns.CategoryDispatcher.PrintStatus()
-    print("|cffc79e4d[AishUI Dispatcher]|r État des sections :")
+    print(L["AURASMENU_CATDISP_DEBUG_HEADER"])
     for _, cat in ipairs(ns.CATEGORIES) do
         print(string.format("  |cffc79e4d%s|r (%s)", cat.label, cat.id))
         for _, sec in ipairs(cat.sections) do
             local status
             if sec.builder and ns.SettingsPanel[sec.builder] then
-                status = "|cff00ff00OK|r"
+                status = L["AURASMENU_CATDISP_OK_STATUS"]
             elseif sec.builder then
-                status = "|cffff8000builder manquant : " .. sec.builder .. "|r"
+                status = string.format(L["AURASMENU_CATDISP_MISSING_BUILDER"], sec.builder)
             else
-                status = "|cff888888placeholder|r"
+                status = L["AURASMENU_CATDISP_PLACEHOLDER_STATUS"]
             end
             print(string.format("    - %-30s %s", sec.label, status))
         end

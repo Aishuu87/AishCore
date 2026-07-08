@@ -19,6 +19,7 @@
 -- ============================================================================
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 ns.Anim = ns.Anim or {}
 
 local CreateFrame = CreateFrame
