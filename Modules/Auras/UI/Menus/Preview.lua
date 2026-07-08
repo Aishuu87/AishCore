@@ -2,6 +2,7 @@
 -- Preview controls for renders + frames externes
 ------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
 
 function ns.SettingsPanel.BuildPreviewMenu(p, cw)
@@ -10,14 +11,14 @@ function ns.SettingsPanel.BuildPreviewMenu(p, cw)
     local FONT = ns.Media.font
 
     local renderMap={
-        {name="Liste d'icônes",key="iconlist",cfg=function() return ns.db and ns.db.iconlist end},
-        {name="Barres de cercle",key="freebars",cfg=function() return ns.db and ns.db.freebars end},
-        {name="Barres libres",key="circlebars",cfg=function() return ns.db and ns.db.circlebars end},
-        {name="Icones",key="icons",cfg=function() return ns.db and ns.db.icons end},
-        {name="Equipment",key="equipment",cfg=function() return ns.db and ns.db.equipment end},
+        {name=L["AURASMENU_PREVIEW_RENDER_ICONLIST"],key="iconlist",cfg=function() return ns.db and ns.db.iconlist end},
+        {name=L["AURASMENU_PREVIEW_RENDER_CIRCLE_BARS"],key="freebars",cfg=function() return ns.db and ns.db.freebars end},
+        {name=L["AURASMENU_PREVIEW_RENDER_FREE_BARS"],key="circlebars",cfg=function() return ns.db and ns.db.circlebars end},
+        {name=L["AURASMENU_PREVIEW_RENDER_ICONS"],key="icons",cfg=function() return ns.db and ns.db.icons end},
+        {name=L["AURASMENU_PREVIEW_RENDER_EQUIPMENT"],key="equipment",cfg=function() return ns.db and ns.db.equipment end},
     }
     SW.CreateAccordionStack(p,{
-    {name="PLACEHOLDERS / ANCRES",build=function(c,w) local py=-5
+    {name=L["AURASMENU_PREVIEW_SECTION_PLACEHOLDERS"],build=function(c,w) local py=-5
         for _,rm in ipairs(renderMap) do
             local lbl=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lbl,FONT,12); lbl:SetPoint("TOPLEFT",5,py); lbl:SetTextColor(unpack(Theme.textNormal)); lbl:SetText(rm.name)
             local tog=SW.CreateToggle(c); tog:SetPoint("TOPRIGHT",-90,py+2); tog:SetValue(true)
@@ -40,7 +41,7 @@ function ns.SettingsPanel.BuildPreviewMenu(p, cw)
                     end
                 end)
             end
-            local btn=SW.CreateActionBtn(c,"Recentrer",70,{0.05,0.05,0.06},{0.78,0.62,0.30,0.55},{0.78,0.62,0.30})
+            local btn=SW.CreateActionBtn(c,L["AURASMENU_PREVIEW_RECENTER"],70,{0.05,0.05,0.06},{0.78,0.62,0.30,0.55},{0.78,0.62,0.30})
             btn:SetSize(70,18); btn:SetPoint("TOPRIGHT",-5,py+1)
             btn:SetScript("OnClick",function()
                 local cfg=rm.cfg(); if not cfg then return end
@@ -49,7 +50,7 @@ function ns.SettingsPanel.BuildPreviewMenu(p, cw)
                 pcall(ns.RebuildDisplay)
             end)
             py=py-30 end
-        local btnAll=SW.CreateActionBtn(c,"Recentrer tout",100,{0.05,0.05,0.06},{0.78,0.62,0.30,0.55},{0.78,0.62,0.30})
+        local btnAll=SW.CreateActionBtn(c,L["AURASMENU_PREVIEW_RECENTER_ALL"],100,{0.05,0.05,0.06},{0.78,0.62,0.30,0.55},{0.78,0.62,0.30})
         btnAll:SetSize(100,20); btnAll:SetPoint("TOPLEFT",5,py-5)
         btnAll:SetScript("OnClick",function()
             for _,rm in ipairs(renderMap) do
@@ -61,9 +62,9 @@ function ns.SettingsPanel.BuildPreviewMenu(p, cw)
             pcall(ns.RebuildDisplay)
         end)
         c:SetHeight(-py+30) end},
-    {name="AISHUI (PREVIEW)",build=function(c,w)
+    {name=L["AURASMENU_PREVIEW_SECTION_AISHUI"],build=function(c,w)
         local lbl=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lbl,FONT,11); lbl:SetPoint("TOPLEFT",5,-8)
-        lbl:SetTextColor(unpack(Theme.textNormal)); lbl:SetText("Afficher preview AishUI")
+        lbl:SetTextColor(unpack(Theme.textNormal)); lbl:SetText(L["AURASMENU_PREVIEW_TOGGLE_LABEL"])
         local tog=SW.CreateToggle(c); tog:SetPoint("TOPRIGHT",-5,-6); tog:SetValue(ns._aishPreviewOn or false)
         tog.onChanged=function(v)
             ns._aishPreviewOn = v
@@ -92,6 +93,6 @@ function ns.SettingsPanel.BuildPreviewMenu(p, cw)
             end)
         end
         local info=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(info,FONT,9); info:SetPoint("TOPLEFT",5,-28)
-        info:SetTextColor(0.39,0.35,0.31); info:SetText("Affiche les frames du panneau partenaire"); c:SetHeight(42) end},
+        info:SetTextColor(0.39,0.35,0.31); info:SetText(L["AURASMENU_PREVIEW_TOGGLE_HINT"]); c:SetHeight(42) end},
 },cw,0)
 end

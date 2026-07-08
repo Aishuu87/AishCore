@@ -7,6 +7,7 @@
 --   • Zero breaking-change : ns.DB pointe toujours sur le profil actif
 ---------------------------------------------------------------------------
 local addonName, ns = ...
+local L = ns.L
 
 ns.Profiles = {}
 local P = ns.Profiles
@@ -25,7 +26,7 @@ local function SafeApply(mod, label)
   if mod and mod.ApplySettings then
     local ok, err = pcall(mod.ApplySettings)
     if not ok then
-      print("|cffff4444[Aishaddon Profils] Erreur ApplySettings " .. label .. " : " .. tostring(err) .. "|r")
+      print(string.format(L["PROFILE_APPLY_SETTINGS_ERROR"], label, tostring(err)))
     end
   end
 end
@@ -107,13 +108,13 @@ local function Serialize(val, depth)
 end
 
 local function Deserialize(str)
-  if type(str) ~= "string" then return nil, "pas une chaîne" end
+  if type(str) ~= "string" then return nil, L["PROFILE_DESERIALIZE_NOT_STRING"] end
   -- loadstring() : API Lua 5.1 disponible dans WoW (load() 4-args non garanti)
   local fn, err = loadstring("return " .. str, "aishaddon_profile_import")
   if not fn then return nil, tostring(err) end
   local ok, result = pcall(fn)
   if not ok then return nil, tostring(result) end
-  if type(result) ~= "table" then return nil, "résultat n'est pas une table" end
+  if type(result) ~= "table" then return nil, L["PROFILE_DESERIALIZE_NOT_TABLE"] end
   return result
 end
 
@@ -262,7 +263,7 @@ end
 --- Active un profil (global + applique les settings).
 function P.SetActive(name)
   local root = AishaddonDB
-  if not root._profiles[name] then return false, "Profil introuvable : " .. tostring(name) end
+  if not root._profiles[name] then return false, string.format(L["PROFILE_NOT_FOUND_NAMED"], tostring(name)) end
 
   root._profiles[name] = ns.MergeDefaults(root._profiles[name], ns.Defaults)
   ns.DB                 = root._profiles[name]
@@ -289,7 +290,7 @@ end
 --- Lie ce personnage à un profil spécifique.
 function P.SetCharProfile(name)
   local root = AishaddonDB
-  if not root._profiles[name] then return false, "Profil introuvable" end
+  if not root._profiles[name] then return false, L["PROFILE_NOT_FOUND"] end
   root._charProfiles = root._charProfiles or {}
   root._charProfiles[ns._charKey or ""] = name
   P.SetActive(name)
@@ -307,12 +308,12 @@ end
 --- Crée un nouveau profil.
 ---   copyFrom : nom du profil source (nil = copie des Defaults)
 function P.Create(name, copyFrom)
-  if type(name) ~= "string" then return false, "Nom invalide" end
+  if type(name) ~= "string" then return false, L["PROFILE_NAME_INVALID"] end
   name = name:match("^%s*(.-)%s*$")
-  if name == "" then return false, "Nom vide" end
+  if name == "" then return false, L["PROFILE_NAME_EMPTY"] end
 
   local root = AishaddonDB
-  if root._profiles[name] then return false, "Un profil « " .. name .. " » existe déjà" end
+  if root._profiles[name] then return false, string.format(L["PROFILE_ALREADY_EXISTS_NAMED"], name) end
 
   if copyFrom and root._profiles[copyFrom] then
     root._profiles[name] = ns.DeepCopy(root._profiles[copyFrom])
@@ -331,14 +332,14 @@ end
 --- Supprime un profil (impossible si c'est le dernier ou le profil actif).
 function P.Delete(name)
   local root = AishaddonDB
-  if not root._profiles[name] then return false, "Profil introuvable" end
+  if not root._profiles[name] then return false, L["PROFILE_NOT_FOUND"] end
 
   local count = 0
   for _ in pairs(root._profiles) do count = count + 1 end
-  if count <= 1 then return false, "Impossible de supprimer le dernier profil" end
+  if count <= 1 then return false, L["PROFILE_CANNOT_DELETE_LAST"] end
 
   if name == (ns._activeProfileName or "Default") then
-    return false, "Impossible de supprimer le profil actif\n(changez d'abord de profil)"
+    return false, L["PROFILE_CANNOT_DELETE_ACTIVE"]
   end
 
   root._profiles[name] = nil
@@ -356,13 +357,13 @@ end
 
 --- Renomme un profil.
 function P.Rename(oldName, newName)
-  if type(newName) ~= "string" then return false, "Nom invalide" end
+  if type(newName) ~= "string" then return false, L["PROFILE_NAME_INVALID"] end
   newName = newName:match("^%s*(.-)%s*$")
-  if newName == "" then return false, "Nom vide" end
+  if newName == "" then return false, L["PROFILE_NAME_EMPTY"] end
 
   local root = AishaddonDB
-  if not root._profiles[oldName] then return false, "Profil introuvable" end
-  if root._profiles[newName]     then return false, "Ce nom existe déjà" end
+  if not root._profiles[oldName] then return false, L["PROFILE_NOT_FOUND"] end
+  if root._profiles[newName]     then return false, L["PROFILE_NAME_ALREADY_EXISTS"] end
 
   root._profiles[newName] = root._profiles[oldName]
   root._profiles[oldName] = nil
@@ -385,7 +386,7 @@ end
 --- Réinitialise un profil aux valeurs par défaut (même logique que Create).
 function P.Reset(name)
   local root = AishaddonDB
-  if not root._profiles[name] then return false, "Profil introuvable" end
+  if not root._profiles[name] then return false, L["PROFILE_NOT_FOUND"] end
 
   local base = ns.ProfileTemplate and ns.DeepCopy(ns.ProfileTemplate) or {}
   root._profiles[name] = ns.MergeDefaults(base, ns.Defaults)
@@ -402,7 +403,7 @@ end
 function P.Export(name)
   local root = AishaddonDB
   local data = root._profiles[name]
-  if not data then return nil, "Profil introuvable" end
+  if not data then return nil, L["PROFILE_NOT_FOUND"] end
   return EXPORT_PREFIX .. Serialize(data)
 end
 
@@ -410,27 +411,27 @@ end
 ---   str     : chaîne issue de Export()
 ---   newName : nom à donner au nouveau profil
 function P.Import(str, newName)
-  if type(str) ~= "string" then return false, "Chaîne invalide" end
+  if type(str) ~= "string" then return false, L["PROFILE_STRING_INVALID"] end
 
   -- Tolérance aux espaces/retours à la ligne en début/fin
   str = str:match("^%s*(.-)%s*$")
 
   local payload = str:match("^" .. EXPORT_PREFIX .. "(.+)$")
   if not payload then
-    return false, "Format non reconnu.\nAttendu : " .. EXPORT_PREFIX .. "..."
+    return false, string.format(L["PROFILE_IMPORT_FORMAT_UNRECOGNIZED"], EXPORT_PREFIX)
   end
 
-  if type(newName) ~= "string" then return false, "Nom de destination invalide" end
+  if type(newName) ~= "string" then return false, L["PROFILE_DEST_NAME_INVALID"] end
   newName = newName:match("^%s*(.-)%s*$")
-  if newName == "" then return false, "Nom de destination vide" end
+  if newName == "" then return false, L["PROFILE_DEST_NAME_EMPTY"] end
 
   local root = AishaddonDB
   if root._profiles[newName] then
-    return false, "Un profil \« " .. newName .. " \» existe déjà"
+    return false, string.format(L["PROFILE_ALREADY_EXISTS_NAMED"], newName)
   end
 
   local data, err = Deserialize(payload)
-  if not data then return false, "Erreur de lecture : " .. tostring(err) end
+  if not data then return false, string.format(L["PROFILE_IMPORT_READ_ERROR"], tostring(err)) end
 
   -- Merge defaults pour combler les clés manquantes
   root._profiles[newName] = ns.MergeDefaults(data, ns.Defaults)
@@ -444,9 +445,9 @@ end
 ---------------------------------------------------------------------------
 function P.CopyFrom(sourceName)
   local root = AishaddonDB
-  if not root._profiles[sourceName] then return false, "Profil source introuvable" end
+  if not root._profiles[sourceName] then return false, L["PROFILE_SOURCE_NOT_FOUND"] end
   local active = ns._activeProfileName or "Default"
-  if sourceName == active then return false, "Source et destination identiques" end
+  if sourceName == active then return false, L["PROFILE_SOURCE_DEST_IDENTICAL"] end
 
   root._profiles[active] = ns.MergeDefaults(ns.DeepCopy(root._profiles[sourceName]), ns.Defaults)
   ns.DB = root._profiles[active]

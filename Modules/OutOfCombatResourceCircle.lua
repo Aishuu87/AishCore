@@ -3,6 +3,7 @@
 -- Pas de dots decoratifs (fond + arc + texte), secondary dots sans runes DK.
 
 local addonName, ns = ...
+local L = ns.L
 
 local OutOfCombatResourceCircle = {}
 ns.Modules.OutOfCombatResourceCircle = OutOfCombatResourceCircle
@@ -816,7 +817,7 @@ function OutOfCombatResourceCircle.SetDraggable(on)
     bar._dragBorder:Show()
     bar:SetScript("OnEnter", function(self)
       GameTooltip:SetOwner(self, "ANCHOR_TOP")
-      GameTooltip:SetText("Clic-glisser pour deplacer")
+      GameTooltip:SetText(L["RESOURCE_DRAG_TOOLTIP"])
       GameTooltip:Show()
     end)
     bar:SetScript("OnLeave", function() GameTooltip:Hide() end)

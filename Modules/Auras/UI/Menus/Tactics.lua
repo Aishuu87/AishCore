@@ -2,6 +2,7 @@
 -- Menu Tactics : liste des sorts découverts avec badges destination, glow, couleur
 ------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
 
 local TC = 0.07
@@ -39,7 +40,7 @@ function ns.OpenGlowPopup(sid, info)
 
         local sec = gp:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(sec,FONT,11); sec:SetPoint("TOP",0,-32)
         if Theme.accent then sec:SetTextColor(unpack(Theme.accent)) end
-        sec:SetText("GLOW (EFFET DE SURBRILLANCE)")
+        sec:SetText(L["AURASMENU_TACTICS_GLOW_SECTION_TITLE"])
 
         local prevF = CreateFrame("Frame",nil,gp); prevF:SetSize(48,48); prevF:SetPoint("TOP",0,-50)
         prevF:SetFrameLevel(gp:GetFrameLevel()+3)
@@ -48,21 +49,21 @@ function ns.OpenGlowPopup(sid, info)
         gp._prevFrame = prevF
 
         local wPad = 16
-        gp._glowDD   = SW.CreateDropdown(gp,"Type de glow (boucle)",{},248); gp._glowDD:SetPoint("TOPLEFT",wPad,-110)
-        gp._entryDD  = SW.CreateDropdown(gp,"Animation d'entree",{},248);    gp._entryDD:SetPoint("TOPLEFT",wPad,-158)
+        gp._glowDD   = SW.CreateDropdown(gp,L["AURASMENU_TACTICS_GLOW_TYPE_LOOP"],{},248); gp._glowDD:SetPoint("TOPLEFT",wPad,-110)
+        gp._entryDD  = SW.CreateDropdown(gp,L["AURASMENU_TACTICS_ENTRY_ANIMATION"],{},248);    gp._entryDD:SetPoint("TOPLEFT",wPad,-158)
 
         gp._testProcBtn = CreateFrame("Button",nil,gp,"BackdropTemplate"); gp._testProcBtn:SetSize(120,20); gp._testProcBtn:SetPoint("TOPLEFT",wPad,-204)
         gp._testProcBtn:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
         gp._testProcBtn:SetBackdropColor(0.20,0.15,0.08,0.9); gp._testProcBtn:SetBackdropBorderColor(0.80,0.55,0.20,0.7)
         local tpT = gp._testProcBtn:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(tpT,FONT,9); tpT:SetAllPoints(); tpT:SetJustifyH("CENTER")
-        tpT:SetTextColor(1.00,0.85,0.39); tpT:SetText("v Tester Proc")
+        tpT:SetTextColor(1.00,0.85,0.39); tpT:SetText(L["AURASMENU_TACTICS_TEST_PROC"])
         gp._testProcBtn:SetScript("OnEnter",function(s) s:SetBackdropColor(0.30,0.22,0.10,1) end)
         gp._testProcBtn:SetScript("OnLeave",function(s) s:SetBackdropColor(0.20,0.15,0.08,0.9) end)
 
-        gp._procScaleSlider = SW.CreateSlider(gp,"Taille proc",0.1,3.0,0.05,248); gp._procScaleSlider:SetPoint("TOPLEFT",wPad,-228)
-        gp._colorBtn        = SW.CreateColorButton(gp,"Couleur glow",248);         gp._colorBtn:SetPoint("TOPLEFT",wPad,-290)
-        gp._opacSlider      = SW.CreateSlider(gp,"Opacite",0,1,0.05,248);          gp._opacSlider:SetPoint("TOPLEFT",wPad,-320)
-        gp._sizeSlider      = SW.CreateSlider(gp,"Taille glow",0.1,3.0,0.05,248); gp._sizeSlider:SetPoint("TOPLEFT",wPad,-376)
+        gp._procScaleSlider = SW.CreateSlider(gp,L["AURASMENU_TACTICS_PROC_SIZE"],0.1,3.0,0.05,248); gp._procScaleSlider:SetPoint("TOPLEFT",wPad,-228)
+        gp._colorBtn        = SW.CreateColorButton(gp,L["AURASMENU_TACTICS_GLOW_COLOR"],248);         gp._colorBtn:SetPoint("TOPLEFT",wPad,-290)
+        gp._opacSlider      = SW.CreateSlider(gp,L["AURASMENU_EQUIPMENT_OPACITY"],0,1,0.05,248);          gp._opacSlider:SetPoint("TOPLEFT",wPad,-320)
+        gp._sizeSlider      = SW.CreateSlider(gp,L["AURASMENU_TACTICS_GLOW_SIZE"],0.1,3.0,0.05,248); gp._sizeSlider:SetPoint("TOPLEFT",wPad,-376)
 
         local gpGrip = CreateFrame("Button",nil,gp); gpGrip:SetSize(12,12); gpGrip:SetPoint("BOTTOMRIGHT",-2,2)
         gpGrip:SetFrameLevel(gp:GetFrameLevel()+20)
@@ -77,7 +78,7 @@ function ns.OpenGlowPopup(sid, info)
     local gp = ns._glowPopup
     local classBC = ns.barColor or {0.5,0.5,0.5}
     gp:SetBackdropBorderColor(classBC[1], classBC[2], classBC[3], 0.9)
-    gp._title:SetText("Glow — "..(info.name or tostring(sid)))
+    gp._title:SetText(string.format(L["AURASMENU_TACTICS_GLOW_TITLE"], (info.name or tostring(sid))))
     pcall(function() local t=C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sid); if t then gp._iconTex:SetTexture(t) end end)
 
     local function RefreshGlowPreview()
@@ -92,7 +93,7 @@ function ns.OpenGlowPopup(sid, info)
     gp._glowDD:SetOptions(go); gp._glowDD:SetValue(info.glowIdx or 2)
     gp._glowDD.onChanged=function(v) info.glowIdx=v; RefreshGlowPreview(); pcall(ns.ScanAuras) end
 
-    local po={{value=1,text="Aucun"}}; for idx,def in ipairs(ns.GLOW_DEFS or {}) do if def.isProcStart then po[#po+1]={value=idx,text=def.name} end end
+    local po={{value=1,text=L["AURASMENU_EQUIPMENT_BORDER_NONE"]}}; for idx,def in ipairs(ns.GLOW_DEFS or {}) do if def.isProcStart then po[#po+1]={value=idx,text=def.name} end end
     gp._entryDD:SetOptions(po); gp._entryDD:SetValue(info.procGlowIdx or 1)
     gp._entryDD.onChanged=function(v) info.procGlowIdx=v; gp._testProcBtn:SetShown(v and v>1); gp._procScaleSlider:SetShown(v and v>1) end
 
@@ -162,7 +163,7 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
     sw1:SetScript("OnClick",function() ColorPickerFrame:SetupColorPickerAndShow({r=sc[1],g=sc[2],b=sc[3],
         swatchFunc=function() local r,g,b=ColorPickerFrame:GetColorRGB(); info.color={r,g,b}; info._colorDefault=false; sw1T:SetColorTexture(r,g,b); onChg() end,
         cancelFunc=function(pp) info.color={pp.r,pp.g,pp.b}; info._colorDefault=false; sw1T:SetColorTexture(pp.r,pp.g,pp.b); onChg() end}) end)
-    sw1:SetScript("OnEnter",function() GameTooltip:SetOwner(sw1,"ANCHOR_TOP"); GameTooltip:SetText("Couleur de la barre",1,1,1); GameTooltip:Show() end)
+    sw1:SetScript("OnEnter",function() GameTooltip:SetOwner(sw1,"ANCHOR_TOP"); GameTooltip:SetText(L["AURASMENU_TACTICS_BAR_COLOR_TOOLTIP"],1,1,1); GameTooltip:Show() end)
     sw1:SetScript("OnLeave",function() GameTooltip:Hide() end)
 
     -- Bouton desat (icône ability_creature_cursed_04, pas de lettre)

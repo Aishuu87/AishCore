@@ -1,5 +1,6 @@
 -- Modules/ResourceCircle.lua : Cercle de ressource primaire (dynamique par classe/spec)
 local addonName, ns = ...
+local L = ns.L
 
 local ResourceCircle = {}
 ns.Modules.ResourceCircle = ResourceCircle
@@ -742,7 +743,7 @@ function ResourceCircle.SetDraggable(on)
     -- Tooltip au survol
     bar:SetScript("OnEnter", function(self)
       GameTooltip:SetOwner(self, "ANCHOR_TOP")
-      GameTooltip:SetText("Clic-glisser pour deplacer")
+      GameTooltip:SetText(L["RESOURCE_DRAG_TOOLTIP"])
       GameTooltip:Show()
     end)
     bar:SetScript("OnLeave", function() GameTooltip:Hide() end)

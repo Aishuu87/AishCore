@@ -2,6 +2,7 @@
 -- Equipment menu: layout cards (Shield Wall / Ronin) + equipment list + position/borders
 ------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
 
 function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
@@ -12,7 +13,7 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
     local TC = 0.07
 
     local y=0; local cfg=ns.db and ns.db.equipment or {}; local al=cfg.layout or "grid_fixed"
-    local dH=SW.CreateSectionHeader(p,"Disposition (trinkets / raciales / equip.)",cw-20); dH:SetPoint("TOPLEFT",10,-y); y=y+22
+    local dH=SW.CreateSectionHeader(p,L["AURASMENU_EQUIPMENT_SECTION_DISPOSITION"],cw-20); dH:SetPoint("TOPLEFT",10,-y); y=y+22
     local cards={{key="grid_fixed",name=ns.LAYOUT_NAMES.GRID_FIXED,fb="ability_warrior_shieldwall"},{key="grid_free",name=ns.LAYOUT_NAMES.GRID_FREE,fb="ability_rogue_sprint"}}
     local sx=math.max(10,(cw-2*155)/2)
     local wgCards = {}
@@ -74,7 +75,7 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
         local actTx=nil
         if isAct then
             actTx = card:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(actTx,FONT,8)
-            actTx:SetPoint("BOTTOM",0,5); actTx:SetTextColor(unpack(Theme.accent)); actTx:SetText("ACTIF")
+            actTx:SetPoint("BOTTOM",0,5); actTx:SetTextColor(unpack(Theme.accent)); actTx:SetText(L["AURASMENU_EQUIPMENT_ACTIVE_LABEL"])
         end
 
         wgCards[#wgCards+1] = {key=c.key, ico=ico, lbl=clbl, actTx=actTx}
@@ -85,7 +86,7 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
                 if not lc.actTx then
                     lc.actTx = clbl:GetParent():CreateFontString(nil,"OVERLAY")
                     ns.ApplyFont(lc.actTx,FONT,8); lc.actTx:SetPoint("BOTTOM",0,5)
-                    lc.actTx:SetTextColor(unpack(Theme.accent)); lc.actTx:SetText("ACTIF")
+                    lc.actTx:SetTextColor(unpack(Theme.accent)); lc.actTx:SetText(L["AURASMENU_EQUIPMENT_ACTIVE_LABEL"])
                 end
             end
             RefreshWGCards(); pcall(function() if ns.Providers then ns.Providers:Refresh() end end)
@@ -109,13 +110,13 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
     local wgSections = {}
     local curLayout = ns.db and ns.db.equipment and ns.db.equipment.layout or "grid_fixed"
     -- 1. EQUIPEMENT
-    wgSections[#wgSections+1] = {name="EQUIPEMENT",build=function(c,w)
+    wgSections[#wgSections+1] = {name=L["AURASMENU_EQUIPMENT_SECTION_EQUIPEMENT"],build=function(c,w)
             local cy=5
             local slots = ns.Providers and ns.Providers.GetAllSlots and ns.Providers:GetAllSlots() or {}
             if #slots == 0 then
                 local nd=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(nd,FONT,11)
                 nd:SetPoint("TOPLEFT",15,-cy); nd:SetTextColor(unpack(Theme.textDim))
-                nd:SetText("Aucun element detecte (equipez trinkets, puis /reload)"); cy=cy+20
+                nd:SetText(L["AURASMENU_EQUIPMENT_NO_ITEMS"]); cy=cy+20
             else
                 local function onSlotChg() pcall(function() ns.Providers:Refresh() end) end
                 local typeOrder = { trinket=1, racial=2, equip=3 }
@@ -156,7 +157,7 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
                     pcall(function() dIco:SetTexture("Interface\\Icons\\ability_creature_cursed_04") end)
                     local function RD() dIco:SetDesaturated(true); if sd.desat then dBg:SetColorTexture(0.12,0.12,0.22,0.8); dIco:SetAlpha(1); ico:SetDesaturated(true) else dBg:SetColorTexture(0.06,0.06,0.10,0.5); dIco:SetAlpha(0.3); ico:SetDesaturated(false) end end; RD()
                     dBtn:SetScript("OnClick",function() sd.desat=not sd.desat; RD(); onSlotChg() end)
-                    dBtn:SetScript("OnEnter",function() dIco:SetAlpha(1); GameTooltip:SetOwner(dBtn,"ANCHOR_TOP"); GameTooltip:SetText("Desaturer l'icone",1,1,1); GameTooltip:Show() end)
+                    dBtn:SetScript("OnEnter",function() dIco:SetAlpha(1); GameTooltip:SetOwner(dBtn,"ANCHOR_TOP"); GameTooltip:SetText(L["AURASMENU_EQUIPMENT_DESATURATE_TOOLTIP"],1,1,1); GameTooltip:Show() end)
                     dBtn:SetScript("OnLeave",function() RD(); GameTooltip:Hide() end)
                     -- Bouton glow fusionné : affiche le type + on/off. Clic gauche = toggle, clic droit = picker
                     -- Style harmonisé avec le menu Sorts (Tactics)
@@ -177,7 +178,7 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
                         else
                             gFus:SetBackdropColor(0.06,0.06,0.10,0.6)
                             gFus:SetBackdropBorderColor(0.18,0.18,0.22,0.5)
-                            gFusTx:SetText("Glow off")
+                            gFusTx:SetText(L["AURASMENU_EQUIPMENT_GLOW_OFF"])
                             gFusTx:SetTextColor(0.30, 0.30, 0.34)
                         end
                     end
@@ -212,9 +213,9 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
                         local glc = sd.glowColor or ns.barColor
                         gFus:SetBackdropBorderColor(glc[1],glc[2],glc[3],1)
                         GameTooltip:SetOwner(gFus,"ANCHOR_TOP")
-                        GameTooltip:SetText((sd.glowEnabled~=false) and "Glow actif" or "Glow desactive",1,1,1)
-                        GameTooltip:AddLine("Clic gauche : activer/desactiver", 0.7, 0.7, 0.7)
-                        GameTooltip:AddLine("Clic droit : choisir le type", 0.7, 0.7, 0.7)
+                        GameTooltip:SetText((sd.glowEnabled~=false) and L["AURASMENU_EQUIPMENT_GLOW_ACTIVE"] or L["AURASMENU_EQUIPMENT_GLOW_INACTIVE"],1,1,1)
+                        GameTooltip:AddLine(L["AURASMENU_EQUIPMENT_GLOW_TOOLTIP_LEFT"], 0.7, 0.7, 0.7)
+                        GameTooltip:AddLine(L["AURASMENU_EQUIPMENT_GLOW_TOOLTIP_RIGHT"], 0.7, 0.7, 0.7)
                         GameTooltip:Show()
                     end)
                     gFus:SetScript("OnLeave",function() RG(); GameTooltip:Hide() end)
@@ -226,30 +227,30 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
             c:SetHeight(cy+5) end}
     -- 2. POSITION & TAILLE
     if curLayout == "grid_fixed" then
-        wgSections[#wgSections+1] = {name="POSITION & TAILLE",build=function(c,w) local cy=0; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+        wgSections[#wgSections+1] = {name=L["AURASMENU_EQUIPMENT_SECTION_POSITION"],build=function(c,w) local cy=0; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
             local cf = ns.db and ns.db.equipment or {}
-            local s1=SW.CreateSlider(c,"Position X",-1000,1000,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.groupX or -167)
+            local s1=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_POSITION_X"],-1000,1000,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.groupX or -167)
             s1.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupX=v end; pcall(function() ns.Providers:Layout() end) end
-            local s2=SW.CreateSlider(c,"Position Y",-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.groupY or -188)
+            local s2=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_POSITION_Y"],-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.groupY or -188)
             s2.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupY=v end; pcall(function() ns.Providers:Layout() end) end; cy=cy+60
-            local s3=SW.CreateSlider(c,"Largeur icone",10,80,1,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(cf.groupW or 31)
+            local s3=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_ICON_WIDTH"],10,80,1,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(cf.groupW or 31)
             s3.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupW=v end; pcall(function() ns.Providers:Layout() end) end
-            local s4=SW.CreateSlider(c,"Hauteur icone",10,80,1,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(cf.groupH or 25)
+            local s4=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_ICON_HEIGHT"],10,80,1,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(cf.groupH or 25)
             s4.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupH=v end; pcall(function() ns.Providers:Layout() end) end; cy=cy+60
-            local s5=SW.CreateSlider(c,"Espacement",0,20,1,slW); s5:SetPoint("TOPLEFT",ox,-cy); s5:SetValue(cf.groupGap or 3)
+            local s5=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_SPACING"],0,20,1,slW); s5:SetPoint("TOPLEFT",ox,-cy); s5:SetValue(cf.groupGap or 3)
             s5.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupGap=v end; pcall(function() ns.Providers:Layout() end) end
-            local s6=SW.CreateSlider(c,"Opacite",0,1,0.05,slW); s6:SetPoint("TOPLEFT",ox+slW+gap,-cy); s6:SetValue(cf.groupAlpha or 1.0)
+            local s6=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_OPACITY"],0,1,0.05,slW); s6:SetPoint("TOPLEFT",ox+slW+gap,-cy); s6:SetValue(cf.groupAlpha or 1.0)
             s6.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupAlpha=v end; pcall(function() ns.Providers:Layout() end) end; cy=cy+60
-            local growOpts={{value="RIGHT",text="Droite"},{value="LEFT",text="Gauche"},{value="DOWN",text="Bas"},{value="UP",text="Haut"}}
-            local gdd=SW.CreateDropdown(c,"Empilement",growOpts,w-30); gdd:SetPoint("TOPLEFT",15,-cy)
+            local growOpts={{value="RIGHT",text=L["AURASMENU_EQUIPMENT_GROWTH_RIGHT"]},{value="LEFT",text=L["AURASMENU_EQUIPMENT_GROWTH_LEFT"]},{value="DOWN",text=L["AURASMENU_EQUIPMENT_GROWTH_DOWN"]},{value="UP",text=L["AURASMENU_EQUIPMENT_GROWTH_UP"]}}
+            local gdd=SW.CreateDropdown(c,L["AURASMENU_EQUIPMENT_STACKING"],growOpts,w-30); gdd:SetPoint("TOPLEFT",15,-cy)
             gdd:SetValue(cf.groupGrowth or "RIGHT")
             gdd.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupGrowth=v end; pcall(function() ns.Providers:Layout() end) end
             cy=cy+50; c:SetHeight(cy) end}
     else
-        wgSections[#wgSections+1] = {name="POSITION & TAILLE",build=function(c,w) local cy=0; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+        wgSections[#wgSections+1] = {name=L["AURASMENU_EQUIPMENT_SECTION_POSITION"],build=function(c,w) local cy=0; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
             local info=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(info,FONT,9)
             info:SetPoint("TOPLEFT",15,-cy); info:SetTextColor(unpack(Theme.textDim))
-            info:SetText("Alt+Drag pour deplacer individuellement"); cy=cy+18
+            info:SetText(L["AURASMENU_EQUIPMENT_ALT_DRAG_HINT"]); cy=cy+18
             local slots = ns.Providers and ns.Providers.GetAllSlots and ns.Providers:GetAllSlots() or {}
             local typeColor = { trinket={0.95,0.85,0.55}, racial={0.78,0.62,0.30}, equip={0.65,0.50,0.20} }
             for _, slot in ipairs(slots) do
@@ -265,32 +266,32 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
                     pcall(function() hIco:SetTexture(sTex) end)
                     local hLbl=hdr:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(hLbl,FONT,10); hLbl:SetPoint("LEFT",20,0); hLbl:SetJustifyH("LEFT")
                     hLbl:SetText(string.format("|cff%02x%02x%02x%s|r", math.floor(tc[1]*255), math.floor(tc[2]*255), math.floor(tc[3]*255), sName)); cy=cy+22
-                    local s1=SW.CreateSlider(c,"Position X",-1000,1000,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(sd.x or 0)
+                    local s1=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_POSITION_X"],-1000,1000,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(sd.x or 0)
                     s1.onChanged=function(v) sd.x=v; pcall(function() ns.Providers:Layout() end) end
-                    local s2=SW.CreateSlider(c,"Position Y",-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(sd.y or -188)
+                    local s2=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_POSITION_Y"],-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(sd.y or -188)
                     s2.onChanged=function(v) sd.y=v; pcall(function() ns.Providers:Layout() end) end; cy=cy+60
-                    local s3=SW.CreateSlider(c,"Largeur",10,80,1,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(sd.w or 31)
+                    local s3=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_WIDTH"],10,80,1,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(sd.w or 31)
                     s3.onChanged=function(v) sd.w=v; pcall(function() ns.Providers:Layout() end) end
-                    local s4=SW.CreateSlider(c,"Hauteur",10,80,1,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(sd.h or 25)
+                    local s4=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_HEIGHT"],10,80,1,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(sd.h or 25)
                     s4.onChanged=function(v) sd.h=v; pcall(function() ns.Providers:Layout() end) end; cy=cy+60
-                    local s5=SW.CreateSlider(c,"Opacite",0,1,0.05,slW); s5:SetPoint("TOPLEFT",ox,-cy); s5:SetValue(sd.alpha or 1.0)
+                    local s5=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_OPACITY"],0,1,0.05,slW); s5:SetPoint("TOPLEFT",ox,-cy); s5:SetValue(sd.alpha or 1.0)
                     s5.onChanged=function(v) sd.alpha=v; pcall(function() ns.Providers:Layout() end) end; cy=cy+60
                 end
             end
             c:SetHeight(math.max(cy, 20)) end}
     end
     -- 3. BORDURE (lit à la volée depuis la DB)
-    wgSections[#wgSections+1] = {name="BORDURE",build=function(c,w) local cy=0; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+    wgSections[#wgSections+1] = {name=L["AURASMENU_EQUIPMENT_SECTION_BORDER"],build=function(c,w) local cy=0; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
         local cf = ns.db and ns.db.equipment or {}
-        local borderOpts={{value="square",text="Carre"},{value="none",text="Aucun"}}
-        local bdd=SW.CreateDropdown(c,"Style",borderOpts,slW); bdd:SetPoint("TOPLEFT",ox,-cy)
+        local borderOpts={{value="square",text=L["AURASMENU_EQUIPMENT_BORDER_SQUARE"]},{value="none",text=L["AURASMENU_EQUIPMENT_BORDER_NONE"]}}
+        local bdd=SW.CreateDropdown(c,L["AURASMENU_EQUIPMENT_STYLE"],borderOpts,slW); bdd:SetPoint("TOPLEFT",ox,-cy)
         bdd:SetValue(cf.borderStyle or "square")
         bdd.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.borderStyle=v end; pcall(function() ns.Providers:Layout() end) end
-        local brs=SW.CreateSlider(c,"Epaisseur",1,6,1,slW); brs:SetPoint("TOPLEFT",ox+slW+gap,-cy)
+        local brs=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_THICKNESS"],1,6,1,slW); brs:SetPoint("TOPLEFT",ox+slW+gap,-cy)
         brs:SetValue(cf.borderWidth or 2)
         brs.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.borderWidth=v end; pcall(function() ns.Providers:Layout() end) end; cy=cy+60
         local curBC = cf.borderColor or {0.055, 0.055, 0.055, 1}
-        local cc=SW.CreateColorButton(c,"Couleur bordure",w-30); cc:SetPoint("TOPLEFT",15,-cy)
+        local cc=SW.CreateColorButton(c,L["AURASMENU_EQUIPMENT_BORDER_COLOR"],w-30); cc:SetPoint("TOPLEFT",15,-cy)
         cc:SetColor(curBC[1], curBC[2], curBC[3])
         cc.onChanged=function(col) if ns.db and ns.db.equipment then ns.db.equipment.borderColor={col[1],col[2],col[3],0.8} end; pcall(function() ns.Providers:Layout() end) end
         cy=cy+30; c:SetHeight(cy) end}

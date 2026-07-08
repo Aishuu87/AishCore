@@ -1,5 +1,6 @@
 -- Modules/UnitBars.lua : Barres de vie Player, Target, Focus, Pet, TargetTarget
 local addonName, ns = ...
+local L = ns.L
 
 local UnitBars = {}
 ns.Modules.UnitBars = UnitBars
@@ -677,10 +678,10 @@ local function UpdateBarName(frame)
     elseif ubPreviewMode and (unit == "target" or unit == "targettarget" or unit == "focus" or unit == "pet") then
         -- Preview : nom spécifique au module quand l'unité n'existe pas
         local PREVIEW_NAMES = {
-            target       = "Target Name",
-            targettarget = "Target of Target Name",
-            focus        = "Focus Name",
-            pet          = "Pet Name",
+            target       = L["UNITBARS_PREVIEW_TARGET"],
+            targettarget = L["UNITBARS_PREVIEW_TARGETTARGET"],
+            focus        = L["UNITBARS_PREVIEW_FOCUS"],
+            pet          = L["UNITBARS_PREVIEW_PET"],
         }
         frame.nameTxt:SetText(PREVIEW_NAMES[unit] or (unit .. " Name"))
     else

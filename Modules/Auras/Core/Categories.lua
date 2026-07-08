@@ -17,6 +17,7 @@
 -- ============================================================================
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 
 ns.CATEGORIES = {
     ----------------------------------------------------------------------------
@@ -24,16 +25,16 @@ ns.CATEGORIES = {
     ----------------------------------------------------------------------------
     {
         id = "joueur",
-        label = "JOUEUR",
+        label = L["AURASDATA_CAT_PLAYER"],
         sections = {
-            { id = "unitBars",       label = "Cadres d'unités",        source = "Aishaddon",
-              desc = "Les barres de vie et de ressource principales de ton personnage. Tu configures ici leur taille, position, texture et couleurs." },
-            { id = "castBar",        label = "Ma barre d'incantation", source = "Aishaddon",
-              desc = "La barre qui s'affiche quand tu lances un sort avec temps d'incantation. Position, taille et style des polices." },
-            { id = "resourceCircle", label = "Cercle de ressource",    source = "Aishaddon",
-              desc = "Le cercle principal autour de ton personnage qui affiche ta ressource (mana, rage, énergie...). Deux modes : un en combat et un hors combat." },
-            { id = "healthCircle",   label = "Cercle de récup",        source = "Aishaddon",
-              desc = "Le cercle de récupération qui s'affiche uniquement hors combat. Utilisé pour les buffs de soin, nourriture et régénération." },
+            { id = "unitBars",       label = L["AURASDATA_SEC_UNITBARS_LABEL"],        source = "Aishaddon",
+              desc = L["AURASDATA_SEC_UNITBARS_DESC"] },
+            { id = "castBar",        label = L["AURASDATA_SEC_CASTBAR_LABEL"], source = "Aishaddon",
+              desc = L["AURASDATA_SEC_CASTBAR_DESC"] },
+            { id = "resourceCircle", label = L["AURASDATA_LABEL_RESOURCE_CIRCLE"],    source = "Aishaddon",
+              desc = L["AURASDATA_SEC_RESOURCECIRCLE_DESC"] },
+            { id = "healthCircle",   label = L["AURASDATA_LABEL_RECOVERY_CIRCLE"],        source = "Aishaddon",
+              desc = L["AURASDATA_SEC_HEALTHCIRCLE_DESC"] },
         },
     },
 
@@ -42,12 +43,12 @@ ns.CATEGORIES = {
     ----------------------------------------------------------------------------
     {
         id = "cible",
-        label = "CIBLE",
+        label = L["AURASDATA_CAT_TARGET"],
         sections = {
-            { id = "topTargetBar",  label = "Cadre de cible",         source = "Aishaddon",
-              desc = "La barre de vie et les auras visibles sur ta cible actuelle. Configure la barre principale et les auras séparément dans les onglets." },
-            { id = "targetCastBar", label = "Incantation de la cible", source = "Aishaddon",
-              desc = "La barre qui montre ce que ta cible est en train de lancer. Pratique pour interrompre au bon moment." },
+            { id = "topTargetBar",  label = L["AURASDATA_SEC_TOPTARGETBAR_LABEL"],         source = "Aishaddon",
+              desc = L["AURASDATA_SEC_TOPTARGETBAR_DESC"] },
+            { id = "targetCastBar", label = L["AURASDATA_SEC_TARGETCASTBAR_LABEL"], source = "Aishaddon",
+              desc = L["AURASDATA_SEC_TARGETCASTBAR_DESC"] },
         },
     },
 
@@ -56,31 +57,31 @@ ns.CATEGORIES = {
     ----------------------------------------------------------------------------
     {
         id = "mesSorts",
-        label = "MES SORTS",
+        label = L["AURASDATA_CAT_MY_SPELLS"],
         sections = {
-            { id = "spellsTracked",  label = "Auras à tracker",        source = "AishUIAura",
+            { id = "spellsTracked",  label = L["AURASDATA_LABEL_SPELLS_TRACKED"],        source = "AishUIAura",
               builder = "BuildTacticsMenu",
-              desc = "La liste centrale de tous les sorts que l'addon surveille. Ajoute des sorts ici puis assigne-les à un emplacement (Liste d'icônes, Barres libres, Icones...)." },
-            { id = "debuffs",   label = "Liste d'icônes",   source = "AishUIAura",
+              desc = L["AURASDATA_SEC_SPELLSTRACKED_DESC"] },
+            { id = "debuffs",   label = L["AURASDATA_SEC_DEBUFFS_LABEL"],   source = "AishUIAura",
               builder = "BuildRenderMenu", builderArg = "iconlist",
-              desc = "Rangée d'icônes (style aegis) avec barre de durée. Idéal pour les DoTs et auras sur la cible. Tu choisis les sorts à y afficher depuis « Auras à tracker ».",
-              tooltip = "Rangée d'icônes avec barre de durée. Tu choisis les sorts depuis Auras à tracker." },
-            { id = "buffs",     label = "Barres de cercle",     source = "AishUIAura",
+              desc = L["AURASDATA_SEC_DEBUFFS_DESC"],
+              tooltip = L["AURASDATA_SEC_DEBUFFS_TOOLTIP"] },
+            { id = "buffs",     label = L["AURASDATA_SEC_BUFFS_LABEL"],     source = "AishUIAura",
               builder = "BuildRenderMenu", builderArg = "freebars",
-              desc = "Barres miroir de part et d'autre du cercle de ressource. Idéal pour les buffs actifs continus. Tu choisis les sorts à y afficher depuis « Auras à tracker ».",
-              tooltip = "Barres miroir autour du cercle de ressource. Tu choisis les sorts depuis Auras à tracker." },
-            { id = "procs",     label = "Icones",     source = "AishUIAura",
+              desc = L["AURASDATA_SEC_BUFFS_DESC"],
+              tooltip = L["AURASDATA_SEC_BUFFS_TOOLTIP"] },
+            { id = "procs",     label = L["AURASDATA_SEC_PROCS_LABEL"],     source = "AishUIAura",
               builder = "BuildRenderMenu", builderArg = "icons",
-              desc = "Icônes compactes en grille ou ligne. Idéal pour les procs et effets courts. Tu choisis les sorts à y afficher depuis « Auras à tracker ».",
-              tooltip = "Icônes compactes. Tu choisis les sorts depuis Auras à tracker." },
-            { id = "cooldowns", label = "Barres libres", source = "AishUIAura",
+              desc = L["AURASDATA_SEC_PROCS_DESC"],
+              tooltip = L["AURASDATA_SEC_PROCS_TOOLTIP"] },
+            { id = "cooldowns", label = L["AURASDATA_SEC_COOLDOWNS_LABEL"], source = "AishUIAura",
               builder = "BuildRenderMenu", builderArg = "circlebars",
-              desc = "Barres librement positionnables (side large). Idéal pour les cooldowns et effets longue durée. Tu choisis les sorts à y afficher depuis « Auras à tracker ».",
-              tooltip = "Barres librement positionnables. Tu choisis les sorts depuis Auras à tracker." },
-            { id = "trinkets",  label = "Trinkets",  source = "AishUIAura",
+              desc = L["AURASDATA_SEC_COOLDOWNS_DESC"],
+              tooltip = L["AURASDATA_SEC_COOLDOWNS_TOOLTIP"] },
+            { id = "trinkets",  label = L["AURASDATA_SEC_TRINKETS_LABEL"],  source = "AishUIAura",
               builder = "BuildEquipmentMenu",
-              desc = "Gestion de tes trinkets (bijoux) et raciales sur cooldown. Configuration par slot d'équipement.",
-              tooltip = "Trinkets et raciales. Configuration par slot depuis ce menu." },
+              desc = L["AURASDATA_SEC_TRINKETS_DESC"],
+              tooltip = L["AURASDATA_SEC_TRINKETS_TOOLTIP"] },
         },
     },
 
@@ -89,13 +90,13 @@ ns.CATEGORIES = {
     ----------------------------------------------------------------------------
     {
         id = "rotation",
-        label = "ROTATION",
+        label = L["AURASDATA_CAT_ROTATION"],
         sections = {
-            { id = "priorityBar",    label = "Slots autour du cercle", source = "Aishaddon",
-              desc = "Deux groupes de slots de part et d'autre du cercle de ressource. Chaque slot affiche automatiquement le sort up en priorité dans sa liste.",
-              tooltip = "2 groupes de slots de part et d'autre du cercle de ressource. Chaque slot affiche automatiquement le sort up en priorité dans sa liste." },
-            { id = "rotationHelper", label = "Aide à la rotation",     source = "Aishaddon",
-              desc = "L'indicateur qui te suggère le prochain sort à lancer en fonction de ta spé et de tes ressources." },
+            { id = "priorityBar",    label = L["AURASDATA_SEC_PRIORITYBAR_LABEL"], source = "Aishaddon",
+              desc = L["AURASDATA_SEC_PRIORITYBAR_DESC"],
+              tooltip = L["AURASDATA_SEC_PRIORITYBAR_TOOLTIP"] },
+            { id = "rotationHelper", label = L["AURASDATA_SEC_ROTATIONHELPER_LABEL"],     source = "Aishaddon",
+              desc = L["AURASDATA_SEC_ROTATIONHELPER_DESC"] },
         },
     },
 
@@ -104,19 +105,19 @@ ns.CATEGORIES = {
     ----------------------------------------------------------------------------
     {
         id = "effets3D",
-        label = "Anims 3D",
+        label = L["AURASDATA_CAT_3D_ANIMS"],
         sections = {
-            { id = "fxOnAura",     label = "Auras",              source = "AishUIAura",
+            { id = "fxOnAura",     label = L["AURASDATA_SEC_FXONAURA_LABEL"],              source = "AishUIAura",
               builder = "BuildEffectsMenu",
-              desc = "Animations 3D qui se jouent sur tes auras (icône, barre, étincelle) lors d'un proc, d'un cast ou d'un événement de combat. Le menu interne te permet de configurer chaque vue (icône / barre / étincelle) par sort." },
-            { id = "fxOnResource", label = "Cercle de ressource", source = "Aishaddon",
-              desc = "Animations 3D qui se jouent sur le cercle de ressource quand tu lances un sort." },
-            { id = "fxOnSecRes",   label = "Ressource secondaire", source = "Aishaddon",
-              desc = "Effets 3D sur les points secondaires : combo points (Voleur, Feral), runes (DK), chi (Monk), Puissance Sacrée (Paladin), essences (Evoker), etc.",
-              tooltip = "Effets 3D sur les points secondaires : combo points (Voleur, Feral), runes (DK), chi (Monk), Puissance Sacrée (Paladin), essences (Evoker), etc." },
-            { id = "fxOnRecup",    label = "Cercle de récup",     source = "Aishaddon",
-              desc = "Animations 3D qui tournent en boucle autour de ton Cercle de récup (hors combat). Disparaissent dès l'entrée en combat.",
-              tooltip = "Animations 3D qui tournent en boucle autour de ton Cercle de récup (hors combat). Disparaissent dès l'entrée en combat." },
+              desc = L["AURASDATA_SEC_FXONAURA_DESC"] },
+            { id = "fxOnResource", label = L["AURASDATA_LABEL_RESOURCE_CIRCLE"], source = "Aishaddon",
+              desc = L["AURASDATA_SEC_FXONRESOURCE_DESC"] },
+            { id = "fxOnSecRes",   label = L["AURASDATA_SEC_FXONSECRES_LABEL"], source = "Aishaddon",
+              desc = L["AURASDATA_SEC_FXONSECRES_TEXT"],
+              tooltip = L["AURASDATA_SEC_FXONSECRES_TEXT"] },
+            { id = "fxOnRecup",    label = L["AURASDATA_LABEL_RECOVERY_CIRCLE"],     source = "Aishaddon",
+              desc = L["AURASDATA_SEC_FXONRECUP_TEXT"],
+              tooltip = L["AURASDATA_SEC_FXONRECUP_TEXT"] },
         },
     },
 
@@ -125,12 +126,12 @@ ns.CATEGORIES = {
     ----------------------------------------------------------------------------
     {
         id = "horsCombat",
-        label = "MONDE",
+        label = L["AURASDATA_CAT_WORLD"],
         sections = {
-            { id = "xpBar",     label = "Barre d'expérience", source = "Aishaddon",
-              desc = "La barre d'expérience customisée qui remplace la barre Blizzard. Affiche XP, réputation et honneur selon le contexte." },
-            { id = "skyriding", label = "Skyriding",          source = "Aishaddon",
-              desc = "Affichage spécifique quand tu es en vol dragon : vitesse, vigueur et indicateurs d'altitude." },
+            { id = "xpBar",     label = L["AURASDATA_SEC_XPBAR_LABEL"], source = "Aishaddon",
+              desc = L["AURASDATA_SEC_XPBAR_DESC"] },
+            { id = "skyriding", label = L["AURASDATA_SEC_SKYRIDING_LABEL"],          source = "Aishaddon",
+              desc = L["AURASDATA_SEC_SKYRIDING_DESC"] },
         },
     },
 
@@ -139,16 +140,16 @@ ns.CATEGORIES = {
     ----------------------------------------------------------------------------
     {
         id = "general",
-        label = "GÉNÉRAL",
+        label = L["AURASDATA_CAT_GENERAL"],
         sections = {
-            { id = "colors",   label = "Couleurs & thème", source = "mixed",
-              desc = "Palette de couleurs globale de l'addon. Personnalise les teintes or, accent, arrière-plan et couleurs de classe." },
-            { id = "preview",  label = "Aperçu",           source = "AishUIAura",
+            { id = "colors",   label = L["AURASDATA_SEC_COLORS_LABEL"], source = "mixed",
+              desc = L["AURASDATA_SEC_COLORS_DESC"] },
+            { id = "preview",  label = L["AURASDATA_SEC_PREVIEW_LABEL"],           source = "AishUIAura",
               builder = "BuildPreviewMenu",
-              desc = "Active un mode aperçu en jeu qui simule des auras factices dans chaque emplacement pour voir le rendu sans attendre un vrai combat." },
-            { id = "profiles", label = "Profils",          source = "mixed",
+              desc = L["AURASDATA_SEC_PREVIEW_DESC"] },
+            { id = "profiles", label = L["AURASDATA_SEC_PROFILES_LABEL"],          source = "mixed",
               builder = "BuildProfilesMenu",
-              desc = "Enregistre, charge ou partage tes configs entre personnages. Un profil = tout le setup (positions, couleurs, sorts trackés)." },
+              desc = L["AURASDATA_SEC_PROFILES_DESC"] },
         },
     },
 }

@@ -35,6 +35,7 @@
 -- CLES DE SPEC : format "CLASS_SPEC" (majuscules), voir ns.SPEC_MAP dans Defaults.lua
 ------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 
 ns.Presets = {}
 
@@ -154,10 +155,10 @@ end
 --   skipped_names : table des noms du preset non trouves (pour feedback UX)
 function ns.ApplyPreset(presetKey, mode)
     local preset = ns.Presets[presetKey]
-    if not preset then return 0, "Preset introuvable : "..tostring(presetKey), {} end
+    if not preset then return 0, string.format(L["AURASDATA_PRESET_ERR_NOT_FOUND"], tostring(presetKey)), {} end
 
     local spells, specKey = ns.GetSpecSpells()
-    if not spells then return 0, "Aucune spe active", {} end
+    if not spells then return 0, L["AURASDATA_PRESET_ERR_NO_SPEC"], {} end
 
     mode = mode or "merge"
 

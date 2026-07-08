@@ -3,6 +3,7 @@
 -- Badge de niveau et infos en grunge_spot1.png. Info XP centre au hover.
 -- Layout mode : drag/resize + sliders settings pour positionner les elements.
 local addonName, ns = ...
+local L = ns.L
 
 ns.Modules = ns.Modules or {}
 local XPBar = {}

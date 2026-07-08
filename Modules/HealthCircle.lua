@@ -1,5 +1,6 @@
 -- Modules/HealthCircle.lua : Cercle de vie - hors combat quand blessé
 local addonName, ns = ...
+local L = ns.L
 
 local HealthCircle = {}
 ns.Modules.HealthCircle = HealthCircle
@@ -424,7 +425,7 @@ function HealthCircle.SetDraggable(on)
     -- Tooltip au survol
     bar:SetScript("OnEnter", function(self)
       GameTooltip:SetOwner(self, "ANCHOR_TOP")
-      GameTooltip:SetText("Clic-glisser pour deplacer")
+      GameTooltip:SetText(L["RESOURCE_DRAG_TOOLTIP"])
       GameTooltip:Show()
     end)
     bar:SetScript("OnLeave", function() GameTooltip:Hide() end)

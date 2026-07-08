@@ -2,6 +2,7 @@
 -- Chaque slot affiche le sort highlight en priorite, sinon le premier sort de sa liste
 -- 2 conteneurs (gauche: slots 1+2, droite: slots 3+4) de part et d'autre du cercle
 local addonName, ns = ...
+local L = ns.L
 
 local PriorityBar = {}
 ns.Modules.PriorityBar = PriorityBar
@@ -29,7 +30,7 @@ local ABE_ASSETS = "Interface/addons/ActionBarsEnhanced/assets/"
 
 local LOOP_GLOW_TYPES = {
   -- 1 : Aucun
-  { name = "Aucun" },
+  { name = L["PRIO_GLOW_NONE"] },
   -- 2 : Pulse (ancien glow maison — alpha bounce, pas flipbook)
   { name = "Pulse", useAlphaPulse = true,
     texture = "Interface\\SpellActivationOverlay\\IconAlert",
@@ -171,7 +172,7 @@ local LOOP_GLOW_TYPES = {
 ---------------------------------------------------------------------------
 local PROC_START_TYPES = {
   -- 1 : Aucun
-  { name = "Aucun" },
+  { name = L["PRIO_GLOW_NONE"] },
   -- 2..N : Flipbook-based (from ABE templates)
   { name = "Modern Blizzard Proc",
     atlas = "UI-HUD-ActionBar-Proc-Start-Flipbook" },
@@ -243,19 +244,19 @@ PriorityBar.PROC_START_TYPES = PROC_START_TYPES
 -- totalSlots : leftNames + rightNames
 ---------------------------------------------------------------------------
 local LAYOUT_DEFS = {
-  { id = "2x2",     name = "2×2 (par défaut)", totalSlots = 4,  rows = 1, cols = 2,
+  { id = "2x2",     name = L["PRIO_LAYOUT_2X2"],        totalSlots = 4,  rows = 1, cols = 2,
     leftNames  = {"A", "B"},
     rightNames = {"Y", "Z"} },
-  { id = "3x3",     name = "3×3",              totalSlots = 6,  rows = 1, cols = 3,
+  { id = "3x3",     name = L["PRIO_LAYOUT_3X3"],        totalSlots = 6,  rows = 1, cols = 3,
     leftNames  = {"A", "B", "C"},
     rightNames = {"X", "Y", "Z"} },
-  { id = "4x4line", name = "4×4 Inline",       totalSlots = 8,  rows = 1, cols = 4,
+  { id = "4x4line", name = L["PRIO_LAYOUT_4X4_INLINE"], totalSlots = 8,  rows = 1, cols = 4,
     leftNames  = {"A", "B", "C", "D"},
     rightNames = {"W", "X", "Y", "Z"} },
-  { id = "4x4sq",   name = "4×4 Carré",        totalSlots = 8,  rows = 2, cols = 2,
+  { id = "4x4sq",   name = L["PRIO_LAYOUT_4X4_SQUARE"], totalSlots = 8,  rows = 2, cols = 2,
     leftNames  = {"A", "B", "C", "D"},
     rightNames = {"Y", "Z", "W", "X"} },
-  { id = "6x6",     name = "6×6",              totalSlots = 12, rows = 2, cols = 3,
+  { id = "6x6",     name = L["PRIO_LAYOUT_6X6"],        totalSlots = 12, rows = 2, cols = 3,
     leftNames  = {"A", "B", "C", "D", "E", "F"},
     rightNames = {"X", "Y", "Z", "U", "V", "W"} },
 }
@@ -490,8 +491,8 @@ local function CheckMissingSpellsFromActionBars()
           end
         end
         if not found then
-          local name = GetSpellName(slot.spellIDs[1]) or ("Sort #" .. slot.spellIDs[1])
-          missing[#missing + 1] = { num = i, name = name, slotName = slot.slotName or ("Slot " .. i) }
+          local name = GetSpellName(slot.spellIDs[1]) or string.format(L["PRIO_SPELL_FALLBACK_NAME"], slot.spellIDs[1])
+          missing[#missing + 1] = { num = i, name = name, slotName = slot.slotName or string.format(L["PRIO_SLOT_FALLBACK_NAME"], i) }
         end
       end
     end
@@ -499,11 +500,11 @@ local function CheckMissingSpellsFromActionBars()
 
   if #missing > 0 then
     local P = "|cffff6600[Aishaddon]|r "
-    print(P .. "Priority Bar — |cffffff00sort(s) non placé(s) dans les barres d'action :|r")
+    print(P .. L["PRIO_MISSING_HEADER"])
     for _, m in ipairs(missing) do
       print(P .. "  |cffff9900•|r " .. m.slotName .. " — |cffffffff" .. m.name .. "|r")
     end
-    print(P .. "Placez ces sorts dans une barre d'action pour activer highlights et rotation.")
+    print(P .. L["PRIO_MISSING_FOOTER"])
   end
 end
 
