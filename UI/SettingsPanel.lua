@@ -1,6 +1,7 @@
 -- UI/SettingsPanel.lua : Panneau de configuration principal
 -- Layout deux colonnes : sidebar categories + contenu scrollable
 local addonName, ns = ...
+local L = ns.L
 
 local SW     = ns.SharedWidgets
 local Theme  = ns.Theme
@@ -328,13 +329,13 @@ end
 -- Utilisé pour l'affichage conditionnel et le nommage des sections.
 ---------------------------------------------------------------------------
 local DOT_TYPE_LABELS = {
-  RUNES          = "Runes",
-  COMBO_ROGUE    = "Points de Combos (Rogue)",
-  COMBO_DRUID    = "Points de Combos (Druide)",
-  CHI            = "Points de Chi",
-  HOLY_POWER     = "Puissance Sacrée",
-  ESSENCE        = "Essence",
-  ARCANE_CHARGES = "Charges Arcaniques",
+  RUNES          = L["SETTINGS_DOT_RUNES"],
+  COMBO_ROGUE    = L["SETTINGS_DOT_COMBO_ROGUE"],
+  COMBO_DRUID    = L["SETTINGS_DOT_COMBO_DRUID"],
+  CHI            = L["SETTINGS_DOT_CHI"],
+  HOLY_POWER     = L["SETTINGS_HOLY_POWER"],
+  ESSENCE        = L["SETTINGS_ESSENCE"],
+  ARCANE_CHARGES = L["SETTINGS_ARCANE_CHARGES"],
 }
 
 -- Retourne le dotType actif ("RUNES", "COMBO", …) ou nil si aucun.
@@ -370,41 +371,41 @@ local function BuildResourceCircle(container)
   local SL_W2 = math.floor((W - 8) / 2)
   local SL_W3 = math.floor((W - 16) / 3)
 
-  ctx:Add(SW.CreateSectionHeader(container, "Cercle de Ressource (Mana)", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_RESOURCE_CIRCLE"], W))
 
   local cb = ctx:Add(SW.CreateCheckbox(container,
-    "Activer le cercle de ressource",
-    "Affiche un cercle de mana/ressource au centre de l'écran\nen combat ou quand une cible est sélectionnée.", W))
+    L["SETTINGS_RC_ENABLE"],
+    L["SETTINGS_RC_ENABLE_TT"], W))
   BindCheckbox(cb, "resourceCircle", "enabled")
 
   ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, "Visibilité", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_VISIBILITY"], W))
   MakeModeRadio(container, ctx, W, "resourceCircle", {
-    { "always",  "Toujours visible",    "Affiche le cercle en permanence (même hors combat)." },
-    { "target",  "Cible seulement",     "Affiche le cercle uniquement quand une cible est sélectionnée." },
-    { "combat",  "En Combat seulement", "Affiche le cercle uniquement en combat (comportement par défaut)." },
+    { "always",  L["SETTINGS_VIS_ALWAYS"],    L["SETTINGS_RC_VIS_ALWAYS_TT"] },
+    { "target",  L["SETTINGS_VIS_TARGET"],    L["SETTINGS_RC_VIS_TARGET_TT"] },
+    { "combat",  L["SETTINGS_VIS_COMBAT"],    L["SETTINGS_RC_VIS_COMBAT_TT"] },
   }, "combat")
 
-  local slSize = ctx:Add(SW.CreateSlider(container, "Taille", 20, 200, 1, W))
+  local slSize = ctx:Add(SW.CreateSlider(container, L["SETTINGS_SIZE"], 20, 200, 1, W))
   BindSlider(slSize, "resourceCircle", "size")
 
-  local slRCArcSize = SW.CreateSlider(container, "Taille arc (ratio)", 0.5, 1.0, 0.05, SL_W2)
+  local slRCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE_RATIO"], 0.5, 1.0, 0.05, SL_W2)
   BindSlider(slRCArcSize, "resourceCircle", "arcSizeRatio")
-  local slRCThick = SW.CreateSlider(container, "Épaisseur arc", 0.0, 0.99, 0.01, SL_W2)
+  local slRCThick = SW.CreateSlider(container, L["SETTINGS_ARC_THICKNESS"], 0.0, 0.99, 0.01, SL_W2)
   BindSlider(slRCThick, "resourceCircle", "overlayRatio")
   ctx:AddRow(8, slRCArcSize, slRCThick)
 
-  local slFont = ctx:Add(SW.CreateSlider(container, "Taille police", 6, 30, 1, W))
+  local slFont = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 30, 1, W))
   BindSlider(slFont, "resourceCircle", "fontSize")
-  local ddFont = ctx:Add(SW.CreateDropdown(container, "Police", ns.GetFontList(), 220))
+  local ddFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
   BindDropdown(ddFont, "resourceCircle", "font")
 
   ctx:Spacer(6)
   -- Option Paladin : Puissance Sacrée en spé Protection / Vindicte
   if ns._playerClass == "PALADIN" and (ns._specID == 66 or ns._specID == 70) then
     local cbHPAllSpecs = ctx:Add(SW.CreateCheckbox(container,
-      "Globes de Puissance Sacrée (Prot./Vind.)",
-      "Affiche les globes de Puissance Sacrée autour du cercle de ressource\nen spé Protection et Vindicte (en plus de l'arc).", W))
+      L["SETTINGS_RC_HOLY_POWER_ORBS"],
+      L["SETTINGS_RC_HOLY_POWER_ORBS_TT"], W))
     BindCheckbox(cbHPAllSpecs, "resourceCircle", "holyPowerAllSpecs")
     cbHPAllSpecs.onChanged = function(val)
       DBSet("resourceCircle", "holyPowerAllSpecs", val)
@@ -415,8 +416,8 @@ local function BuildResourceCircle(container)
   -- Option Evoker : Essence en spé Dévastation / Augmentation
   if ns._playerClass == "EVOKER" and (ns._specID == 1473 or ns._specID == 1467) then
     local cbEssAllSpecs = ctx:Add(SW.CreateCheckbox(container,
-      "Globes d'Essence (Dév./Aug.)",
-      "Affiche les globes d'Essence autour du cercle de ressource\nen spé Dévastation et Augmentation (en plus de l'arc).", W))
+      L["SETTINGS_RC_ESSENCE_ORBS"],
+      L["SETTINGS_RC_ESSENCE_ORBS_TT"], W))
     BindCheckbox(cbEssAllSpecs, "resourceCircle", "essenceAllSpecs")
     cbEssAllSpecs.onChanged = function(val)
       DBSet("resourceCircle", "essenceAllSpecs", val)
@@ -426,62 +427,62 @@ local function BuildResourceCircle(container)
   end
   -- Section dots secondaires : titre dynamique selon classe/spec, masquée si aucun dot
   local dotType   = GetActiveDotType()
-  local dotsLabel = dotType and (DOT_TYPE_LABELS[dotType] or "Globes externes") or nil
+  local dotsLabel = dotType and (DOT_TYPE_LABELS[dotType] or L["SETTINGS_DOT_EXTERNAL"]) or nil
   if dotsLabel then
     ctx:Add(SW.CreateSectionHeader(container, dotsLabel, W))
     local dp = "secondaryDots_" .. dotType .. "_"  -- préfixe clé per-type
 
-    local slRot = SW.CreateSlider(container, "Rotation globes", 0, 360, 1, SL_W2)
+    local slRot = SW.CreateSlider(container, L["SETTINGS_ORB_ROTATION"], 0, 360, 1, SL_W2)
     BindSlider(slRot, "resourceCircle", dp.."rotation", "secondaryDotsRotation")
-    local slSpread = SW.CreateSlider(container, "Ecartement", 5, 60, 1, SL_W2)
+    local slSpread = SW.CreateSlider(container, L["SETTINGS_SPREAD"], 5, 60, 1, SL_W2)
     BindSlider(slSpread, "resourceCircle", dp.."spread", "secondaryDotsSpread")
     ctx:AddRow(8, slRot, slSpread)
 
-    local slSecSize = SW.CreateSlider(container, "Taille globes", 0.05, 0.5, 0.01, SL_W2)
+    local slSecSize = SW.CreateSlider(container, L["SETTINGS_ORB_SIZE"], 0.05, 0.5, 0.01, SL_W2)
     BindSlider(slSecSize, "resourceCircle", dp.."size", "secondaryDotsSize")
-    local slSecRadius = SW.CreateSlider(container, "Rayon", 0.2, 1.2, 0.01, SL_W2)
+    local slSecRadius = SW.CreateSlider(container, L["SETTINGS_RADIUS"], 0.2, 1.2, 0.01, SL_W2)
     BindSlider(slSecRadius, "resourceCircle", dp.."radius", "secondaryDotsRadius")
     ctx:AddRow(8, slSecSize, slSecRadius)
 
     local cbReversed = ctx:Add(SW.CreateCheckbox(container,
-      "Ordre inversé (gauche ? droite)",
-      "Inverse l'ordre d'apparition des orbes :\npar défaut droite?gauche, coché gauche?droite.", W))
+      L["SETTINGS_ORB_REVERSED_ORDER"],
+      L["SETTINGS_ORB_REVERSED_ORDER_TT"], W))
     BindCheckbox(cbReversed, "resourceCircle", dp.."reversed", "secondaryDotsReversed")
   end
 
   -- Section arc de stagger : Moine Brasseur uniquement (spec 268)
   if ns._specID == 268 then
     ctx:Spacer(6)
-    ctx:Add(SW.CreateSectionHeader(container, "Arc secondaire (Stagger)", W))
+    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_STAGGER_ARC"], W))
 
-    local slStagArc = SW.CreateSlider(container, "Taille arc sec.", 0.3, 0.99, 0.01, SL_W2)
+    local slStagArc = SW.CreateSlider(container, L["SETTINGS_STAGGER_ARC_SIZE"], 0.3, 0.99, 0.01, SL_W2)
     BindSlider(slStagArc, "resourceCircle", "staggerArcRatio")
-    local slStagThick = SW.CreateSlider(container, "Épaisseur arc sec.", 0.0, 0.99, 0.01, SL_W2)
+    local slStagThick = SW.CreateSlider(container, L["SETTINGS_STAGGER_ARC_THICKNESS"], 0.0, 0.99, 0.01, SL_W2)
     BindSlider(slStagThick, "resourceCircle", "staggerOverlayRatio")
     ctx:AddRow(8, slStagArc, slStagThick)
 
     local cbStagPct = ctx:Add(SW.CreateCheckbox(container,
-      "Afficher le pourcentage de report",
-      "Affiche le pourcentage de stagger sous le texte de ressource du cercle central,\nau même emplacement que les stacks de Fragments du Dévoreur.", W))
+      L["SETTINGS_STAGGER_SHOW_PCT"],
+      L["SETTINGS_STAGGER_SHOW_PCT_TT"], W))
     BindCheckbox(cbStagPct, "resourceCircle", "staggerShowPercent")
   end
 
   -- Arc de durée dans le cercle central : toggle + taille/épaisseur par spec tank
   local _arcSpec
-  if     ns._specID == 66  then _arcSpec = { cfgKey = "consecrationArcEnabled", label = "Consécration",         color = {1.00, 0.88, 0.10} }
-  elseif ns._specID == 73  then _arcSpec = { cfgKey = "ignorePainArcEnabled",   label = "Dur au mal",           color = {0.78, 0.25, 0.25} }
+  if     ns._specID == 66  then _arcSpec = { cfgKey = "consecrationArcEnabled", label = L["SETTINGS_ARC_LABEL_CONSECRATION"], color = {1.00, 0.88, 0.10} }
+  elseif ns._specID == 73  then _arcSpec = { cfgKey = "ignorePainArcEnabled",   label = L["SETTINGS_ARC_LABEL_IGNORE_PAIN"],  color = {0.78, 0.25, 0.25} }
   elseif ns._specID == 250 then _arcSpec = { cfgKey = "dndArcEnabled",          label = "188290",               color = {0.20, 0.78, 0.35} }
   end
   if _arcSpec then
     ctx:Spacer(6)
-    ctx:Add(SW.CreateSectionHeader(container, "Arc de durée (" .. _arcSpec.label .. ")", W))
-    local cbDur = ctx:Add(SW.CreateCheckbox(container, "Afficher l'arc de durée de " .. _arcSpec.label, W))
+    ctx:Add(SW.CreateSectionHeader(container, string.format(L["SETTINGS_ARC_DURATION_HEADER"], _arcSpec.label), W))
+    local cbDur = ctx:Add(SW.CreateCheckbox(container, string.format(L["SETTINGS_ARC_DURATION_SHOW"], _arcSpec.label), W))
     BindCheckbox(cbDur, "resourceCircle", _arcSpec.cfgKey)
     cbDur.onChanged = function(v) DBSet("resourceCircle", _arcSpec.cfgKey, v); if ns.AutoConfigCenterArc then ns.AutoConfigCenterArc() end end
     cbDur:SetChecked(DBGet("resourceCircle", _arcSpec.cfgKey) ~= false)
-    local slDurArc = SW.CreateSlider(container, "Taille arc", 0.3, 0.99, 0.01, SL_W2)
+    local slDurArc = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.3, 0.99, 0.01, SL_W2)
     BindSlider(slDurArc, "resourceCircle", "durationArcRatio")
-    local slDurThick = SW.CreateSlider(container, "Épaisseur", 0.0, 0.99, 0.01, SL_W2)
+    local slDurThick = SW.CreateSlider(container, L["SETTINGS_THICKNESS"], 0.0, 0.99, 0.01, SL_W2)
     BindSlider(slDurThick, "resourceCircle", "durationArcOverlayRatio")
     ctx:AddRow(8, slDurArc, slDurThick)
     -- Color swatch
@@ -491,7 +492,7 @@ local function BuildResourceCircle(container)
     local colorRow = CreateFrame("Frame", nil, container); colorRow:SetSize(W, 26)
     local colorLbl = colorRow:CreateFontString(nil, "OVERLAY")
     colorLbl:SetFont(ns.Media.fontGui, 11); colorLbl:SetPoint("LEFT", 0, 0)
-    colorLbl:SetTextColor(0.8, 0.8, 0.8, 1); colorLbl:SetText("Couleur de l'arc")
+    colorLbl:SetTextColor(0.8, 0.8, 0.8, 1); colorLbl:SetText(L["SETTINGS_ARC_COLOR"])
     local sw = CreateFrame("Button", nil, colorRow); sw:SetSize(22, 22); sw:SetPoint("LEFT", colorLbl, "RIGHT", 8, 0)
     local swT = sw:CreateTexture(nil, "ARTWORK"); swT:SetAllPoints(); swT:SetColorTexture(cr, cg, cb_)
     local swB = sw:CreateTexture(nil, "BORDER"); swB:SetPoint("TOPLEFT",-1,1); swB:SetPoint("BOTTOMRIGHT",1,-1)
@@ -515,7 +516,7 @@ local function BuildResourceCircle(container)
         end,
       })
     end)
-    sw:SetScript("OnEnter", function() GameTooltip:SetOwner(sw,"ANCHOR_TOP"); GameTooltip:SetText("Couleur de l'arc de durée",1,1,1); GameTooltip:Show() end)
+    sw:SetScript("OnEnter", function() GameTooltip:SetOwner(sw,"ANCHOR_TOP"); GameTooltip:SetText(L["SETTINGS_ARC_DURATION_COLOR"],1,1,1); GameTooltip:Show() end)
     sw:SetScript("OnLeave", function() GameTooltip:Hide() end)
     ctx:Add(colorRow)
   end
@@ -547,35 +548,35 @@ local function BuildResourceCircle(container)
   end)
 
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Glow de fond", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_BG_GLOW"], W))
 
   local cbGlow = ctx:Add(SW.CreateCheckbox(container,
-    "Activer le glow de fond",
-    "Affiche un halo lumineux derrière le cercle de ressource,\ncolorise selon la spécialisation active.", W))
+    L["SETTINGS_GLOW_ENABLE"],
+    L["SETTINGS_RC_GLOW_ENABLE_TT"], W))
   BindCheckbox(cbGlow, "resourceCircle", "glowEnabled")
 
-  local slGlowSize = SW.CreateSlider(container, "Taille glow", 0.5, 8.0, 0.1, SL_W2)
+  local slGlowSize = SW.CreateSlider(container, L["SETTINGS_GLOW_SIZE"], 0.5, 8.0, 0.1, SL_W2)
   BindSlider(slGlowSize, "resourceCircle", "glowSize")
-  local slGlowOpacity = SW.CreateSlider(container, "Opacité glow", 0, 1, 0.05, SL_W2)
+  local slGlowOpacity = SW.CreateSlider(container, L["SETTINGS_GLOW_OPACITY"], 0, 1, 0.05, SL_W2)
   BindSlider(slGlowOpacity, "resourceCircle", "glowOpacity")
   ctx:AddRow(8, slGlowSize, slGlowOpacity)
 
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Texte de ressource secondaire", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SECONDARY_RES_TEXT"], W))
 
-  local slSecResSize = ctx:Add(SW.CreateSlider(container, "Taille police", 6, 30, 1, W))
+  local slSecResSize = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 30, 1, W))
   BindSlider(slSecResSize, "resourceCircle", "secResTextSize")
-  local ddSecResFont = ctx:Add(SW.CreateDropdown(container, "Police", ns.GetFontList(), 220))
+  local ddSecResFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
   BindDropdown(ddSecResFont, "resourceCircle", "secResFont")
 
-  local slSecResX = SW.CreateSlider(container, "Décalage X", -200, 200, 1, SL_W2)
+  local slSecResX = SW.CreateSlider(container, L["SETTINGS_OFFSET_X"], -200, 200, 1, SL_W2)
   BindSlider(slSecResX, "resourceCircle", "secResTextOffsetX")
-  local slSecResY = SW.CreateSlider(container, "Décalage Y", -200, 200, 1, SL_W2)
+  local slSecResY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -200, 200, 1, SL_W2)
   BindSlider(slSecResY, "resourceCircle", "secResTextOffsetY")
   ctx:AddRow(8, slSecResX, slSecResY)
 
   ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, "Position", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_POSITION"], W))
 
   -- Champs de saisie directe de la position X / Y
   local function MakePosInput(labelText, dbSubKey)
@@ -624,8 +625,8 @@ local function BuildResourceCircle(container)
     return f
   end
 
-  local rcXInput = MakePosInput("Position X (px)", "x")
-  local rcYInput = MakePosInput("Position Y (px)", "y")
+  local rcXInput = MakePosInput(L["SETTINGS_POSITION_X_PX"], "x")
+  local rcYInput = MakePosInput(L["SETTINGS_POSITION_Y_PX"], "y")
   ctx:AddRow(8, rcXInput, rcYInput)
   ctx:Spacer(6)
 
@@ -638,17 +639,17 @@ local function BuildResourceCircle(container)
   local _rcLabel = rcDragBtn:CreateFontString(nil, "OVERLAY")
   _rcLabel:SetFont(ns.Media.fontGui, 11); _rcLabel:SetPoint("CENTER")
   _rcLabel:SetTextColor(unpack(Theme.textNormal))
-  _rcLabel:SetText("Déplacer (glisser-déposer)")
+  _rcLabel:SetText(L["UI_MOVE_DRAG_DROP"])
 
   local function SetRCDragBtnState(active)
     if active then
       _rcBg:SetColorTexture(0.05, 0.18, 0.08, 1)
       _rcLabel:SetTextColor(0.3, 1.0, 0.3, 1)
-      _rcLabel:SetText("Glissez le cercle  u2014  cliquez pour terminer")
+      _rcLabel:SetText(L["SETTINGS_RC_DRAG_HINT"])
     else
       _rcBg:SetColorTexture(0.10, 0.10, 0.13, 1)
       _rcLabel:SetTextColor(unpack(Theme.textNormal))
-      _rcLabel:SetText("Déplacer (glisser-déposer)")
+      _rcLabel:SetText(L["UI_MOVE_DRAG_DROP"])
     end
   end
 
@@ -684,41 +685,41 @@ local function BuildOutOfCombat(container)
   local SL_W3 = math.floor((W - 16) / 3)
 
   -- ====== Cercle de Vie ======
-  ctx:Add(SW.CreateSectionHeader(container, "Cercle de Vie", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_HEALTH_CIRCLE"], W))
 
   local cbHC = ctx:Add(SW.CreateCheckbox(container,
-    "Activer le cercle de vie",
-    "Affiche un cercle de vie hors combat quand le joueur est blessé.", W))
+    L["SETTINGS_HC_ENABLE"],
+    L["SETTINGS_HC_ENABLE_TT"], W))
   BindCheckbox(cbHC, "healthCircle", "enabled")
 
-  local slHCSize = SW.CreateSlider(container, "Taille", 10, 120, 1, SL_W3)
+  local slHCSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, SL_W3)
   BindSlider(slHCSize, "healthCircle", "size")
-  local slHCArcSize = SW.CreateSlider(container, "Taille arc", 0.5, 1.0, 0.05, SL_W3)
+  local slHCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.5, 1.0, 0.05, SL_W3)
   BindSlider(slHCArcSize, "healthCircle", "arcSizeRatio")
-  local slHCThick = SW.CreateSlider(container, "Épaisseur", 0.0, 0.99, 0.01, SL_W3)
+  local slHCThick = SW.CreateSlider(container, L["SETTINGS_THICKNESS"], 0.0, 0.99, 0.01, SL_W3)
   BindSlider(slHCThick, "healthCircle", "overlayRatio")
   ctx:AddRow(8, slHCSize, slHCArcSize, slHCThick)
 
-  local slHCDelay = SW.CreateSlider(container, "Delai masquage (s)", 0.5, 10, 0.5, SL_W2)
+  local slHCDelay = SW.CreateSlider(container, L["SETTINGS_HIDE_DELAY_S"], 0.5, 10, 0.5, SL_W2)
   BindSlider(slHCDelay, "healthCircle", "hideDelay")
-  local slHCFont = SW.CreateSlider(container, "Taille police", 4, 20, 1, SL_W2)
+  local slHCFont = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 4, 20, 1, SL_W2)
   BindSlider(slHCFont, "healthCircle", "fontSize")
   ctx:AddRow(8, slHCDelay, slHCFont)
-  local ddHCFont = ctx:Add(SW.CreateDropdown(container, "Police", ns.GetFontList(), 220))
+  local ddHCFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
   BindDropdown(ddHCFont, "healthCircle", "font")
 
   ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, "Visibilité du cercle de vie", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_HC_VISIBILITY"], W))
   MakeModeRadio(container, ctx, W, "healthCircle", {
-    { "always",    "Toujours visible",       "Affiche le cercle même si le joueur est à pleine vie." },
-    { "important", "Seulement si important", "Affiche le cercle uniquement si le joueur est blessé (comportement par défaut)." },
+    { "always",    L["SETTINGS_VIS_ALWAYS"],    L["SETTINGS_HC_VIS_ALWAYS_TT"] },
+    { "important", L["SETTINGS_VIS_IMPORTANT"], L["SETTINGS_HC_VIS_IMPORTANT_TT"] },
   }, "important")
 
   -- Heartbeat pulse toggle
   ctx:Spacer(4)
   local cbHCPulse = ctx:Add(SW.CreateCheckbox(container,
-    "Pouls battement de cœur",
-    "Animation de scale subtile en battement de cœur sur le cercle de vie hors combat.", W))
+    L["SETTINGS_HC_HEARTBEAT_PULSE"],
+    L["SETTINGS_HC_HEARTBEAT_PULSE_TT"], W))
   BindCheckbox(cbHCPulse, "healthCircle", "heartbeatPulse")
 
   -- Drag toggle for HealthCircle
@@ -731,17 +732,17 @@ local function BuildOutOfCombat(container)
   local _hcLabel = hcDragBtn:CreateFontString(nil, "OVERLAY")
   _hcLabel:SetFont(ns.Media.fontGui, 11); _hcLabel:SetPoint("CENTER")
   _hcLabel:SetTextColor(unpack(Theme.textNormal))
-  _hcLabel:SetText("Déplacer le cercle de vie")
+  _hcLabel:SetText(L["SETTINGS_HC_MOVE"])
 
   local function SetHCDragBtnState(active)
     if active then
       _hcBg:SetColorTexture(0.05, 0.18, 0.08, 1)
       _hcLabel:SetTextColor(0.3, 1.0, 0.3, 1)
-      _hcLabel:SetText("Glissez le cercle et cliquez pour terminer")
+      _hcLabel:SetText(L["SETTINGS_DRAG_CIRCLE_HINT"])
     else
       _hcBg:SetColorTexture(0.10, 0.10, 0.13, 1)
       _hcLabel:SetTextColor(unpack(Theme.textNormal))
-      _hcLabel:SetText("Déplacer le cercle de vie")
+      _hcLabel:SetText(L["SETTINGS_HC_MOVE"])
     end
   end
 
@@ -767,24 +768,24 @@ local function BuildOutOfCombat(container)
   ctx:Spacer(10)
 
   -- ====== Cercle de Ressource Hors Combat ======
-  ctx:Add(SW.CreateSectionHeader(container, "Cercle de Ressource (Hors Combat)", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_OCRC"], W))
 
   local cbOCRC = ctx:Add(SW.CreateCheckbox(container,
-    "Activer le cercle de ressource hors combat",
-    "Affiche la ressource (mana/énergie/etc.) hors combat, côté du cercle de vie.", W))
+    L["SETTINGS_OCRC_ENABLE"],
+    L["SETTINGS_OCRC_ENABLE_TT"], W))
   BindCheckbox(cbOCRC, "outOfCombatResourceCircle", "enabled")
 
-  local slOCRCSize = SW.CreateSlider(container, "Taille", 10, 120, 1, SL_W3)
+  local slOCRCSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, SL_W3)
   BindSlider(slOCRCSize, "outOfCombatResourceCircle", "size")
-  local slOCRCArcSize = SW.CreateSlider(container, "Taille arc", 0.5, 1.0, 0.05, SL_W3)
+  local slOCRCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.5, 1.0, 0.05, SL_W3)
   BindSlider(slOCRCArcSize, "outOfCombatResourceCircle", "arcSizeRatio")
-  local slOCRCThick = SW.CreateSlider(container, "Épaisseur", 0.0, 0.99, 0.01, SL_W3)
+  local slOCRCThick = SW.CreateSlider(container, L["SETTINGS_THICKNESS"], 0.0, 0.99, 0.01, SL_W3)
   BindSlider(slOCRCThick, "outOfCombatResourceCircle", "overlayRatio")
   ctx:AddRow(8, slOCRCSize, slOCRCArcSize, slOCRCThick)
 
-  local slOCRCFont = ctx:Add(SW.CreateSlider(container, "Taille police", 4, 20, 1, SL_W2))
+  local slOCRCFont = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 4, 20, 1, SL_W2))
   BindSlider(slOCRCFont, "outOfCombatResourceCircle", "fontSize")
-  local ddOCRCFont = ctx:Add(SW.CreateDropdown(container, "Police", ns.GetFontList(), 220))
+  local ddOCRCFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
   BindDropdown(ddOCRCFont, "outOfCombatResourceCircle", "font")
 
   -- Section dots secondaires hors combat : titre dynamique, masquée si aucun dot
@@ -792,8 +793,8 @@ local function BuildOutOfCombat(container)
   if ns._playerClass == "PALADIN" and (ns._specID == 66 or ns._specID == 70) then
     ctx:Spacer(4)
     local cbOCRCHPAllSpecs = ctx:Add(SW.CreateCheckbox(container,
-      "Globes de Puissance Sacrée (Prot./Vind.)",
-      "Affiche les globes de Puissance Sacrée autour du petit cercle hors combat\nen spé Protection et Vindicte.", W))
+      L["SETTINGS_RC_HOLY_POWER_ORBS"],
+      L["SETTINGS_OCRC_HOLY_POWER_ORBS_TT"], W))
     BindCheckbox(cbOCRCHPAllSpecs, "outOfCombatResourceCircle", "holyPowerAllSpecs")
     cbOCRCHPAllSpecs.onChanged = function(val)
       DBSet("outOfCombatResourceCircle", "holyPowerAllSpecs", val)
@@ -805,8 +806,8 @@ local function BuildOutOfCombat(container)
   if ns._playerClass == "EVOKER" and (ns._specID == 1473 or ns._specID == 1467) then
     ctx:Spacer(4)
     local cbOCRCEssAllSpecs = ctx:Add(SW.CreateCheckbox(container,
-      "Globes d'Essence (Dév./Aug.)",
-      "Affiche les globes d'Essence autour du petit cercle hors combat\nen spé Dévastation et Augmentation.", W))
+      L["SETTINGS_RC_ESSENCE_ORBS"],
+      L["SETTINGS_OCRC_ESSENCE_ORBS_TT"], W))
     BindCheckbox(cbOCRCEssAllSpecs, "outOfCombatResourceCircle", "essenceAllSpecs")
     cbOCRCEssAllSpecs.onChanged = function(val)
       DBSet("outOfCombatResourceCircle", "essenceAllSpecs", val)
@@ -815,49 +816,49 @@ local function BuildOutOfCombat(container)
     end
   end
   local ocrcDotType   = GetActiveDotType()
-  local ocrcDotsLabel = ocrcDotType and (DOT_TYPE_LABELS[ocrcDotType] or "Globes externes") or nil
+  local ocrcDotsLabel = ocrcDotType and (DOT_TYPE_LABELS[ocrcDotType] or L["SETTINGS_DOT_EXTERNAL"]) or nil
   if ocrcDotsLabel then
     ctx:Spacer(4)
     ctx:Add(SW.CreateSectionHeader(container, ocrcDotsLabel, W))
     local odp = "secondaryDots_" .. ocrcDotType .. "_"  -- préfixe clé per-type
 
-    local slOCRCRot = SW.CreateSlider(container, "Rotation globes", 0, 360, 1, SL_W2)
+    local slOCRCRot = SW.CreateSlider(container, L["SETTINGS_ORB_ROTATION"], 0, 360, 1, SL_W2)
     BindSlider(slOCRCRot, "outOfCombatResourceCircle", odp.."rotation", "secondaryDotsRotation")
-    local slOCRCSpread = SW.CreateSlider(container, "Ecartement", 5, 60, 1, SL_W2)
+    local slOCRCSpread = SW.CreateSlider(container, L["SETTINGS_SPREAD"], 5, 60, 1, SL_W2)
     BindSlider(slOCRCSpread, "outOfCombatResourceCircle", odp.."spread", "secondaryDotsSpread")
     ctx:AddRow(8, slOCRCRot, slOCRCSpread)
 
-    local slOCRCSecSize = SW.CreateSlider(container, "Taille globes", 0.05, 0.5, 0.01, SL_W2)
+    local slOCRCSecSize = SW.CreateSlider(container, L["SETTINGS_ORB_SIZE"], 0.05, 0.5, 0.01, SL_W2)
     BindSlider(slOCRCSecSize, "outOfCombatResourceCircle", odp.."size", "secondaryDotsSize")
-    local slOCRCSecRadius = SW.CreateSlider(container, "Rayon", 0.2, 1.2, 0.01, SL_W2)
+    local slOCRCSecRadius = SW.CreateSlider(container, L["SETTINGS_RADIUS"], 0.2, 1.2, 0.01, SL_W2)
     BindSlider(slOCRCSecRadius, "outOfCombatResourceCircle", odp.."radius", "secondaryDotsRadius")
     ctx:AddRow(8, slOCRCSecSize, slOCRCSecRadius)
 
     local cbOCRCReversed = ctx:Add(SW.CreateCheckbox(container,
-      "Ordre inversé (gauche ? droite)",
-      "Inverse l'ordre d'apparition des orbes :\npar défaut droite?gauche, coché gauche?droite.", W))
+      L["SETTINGS_ORB_REVERSED_ORDER"],
+      L["SETTINGS_ORB_REVERSED_ORDER_TT"], W))
     BindCheckbox(cbOCRCReversed, "outOfCombatResourceCircle", odp.."reversed", "secondaryDotsReversed")
   end
 
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Glow de fond (hors combat)", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_BG_GLOW_OOC"], W))
 
   local cbOCRCGlow = ctx:Add(SW.CreateCheckbox(container,
-    "Activer le glow de fond",
-    "Affiche un halo lumineux derrière le petit cercle de ressource,\ncolorise selon la spécialisation active.", W))
+    L["SETTINGS_GLOW_ENABLE"],
+    L["SETTINGS_OCRC_GLOW_ENABLE_TT"], W))
   BindCheckbox(cbOCRCGlow, "outOfCombatResourceCircle", "glowEnabled")
 
-  local slOCRCGlowSize = SW.CreateSlider(container, "Taille glow", 0.3, 8.0, 0.1, SL_W2)
+  local slOCRCGlowSize = SW.CreateSlider(container, L["SETTINGS_GLOW_SIZE"], 0.3, 8.0, 0.1, SL_W2)
   BindSlider(slOCRCGlowSize, "outOfCombatResourceCircle", "glowSize")
-  local slOCRCGlowOpacity = SW.CreateSlider(container, "Opacité glow", 0, 1, 0.05, SL_W2)
+  local slOCRCGlowOpacity = SW.CreateSlider(container, L["SETTINGS_GLOW_OPACITY"], 0, 1, 0.05, SL_W2)
   BindSlider(slOCRCGlowOpacity, "outOfCombatResourceCircle", "glowOpacity")
   ctx:AddRow(8, slOCRCGlowSize, slOCRCGlowOpacity)
 
   ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, "Visibilité du cercle de ressource", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_OCRC_VISIBILITY"], W))
   MakeModeRadio(container, ctx, W, "outOfCombatResourceCircle", {
-    { "always",    "Toujours visible",       "Affiche le cercle hors combat en permanence." },
-    { "important", "Seulement si important", "Affiche le cercle seulement quand la ressource change (comportement par défaut)." },
+    { "always",    L["SETTINGS_VIS_ALWAYS"],    L["SETTINGS_OCRC_VIS_ALWAYS_TT"] },
+    { "important", L["SETTINGS_VIS_IMPORTANT"], L["SETTINGS_OCRC_VIS_IMPORTANT_TT"] },
   }, "important")
 
   ctx:Spacer(4)
@@ -871,17 +872,17 @@ local function BuildOutOfCombat(container)
   local _ocrcLabel = ocrcDragBtn:CreateFontString(nil, "OVERLAY")
   _ocrcLabel:SetFont(ns.Media.fontGui, 11); _ocrcLabel:SetPoint("CENTER")
   _ocrcLabel:SetTextColor(unpack(Theme.textNormal))
-  _ocrcLabel:SetText("Déplacer le cercle de ressource hors combat")
+  _ocrcLabel:SetText(L["SETTINGS_OCRC_MOVE"])
 
   local function SetOCRCDragBtnState(active)
     if active then
       _ocrcBg:SetColorTexture(0.05, 0.18, 0.08, 1)
       _ocrcLabel:SetTextColor(0.3, 1.0, 0.3, 1)
-      _ocrcLabel:SetText("Glissez le cercle et cliquez pour terminer")
+      _ocrcLabel:SetText(L["SETTINGS_DRAG_CIRCLE_HINT"])
     else
       _ocrcBg:SetColorTexture(0.10, 0.10, 0.13, 1)
       _ocrcLabel:SetTextColor(unpack(Theme.textNormal))
-      _ocrcLabel:SetText("Déplacer le cercle de ressource hors combat")
+      _ocrcLabel:SetText(L["SETTINGS_OCRC_MOVE"])
     end
   end
 
@@ -907,7 +908,7 @@ local function BuildOutOfCombat(container)
   ctx:Spacer(4)
 
   -- Bouton reset position OCRC
-  local resetOCRC = SW.CreateActionBtn(container, "Réinitialiser la position du cercle de ressource", W,
+  local resetOCRC = SW.CreateActionBtn(container, L["SETTINGS_OCRC_RESET_POSITION"], W,
     nil, Theme.gold, Theme.accent)
   resetOCRC:SetScript("OnClick", function()
     local OCRC = ns.Modules.OutOfCombatResourceCircle
@@ -965,36 +966,36 @@ local function BuildUnitBars(container)
     LiveApply("unitBars")
   end
 
-  ctx:Add(SW.CreateSectionHeader(container, "Barres de Vie", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_UNIT_BARS"], W))
 
   -- Enable global
   local cbAll = ctx:Add(SW.CreateCheckbox(container,
-    "Activer les barres de vie",
-    "Affiche les barres de santé pour le joueur, la cible, la focalisation, le familier et la cible de cible.", W))
+    L["SETTINGS_UB_ENABLE"],
+    L["SETTINGS_UB_ENABLE_TT"], W))
   BindCheckbox(cbAll, "unitBars", "enabled")
 
   -- Verrouiller les positions
   local cbLock = ctx:Add(SW.CreateCheckbox(container,
-    "Verrouiller les positions",
-    "Empêche le déplacement des barres par glisser-déposer.", W))
+    L["SETTINGS_UB_LOCK_POSITIONS"],
+    L["SETTINGS_UB_LOCK_POSITIONS_TT"], W))
   BindCheckbox(cbLock, "unitBars", "locked")
 
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Options globales", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_GLOBAL_OPTIONS"], W))
 
   -- Inversion des couleurs
   local cbRev = ctx:Add(SW.CreateCheckbox(container,
-    "Mode classique (fill coloré / fond noir)",
-    "Inverse le rendu : par défaut le fond est coloré et le fill est noir.", W))
+    L["SETTINGS_UB_CLASSIC_MODE"],
+    L["SETTINGS_UB_CLASSIC_MODE_TT"], W))
   BindCheckbox(cbRev, "unitBars", "reversed")
 
   -- Mode de visibilité (remplace "Masquer hors combat")
   ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, "Visibilité", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_VISIBILITY"], W))
   MakeModeRadio(container, ctx, W, "unitBars", {
-    { "always",  "Toujours visible",    "Affiche les barres en permanence, même sans cible." },
-    { "target",  "Cible seulement",     "Affiche les barres uniquement quand l'unité correspondante existe." },
-    { "combat",  "En Combat seulement", "Affiche les barres uniquement en combat (comportement par défaut)." },
+    { "always",  L["SETTINGS_VIS_ALWAYS"],    L["SETTINGS_UB_VIS_ALWAYS_TT"] },
+    { "target",  L["SETTINGS_VIS_TARGET"],    L["SETTINGS_UB_VIS_TARGET_TT"] },
+    { "combat",  L["SETTINGS_VIS_COMBAT"],    L["SETTINGS_UB_VIS_COMBAT_TT"] },
   }, "combat")
 
   local function UBGlobal(prop)
@@ -1010,39 +1011,39 @@ local function BuildUnitBars(container)
 
   -- Dots : toggle + sliders
   local cbShowDots = ctx:Add(SW.CreateCheckbox(container,
-    "Afficher les dots (3 petits ronds)",
-    "Affiche ou masque les 3 cercles décoratifs sur le côté des barres de vie.", W))
+    L["SETTINGS_UB_SHOW_DOTS"],
+    L["SETTINGS_UB_SHOW_DOTS_TT"], W))
   BindCheckbox(cbShowDots, "unitBars", "showDots")
 
   -- Taille du dot principal
   local _ubSL2 = math.floor((W - 8) / 2)
   local _ubSL3 = math.floor((W - 16) / 3)
-  local slDot = SW.CreateSlider(container, "Taille dot", 4, 24, 1, _ubSL3)
+  local slDot = SW.CreateSlider(container, L["SETTINGS_UB_DOT_SIZE"], 4, 24, 1, _ubSL3)
   slDot:SetValue(UBGlobal("dotSize") or 9)
   slDot.onChanged = function(val) UBGlobalSet("dotSize", val) end
   -- Ratio dots (0=proportionnel, 100=identiques)
-  local slDotR = SW.CreateSlider(container, "Ratio dots", 0, 100, 1, _ubSL3)
+  local slDotR = SW.CreateSlider(container, L["SETTINGS_UB_DOT_RATIO"], 0, 100, 1, _ubSL3)
   slDotR:SetValue(UBGlobal("dotRatio") or 0)
   slDotR.onChanged = function(val) UBGlobalSet("dotRatio", val) end
   -- Ecart dots/barre
-  local slDotGap = SW.CreateSlider(container, "Ecart dots (px)", -10, 20, 1, _ubSL3)
+  local slDotGap = SW.CreateSlider(container, L["SETTINGS_UB_DOT_GAP"], -10, 20, 1, _ubSL3)
   slDotGap:SetValue(UBGlobal("dotGap") or 3)
   slDotGap.onChanged = function(val) UBGlobalSet("dotGap", val) end
   ctx:AddRow(8, slDot, slDotR, slDotGap)
 
   -- Barre de bouclier (absorb)
   ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, "Barre de bouclier", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SHIELD_BAR"], W))
   local cbAbsorb = ctx:Add(SW.CreateCheckbox(container,
-    "Afficher la barre de bouclier",
-    "Affiche en bleu la quantité absorbée (shields) sur les barres de vie.\nLa zone bleue apparaît juste après le fill de santé.", W))
+    L["SETTINGS_UB_SHOW_SHIELD_BAR"],
+    L["SETTINGS_UB_SHOW_SHIELD_BAR_TT"], W))
   cbAbsorb:SetChecked(UBGlobal("showAbsorb") ~= false)
   cbAbsorb.onChanged = function(val) UBGlobalSet("showAbsorb", val) end
 
   -- Couleur de la barre d'absorb
   local swAbsorb = ctx:Add(SW.CreateColorSwatch(container,
-    "Couleur de l'absorb",
-    "Couleur de la barre de bouclier (absorb). Cliquez pour choisir.", W))
+    L["SETTINGS_UB_ABSORB_COLOR"],
+    L["SETTINGS_UB_ABSORB_COLOR_TT"], W))
   local _absC = UBGlobal("absorbColor") or { 0, 1, 0.918, 1 }
   swAbsorb:SetColor(_absC[1], _absC[2], _absC[3], _absC[4])
   swAbsorb.onChanged = function(r, g, b, a)
@@ -1051,28 +1052,28 @@ local function BuildUnitBars(container)
 
   -- Sens de l'absorb (normal = droite, miroir = gauche)
   local cbAbsorbRev = ctx:Add(SW.CreateCheckbox(container,
-    "Afficher l'absorb en miroir (à gauche)",
-    "Par défaut l'absorb s'affiche à droite du fill HP.\nEn miroir, il s'affiche à gauche, superposé au début de la barre.", W))
+    L["SETTINGS_UB_ABSORB_MIRROR"],
+    L["SETTINGS_UB_ABSORB_MIRROR_TT"], W))
   cbAbsorbRev:SetChecked(UBGlobal("absorbReversed") == true)
   cbAbsorbRev.onChanged = function(val) UBGlobalSet("absorbReversed", val) end
 
   -- Taille police texte HP
-  local slTxt = ctx:Add(SW.CreateSlider(container, "Taille police HP%", 6, 20, 1, W))
+  local slTxt = ctx:Add(SW.CreateSlider(container, L["SETTINGS_UB_HP_FONT_SIZE"], 6, 20, 1, W))
   slTxt:SetValue(UBGlobal("textSize") or 8)
   slTxt.onChanged = function(val) UBGlobalSet("textSize", val) end
-  local ddUBHpFont = ctx:Add(SW.CreateDropdown(container, "Police HP", ns.GetFontList(), 220))
+  local ddUBHpFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_UB_HP_FONT"], ns.GetFontList(), 220))
   local _ubHpFontV = UBGlobal("font"); if _ubHpFontV then ddUBHpFont:SetValue(_ubHpFontV) end
   ddUBHpFont.onChanged = function(val) UBGlobalSet("font", val) end
 
   -- Mode d'affichage HP : pourcentage vs valeur (mutuellement exclusif)
   ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, "Texte HP", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_HP_TEXT"], W))
   local cbPct = ctx:Add(SW.CreateCheckbox(container,
-    "Afficher la vie en pourcentage (0-100)",
-    "Affiche un entier de 0 à 100 indiquant le pourcentage de vie.", W))
+    L["SETTINGS_UB_HP_SHOW_PCT"],
+    L["SETTINGS_UB_HP_SHOW_PCT_TT"], W))
   local cbVal = ctx:Add(SW.CreateCheckbox(container,
-    "Afficher la vie en valeur (ex: 120K)",
-    "Affiche la valeur brute de vie abrégée.", W))
+    L["SETTINGS_UB_HP_SHOW_VALUE"],
+    L["SETTINGS_UB_HP_SHOW_VALUE_TT"], W))
   -- Init
   local function RefreshHPModeCheckboxes()
     local m = UBGlobal("hpDisplayMode") or "pct"
@@ -1093,21 +1094,21 @@ local function BuildUnitBars(container)
   end)
 
   -- Taille police nom
-  local slName = ctx:Add(SW.CreateSlider(container, "Taille police nom", 8, 28, 1, W))
+  local slName = ctx:Add(SW.CreateSlider(container, L["SETTINGS_UB_NAME_FONT_SIZE"], 8, 28, 1, W))
   slName:SetValue(UBGlobal("nameSize") or 14)
   slName.onChanged = function(val) UBGlobalSet("nameSize", val) end
-  local ddUBNameFont = ctx:Add(SW.CreateDropdown(container, "Police nom", ns.GetFontList(), 220))
+  local ddUBNameFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_UB_NAME_FONT"], ns.GetFontList(), 220))
   local _ubNameFontV = UBGlobal("nameFont"); if _ubNameFontV then ddUBNameFont:SetValue(_ubNameFontV) end
   ddUBNameFont.onChanged = function(val) UBGlobalSet("nameFont", val) end
 
   -- Mode tank
   ctx:Spacer(4)
   local cbTank = ctx:Add(SW.CreateCheckbox(container,
-    "Hauteur élargie en spé tank (Joueur / Cible / Focus)",
-    "Utilise une hauteur plus grande pour joueur, cible et focus dans les spés tank.", W))
+    L["SETTINGS_UB_TANK_HEIGHT"],
+    L["SETTINGS_UB_TANK_HEIGHT_TT"], W))
   BindCheckbox(cbTank, "unitBars", "useTankHeight")
 
-  local slTankW = ctx:Add(SW.CreateSlider(container, "Hauteur tank", 2, 30, 1, W))
+  local slTankW = ctx:Add(SW.CreateSlider(container, L["SETTINGS_UB_TANK_HEIGHT_SLIDER"], 2, 30, 1, W))
   slTankW:SetValue(UBGlobal("tankHeight") or 8)
   slTankW.onChanged = function(val) UBGlobalSet("tankHeight", val) end
 
@@ -1139,17 +1140,17 @@ local function BuildUnitBars(container)
       eb:SetScript("OnEditFocusLost", Commit)
       return eb
     end
-    MakeInput(labelA or "X :", propA, 0)
-    MakeInput(labelB or "Y :", propB, W / 2)
+    MakeInput(labelA or L["SETTINGS_AXIS_X"], propA, 0)
+    MakeInput(labelB or L["SETTINGS_AXIS_Y"], propB, W / 2)
     return row
   end
 
   local BAR_LABELS = {
-    { key = "player",       label = "Joueur" },
-    { key = "target",       label = "Cible" },
-    { key = "focus",        label = "Focalisation" },
-    { key = "pet",          label = "Familier" },
-    { key = "targettarget", label = "Cible de la cible" },
+    { key = "player",       label = L["SETTINGS_UNIT_PLAYER"] },
+    { key = "target",       label = L["SETTINGS_UNIT_TARGET"] },
+    { key = "focus",        label = L["SETTINGS_UNIT_FOCUS"] },
+    { key = "pet",          label = L["SETTINGS_UNIT_PET"] },
+    { key = "targettarget", label = L["SETTINGS_UNIT_TARGET_OF_TARGET"] },
   }
 
   for _, entry in ipairs(BAR_LABELS) do
@@ -1158,20 +1159,20 @@ local function BuildUnitBars(container)
     ctx:Add(SW.CreateSectionHeader(container, entry.label, W))
 
     local cbBar = ctx:Add(SW.CreateCheckbox(container,
-      "Activer", "Active ou désactive cette barre.", W))
+      L["SETTINGS_ENABLE"], L["SETTINGS_UB_BAR_ENABLE_TT"], W))
     cbBar:SetChecked(UBGet(bk, "enabled") ~= false)
     cbBar.onChanged = function(val) UBSet(bk, "enabled", val) end
 
-    local slW = SW.CreateSlider(container, "Largeur", 40, 700, 1, _ubSL2)
+    local slW = SW.CreateSlider(container, L["SETTINGS_WIDTH"], 40, 700, 1, _ubSL2)
     slW:SetValue(UBGet(bk, "width") or 200)
     slW.onChanged = function(val) UBSet(bk, "width", val) end
-    local slH = SW.CreateSlider(container, "Hauteur", 2, 40, 1, _ubSL2)
+    local slH = SW.CreateSlider(container, L["SETTINGS_HEIGHT"], 2, 40, 1, _ubSL2)
     slH:SetValue(UBGet(bk, "height") or 4)
     slH.onChanged = function(val) UBSet(bk, "height", val) end
     ctx:AddRow(8, slW, slH)
 
-    ctx:Add(MakeXYRow(bk, "x", "y", "X :", "Y :"))
-    ctx:Add(MakeXYRow(bk, "nameOffX", "nameOffY", "Nom X :", "Nom Y :"))
+    ctx:Add(MakeXYRow(bk, "x", "y", L["SETTINGS_AXIS_X"], L["SETTINGS_AXIS_Y"]))
+    ctx:Add(MakeXYRow(bk, "nameOffX", "nameOffY", L["SETTINGS_NAME_AXIS_X"], L["SETTINGS_NAME_AXIS_Y"]))
 
     ctx:Spacer(4)
   end
@@ -1233,9 +1234,9 @@ local function BuildCastBar(container)
 
   -- Helper : 3 boutons alignement (LEFT / CENTER / RIGHT)
   local function MakeAlignRow(prop, options)
-    options = options or { { k="LEFT",   l="Gauche" },
-                           { k="CENTER", l="Centre" },
-                           { k="RIGHT",  l="Droite" } }
+    options = options or { { k="LEFT",   l=L["SETTINGS_ALIGN_LEFT"] },
+                           { k="CENTER", l=L["SETTINGS_ALIGN_CENTER"] },
+                           { k="RIGHT",  l=L["SETTINGS_ALIGN_RIGHT"] } }
     local ABTN_W = 90
     local row = CreateFrame("Frame", nil, container)
     row:SetSize(W, 26)
@@ -1278,25 +1279,25 @@ local function BuildCastBar(container)
   end
 
   -- ====== Barre ======
-  ctx:Add(SW.CreateSectionHeader(container, "Barre de Cast", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_CAST_BAR"], W))
 
   local cbEn = ctx:Add(SW.CreateCheckbox(container,
-    "Activer la barre de cast", "Affiche une barre pendant les incantations.", W))
+    L["SETTINGS_CB_ENABLE"], L["SETTINGS_CB_ENABLE_TT"], W))
   cbEn:SetChecked(CBGet("enabled") ~= false)
   cbEn.onChanged = function(val) CBSet("enabled", val) end
 
   local _cbSL2 = math.floor((W - 8) / 2)
-  local slW = SW.CreateSlider(container, "Largeur", 60, 500, 1, _cbSL2)
+  local slW = SW.CreateSlider(container, L["SETTINGS_WIDTH"], 60, 500, 1, _cbSL2)
   slW:SetValue(CBGet("width") or 260)
   slW.onChanged = function(val) CBSet("width", val) end
-  local slH = SW.CreateSlider(container, "Hauteur", 1, 20, 1, _cbSL2)
+  local slH = SW.CreateSlider(container, L["SETTINGS_HEIGHT"], 1, 20, 1, _cbSL2)
   slH:SetValue(CBGet("height") or 3)
   slH.onChanged = function(val) CBSet("height", val) end
   ctx:AddRow(8, slW, slH)
 
   -- ====== Position ======
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Position", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_POSITION"], W))
 
   -- Bouton de repositionnement par drag (style thEme addon)
   local CB = ns.Modules and ns.Modules.CastBar
@@ -1318,17 +1319,17 @@ local function BuildCastBar(container)
   _dbLabel:SetFont(ns.Media.fontGui, 12)
   _dbLabel:SetPoint("CENTER")
   _dbLabel:SetTextColor(unpack(ns.Theme.textNormal))
-  _dbLabel:SetText("Déplacer (glisser-déposer)")
+  _dbLabel:SetText(L["UI_MOVE_DRAG_DROP"])
 
   local function SetDragBtnState(active)
     if active then
       _dbBg:SetColorTexture(0.05, 0.18, 0.08, 1)
       _dbLabel:SetTextColor(0.3, 1.0, 0.3, 1)
-      _dbLabel:SetText("Glissez la barre  u2014  cliquez pour terminer")
+      _dbLabel:SetText(L["SETTINGS_CB_DRAG_HINT"])
     else
       _dbBg:SetColorTexture(0.10, 0.10, 0.13, 1)
       _dbLabel:SetTextColor(unpack(ns.Theme.textNormal))
-      _dbLabel:SetText("Déplacer (glisser-déposer)")
+      _dbLabel:SetText(L["UI_MOVE_DRAG_DROP"])
     end
   end
 
@@ -1387,61 +1388,61 @@ local function BuildCastBar(container)
     eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     eb:SetScript("OnEditFocusLost", Commit)
   end
-  MakePosInput("X :", "x", "AishaddonCBXEditBox", 0)
-  MakePosInput("Y :", "y", "AishaddonCBYEditBox", W / 2)
+  MakePosInput(L["SETTINGS_AXIS_X"], "x", "AishaddonCBXEditBox", 0)
+  MakePosInput(L["SETTINGS_AXIS_Y"], "y", "AishaddonCBYEditBox", W / 2)
   ctx:Add(xyRow)
 
   -- Remarque : X/Y sont relatifs E UIParent CENTER
   local hint = container:CreateFontString(nil, "OVERLAY")
   hint:SetFont(ns.Media.fontGui, 10)
   hint:SetTextColor(0.55, 0.55, 0.55, 1)
-  hint:SetText("X / Y : offset depuis le centre de l'écran.")
+  hint:SetText(L["UI_OFFSET_HINT"])
   hint:SetJustifyH("LEFT")
   hint:SetSize(W - 10, 18)
   ctx:Add(hint)
 
   local cbSchool = ctx:Add(SW.CreateCheckbox(container,
-    "Colorer suivant l'école de magie",
-    "(\195\192 implementer) Colorera la barre selon l'école de magie du sort.", W))
+    L["SETTINGS_CB_COLOR_BY_SCHOOL"],
+    L["SETTINGS_CB_COLOR_BY_SCHOOL_TT"], W))
   cbSchool:SetChecked(CBGet("colorBySchool") or false)
   cbSchool.onChanged = function(val) CBSet("colorBySchool", val) end
 
   -- ====== Texte Nom ======
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Texte - Nom du sort", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SPELL_NAME_TEXT"], W))
 
-  local slNS = ctx:Add(SW.CreateSlider(container, "Taille police", 6, 28, 1, W))
+  local slNS = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 28, 1, W))
   slNS:SetValue(CBGet("nameSize") or 12)
   slNS.onChanged = function(val) CBSet("nameSize", val) end
 
-  local ddCBFont = ctx:Add(SW.CreateDropdown(container, "Police nom", ns.GetFontList(), 220))
+  local ddCBFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_UB_NAME_FONT"], ns.GetFontList(), 220))
   do
     local _v = CBGet("font"); if _v then ddCBFont:SetValue(_v) end
     ddCBFont.onChanged = function(val) CBSet("font", val) end
   end
 
-  ctx:Add(MakeCBXYRow("nameOffX", "nameOffY", "X :", "Y :"))
+  ctx:Add(MakeCBXYRow("nameOffX", "nameOffY", L["SETTINGS_AXIS_X"], L["SETTINGS_AXIS_Y"]))
 
-  ctx:Add(SW.CreateSectionHeader(container, "Alignement nom", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CB_NAME_ALIGNMENT"], W))
   ctx:Add(MakeAlignRow("nameJustify"))
 
   -- ====== Texte Timer ======
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Texte - Minuteur", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TIMER_TEXT"], W))
 
-  local slTS = ctx:Add(SW.CreateSlider(container, "Taille police", 6, 20, 1, W))
+  local slTS = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 20, 1, W))
   slTS:SetValue(CBGet("timerSize") or 8)
   slTS.onChanged = function(val) CBSet("timerSize", val) end
 
-  local ddCBTimerFont = ctx:Add(SW.CreateDropdown(container, "Police minuteur", ns.GetFontList(), 220))
+  local ddCBTimerFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_CB_TIMER_FONT"], ns.GetFontList(), 220))
   do
     local _v = CBGet("timerFont"); if _v then ddCBTimerFont:SetValue(_v) end
     ddCBTimerFont.onChanged = function(val) CBSet("timerFont", val) end
   end
 
-  ctx:Add(MakeCBXYRow("timerOffX", "timerOffY", "X :", "Y :"))
+  ctx:Add(MakeCBXYRow("timerOffX", "timerOffY", L["SETTINGS_AXIS_X"], L["SETTINGS_AXIS_Y"]))
 
-  ctx:Add(SW.CreateSectionHeader(container, "Alignement minuteur", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CB_TIMER_ALIGNMENT"], W))
   ctx:Add(MakeAlignRow("timerJustify"))
 
   ctx:Finalize()
@@ -1501,7 +1502,7 @@ local function BuildTargetCastBar(container)
 
   -- Helper : 3 boutons alignement
   local function MakeTCBAlignRow(prop, options)
-    options = options or { { k="LEFT", l="Gauche" }, { k="CENTER", l="Centre" }, { k="RIGHT", l="Droite" } }
+    options = options or { { k="LEFT", l=L["SETTINGS_ALIGN_LEFT"] }, { k="CENTER", l=L["SETTINGS_ALIGN_CENTER"] }, { k="RIGHT", l=L["SETTINGS_ALIGN_RIGHT"] } }
     local ABTN_W = 90
     local row = CreateFrame("Frame", nil, container)
     row:SetSize(W, 26)
@@ -1544,30 +1545,30 @@ local function BuildTargetCastBar(container)
   end
 
   -- ====== Barre ======
-  ctx:Add(SW.CreateSectionHeader(container, "Barre de Cast Cible", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TARGET_CAST_BAR"], W))
 
   local tcbEn = ctx:Add(SW.CreateCheckbox(container,
-    "Activer la barre de cast cible", "Affiche une barre pendant les incantations de la cible.", W))
+    L["SETTINGS_TCB_ENABLE"], L["SETTINGS_TCB_ENABLE_TT"], W))
   tcbEn:SetChecked(TCBGet("enabled") ~= false)
   tcbEn.onChanged = function(val) TCBSet("enabled", val) end
 
   local tcbIcon = ctx:Add(SW.CreateCheckbox(container,
-    "Afficher l'icône du sort", "Affiche l'icône du sort à gauche de la barre.", W))
+    L["SETTINGS_TCB_SHOW_ICON"], L["SETTINGS_TCB_SHOW_ICON_TT"], W))
   tcbIcon:SetChecked(TCBGet("showIcon") ~= false)
   tcbIcon.onChanged = function(val) TCBSet("showIcon", val) end
 
   local _tcbSL2 = math.floor((W - 8) / 2)
-  local slTCBW = SW.CreateSlider(container, "Largeur", 60, 500, 1, _tcbSL2)
+  local slTCBW = SW.CreateSlider(container, L["SETTINGS_WIDTH"], 60, 500, 1, _tcbSL2)
   slTCBW:SetValue(TCBGet("width") or 260)
   slTCBW.onChanged = function(val) TCBSet("width", val) end
-  local slTCBH = SW.CreateSlider(container, "Hauteur", 1, 20, 1, _tcbSL2)
+  local slTCBH = SW.CreateSlider(container, L["SETTINGS_HEIGHT"], 1, 20, 1, _tcbSL2)
   slTCBH:SetValue(TCBGet("height") or 3)
   slTCBH.onChanged = function(val) TCBSet("height", val) end
   ctx:AddRow(8, slTCBW, slTCBH)
 
   -- ====== Position ======
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Position", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_POSITION"], W))
 
   local TCB = ns.Modules and ns.Modules.TargetCastBar
   local tcbDragActive = false
@@ -1588,17 +1589,17 @@ local function BuildTargetCastBar(container)
   _tdbLabel:SetFont(ns.Media.fontGui, 12)
   _tdbLabel:SetPoint("CENTER")
   _tdbLabel:SetTextColor(unpack(ns.Theme.textNormal))
-  _tdbLabel:SetText("Déplacer (glisser-déposer)")
+  _tdbLabel:SetText(L["UI_MOVE_DRAG_DROP"])
 
   local function SetTCBDragBtnState(active)
     if active then
       _tdbBg:SetColorTexture(0.05, 0.18, 0.08, 1)
       _tdbLabel:SetTextColor(0.3, 1.0, 0.3, 1)
-      _tdbLabel:SetText("Glissez la barre \226\128\148 cliquez pour terminer")
+      _tdbLabel:SetText(L["SETTINGS_TCB_DRAG_HINT"])
     else
       _tdbBg:SetColorTexture(0.10, 0.10, 0.13, 1)
       _tdbLabel:SetTextColor(unpack(ns.Theme.textNormal))
-      _tdbLabel:SetText("Déplacer (glisser-déposer)")
+      _tdbLabel:SetText(L["UI_MOVE_DRAG_DROP"])
     end
   end
 
@@ -1655,74 +1656,74 @@ local function BuildTargetCastBar(container)
     eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     eb:SetScript("OnEditFocusLost", Commit)
   end
-  MakeTCBPosInput("X :", "x", "AishaddonTCBXEditBox", 0)
-  MakeTCBPosInput("Y :", "y", "AishaddonTCBYEditBox", W / 2)
+  MakeTCBPosInput(L["SETTINGS_AXIS_X"], "x", "AishaddonTCBXEditBox", 0)
+  MakeTCBPosInput(L["SETTINGS_AXIS_Y"], "y", "AishaddonTCBYEditBox", W / 2)
   ctx:Add(tcbXYRow)
 
   local tcbHint = container:CreateFontString(nil, "OVERLAY")
   tcbHint:SetFont(ns.Media.fontGui, 10)
   tcbHint:SetTextColor(0.55, 0.55, 0.55, 1)
-  tcbHint:SetText("X / Y : offset depuis le centre de l'écran.")
+  tcbHint:SetText(L["UI_OFFSET_HINT"])
   tcbHint:SetJustifyH("LEFT")
   tcbHint:SetSize(W - 10, 18)
   ctx:Add(tcbHint)
 
   -- ====== Couleurs ======
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Couleurs", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_COLORS"], W))
 
-  local colInt = ctx:Add(SW.CreateColorButton(container, "Interruptible (turquoise)", W))
+  local colInt = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TCB_COLOR_INTERRUPTIBLE"], W))
   do local c = TCBGet("colorInterruptible") or {0,0.78,0.78,1}; colInt:SetColor(c[1],c[2],c[3],c[4]) end
   colInt.onChanged = function(val) TCBSet("colorInterruptible", val) end
 
-  local colImp = ctx:Add(SW.CreateColorButton(container, "Sort important", W))
+  local colImp = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TCB_COLOR_IMPORTANT"], W))
   do local c = TCBGet("colorImportant") or {0.855,0.239,1,1}; colImp:SetColor(c[1],c[2],c[3],c[4]) end
   colImp.onChanged = function(val) TCBSet("colorImportant", val) end
 
-  local colNI = ctx:Add(SW.CreateColorButton(container, "Non-interruptible", W))
+  local colNI = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TCB_COLOR_NOT_INTERRUPTIBLE"], W))
   do local c = TCBGet("colorNotInterruptible") or {0.765,0.294,0.290,1}; colNI:SetColor(c[1],c[2],c[3],c[4]) end
   colNI.onChanged = function(val) TCBSet("colorNotInterruptible", val) end
 
-  local colCh = ctx:Add(SW.CreateColorButton(container, "Canalisation", W))
+  local colCh = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TCB_COLOR_CHANNELING"], W))
   do local c = TCBGet("colorChanneling") or {0.506,0.788,0.243,1}; colCh:SetColor(c[1],c[2],c[3],c[4]) end
   colCh.onChanged = function(val) TCBSet("colorChanneling", val) end
 
   -- ====== Texte Nom ======
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Texte - Nom du sort", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SPELL_NAME_TEXT"], W))
 
-  local slTCBNS = ctx:Add(SW.CreateSlider(container, "Taille police", 6, 28, 1, W))
+  local slTCBNS = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 28, 1, W))
   slTCBNS:SetValue(TCBGet("nameSize") or 12)
   slTCBNS.onChanged = function(val) TCBSet("nameSize", val) end
 
-  local ddTCBFont = ctx:Add(SW.CreateDropdown(container, "Police nom", ns.GetFontList(), 220))
+  local ddTCBFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_UB_NAME_FONT"], ns.GetFontList(), 220))
   do
     local _v = TCBGet("font"); if _v then ddTCBFont:SetValue(_v) end
     ddTCBFont.onChanged = function(val) TCBSet("font", val) end
   end
 
-  ctx:Add(MakeTCBXYRow("nameOffX", "nameOffY", "X :", "Y :"))
+  ctx:Add(MakeTCBXYRow("nameOffX", "nameOffY", L["SETTINGS_AXIS_X"], L["SETTINGS_AXIS_Y"]))
 
-  ctx:Add(SW.CreateSectionHeader(container, "Alignement nom", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CB_NAME_ALIGNMENT"], W))
   ctx:Add(MakeTCBAlignRow("nameJustify"))
 
   -- ====== Texte Timer ======
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Texte - Minuteur", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TIMER_TEXT"], W))
 
-  local slTCBTS = ctx:Add(SW.CreateSlider(container, "Taille police", 6, 20, 1, W))
+  local slTCBTS = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 20, 1, W))
   slTCBTS:SetValue(TCBGet("timerSize") or 8)
   slTCBTS.onChanged = function(val) TCBSet("timerSize", val) end
 
-  local ddTCBTimerFont = ctx:Add(SW.CreateDropdown(container, "Police minuteur", ns.GetFontList(), 220))
+  local ddTCBTimerFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_CB_TIMER_FONT"], ns.GetFontList(), 220))
   do
     local _v = TCBGet("timerFont"); if _v then ddTCBTimerFont:SetValue(_v) end
     ddTCBTimerFont.onChanged = function(val) TCBSet("timerFont", val) end
   end
 
-  ctx:Add(MakeTCBXYRow("timerOffX", "timerOffY", "X :", "Y :"))
+  ctx:Add(MakeTCBXYRow("timerOffX", "timerOffY", L["SETTINGS_AXIS_X"], L["SETTINGS_AXIS_Y"]))
 
-  ctx:Add(SW.CreateSectionHeader(container, "Alignement minuteur", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CB_TIMER_ALIGNMENT"], W))
   ctx:Add(MakeTCBAlignRow("timerJustify"))
 
   ctx:Finalize()
@@ -1745,12 +1746,12 @@ local sePreviewModel    = nil  -- PlayerModel de preview live
 -- Pseudo-sorts Fire Mage (Heating Up / Hot Streak) pour le module Animations 3D
 -- Ces IDs fictifs correspondent aux procs détectés via SPELL_ACTIVATION_OVERLAY_SHOW dans ResourceCircle
 local PSEUDO_SPELLS_3D = {
-  [9000001] = { name = "Réchauffement (Heating Up)",  icon = 236218,  specID = 63 },
-  [9000002] = { name = "Bonne Série! (Hot Streak)",   icon = 1035045, specID = 63 },
-  [9000003] = { name = "Explosion d'Essence",         icon = 4630437, specID = 1468 },
-  [9000004] = { name = "Arme Maelstrom (5+)",         icon = 136063,  specID = 263  },
-  [9000005] = { name = "Arme Maelstrom (8+)",         icon = 136063,  specID = 263  },
-  [9000006] = { name = "Arme Maelstrom (10)",         icon = 136063,  specID = 263  },
+  [9000001] = { name = L["SETTINGS_PSEUDO_HEATING_UP"],    icon = 236218,  specID = 63 },
+  [9000002] = { name = L["SETTINGS_PSEUDO_HOT_STREAK"],    icon = 1035045, specID = 63 },
+  [9000003] = { name = L["SETTINGS_PSEUDO_ESSENCE_BURST"], icon = 4630437, specID = 1468 },
+  [9000004] = { name = L["SETTINGS_PSEUDO_MAELSTROM_5"],   icon = 136063,  specID = 263  },
+  [9000005] = { name = L["SETTINGS_PSEUDO_MAELSTROM_8"],   icon = 136063,  specID = 263  },
+  [9000006] = { name = L["SETTINGS_PSEUDO_MAELSTROM_10"],  icon = 136063,  specID = 263  },
 }
 
 -- Utilitaire : résout le nom et l'icône d'un spellID
@@ -1760,11 +1761,11 @@ local function GetSpellInfo3D(spellID)
   end
   local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(spellID)
   if info then
-    return info.name or ("Spell " .. spellID), info.iconID or 134400
+    return info.name or string.format(L["SETTINGS_SPELL_FALLBACK_NAME"], spellID), info.iconID or 134400
   end
   -- Fallback ancien API
   local name, _, icon = GetSpellInfo(spellID)
-  return name or ("Spell " .. spellID), icon or 134400
+  return name or string.format(L["SETTINGS_SPELL_FALLBACK_NAME"], spellID), icon or 134400
 end
 
 -- Retourne la table combos de la DB (crée-la si besoin)
@@ -1811,40 +1812,40 @@ local seOocList            = nil       -- frame pour la liste de triggers OOC
 -- Triggers prédéfinis pour Globes Externes par classe
 local ORB_TRIGGERS = {
   ROGUE = {
-    { key = "combo",             label = "Points de combos" },
-    { key = "combo_max",         label = "Points de combos Max" },
-    { key = "combo_stealth",     label = "Points de combo Stealth" },
-    { key = "combo_max_stealth", label = "Points de combo Max Stealth" },
+    { key = "combo",             label = L["SETTINGS_ORB_COMBO_POINTS"] },
+    { key = "combo_max",         label = L["SETTINGS_ORB_COMBO_POINTS_MAX"] },
+    { key = "combo_stealth",     label = L["SETTINGS_ORB_COMBO_POINTS_STEALTH"] },
+    { key = "combo_max_stealth", label = L["SETTINGS_ORB_COMBO_POINTS_MAX_STEALTH"] },
   },
   DRUID = {
-    { key = "combo",             label = "Points de combos" },
-    { key = "combo_max",         label = "Points de combos Max" },
-    { key = "combo_stealth",     label = "Points de combo Stealth" },
-    { key = "combo_max_stealth", label = "Points de combo Max Stealth" },
+    { key = "combo",             label = L["SETTINGS_ORB_COMBO_POINTS"] },
+    { key = "combo_max",         label = L["SETTINGS_ORB_COMBO_POINTS_MAX"] },
+    { key = "combo_stealth",     label = L["SETTINGS_ORB_COMBO_POINTS_STEALTH"] },
+    { key = "combo_max_stealth", label = L["SETTINGS_ORB_COMBO_POINTS_MAX_STEALTH"] },
   },
   DEATHKNIGHT = {
-    { key = "rune_frost",  label = "Runes de Givre" },
-    { key = "rune_blood",  label = "Runes de Sang" },
-    { key = "rune_unholy", label = "Rune Impie" },
+    { key = "rune_frost",  label = L["SETTINGS_ORB_RUNE_FROST"] },
+    { key = "rune_blood",  label = L["SETTINGS_ORB_RUNE_BLOOD"] },
+    { key = "rune_unholy", label = L["SETTINGS_ORB_RUNE_UNHOLY"] },
   },
   PALADIN = {
-    { key = "holypower",     label = "Puissance sacrée" },
-    { key = "holypower_max", label = "Puissance sacrée Max" },
+    { key = "holypower",     label = L["SETTINGS_HOLY_POWER"] },
+    { key = "holypower_max", label = L["SETTINGS_ORB_HOLY_POWER_MAX"] },
   },
   EVOKER = {
-    { key = "essence",       label = "Essence" },
-    { key = "essence_burst", label = "Explosion d'Essence" },
+    { key = "essence",       label = L["SETTINGS_ESSENCE"] },
+    { key = "essence_burst", label = L["SETTINGS_PSEUDO_ESSENCE_BURST"] },
   },
   MONK = {
-    { key = "chi", label = "Points de chi" },
+    { key = "chi", label = L["SETTINGS_ORB_CHI_POINTS"] },
   },
   MAGE = {
-    { key = "arcane_charges",      label = "Charges Arcaniques" },
-    { key = "arcane_charges_full", label = "Charges Arcaniques (4/4)" },
+    { key = "arcane_charges",      label = L["SETTINGS_ARCANE_CHARGES"] },
+    { key = "arcane_charges_full", label = L["SETTINGS_ORB_ARCANE_CHARGES_FULL"] },
   },
   WARLOCK = {
-    { key = "demonic_core",     label = "Coeur Démoniaque" },
-    { key = "demonic_core_max", label = "Coeur Démoniaque (4/4)" },
+    { key = "demonic_core",     label = L["SETTINGS_ORB_DEMONIC_CORE"] },
+    { key = "demonic_core_max", label = L["SETTINGS_ORB_DEMONIC_CORE_MAX"] },
   },
 }
 
@@ -1936,12 +1937,12 @@ end
 -- Triggers OOC cercle de vie : global (par classe) + un par spé du joueur
 local function GetOocTriggers()
   local cls = ns._playerClass or ""
-  local triggers = { { key = "global_" .. cls, label = "Regen - Global" } }
+  local triggers = { { key = "global_" .. cls, label = L["SETTINGS_TRIGGER_REGEN_GLOBAL"] } }
   local numSpecs = GetNumSpecializations and GetNumSpecializations() or 0
   for i = 1, numSpecs do
     local _, specName = GetSpecializationInfo(i)
     if specName then
-      triggers[#triggers + 1] = { key = SpecKeyForClass(i), label = "Regen - " .. specName }
+      triggers[#triggers + 1] = { key = SpecKeyForClass(i), label = string.format(L["SETTINGS_TRIGGER_REGEN_SPEC"], specName) }
     end
   end
   return triggers
@@ -1951,15 +1952,15 @@ end
 -- Une variante de spé prend la priorité sur le global si elle est configurée.
 local function GetEvokerOrbTriggers()
   local triggers = {
-    { key = "essence",       label = "Essence - Global" },
-    { key = "essence_burst", label = "Explosion d'Essence - Global" },
+    { key = "essence",       label = L["SETTINGS_TRIGGER_ESSENCE_GLOBAL"] },
+    { key = "essence_burst", label = L["SETTINGS_TRIGGER_ESSENCE_BURST_GLOBAL"] },
   }
   local numSpecs = GetNumSpecializations and GetNumSpecializations() or 0
   for i = 1, numSpecs do
     local _, specName = GetSpecializationInfo(i)
     if specName then
-      triggers[#triggers + 1] = { key = "essence_spec" .. i,       label = "Essence - " .. specName }
-      triggers[#triggers + 1] = { key = "essence_burst_spec" .. i, label = "Explosion d'Essence - " .. specName }
+      triggers[#triggers + 1] = { key = "essence_spec" .. i,       label = string.format(L["SETTINGS_TRIGGER_ESSENCE_SPEC"], specName) }
+      triggers[#triggers + 1] = { key = "essence_burst_spec" .. i, label = string.format(L["SETTINGS_TRIGGER_ESSENCE_BURST_SPEC"], specName) }
     end
   end
   return triggers
@@ -2088,8 +2089,8 @@ end
 
 -- Popup de confirmation pour la suppression d'un tag
 StaticPopupDialogs["AISD_CONFIRM_DELETE_TAG"] = {
-  text = "Supprimer le tag \"%s\" ?\nCette action est irréversible.",
-  button1 = "Confirmer", button2 = "Annuler",
+  text = L["SETTINGS_CONFIRM_DELETE_TAG"],
+  button1 = L["SETTINGS_CONFIRM"], button2 = L["SETTINGS_CANCEL"],
   OnAccept = function(self, data)
     if data and data.callback then data.callback() end
   end,
@@ -2280,7 +2281,7 @@ local function EnsureModelPicker()
   title:SetFont(ns.Media.fontTitle, 13, "OUTLINE")
   title:SetPoint("TOP", f, "TOP", 0, -8)
   title:SetTextColor(unpack(Theme.accent))
-  title:SetText("Choisir un modèle 3D")
+  title:SetText(L["SETTINGS_MODEL_PICKER_TITLE"])
 
   -- Layout columns
   local LEFT_W = 340
@@ -2298,7 +2299,7 @@ local function EnsureModelPicker()
   tagTitle:SetFont(ns.Media.fontTitle, 10, "OUTLINE")
   tagTitle:SetPoint("TOPLEFT", tagFrame, "TOPLEFT", 4, -2)
   tagTitle:SetTextColor(0.6, 0.6, 0.6)
-  tagTitle:SetText("Tags")
+  tagTitle:SetText(L["SETTINGS_TAGS_HEADER"])
 
   local tagScrollFrame = CreateFrame("ScrollFrame", nil, tagFrame, "UIPanelScrollFrameTemplate")
   tagScrollFrame:SetPoint("TOPLEFT", tagTitle, "BOTTOMLEFT", 0, -2)
@@ -2409,7 +2410,7 @@ local function EnsureModelPicker()
               f._deleteMode = false
               if f._delBtnLbl then
                 f._delBtnBg:SetColorTexture(0.18, 0.04, 0.04, 1)
-                f._delBtnLbl:SetText("Supprimer")
+                f._delBtnLbl:SetText(L["SETTINGS_DELETE"])
                 f._delBtnLbl:SetTextColor(1, 0.35, 0.35)
               end
               f:RebuildTagSidebar()
@@ -2460,7 +2461,7 @@ local function EnsureModelPicker()
   newTagBtnBg:SetAllPoints(); newTagBtnBg:SetColorTexture(0.06, 0.16, 0.06, 1)
   local newTagBtnLbl = newTagBtn:CreateFontString(nil, "OVERLAY")
   newTagBtnLbl:SetFont(ns.Media.fontGui, 10); newTagBtnLbl:SetPoint("CENTER")
-  newTagBtnLbl:SetText("+ Nouveau tag"); newTagBtnLbl:SetTextColor(0.35, 0.85, 0.35)
+  newTagBtnLbl:SetText(L["SETTINGS_NEW_TAG_BTN"]); newTagBtnLbl:SetTextColor(0.35, 0.85, 0.35)
   newTagBtn:SetScript("OnEnter", function()
     newTagBtnBg:SetColorTexture(0.10, 0.26, 0.10, 1); newTagBtnLbl:SetTextColor(0.6, 1, 0.6)
   end)
@@ -2470,8 +2471,8 @@ local function EnsureModelPicker()
   newTagBtn:SetScript("OnClick", function()
     local n, existingLabels = 1, {}
     for _, t in ipairs(MODEL_TAGS) do existingLabels[t.label] = true end
-    while existingLabels["Nouveau tag " .. n] do n = n + 1 end
-    local newTag = { label = "Nouveau tag " .. n, color = {0.6, 0.6, 0.6}, keywords = {} }
+    while existingLabels[string.format(L["SETTINGS_NEW_TAG_DEFAULT_NAME"], n)] do n = n + 1 end
+    local newTag = { label = string.format(L["SETTINGS_NEW_TAG_DEFAULT_NAME"], n), color = {0.6, 0.6, 0.6}, keywords = {} }
     MODEL_TAGS[#MODEL_TAGS + 1] = newTag
     if not ns.DB then ns.DB = {} end
     if not ns.DB.modelTagUserDefined then ns.DB.modelTagUserDefined = {} end
@@ -2499,7 +2500,7 @@ local function EnsureModelPicker()
   delBtnBg:SetAllPoints(); delBtnBg:SetColorTexture(0.18, 0.04, 0.04, 1)
   local delBtnLbl = delBtn:CreateFontString(nil, "OVERLAY")
   delBtnLbl:SetFont(ns.Media.fontGui, 10); delBtnLbl:SetPoint("CENTER")
-  delBtnLbl:SetText("Supprimer"); delBtnLbl:SetTextColor(1, 0.35, 0.35)
+  delBtnLbl:SetText(L["SETTINGS_DELETE"]); delBtnLbl:SetTextColor(1, 0.35, 0.35)
   f._delBtnBg  = delBtnBg
   f._delBtnLbl = delBtnLbl
   delBtn:SetScript("OnEnter", function()
@@ -2517,10 +2518,10 @@ local function EnsureModelPicker()
     f._deleteMode = not f._deleteMode
     if f._deleteMode then
       delBtnBg:SetColorTexture(0.40, 0.08, 0.08, 1)
-      delBtnLbl:SetText("< Annuler")
+      delBtnLbl:SetText(L["SETTINGS_CANCEL_BACK"])
     else
       delBtnBg:SetColorTexture(0.18, 0.04, 0.04, 1)
-      delBtnLbl:SetText("Supprimer")
+      delBtnLbl:SetText(L["SETTINGS_DELETE"])
       -- Réinitialiser le dimming qui peut être rouge en mode suppression
       f:RebuildTagSidebar()
     end
@@ -2621,7 +2622,7 @@ local function EnsureModelPicker()
       -- Tooltip with FileID
       GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
       GameTooltip:SetText(s._modelName or "", 1, 1, 1)
-      GameTooltip:AddLine("FileID: " .. tostring(s._fileID or "?"), 0.6, 0.6, 0.6)
+      GameTooltip:AddLine(string.format(L["SETTINGS_TOOLTIP_FILEID"], tostring(s._fileID or "?")), 0.6, 0.6, 0.6)
       GameTooltip:Show()
       -- Preview on hover
       if s._fileID and f._previewModel then
@@ -2926,7 +2927,7 @@ local function EnsureModelPicker()
   kwAddBg:SetAllPoints(); kwAddBg:SetColorTexture(0.10, 0.28, 0.10, 1)
   local kwAddLbl = kwAddBtn:CreateFontString(nil, "OVERLAY")
   kwAddLbl:SetFont(ns.Media.fontGui, 9); kwAddLbl:SetPoint("CENTER")
-  kwAddLbl:SetText("+Ajouter"); kwAddLbl:SetTextColor(0.4, 1, 0.4)
+  kwAddLbl:SetText(L["SETTINGS_ADD_BTN"]); kwAddLbl:SetTextColor(0.4, 1, 0.4)
   kwAddBtn:SetScript("OnEnter", function() kwAddBg:SetColorTexture(0.14, 0.40, 0.14, 1); kwAddLbl:SetTextColor(1,1,1) end)
   kwAddBtn:SetScript("OnLeave", function() kwAddBg:SetColorTexture(0.10, 0.28, 0.10, 1); kwAddLbl:SetTextColor(0.4, 1, 0.4) end)
 
@@ -3083,7 +3084,7 @@ local function EnsureModelPicker()
     end
     if #kws == 0 then
       local empty = GetChip(1)
-      empty._lbl:SetText("|cff555555(aucun keyword)|r")
+      empty._lbl:SetText("|cff555555" .. L["SETTINGS_NO_KEYWORD"] .. "|r")
       empty._xb:Hide()
       empty:ClearAllPoints()
       empty:SetPoint("TOPLEFT", kwContent, "TOPLEFT", 2, -2)
@@ -3190,7 +3191,7 @@ local function EnsureModelPicker()
   selLabel:SetPoint("RIGHT", ctrlPanel, "RIGHT", -8, 0)
   selLabel:SetJustifyH("LEFT")
   selLabel:SetTextColor(unpack(Theme.textDim))
-  selLabel:SetText("Survolez un modèle pour prévisualiser")
+  selLabel:SetText(L["SETTINGS_HOVER_MODEL_PREVIEW"])
   f._selLabel = selLabel
 
   -- 4 sliders + bouton Ajouter : X / Y / Z / Rotation / [Ajouter]
@@ -3198,7 +3199,7 @@ local function EnsureModelPicker()
   local _slGap   = 6
   local _ctrlSlW = math.floor(((900 + TAG_W - 12 - (TAG_W + LEFT_W + 24) - 6 - _addBtnW - _slGap) - 3 * _slGap) / 4)
 
-  local xSlider = SW.CreateSlider(ctrlPanel, "X (G/D)", -30, 30, 0.1, _ctrlSlW)
+  local xSlider = SW.CreateSlider(ctrlPanel, L["SETTINGS_AXIS_X_LR"], -30, 30, 0.1, _ctrlSlW)
   xSlider:ClearAllPoints()
   xSlider:SetPoint("TOPLEFT", selLabel, "BOTTOMLEFT", 0, -8)
   xSlider:SetValue(0)
@@ -3210,7 +3211,7 @@ local function EnsureModelPicker()
   end
   f._xSlider = xSlider
 
-  local ySlider = SW.CreateSlider(ctrlPanel, "Y (H/B)", -30, 30, 0.1, _ctrlSlW)
+  local ySlider = SW.CreateSlider(ctrlPanel, L["SETTINGS_AXIS_Y_UD"], -30, 30, 0.1, _ctrlSlW)
   ySlider:ClearAllPoints()
   ySlider:SetPoint("TOPLEFT", selLabel, "BOTTOMLEFT", (_ctrlSlW + _slGap) * 1, -8)
   ySlider:SetValue(0)
@@ -3222,7 +3223,7 @@ local function EnsureModelPicker()
   end
   f._ySlider = ySlider
 
-  local zSlider = SW.CreateSlider(ctrlPanel, "Z (prof.)", -30, 30, 0.1, _ctrlSlW)
+  local zSlider = SW.CreateSlider(ctrlPanel, L["SETTINGS_AXIS_Z_DEPTH"], -30, 30, 0.1, _ctrlSlW)
   zSlider:ClearAllPoints()
   zSlider:SetPoint("TOPLEFT", selLabel, "BOTTOMLEFT", (_ctrlSlW + _slGap) * 2, -8)
   zSlider:SetValue(0)
@@ -3234,7 +3235,7 @@ local function EnsureModelPicker()
   end
   f._zSlider = zSlider
 
-  local rotSlider = SW.CreateSlider(ctrlPanel, "Rotation", 0, 360, 5, _ctrlSlW)
+  local rotSlider = SW.CreateSlider(ctrlPanel, L["SETTINGS_ROTATION"], 0, 360, 5, _ctrlSlW)
   rotSlider:ClearAllPoints()
   rotSlider:SetPoint("TOPLEFT", selLabel, "BOTTOMLEFT", (_ctrlSlW + _slGap) * 3, -8)
   rotSlider:SetValue(0)
@@ -3246,7 +3247,7 @@ local function EnsureModelPicker()
   f._rotSlider = rotSlider
 
   -- Bouton "Ajouter" ancrE E droite du footer (ctrlPanel)
-  local addBtn = SW.CreateActionBtn(ctrlPanel, "Ajouter", _addBtnW,
+  local addBtn = SW.CreateActionBtn(ctrlPanel, L["SETTINGS_ADD_BTN_FULL"], _addBtnW,
     { 0.06, 0.20, 0.06, 0.95 }, nil, Theme.accentGreen)
   addBtn:SetPoint("RIGHT", ctrlPanel, "RIGHT", -6, -8)
   f._addBtn = addBtn
@@ -3464,7 +3465,7 @@ local function BuildSpellListRow(parent, spellID, width, onClick, combosDB)
 
   local combos = combosDB or GetCombosDB()
   local n = combos[spellID] and #combos[spellID] or 0
-  row.countText:SetText(n > 0 and (n .. " fx") or "")
+  row.countText:SetText(n > 0 and string.format(L["SETTINGS_FX_COUNT"], n) or "")
 
   -- Zone invisible par-dessus l'icône : affiche le tooltip natif WoW au survol
   local iconZone = CreateFrame("Frame", nil, row)
@@ -3588,9 +3589,9 @@ local function BuildAnimRow(parent, idx, anim, width, onClick, onTriggerChange, 
   local delayStr = (anim.delay and anim.delay > 0) and string.format(" +%.1fs", anim.delay) or ""
   local modelName = GetModelNameByFileID(mid)
   if modelName then
-    row.label:SetText(string.format("#%d  %s%s", idx, modelName, delayStr))
+    row.label:SetText(string.format(L["SETTINGS_ANIM_ROW_NAMED"], idx, modelName, delayStr))
   else
-    row.label:SetText(string.format("#%d  Model %d%s", idx, mid, delayStr))
+    row.label:SetText(string.format(L["SETTINGS_ANIM_ROW_UNNAMED"], idx, mid, delayStr))
   end
   row.animIdx = idx
 
@@ -3649,7 +3650,7 @@ local function BuildTriggerRow(parent, triggerDef, width, sectionType, onClick)
     local dbKey = (sectionType == "orbs") and OrbKeyForClass(triggerDef.key) or triggerDef.key
     local combo = db[dbKey]
     if combo and #combo > 0 then
-      fxTxt:SetText(#combo .. " fx")
+      fxTxt:SetText(string.format(L["SETTINGS_FX_COUNT"], #combo))
     else
       fxTxt:SetText("")
     end
@@ -3699,8 +3700,8 @@ local function BuildTriggerRow(parent, triggerDef, width, sectionType, onClick)
 
     sw:SetScript("OnEnter", function()
       GameTooltip:SetOwner(sw, "ANCHOR_RIGHT")
-      GameTooltip:SetText("Couleur des globes", 1, 1, 1)
-      GameTooltip:AddLine("Clic droit pour réinitialiser", 0.7, 0.7, 0.7)
+      GameTooltip:SetText(L["SETTINGS_ORB_GLOBE_COLOR"], 1, 1, 1)
+      GameTooltip:AddLine(L["SETTINGS_TT_RIGHT_CLICK_RESET"], 0.7, 0.7, 0.7)
       GameTooltip:Show()
     end)
     sw:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3813,12 +3814,12 @@ local function BuildSpellEffects(container)
   local ctx = NewLayout(container)
   local W = CONTENT_W
 
-  ctx:Add(SW.CreateSectionHeader(container, "Animations 3D", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_3D_ANIMATIONS"], W))
 
   -- Enable checkbox
   local cb = ctx:Add(SW.CreateCheckbox(container,
-    "Activer les animations 3D",
-    "Déclenche des effets 3D autour du cercle de ressource lors des casts.", W))
+    L["SETTINGS_SE_ENABLE"],
+    L["SETTINGS_SE_ENABLE_TT"], W))
   BindCheckbox(cb, "spellEffects", "enabled")
   ctx:Spacer(6)
 
@@ -3905,7 +3906,7 @@ local function BuildSpellEffects(container)
   -- Section 1 : Sorts configurés
   -- -----------------------------------------------------------------------
   local sec1 = { expanded = true }
-  sec1.header = CreateSectionHdr(leftContent, "Sorts configurés")
+  sec1.header = CreateSectionHdr(leftContent, L["SETTINGS_SEC_CONFIGURED_SPELLS"])
   sec1.body = CreateFrame("Frame", nil, leftContent)
   sec1.body:SetWidth(LEFT_W - 20)
   -- Overhead fixe quand une seule section est ouverte :
@@ -3957,11 +3958,11 @@ local function BuildSpellEffects(container)
 
   -- Boutons Add / Remove
   local _btnHalf = (LEFT_W - 26) / 2 - 2
-  local addBtn = SW.CreateActionBtn(sec1.body, "+ Ajouter", _btnHalf,
+  local addBtn = SW.CreateActionBtn(sec1.body, L["SETTINGS_ADD_BTN"], _btnHalf,
     { 0.06, 0.14, 0.06, 0.9 }, nil, Theme.accentGreen)
   addBtn:SetPoint("BOTTOMLEFT", sec1.body, "BOTTOMLEFT", 0, 28)
 
-  local remBtn = SW.CreateActionBtn(sec1.body, "- Supprimer", _btnHalf,
+  local remBtn = SW.CreateActionBtn(sec1.body, L["SETTINGS_REMOVE_BTN"], _btnHalf,
     { 0.14, 0.04, 0.04, 0.9 }, nil, { 1, 0.4, 0.4 })
   remBtn:SetPoint("LEFT", addBtn, "RIGHT", 4, 0)
 
@@ -3993,7 +3994,7 @@ local function BuildSpellEffects(container)
   placeholder:SetFont(ns.Media.fontGui, 10)
   placeholder:SetPoint("LEFT", spellInput, "LEFT", 0, 0)
   placeholder:SetTextColor(unpack(Theme.textDim))
-  placeholder:SetText("SpellID...")
+  placeholder:SetText(L["SETTINGS_SPELLID_PLACEHOLDER"])
   spellInput:SetScript("OnTextChanged", function(s)
     placeholder:SetShown(s:GetText() == "")
   end)
@@ -4002,7 +4003,7 @@ local function BuildSpellEffects(container)
   -- Section OOC : Cercle de vie Hors-Combat
   -- -----------------------------------------------------------------------
   local secOoc = { expanded = false, id = "ooc" }
-  secOoc.header = CreateSectionHdr(leftContent, "Cercle de vie Hors-Combat")
+  secOoc.header = CreateSectionHdr(leftContent, L["SETTINGS_SEC_HC_OOC"])
   secOoc.body = CreateFrame("Frame", nil, leftContent)
   secOoc.body:SetWidth(LEFT_W - 20)
   secOoc.body:Hide()
@@ -4032,7 +4033,7 @@ local function BuildSpellEffects(container)
   -- Section Orbs : Globes Externes
   -- -----------------------------------------------------------------------
   local secOrbs = { expanded = false, id = "orbs" }
-  secOrbs.header = CreateSectionHdr(leftContent, "Globes externes")
+  secOrbs.header = CreateSectionHdr(leftContent, L["SETTINGS_DOT_EXTERNAL"])
   secOrbs.body = CreateFrame("Frame", nil, leftContent)
   secOrbs.body:SetWidth(LEFT_W - 20)
   secOrbs.body:Hide()
@@ -4066,7 +4067,7 @@ local function BuildSpellEffects(container)
   -- (même liste que "Auras à tracker" — apparition de l'aura → lecture en boucle)
   -- -----------------------------------------------------------------------
   local secAuras = { expanded = false, id = "auras" }
-  secAuras.header = CreateSectionHdr(leftContent, "Auras")
+  secAuras.header = CreateSectionHdr(leftContent, L["SETTINGS_AURAS"])
   secAuras.body = CreateFrame("Frame", nil, leftContent)
   secAuras.body:SetWidth(LEFT_W - 20)
   secAuras.body:Hide()
@@ -4175,7 +4176,7 @@ local function BuildSpellEffects(container)
   rightTitle:SetFont(ns.Media.fontGui, 10)
   rightTitle:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 4, -2)
   rightTitle:SetTextColor(unpack(Theme.textDim))
-  rightTitle:SetText("Combo (aucun sort sélectionné)")
+  rightTitle:SetText(L["SETTINGS_COMBO_NO_SPELL_SELECTED"])
 
   -- En-têtes de colonnes pour les checkboxes (On Hit / Casting)
   local colHeaderFrame = CreateFrame("Frame", nil, rightPanel)
@@ -4198,7 +4199,7 @@ local function BuildSpellEffects(container)
   hdrModel:SetFont(ns.Media.fontGui, 8)
   hdrModel:SetPoint("LEFT", colHeaderFrame, "LEFT", 46, 0)
   hdrModel:SetTextColor(unpack(Theme.textDim))
-  hdrModel:SetText("Modèle")
+  hdrModel:SetText(L["SETTINGS_MODEL"])
 
   -- Références pour masquer les colonnes H/C selon la section active
   local _hdrHit  = hdrHit
@@ -4220,15 +4221,15 @@ local function BuildSpellEffects(container)
 
   -- Boutons Add/Remove anim + Preview combo
   local animBtnW = math.floor((RIGHT_W - 18) / 3) - 3
-  local animAddBtn = SW.CreateActionBtn(rightPanel, "+ Anim", animBtnW,
+  local animAddBtn = SW.CreateActionBtn(rightPanel, L["SETTINGS_ANIM_ADD_BTN"], animBtnW,
     { 0.06, 0.14, 0.06, 0.9 }, nil, Theme.accentGreen)
   animAddBtn:SetPoint("TOPLEFT", animScroll, "BOTTOMLEFT", 0, -4)
 
-  local animRemBtn = SW.CreateActionBtn(rightPanel, "- Anim", animBtnW,
+  local animRemBtn = SW.CreateActionBtn(rightPanel, L["SETTINGS_ANIM_REMOVE_BTN"], animBtnW,
     { 0.14, 0.04, 0.04, 0.9 }, nil, { 1, 0.4, 0.4 })
   animRemBtn:SetPoint("LEFT", animAddBtn, "RIGHT", 4, 0)
 
-  local previewComboBtn = SW.CreateActionBtn(rightPanel, "> Preview Combo", animBtnW,
+  local previewComboBtn = SW.CreateActionBtn(rightPanel, L["SETTINGS_PREVIEW_COMBO_BTN"], animBtnW,
     { 0.08, 0.08, 0.16, 0.9 }, nil, Theme.accent)
   previewComboBtn:SetPoint("LEFT", animRemBtn, "RIGHT", 4, 0)
   previewComboBtn:SetScript("OnLeave", function(s)
@@ -4255,7 +4256,7 @@ local function BuildSpellEffects(container)
   aliasLabel:SetFont(ns.Media.fontGui, 9)
   aliasLabel:SetPoint("LEFT", aliasRow, "LEFT", 2, 0)
   aliasLabel:SetTextColor(unpack(Theme.textDim))
-  aliasLabel:SetText("Alt IDs:")
+  aliasLabel:SetText(L["SETTINGS_ALT_IDS"])
   aliasLabel:SetWidth(44)
 
   -- Zone des chips (alias existants)
@@ -4288,7 +4289,7 @@ local function BuildSpellEffects(container)
     aliasPh:SetFont(ns.Media.fontGui, 8)
     aliasPh:SetPoint("LEFT", seAliasInput, "LEFT", 0, 0)
     aliasPh:SetTextColor(unpack(Theme.textDim))
-    aliasPh:SetText("SpellID...")
+    aliasPh:SetText(L["SETTINGS_SPELLID_PLACEHOLDER"])
     seAliasInput:SetScript("OnTextChanged", function(s) aliasPh:SetShown(s:GetText() == "") end)
     seAliasInput:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
     seAliasInput:SetScript("OnEnterPressed", function(s)
@@ -4331,7 +4332,7 @@ local function BuildSpellEffects(container)
   editorTitle:SetFont(ns.Media.fontGui, 10)
   editorTitle:SetPoint("TOPLEFT", editorFrame, "TOPLEFT", 4, -2)
   editorTitle:SetTextColor(unpack(Theme.textDim))
-  editorTitle:SetText("Éditeur d'animation")
+  editorTitle:SetText(L["SETTINGS_ANIM_EDITOR_TITLE"])
   seAnimEditor._title = editorTitle
 
   -- Conteneur scrollable pour les contrEles de l'éditeur
@@ -4361,7 +4362,7 @@ local function BuildSpellEffects(container)
   modelIDLabel:SetFont(ns.Media.fontGui, 10)
   modelIDLabel:SetPoint("TOPLEFT", edContent, "TOPLEFT", 4, -4)
   modelIDLabel:SetTextColor(unpack(Theme.textNormal))
-  modelIDLabel:SetText("Model File ID")
+  modelIDLabel:SetText(L["SETTINGS_MODEL_FILE_ID"])
 
   local pickerBtnW = 74
   local previewBtnW = 70
@@ -4397,12 +4398,12 @@ local function BuildSpellEffects(container)
   seAnimEditor._modelIDInput = modelIDInput
 
   -- Model Picker button
-  local modelPickerBtn = SW.CreateActionBtn(edContent, "Parcourir", pickerBtnW,
+  local modelPickerBtn = SW.CreateActionBtn(edContent, L["SETTINGS_BROWSE_BTN"], pickerBtnW,
     { 0.10, 0.10, 0.16, 0.9 }, nil, Theme.accent)
   modelPickerBtn:SetPoint("LEFT", modelIDInputBg, "RIGHT", 4, 0)
 
   -- Preview button (loop toggle)
-  local previewBtn = SW.CreateActionBtn(edContent, "> Preview", previewBtnW,
+  local previewBtn = SW.CreateActionBtn(edContent, L["SETTINGS_PREVIEW_BTN"], previewBtnW,
     { 0.08, 0.08, 0.16, 0.9 }, nil, Theme.accent)
   previewBtn:SetPoint("LEFT", modelPickerBtn, "RIGHT", 4, 0)
   previewBtn:SetScript("OnLeave", function(s)
@@ -4436,7 +4437,7 @@ local function BuildSpellEffects(container)
   strataLabel:SetFont(ns.Media.fontGui, 9)
   strataLabel:SetPoint("LEFT", strataFrame, "LEFT", 0, 0)
   strataLabel:SetTextColor(unpack(Theme.textDim))
-  strataLabel:SetText("Couche :")
+  strataLabel:SetText(L["SETTINGS_LAYER"])
 
   local strataBgBtn = CreateFrame("Button", nil, strataFrame)
   strataBgBtn:SetSize(80, 18)
@@ -4454,7 +4455,7 @@ local function BuildSpellEffects(container)
   strataBgLabel:SetFont(ns.Media.fontGui, 9)
   strataBgLabel:SetPoint("LEFT", strataBgRing, "RIGHT", 4, 0)
   strataBgLabel:SetTextColor(unpack(Theme.textNormal))
-  strataBgLabel:SetText("Arrière-plan")
+  strataBgLabel:SetText(L["SETTINGS_LAYER_BACKGROUND"])
 
   local strataFgBtn = CreateFrame("Button", nil, strataFrame)
   strataFgBtn:SetSize(80, 18)
@@ -4472,7 +4473,7 @@ local function BuildSpellEffects(container)
   strataFgLabel:SetFont(ns.Media.fontGui, 9)
   strataFgLabel:SetPoint("LEFT", strataFgRing, "RIGHT", 4, 0)
   strataFgLabel:SetTextColor(unpack(Theme.textNormal))
-  strataFgLabel:SetText("Moyen plan")
+  strataFgLabel:SetText(L["SETTINGS_LAYER_MIDGROUND"])
 
   local strataTopBtn = CreateFrame("Button", nil, strataFrame)
   strataTopBtn:SetSize(85, 18)
@@ -4490,7 +4491,7 @@ local function BuildSpellEffects(container)
   strataTopLabel:SetFont(ns.Media.fontGui, 9)
   strataTopLabel:SetPoint("LEFT", strataTopRing, "RIGHT", 4, 0)
   strataTopLabel:SetTextColor(unpack(Theme.textNormal))
-  strataTopLabel:SetText("Premier plan")
+  strataTopLabel:SetText(L["SETTINGS_LAYER_FOREGROUND"])
 
   local function RefreshStrataRadio()
     local db, key = GetActiveComboTable()
@@ -4563,19 +4564,19 @@ local function BuildSpellEffects(container)
 
   local sliderDefs = {
     -- Ligne 1 : X, Y, Z
-    { key = "x",         label = "X Offset",   min = -30, max = 30,  step = 0.01, fmt = "%.2f" },
-    { key = "y",         label = "Y Offset",   min = -30, max = 30,  step = 0.01, fmt = "%.2f" },
-    { key = "z",         label = "Z (prof.)",  min = -30, max = 30,  step = 0.01, fmt = "%.2f" },
+    { key = "x",         label = L["SETTINGS_ANIM_X_OFFSET"], min = -30, max = 30,  step = 0.01, fmt = "%.2f" },
+    { key = "y",         label = L["SETTINGS_ANIM_Y_OFFSET"], min = -30, max = 30,  step = 0.01, fmt = "%.2f" },
+    { key = "z",         label = L["SETTINGS_AXIS_Z_DEPTH"],  min = -30, max = 30,  step = 0.01, fmt = "%.2f" },
     -- Ligne 2 : Échelle, Rotation, Opacité
-    { key = "scale",     label = "Échelle",    min = 0.1, max = 5,   step = 0.01, fmt = "%.2f" },
-    { key = "rotation",  label = "Rotation",   min = 0,   max = 360, step = 0.1,  fmt = "%.1f" },
-    { key = "alpha",     label = "Opacité",    min = 0,   max = 1,   step = 0.01, fmt = "%.2f" },
+    { key = "scale",     label = L["SETTINGS_SCALE"],    min = 0.1, max = 5,   step = 0.01, fmt = "%.2f" },
+    { key = "rotation",  label = L["SETTINGS_ROTATION"],   min = 0,   max = 360, step = 0.1,  fmt = "%.1f" },
+    { key = "alpha",     label = L["SETTINGS_OPACITY"],    min = 0,   max = 1,   step = 0.01, fmt = "%.2f" },
     -- Ligne 3 : Offset X (Pos. X), Offset Y (Pos. Y), Délai
-    { key = "anchorX",   label = "Pos. X",     min = -800, max = 800, step = 1,   fmt = "%.0f" },
-    { key = "anchorY",   label = "Pos. Y",     min = -800, max = 800, step = 1,   fmt = "%.0f" },
-    { key = "delay",     label = "Délai",      min = 0,   max = 3,   step = 0.01, fmt = "%.2f" },
+    { key = "anchorX",   label = L["SETTINGS_POS_X"],     min = -800, max = 800, step = 1,   fmt = "%.0f" },
+    { key = "anchorY",   label = L["SETTINGS_POS_Y"],     min = -800, max = 800, step = 1,   fmt = "%.0f" },
+    { key = "delay",     label = L["SETTINGS_DELAY"],      min = 0,   max = 3,   step = 0.01, fmt = "%.2f" },
     -- Ligne 4 : Durée
-    { key = "duration",  label = "Durée",      min = 0.1, max = 30,  step = 0.01, fmt = "%.2f" },
+    { key = "duration",  label = L["SETTINGS_DURATION"],      min = 0.1, max = 30,  step = 0.01, fmt = "%.2f" },
   }
 
   seAnimEditor._sliders = {}
@@ -4651,7 +4652,7 @@ local function BuildSpellEffects(container)
     bg:SetAllPoints(); bg:SetColorTexture(0.18, 0.06, 0.06, 0.9)
     stopBtn.text = stopBtn:CreateFontString(nil, "OVERLAY")
     stopBtn.text:SetFont(ns.Media.fontGui, 11); stopBtn.text:SetPoint("CENTER")
-    stopBtn.text:SetText("x Stopper toutes les anims")
+    stopBtn.text:SetText(L["SETTINGS_STOP_ALL_ANIMS"])
     stopBtn.text:SetTextColor(1, 0.4, 0.4)
     stopBtn:SetScript("OnEnter", function(s) s.text:SetTextColor(1,1,1) end)
     stopBtn:SetScript("OnLeave", function(s) s.text:SetTextColor(1, 0.4, 0.4) end)
@@ -4664,9 +4665,9 @@ local function BuildSpellEffects(container)
       -- Relancer les décorations réelles
       if SE and SE.RefreshDecorations then SE.RefreshDecorations() end
       -- Reset preview button states
-      previewBtn._lbl:SetText("> Preview")
+      previewBtn._lbl:SetText(L["SETTINGS_PREVIEW_BTN"])
       previewBtn._lbl:SetTextColor(unpack(Theme.accent))
-      previewComboBtn._lbl:SetText("> Preview Combo")
+      previewComboBtn._lbl:SetText(L["SETTINGS_PREVIEW_COMBO_BTN"])
       previewComboBtn._lbl:SetTextColor(unpack(Theme.accent))
     end)
   end
@@ -4860,7 +4861,7 @@ local function BuildSpellEffects(container)
 
     local db, key = GetActiveComboTable()
     if not db or not key then
-      seAnimList._rightTitle:SetText("Combo (aucune sélection)")
+      seAnimList._rightTitle:SetText(L["SETTINGS_COMBO_NO_SELECTION"])
       return
     end
 
@@ -4868,20 +4869,20 @@ local function BuildSpellEffects(container)
     local titleText = ""
     if seActiveSection == "spells" then
       local name = GetSpellInfo3D(key)
-      titleText = "Combo : " .. (name or "?")
+      titleText = string.format(L["SETTINGS_COMBO_TITLE"], name or "?")
     elseif seActiveSection == "orbs" then
       local triggers = GetClassOrbTriggers()
       for _, t in ipairs(triggers) do
-        if OrbKeyForClass(t.key) == key then titleText = "Combo : " .. t.label; break end
+        if OrbKeyForClass(t.key) == key then titleText = string.format(L["SETTINGS_COMBO_TITLE"], t.label); break end
       end
     elseif seActiveSection == "ooc" then
       local triggers = GetOocTriggers()
       for _, t in ipairs(triggers) do
-        if t.key == key then titleText = "Combo : " .. t.label; break end
+        if t.key == key then titleText = string.format(L["SETTINGS_COMBO_TITLE"], t.label); break end
       end
     elseif seActiveSection == "auras" then
       local name = GetSpellInfo3D(key)
-      titleText = "Combo : " .. (name or "?")
+      titleText = string.format(L["SETTINGS_COMBO_TITLE"], name or "?")
     end
     seAnimList._rightTitle:SetText(titleText)
 
@@ -4924,11 +4925,11 @@ local function BuildSpellEffects(container)
     -- Stop any running preview loop when switching
     local SE = ns.Modules.SpellEffects
     if SE and SE.StopPreview then SE.StopPreview() end
-    previewBtn._lbl:SetText("> Preview")
+    previewBtn._lbl:SetText(L["SETTINGS_PREVIEW_BTN"])
     previewBtn._lbl:SetTextColor(unpack(Theme.accent))
 
     if hasAnim then
-      seAnimEditor._title:SetText(string.format("Animation #%d", seSelectedAnimIdx))
+      seAnimEditor._title:SetText(string.format(L["SETTINGS_ANIMATION_NUM"], seSelectedAnimIdx))
       seAnimEditor._modelIDInput:SetText(tostring(anim.modelID or 0))
       -- Model name
       local mName = GetModelNameByFileID(anim.modelID or 0)
@@ -4939,7 +4940,7 @@ local function BuildSpellEffects(container)
       end
       if seAnimEditor._refreshStrata then seAnimEditor._refreshStrata() end
     else
-      seAnimEditor._title:SetText("Éditeur d'animation (aucune sélection)")
+      seAnimEditor._title:SetText(L["SETTINGS_ANIM_EDITOR_NO_SELECTION"])
       seAnimEditor._modelIDInput:SetText("")
       seAnimEditor._modelNameLabel:SetText("")
       for _, sl in pairs(seAnimEditor._sliders) do
@@ -5104,12 +5105,12 @@ local function BuildSpellEffects(container)
     end
 
     if #buffs > 0 then
-      MakeSectionLabel("BUFFS JOUEUR", 0.40, 0.85, 0.40)
+      MakeSectionLabel(L["SETTINGS_PLAYER_BUFFS"], 0.40, 0.85, 0.40)
       AddGroup(buffs)
     end
     if #debuffs > 0 then
       if #buffs > 0 then yy = yy + 4 end
-      MakeSectionLabel("DEBUFFS CIBLE", 0.90, 0.38, 0.38)
+      MakeSectionLabel(L["SETTINGS_TARGET_DEBUFFS"], 0.90, 0.38, 0.38)
       AddGroup(debuffs)
     end
 
@@ -5159,7 +5160,7 @@ local function BuildSpellEffects(container)
       ptitle:SetFont(ns.Media.fontTitle, 11, "OUTLINE")
       ptitle:SetPoint("TOP", pf, "TOP", 0, -8)
       ptitle:SetTextColor(unpack(Theme.accent))
-      ptitle:SetText("Choisir un sort")
+      ptitle:SetText(L["SETTINGS_SPELL_PICKER_TITLE"])
 
       local pclose = CreateFrame("Button", nil, pf)
       pclose:SetSize(18, 18)
@@ -5320,9 +5321,9 @@ local function BuildSpellEffects(container)
           end
         end
         -- Mettre le bouton Preview en état "Stop"
-        previewBtn._lbl:SetText("¦ Stop")
+        previewBtn._lbl:SetText(L["SETTINGS_STOP_BTN"])
         previewBtn._lbl:SetTextColor(0.3, 1, 0.3)
-        previewComboBtn._lbl:SetText("> Preview Combo")
+        previewComboBtn._lbl:SetText(L["SETTINGS_PREVIEW_COMBO_BTN"])
         previewComboBtn._lbl:SetTextColor(unpack(Theme.accent))
       end
       PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
@@ -5348,9 +5349,9 @@ local function BuildSpellEffects(container)
         if SE.RefreshDecorations then SE.RefreshDecorations() end
       end
       -- Reset preview buttons
-      previewBtn._lbl:SetText("> Preview")
+      previewBtn._lbl:SetText(L["SETTINGS_PREVIEW_BTN"])
       previewBtn._lbl:SetTextColor(unpack(Theme.accent))
-      previewComboBtn._lbl:SetText("> Preview Combo")
+      previewComboBtn._lbl:SetText(L["SETTINGS_PREVIEW_COMBO_BTN"])
       previewComboBtn._lbl:SetTextColor(unpack(Theme.accent))
     end
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
@@ -5387,14 +5388,14 @@ local function BuildSpellEffects(container)
         SE.StopDecoPreview()
         ClearOrbColorPreview()
         SE.RefreshDecorations()
-        previewComboBtn._lbl:SetText("> Preview Combo")
+        previewComboBtn._lbl:SetText(L["SETTINGS_PREVIEW_COMBO_BTN"])
         previewComboBtn._lbl:SetTextColor(unpack(Theme.accent))
         return
       end
     else
       if SE.IsComboPreviewLooping and SE.IsComboPreviewLooping() then
         SE.StopComboPreview()
-        previewComboBtn._lbl:SetText("> Preview Combo")
+        previewComboBtn._lbl:SetText(L["SETTINGS_PREVIEW_COMBO_BTN"])
         previewComboBtn._lbl:SetTextColor(unpack(Theme.accent))
         return
       end
@@ -5403,7 +5404,7 @@ local function BuildSpellEffects(container)
     -- Stopper l'autre type de preview si actif
     if SE.IsPreviewLooping and SE.IsPreviewLooping() then
       SE.StopPreview()
-      previewBtn._lbl:SetText("> Preview")
+      previewBtn._lbl:SetText(L["SETTINGS_PREVIEW_BTN"])
       previewBtn._lbl:SetTextColor(unpack(Theme.accent))
     end
     if SE.IsDecoPreviewActive and SE.IsDecoPreviewActive() then
@@ -5423,7 +5424,7 @@ local function BuildSpellEffects(container)
     else
       SE.PreviewComboLoop(combo, GetPreviewAnchor())
     end
-    previewComboBtn._lbl:SetText("¦ Stop Combo")
+    previewComboBtn._lbl:SetText(L["SETTINGS_STOP_COMBO_BTN"])
     previewComboBtn._lbl:SetTextColor(0.3, 1, 0.3)
   end)
 
@@ -5440,14 +5441,14 @@ local function BuildSpellEffects(container)
         SE.StopDecoPreview()
         ClearOrbColorPreview()
         SE.RefreshDecorations()
-        previewBtn._lbl:SetText("> Preview")
+        previewBtn._lbl:SetText(L["SETTINGS_PREVIEW_BTN"])
         previewBtn._lbl:SetTextColor(unpack(Theme.accent))
         return
       end
     else
       if SE.IsPreviewLooping and SE.IsPreviewLooping() then
         SE.StopPreview()
-        previewBtn._lbl:SetText("> Preview")
+        previewBtn._lbl:SetText(L["SETTINGS_PREVIEW_BTN"])
         previewBtn._lbl:SetTextColor(unpack(Theme.accent))
         return
       end
@@ -5456,7 +5457,7 @@ local function BuildSpellEffects(container)
     -- Stopper l'autre type de preview si actif
     if SE.IsComboPreviewLooping and SE.IsComboPreviewLooping() then
       SE.StopComboPreview()
-      previewComboBtn._lbl:SetText("> Preview Combo")
+      previewComboBtn._lbl:SetText(L["SETTINGS_PREVIEW_COMBO_BTN"])
       previewComboBtn._lbl:SetTextColor(unpack(Theme.accent))
     end
     if SE.IsDecoPreviewActive and SE.IsDecoPreviewActive() then
@@ -5477,7 +5478,7 @@ local function BuildSpellEffects(container)
     else
       SE.PreviewLoop(combo[seSelectedAnimIdx], GetPreviewAnchor())
     end
-    previewBtn._lbl:SetText("¦ Stop")
+    previewBtn._lbl:SetText(L["SETTINGS_STOP_BTN"])
     previewBtn._lbl:SetTextColor(0.3, 1, 0.3)
   end)
 
@@ -5504,9 +5505,9 @@ local function BuildSpellEffects(container)
             SE.StartDecoPreview({ combo[seSelectedAnimIdx] }, GetPreviewAnchor())
           end
         end
-        previewBtn._lbl:SetText("¦ Stop")
+        previewBtn._lbl:SetText(L["SETTINGS_STOP_BTN"])
         previewBtn._lbl:SetTextColor(0.3, 1, 0.3)
-        previewComboBtn._lbl:SetText("> Preview Combo")
+        previewComboBtn._lbl:SetText(L["SETTINGS_PREVIEW_COMBO_BTN"])
         previewComboBtn._lbl:SetTextColor(unpack(Theme.accent))
       end
       PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
@@ -5595,44 +5596,40 @@ local function BuildXPBar(container)
   local ctx = NewLayout(container)
   local W = CONTENT_W
 
-  ctx:Add(SW.CreateSectionHeader(container, "Barre d'Expérience", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_XP_BAR"], W))
 
   local cb = ctx:Add(SW.CreateCheckbox(container,
-    "Activer la barre d'XP",
-    "Affiche une barre XP en bas lors d'un gain d'expérience (4s)\n" ..
-    "ou au survol du coin bas-gauche.\n" ..
-    "Masquée automatiquement au niveau maximum.", W))
+    L["SETTINGS_XP_ENABLE"],
+    L["SETTINGS_XP_ENABLE_TT"], W))
   BindCheckbox(cb, "xpBar", "enabled")
 
   local cbRest = ctx:Add(SW.CreateCheckbox(container,
-    "Afficher l'indicateur de Zone de repos",
-    "Affiche une animation 3D (modèle du jeu) lorsque le joueur\n" ..
-    "est en zone de repos (auberge, capitale).", W))
+    L["SETTINGS_XP_REST_INDICATOR"],
+    L["SETTINGS_XP_REST_INDICATOR_TT"], W))
   BindCheckbox(cbRest, "xpBar", "restIndicator")
 
   local cbRestPreview = ctx:Add(SW.CreateCheckbox(container,
-    "  ? Prévisualiser (forcer l'affichage)",
-    "Force l'affichage de l'indicateur pour pouvoir le positionner,\n" ..
-    "même si vous n'êtes pas en zone de repos.", W))
+    L["SETTINGS_XP_REST_PREVIEW"],
+    L["SETTINGS_XP_REST_PREVIEW_TT"], W))
   cbRestPreview:SetChecked(false)
   cbRestPreview.onChanged = function(val)
     if ns.Modules.XPBar then ns.Modules.XPBar.SetRestPreview(val) end
   end
 
   local _xpSL3 = math.floor((W - 16) / 3)
-  local slRestX = SW.CreateSlider(container, "Repos – X", -300, 600, 1, _xpSL3)
+  local slRestX = SW.CreateSlider(container, L["SETTINGS_XP_REST_X"], -300, 600, 1, _xpSL3)
   slRestX:SetValue(DBGet("xpBar", "restX") or 0)
   slRestX.onChanged = function(val)
     DBSet("xpBar", "restX", val)
     if ns.Modules.XPBar then ns.Modules.XPBar.ApplyRestModelCfg() end
   end
-  local slRestY = SW.CreateSlider(container, "Repos – Y", -100, 400, 1, _xpSL3)
+  local slRestY = SW.CreateSlider(container, L["SETTINGS_XP_REST_Y"], -100, 400, 1, _xpSL3)
   slRestY:SetValue(DBGet("xpBar", "restY") or 0)
   slRestY.onChanged = function(val)
     DBSet("xpBar", "restY", val)
     if ns.Modules.XPBar then ns.Modules.XPBar.ApplyRestModelCfg() end
   end
-  local slRestScale = SW.CreateSlider(container, "Repos – Échelle", 0.3, 4.0, 0.05, _xpSL3)
+  local slRestScale = SW.CreateSlider(container, L["SETTINGS_XP_REST_SCALE"], 0.3, 4.0, 0.05, _xpSL3)
   slRestScale:SetValue(DBGet("xpBar", "restScale") or 1.0)
   slRestScale.onChanged = function(val)
     DBSet("xpBar", "restScale", val)
@@ -5641,18 +5638,16 @@ local function BuildXPBar(container)
   ctx:AddRow(8, slRestX, slRestY, slRestScale)
 
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Comportement au niveau maximum", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_MAX_LEVEL_BEHAVIOR"], W))
 
   local cbComp = ctx:Add(SW.CreateCheckbox(container,
-    "Suivi de l'XP du compagnon de gouffre",
-    "Dans un gouffre, affiche l'XP du compagnon\n" ..
-    "à la place de la réputation.\n" ..
-    "Prioritaire sur la réputation, uniquement en gouffre.", W))
+    L["SETTINGS_XP_COMPANION"],
+    L["SETTINGS_XP_COMPANION_TT"], W))
   BindCheckbox(cbComp, "xpBar", "companionXP")
 
   local cbRep = ctx:Add(SW.CreateCheckbox(container,
-    "Suivi des Réputations et des Renoms",
-    "Au niveau maximum, remplace la barre d'XP par la réputation.\n", W))
+    L["SETTINGS_XP_REP_TRACKING"],
+    L["SETTINGS_XP_REP_TRACKING_TT"], W))
   BindCheckbox(cbRep, "xpBar", "repEnabled")
 
 
@@ -5660,13 +5655,13 @@ local function BuildXPBar(container)
   local rg = ctx:Add(SW.CreateRadioGroup(container, {
     {
       value   = "tracked",
-      label   = "Réputation suivie (Fixe)",
-      tooltip = "Affiche en permanence la réputation actuellement\nsuivie dans le panneau Réputations.",
+      label   = L["SETTINGS_XP_REP_TRACKED"],
+      tooltip = L["SETTINGS_XP_REP_TRACKED_TT"],
     },
     {
       value   = "lastGained",
-      label   = "Dernière réputation augmentée (Dynamique)",
-      tooltip = "Affiche la réputation qui a récemment progressé,\njusqu'au prochain gain de réputation.",
+      label   = L["SETTINGS_XP_REP_LAST_GAINED"],
+      tooltip = L["SETTINGS_XP_REP_LAST_GAINED_TT"],
     },
   }, W))
   rg:SetValue(DBGet("xpBar", "repDisplayMode") or "tracked")
@@ -5693,8 +5688,8 @@ local function BuildXPBar(container)
   end
 
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, "Badge de niveau — Police", W))
-  local ddXPFont = ctx:Add(SW.CreateDropdown(container, "Police badge / niveau", ns.GetFontList(), 220))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_LEVEL_BADGE_FONT"], W))
+  local ddXPFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_XP_BADGE_FONT"], ns.GetFontList(), 220))
   BindDropdown(ddXPFont, "xpBar", "fontLevel")
 
   ctx:Finalize()
@@ -5710,7 +5705,7 @@ local function BuildPriorityBar(container)
   local ctx = NewLayout(container)
   local W = CONTENT_W
 
-  ctx:Add(SW.CreateSectionHeader(container, "Priority Bar", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_PRIORITY_BAR"], W))
 
   ---------------------------------------------------------------------------
   -- Disposition (5 choix visuels, spec-specific)
@@ -5725,11 +5720,11 @@ local function BuildPriorityBar(container)
       ["6x6"]     = "layout_6x6",
     }
     local LAYOUT_LABELS = {
-      ["2x2"]     = "2×2",
-      ["3x3"]     = "3×3",
-      ["4x4line"] = "4×4 Inline",
-      ["4x4sq"]   = "4×4 Carré",
-      ["6x6"]     = "6×6",
+      ["2x2"]     = L["SETTINGS_LAYOUT_2X2"],
+      ["3x3"]     = L["SETTINGS_LAYOUT_3X3"],
+      ["4x4line"] = L["SETTINGS_LAYOUT_4X4_INLINE"],
+      ["4x4sq"]   = L["SETTINGS_LAYOUT_4X4_SQUARE"],
+      ["6x6"]     = L["SETTINGS_LAYOUT_6X6"],
     }
     -- Les textures layout_*.tga font 230x80px (ratio ~2.875:1) : on dimensionne
     -- l'icone en consequence pour eviter tout etirement.
@@ -5779,7 +5774,7 @@ local function BuildPriorityBar(container)
       clbl:SetText(LAYOUT_LABELS[lk] or lk)
 
       local actTx = card:CreateFontString(nil, "OVERLAY"); actTx:SetFont(ns.Media.fontGui, 8); actTx:SetPoint("BOTTOM", 0, 4)
-      actTx:SetTextColor(unpack(Theme.accent)); actTx:SetText("ACTIF")
+      actTx:SetTextColor(unpack(Theme.accent)); actTx:SetText(L["SETTINGS_ACTIVE_BADGE"])
       actTx:SetShown(isAct)
 
       layoutCards[#layoutCards + 1] = { key = lk, card = card, ico = ico, lbl = clbl, actTx = actTx }
@@ -5833,27 +5828,27 @@ local function BuildPriorityBar(container)
   end
 
   -- Activer
-  local cbPB = ctx:Add(SW.CreateCheckbox(container, "Activer la Priority Bar",
-    "Affiche 4 icônes de sort de part et d'autre du cercle en combat.", W))
+  local cbPB = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_ENABLE"],
+    L["SETTINGS_PB_ENABLE_TT"], W))
   BindCheckbox(cbPB, "priorityBar", "enabled")
 
   ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, "Visibilité", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_VISIBILITY"], W))
   MakeModeRadio(container, ctx, W, "priorityBar", {
-    { "always",  "Toujours visible",    "Affiche la barre en permanence." },
-    { "target",  "Cible seulement",     "Affiche la barre uniquement quand une cible est sélectionnée." },
-    { "combat",  "En Combat seulement", "Affiche la barre uniquement en combat (comportement par défaut)." },
+    { "always",  L["SETTINGS_VIS_ALWAYS"],    L["SETTINGS_PB_VIS_ALWAYS_TT"] },
+    { "target",  L["SETTINGS_VIS_TARGET"],    L["SETTINGS_PB_VIS_TARGET_TT"] },
+    { "combat",  L["SETTINGS_VIS_COMBAT"],    L["SETTINGS_PB_VIS_COMBAT_TT"] },
   }, "combat")
 
   local _pbSL2 = math.floor((W - 8) / 2)
   local _pbSL3 = math.floor((W - 16) / 3)
-  local slPBSize = SW.CreateSlider(container, "Taille icônes", 16, 80, 1, _pbSL2)
+  local slPBSize = SW.CreateSlider(container, L["SETTINGS_PB_ICON_SIZE"], 16, 80, 1, _pbSL2)
   BindSlider(slPBSize, "priorityBar", "iconSize")
-  local slPBSpacing = SW.CreateSlider(container, "Espacement", 0, 30, 1, _pbSL2)
+  local slPBSpacing = SW.CreateSlider(container, L["SETTINGS_SPACING"], 0, 30, 1, _pbSL2)
   BindSlider(slPBSpacing, "priorityBar", "iconSpacing")
   ctx:AddRow(8, slPBSize, slPBSpacing)
 
-  local slPBOffset = SW.CreateSlider(container, "Distance horiz.", 50, 400, 1, _pbSL2)
+  local slPBOffset = SW.CreateSlider(container, L["SETTINGS_PB_HORIZ_DISTANCE"], 50, 400, 1, _pbSL2)
   BindSlider(slPBOffset, "priorityBar", "sideOffset")
   local origOff = slPBOffset.onChanged
   slPBOffset.onChanged = function(val)
@@ -5861,7 +5856,7 @@ local function BuildPriorityBar(container)
     if PB and PB.ClearDragPositions then PB.ClearDragPositions() end
     origOff(val)
   end
-  local slPBVert = SW.CreateSlider(container, "Décalage vert.", -500, 500, 1, _pbSL2)
+  local slPBVert = SW.CreateSlider(container, L["SETTINGS_VERTICAL_OFFSET"], -500, 500, 1, _pbSL2)
   BindSlider(slPBVert, "priorityBar", "verticalOffset")
   local origVert = slPBVert.onChanged
   slPBVert.onChanged = function(val)
@@ -5873,89 +5868,89 @@ local function BuildPriorityBar(container)
 
   ctx:Spacer(4)
 
-  local cbSwipe = ctx:Add(SW.CreateCheckbox(container, "Afficher le cooldown swipe",
-    "Anime un arc de cercle sur l'icône quand le sort est en cooldown.", W))
+  local cbSwipe = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_SHOW_SWIPE"],
+    L["SETTINGS_PB_SHOW_SWIPE_TT"], W))
   BindCheckbox(cbSwipe, "priorityBar", "showCooldownSwipe")
 
-  local cbDesat = ctx:Add(SW.CreateCheckbox(container, "Griser en cooldown",
-    "Désature l'icône quand le sort est en cooldown.", W))
+  local cbDesat = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_DESATURATE"],
+    L["SETTINGS_PB_DESATURATE_TT"], W))
   BindCheckbox(cbDesat, "priorityBar", "desaturateOnCooldown")
 
-  local cbHideUnlearned = ctx:Add(SW.CreateCheckbox(container, "Masquer les sorts non appris",
-    "Cache les icônes des sorts qui ne sont pas connus\n(pas le bon talent, pas le niveau, mauvaise spé).", W))
+  local cbHideUnlearned = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_HIDE_UNLEARNED"],
+    L["SETTINGS_PB_HIDE_UNLEARNED_TT"], W))
   BindCheckbox(cbHideUnlearned, "priorityBar", "hideUnlearned")
 
   ctx:Spacer(4)
 
   -- Bordure
-  ctx:Add(SW.CreateSectionHeader(container, "Bordure", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_BORDER"], W))
 
-  local cbBorder = ctx:Add(SW.CreateCheckbox(container, "Afficher la bordure", "", W))
+  local cbBorder = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_SHOW_BORDER"], "", W))
   BindCheckbox(cbBorder, "priorityBar", "showBorder")
 
-  local ddBorderStyle = ctx:Add(SW.CreateDropdown(container, "Style", {
-    { value = "solid",  text = "Solide"    },
-    { value = "glow",   text = "Lumineuse" },
-    { value = "shadow", text = "Ombree"    },
+  local ddBorderStyle = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_STYLE"], {
+    { value = "solid",  text = L["SETTINGS_BORDER_SOLID"]  },
+    { value = "glow",   text = L["SETTINGS_BORDER_GLOW"]   },
+    { value = "shadow", text = L["SETTINGS_BORDER_SHADOW"] },
   }, W))
   BindDropdown(ddBorderStyle, "priorityBar", "borderStyle")
 
-  local slBorderSize = ctx:Add(SW.CreateSlider(container, "Épaisseur", 1, 6, 1, W))
+  local slBorderSize = ctx:Add(SW.CreateSlider(container, L["SETTINGS_THICKNESS"], 1, 6, 1, W))
   BindSlider(slBorderSize, "priorityBar", "borderSize")
 
-  local colBorder = ctx:Add(SW.CreateColorButton(container, "Couleur de bordure", W))
+  local colBorder = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_BORDER_COLOR"], W))
   BindColorButton(colBorder, "priorityBar", "borderColor")
 
   ctx:Spacer(4)
 
   -- Texte de cooldown
-  ctx:Add(SW.CreateSectionHeader(container, "Texte de Cooldown", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_COOLDOWN_TEXT"], W))
 
-  local cbCDText = ctx:Add(SW.CreateCheckbox(container, "Afficher le cooldown", "", W))
+  local cbCDText = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_SHOW_COOLDOWN"], "", W))
   BindCheckbox(cbCDText, "priorityBar", "showCooldownText")
 
-  local slCDFont = ctx:Add(SW.CreateSlider(container, "Taille police", 8, 24, 1, W))
+  local slCDFont = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 8, 24, 1, W))
   BindSlider(slCDFont, "priorityBar", "cooldownFontSize")
 
-  local colCDText = ctx:Add(SW.CreateColorButton(container, "Couleur du texte", W))
+  local colCDText = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TEXT_COLOR"], W))
   BindColorButton(colCDText, "priorityBar", "cooldownTextColor")
 
   ctx:Spacer(4)
 
   -- Charges
-  ctx:Add(SW.CreateSectionHeader(container, "Charges", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_CHARGES"], W))
 
-  local cbCharges = ctx:Add(SW.CreateCheckbox(container, "Afficher les charges", "", W))
+  local cbCharges = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_SHOW_CHARGES"], "", W))
   BindCheckbox(cbCharges, "priorityBar", "showCharges")
 
-  local ddChargePos = ctx:Add(SW.CreateDropdown(container, "Position", {
-    { value = "TOPLEFT",     text = "Haut-gauche"  },
-    { value = "TOP",         text = "Haut"         },
-    { value = "TOPRIGHT",    text = "Haut-droite"  },
-    { value = "LEFT",        text = "Gauche"       },
-    { value = "CENTER",      text = "Centre"       },
-    { value = "RIGHT",       text = "Droite"       },
-    { value = "BOTTOMLEFT",  text = "Bas-gauche"   },
-    { value = "BOTTOM",      text = "Bas"          },
-    { value = "BOTTOMRIGHT", text = "Bas-droite"   },
+  local ddChargePos = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_POSITION"], {
+    { value = "TOPLEFT",     text = L["SETTINGS_ANCHOR_TOPLEFT"]     },
+    { value = "TOP",         text = L["SETTINGS_ANCHOR_TOP"]         },
+    { value = "TOPRIGHT",    text = L["SETTINGS_ANCHOR_TOPRIGHT"]    },
+    { value = "LEFT",        text = L["SETTINGS_ANCHOR_LEFT"]        },
+    { value = "CENTER",      text = L["SETTINGS_ANCHOR_CENTER"]      },
+    { value = "RIGHT",       text = L["SETTINGS_ANCHOR_RIGHT"]       },
+    { value = "BOTTOMLEFT",  text = L["SETTINGS_ANCHOR_BOTTOMLEFT"]  },
+    { value = "BOTTOM",      text = L["SETTINGS_ANCHOR_BOTTOM"]      },
+    { value = "BOTTOMRIGHT", text = L["SETTINGS_ANCHOR_BOTTOMRIGHT"] },
   }, W))
   BindDropdown(ddChargePos, "priorityBar", "chargePosition")
 
-  local slChargeOffX = SW.CreateSlider(container, "Offset X", -20, 20, 1, _pbSL3)
+  local slChargeOffX = SW.CreateSlider(container, L["SETTINGS_PB_CHARGE_OFFSET_X"], -20, 20, 1, _pbSL3)
   BindSlider(slChargeOffX, "priorityBar", "chargeOffsetX")
-  local slChargeOffY = SW.CreateSlider(container, "Offset Y", -20, 20, 1, _pbSL3)
+  local slChargeOffY = SW.CreateSlider(container, L["SETTINGS_PB_CHARGE_OFFSET_Y"], -20, 20, 1, _pbSL3)
   BindSlider(slChargeOffY, "priorityBar", "chargeOffsetY")
-  local slChargeFont = SW.CreateSlider(container, "Taille police", 8, 24, 1, _pbSL3)
+  local slChargeFont = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 8, 24, 1, _pbSL3)
   BindSlider(slChargeFont, "priorityBar", "chargeFontSize")
   ctx:AddRow(8, slChargeOffX, slChargeOffY, slChargeFont)
 
-  local colCharges = ctx:Add(SW.CreateColorButton(container, "Couleur des charges", W))
+  local colCharges = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_PB_CHARGES_COLOR"], W))
   BindColorButton(colCharges, "priorityBar", "chargeColor")
 
   ctx:Spacer(4)
 
   -- Glow
-  ctx:Add(SW.CreateSectionHeader(container, "Glow (effet de surbrillance)", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_GLOW"], W))
 
   -- Single-icon glow preview
   local pvFrame = CreateFrame("Frame", nil, container)
@@ -6143,7 +6138,7 @@ local function BuildPriorityBar(container)
       loopGlowItems[#loopGlowItems + 1] = { value = idx, text = def.name }
     end
   end
-  local ddLoopGlow = ctx:Add(SW.CreateDropdown(container, "Type de glow (boucle)", loopGlowItems, W))
+  local ddLoopGlow = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_PB_LOOP_GLOW_TYPE"], loopGlowItems, W))
   BindDropdown(ddLoopGlow, "priorityBar", "loopGlowIndex")
 
   -- Build proc start dropdown items dynamically
@@ -6155,23 +6150,23 @@ local function BuildPriorityBar(container)
       procStartItems[#procStartItems + 1] = { value = idx, text = def.name }
     end
   end
-  local ddProcStart = ctx:Add(SW.CreateDropdown(container, "Animation d'entrée (proc start)", procStartItems, W))
+  local ddProcStart = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_PB_PROC_START_ANIM"], procStartItems, W))
   BindDropdown(ddProcStart, "priorityBar", "procStartIndex")
 
-  local colGlow = ctx:Add(SW.CreateColorButton(container, "Couleur du glow", W))
+  local colGlow = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_GLOW_COLOR"], W))
   BindColorButton(colGlow, "priorityBar", "glowColor")
 
-  local slGlowSize = ctx:Add(SW.CreateSlider(container, "Taille du glow", 0, 16, 1, W))
+  local slGlowSize = ctx:Add(SW.CreateSlider(container, L["SETTINGS_GLOW_SIZE"], 0, 16, 1, W))
   BindSlider(slGlowSize, "priorityBar", "glowSize")
 
-  local cbSpecColor = ctx:Add(SW.CreateCheckbox(container, "Utiliser la couleur de la spécialisation",
-    "Le glow prend la couleur 'Glow' définie dans le module Couleurs pour votre spec active.", W))
+  local cbSpecColor = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_USE_SPEC_COLOR"],
+    L["SETTINGS_PB_USE_SPEC_COLOR_TT"], W))
   BindCheckbox(cbSpecColor, "priorityBar", "useSpecGlowColor")
 
   ctx:Spacer(4)
 
   -- Bouton reset
-  local resetBtn = SW.CreateActionBtn(container, "Réinitialiser les positions", W,
+  local resetBtn = SW.CreateActionBtn(container, L["SETTINGS_PB_RESET_POSITIONS"], W,
     nil, Theme.gold, Theme.accent)
   resetBtn:SetScript("OnClick", function()
     local PB = ns.Modules.PriorityBar
@@ -6199,7 +6194,7 @@ local function BuildPriorityBar(container)
   ---------------------------------------------------------------------------
   -- Section editeur de slots (par spec)
   ---------------------------------------------------------------------------
-  ctx:Add(SW.CreateSectionHeader(container, "Sorts par Slot (Spec Active)", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SLOT_SPELLS"], W))
 
   local slotBaseY = ctx.y
 
@@ -6222,7 +6217,7 @@ local function BuildPriorityBar(container)
     title:SetFont(ns.Media.fontTitle, 11, "OUTLINE")
     title:SetPoint("TOP", f, "TOP", 0, -8)
     title:SetTextColor(unpack(Theme.accent))
-    title:SetText("Ajouter un sort")
+    title:SetText(L["SETTINGS_ADD_SPELL_TITLE"])
 
     local closeBtn = CreateFrame("Button", nil, f)
     closeBtn:SetSize(18, 18)
@@ -6351,9 +6346,9 @@ local function BuildPriorityBar(container)
     local HEAD_H = 26
 
     for slotIndex = 1, totalSlots do
-      local slotData = currentSlots[slotIndex] or { spellIDs = {}, name = allNames[slotIndex] or ("Slot "..slotIndex) }
+      local slotData = currentSlots[slotIndex] or { spellIDs = {}, name = allNames[slotIndex] or string.format(L["SETTINGS_SLOT_FALLBACK_NAME"], slotIndex) }
       local spellIDs = slotData.spellIDs or {}
-      local slotName = allNames[slotIndex] or slotData.name or ("Slot " .. slotIndex)
+      local slotName = allNames[slotIndex] or slotData.name or string.format(L["SETTINGS_SLOT_FALLBACK_NAME"], slotIndex)
 
       -- En-tête du slot
       local hdr = CreateFrame("Frame", nil, container)
@@ -6398,8 +6393,8 @@ local function BuildPriorityBar(container)
         nm:SetPoint("LEFT", ico, "RIGHT", 5, 0)
         nm:SetPoint("RIGHT", row, "RIGHT", -100, 0)
         nm:SetTextColor(unpack(Theme.textNormal))
-        local spellName = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)) or ("Sort#"..spellID)
-        nm:SetText(spellName or ("Sort#"..spellID))
+        local spellName = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)) or string.format(L["SETTINGS_SPELL_FALLBACK_HASH"], spellID)
+        nm:SetText(spellName or string.format(L["SETTINGS_SPELL_FALLBACK_HASH"], spellID))
 
         -- Pastille de couleur de glow individuelle
         local colorBtn = CreateFrame("Button", nil, row)
@@ -6460,9 +6455,9 @@ local function BuildPriorityBar(container)
         colorBtn:SetScript("OnEnter", function()
           cbBorder:SetColorTexture(1, 1, 1, 0.6)
           GameTooltip:SetOwner(colorBtn, "ANCHOR_TOP", 0, 4)
-          GameTooltip:SetText("Couleur de highlight", 1, 1, 1)
-          GameTooltip:AddLine("Clic gauche : définir une couleur de glow\nspécifique pour ce sort.", 0.7, 0.7, 0.7, true)
-          GameTooltip:AddLine("Clic droit : réinitialiser (utiliser la\ncouleur globale).", 0.6, 0.6, 0.6, true)
+          GameTooltip:SetText(L["SETTINGS_PB_HIGHLIGHT_COLOR"], 1, 1, 1)
+          GameTooltip:AddLine(L["SETTINGS_PB_HIGHLIGHT_COLOR_TT1"], 0.7, 0.7, 0.7, true)
+          GameTooltip:AddLine(L["SETTINGS_PB_HIGHLIGHT_COLOR_TT2"], 0.6, 0.6, 0.6, true)
           GameTooltip:Show()
         end)
         colorBtn:SetScript("OnLeave", function()
@@ -6525,7 +6520,7 @@ local function BuildPriorityBar(container)
       addBtn:SetScript("OnLeave", function() addBg:SetColorTexture(0.07,0.11,0.07,0.75) end)
       local addTxt = addBtn:CreateFontString(nil, "OVERLAY")
       addTxt:SetFont(ns.Media.fontGui, 10); addTxt:SetPoint("CENTER")
-      addTxt:SetTextColor(0.35, 0.9, 0.35); addTxt:SetText("+ Ajouter un sort")
+      addTxt:SetTextColor(0.35, 0.9, 0.35); addTxt:SetText(L["SETTINGS_ADD_SPELL_BTN"])
       local capturedSlot2 = slotIndex
       addBtn:SetScript("OnClick", function(self)
         if InCombatLockdown() then return end
@@ -6611,8 +6606,8 @@ local function BuildTopTargetBar(container)
   end
 
   -- Activer / désactiver le module
-  local cbTTB = ctx:Add(SW.CreateCheckbox(container, "Activer le Top Target",
-    "Affiche la barre de cible et cible-de-la-cible en haut de l'écran.", W))
+  local cbTTB = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_TTB_ENABLE"],
+    L["SETTINGS_TTB_ENABLE_TT"], W))
   cbTTB.onChanged = function(val)
     if not ns.DB              then ns.DB = {} end
     if not ns.DB.topTargetBar then ns.DB.topTargetBar = {} end
@@ -6629,8 +6624,8 @@ local function BuildTopTargetBar(container)
 
   -- Toggle : afficher la cible de la cible
   local cbShowTT = ctx:Add(SW.CreateCheckbox(container,
-    "Afficher la cible de la cible",
-    "Affiche la petite barre de vie de la cible de votre cible sous le Top Target.", W))
+    L["SETTINGS_TTB_SHOW_TOT"],
+    L["SETTINGS_TTB_SHOW_TOT_TT"], W))
   do
     local db  = ns.DB       and ns.DB.topTargetBar
     local def = ns.Defaults and ns.Defaults.topTargetBar
@@ -6648,8 +6643,8 @@ local function BuildTopTargetBar(container)
 
   -- Toggle : afficher la barre de ressource (énergie / mana / rage…)
   local cbShowPower = ctx:Add(SW.CreateCheckbox(container,
-    "Afficher la barre de ressource",
-    "Affiche la barre d'énergie/mana/rage de la cible sous la barre de vie (même style, couleur selon le type de puissance).", W))
+    L["SETTINGS_TTB_SHOW_POWER_BAR"],
+    L["SETTINGS_TTB_SHOW_POWER_BAR_TT"], W))
   do
     local db  = ns.DB       and ns.DB.topTargetBar
     local def = ns.Defaults and ns.Defaults.topTargetBar
@@ -6666,28 +6661,28 @@ local function BuildTopTargetBar(container)
   end
 
   ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, "Top Target - Conteneur", W))
-  ctx:Add(MakeTTBXYRow("x", "y", "X :", "Y :"))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_CONTAINER"], W))
+  ctx:Add(MakeTTBXYRow("x", "y", L["SETTINGS_AXIS_X"], L["SETTINGS_AXIS_Y"]))
 
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Top Target - Fond noir", W))
-  ctx:Add(MakeTTBXYRow("bgW",  "bgH",  "Larg :",    "Haut :"))
-  ctx:Add(MakeTTBXYRow("bgOX", "bgOY", "Offset X :", "Offset Y :"))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_BLACK_BG"], W))
+  ctx:Add(MakeTTBXYRow("bgW",  "bgH",  L["SETTINGS_WIDTH_SHORT"],    L["SETTINGS_HEIGHT_SHORT"]))
+  ctx:Add(MakeTTBXYRow("bgOX", "bgOY", L["SETTINGS_OFFSET_X_COLON"], L["SETTINGS_OFFSET_Y_COLON"]))
 
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Top Target - Barre colorée", W))
-  ctx:Add(MakeTTBXYRow("barW",  "barH",  "Larg :",    "Haut :"))
-  ctx:Add(MakeTTBXYRow("barOX", "barOY", "Offset X :", "Offset Y :"))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_COLORED_BAR"], W))
+  ctx:Add(MakeTTBXYRow("barW",  "barH",  L["SETTINGS_WIDTH_SHORT"],    L["SETTINGS_HEIGHT_SHORT"]))
+  ctx:Add(MakeTTBXYRow("barOX", "barOY", L["SETTINGS_OFFSET_X_COLON"], L["SETTINGS_OFFSET_Y_COLON"]))
 
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Top Target - Texte Nom", W))
-  local ddTTBNameFont = ctx:Add(SW.CreateDropdown(container, "Police", ns.GetFontList(), 220))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_NAME_TEXT"], W))
+  local ddTTBNameFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
   BindDropdown(ddTTBNameFont, "topTargetBar", "nameFont")
-  ctx:Add(MakeTTBXYRow("nameOX", "nameOY", "Offset X :", "Offset Y :"))
+  ctx:Add(MakeTTBXYRow("nameOX", "nameOY", L["SETTINGS_OFFSET_X_COLON"], L["SETTINGS_OFFSET_Y_COLON"]))
 
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Top Target - Texte HP", W))
-  local ddTTBHpFont = ctx:Add(SW.CreateDropdown(container, "Police", ns.GetFontList(), 220))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_HP_TEXT"], W))
+  local ddTTBHpFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
   BindDropdown(ddTTBHpFont, "topTargetBar", "hpFont")
 
   -- Ligne ancrage
@@ -6697,10 +6692,10 @@ local function BuildTopTargetBar(container)
     local ancLbl = ancRow:CreateFontString(nil, "OVERLAY")
     ancLbl:SetFont(ns.Media.fontGui, 10)
     ancLbl:SetTextColor(unpack(ns.Theme.textNormal))
-    ancLbl:SetText("Ancrage :")
+    ancLbl:SetText(L["SETTINGS_ANCHOR_COLON"])
     ancLbl:SetPoint("LEFT", ancRow, "LEFT", 0, 0)
     local ANCS   = { "LEFT",   "CENTER", "RIGHT"  }
-    local ANLBLS = { "Gauche", "Milieu", "Droite" }
+    local ANLBLS = { L["SETTINGS_ALIGN_LEFT"], L["SETTINGS_ANCHOR_MIDDLE"], L["SETTINGS_ALIGN_RIGHT"] }
     local ancBtns = {}
     for i, anc in ipairs(ANCS) do
       local btn = CreateFrame("Button", nil, ancRow)
@@ -6741,7 +6736,7 @@ local function BuildTopTargetBar(container)
     local szLbl = szRow:CreateFontString(nil, "OVERLAY")
     szLbl:SetFont(ns.Media.fontGui, 10)
     szLbl:SetTextColor(unpack(ns.Theme.textNormal))
-    szLbl:SetText("Taille :")
+    szLbl:SetText(L["SETTINGS_SIZE_COLON"])
     szLbl:SetPoint("LEFT", szRow, "LEFT", 0, 6)
     local szEb = CreateFrame("EditBox", nil, szRow, "InputBoxTemplate")
     SW.StyleEditBox(szEb)
@@ -6757,25 +6752,25 @@ local function BuildTopTargetBar(container)
     ctx:Add(szRow)
   end
 
-  ctx:Add(MakeTTBXYRow("hpOX", "hpOY", "Offset X :", "Offset Y :"))
+  ctx:Add(MakeTTBXYRow("hpOX", "hpOY", L["SETTINGS_OFFSET_X_COLON"], L["SETTINGS_OFFSET_Y_COLON"]))
 
   ctx:Spacer()
-  ctx:Add(SW.CreateSectionHeader(container, "Cible-de-la-Cible - Conteneur", W))
-  ctx:Add(MakeTTBXYRow("ttx", "tty", "X :", "Y :"))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TOT_CONTAINER"], W))
+  ctx:Add(MakeTTBXYRow("ttx", "tty", L["SETTINGS_AXIS_X"], L["SETTINGS_AXIS_Y"]))
 
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Cible-de-la-Cible - Fond noir", W))
-  ctx:Add(MakeTTBXYRow("ttBgW",  "ttBgH",  "Larg :",    "Haut :"))
-  ctx:Add(MakeTTBXYRow("ttBgOX", "ttBgOY", "Offset X :", "Offset Y :"))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TOT_BLACK_BG"], W))
+  ctx:Add(MakeTTBXYRow("ttBgW",  "ttBgH",  L["SETTINGS_WIDTH_SHORT"],    L["SETTINGS_HEIGHT_SHORT"]))
+  ctx:Add(MakeTTBXYRow("ttBgOX", "ttBgOY", L["SETTINGS_OFFSET_X_COLON"], L["SETTINGS_OFFSET_Y_COLON"]))
 
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Cible-de-la-Cible - Barre colorée", W))
-  ctx:Add(MakeTTBXYRow("ttBarW",  "ttBarH",  "Larg :",    "Haut :"))
-  ctx:Add(MakeTTBXYRow("ttBarOX", "ttBarOY", "Offset X :", "Offset Y :"))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TOT_COLORED_BAR"], W))
+  ctx:Add(MakeTTBXYRow("ttBarW",  "ttBarH",  L["SETTINGS_WIDTH_SHORT"],    L["SETTINGS_HEIGHT_SHORT"]))
+  ctx:Add(MakeTTBXYRow("ttBarOX", "ttBarOY", L["SETTINGS_OFFSET_X_COLON"], L["SETTINGS_OFFSET_Y_COLON"]))
 
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Cible-de-la-Cible - Texte Nom", W))
-  ctx:Add(MakeTTBXYRow("ttNameOX", "ttNameOY", "Offset X :", "Offset Y :"))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TOT_NAME_TEXT"], W))
+  ctx:Add(MakeTTBXYRow("ttNameOX", "ttNameOY", L["SETTINGS_OFFSET_X_COLON"], L["SETTINGS_OFFSET_Y_COLON"]))
 
   ctx:Finalize()
 end
@@ -6887,7 +6882,7 @@ local function BuildTargetAuras(container)
         end
       end
     end
-    for i, opt in ipairs({ {k="LEFT", l="Gauche"}, {k="RIGHT", l="Droite"} }) do
+    for i, opt in ipairs({ {k="LEFT", l=L["SETTINGS_ALIGN_LEFT"]}, {k="RIGHT", l=L["SETTINGS_ALIGN_RIGHT"]} }) do
       local b = CreateFrame("Button", nil, row, "BackdropTemplate")
       b:SetSize(ABTN_W, 22)
       b:SetPoint("LEFT", row, "LEFT", (i-1) * (ABTN_W + 4), 0)
@@ -6925,61 +6920,61 @@ local function BuildTargetAuras(container)
     ctx:Add(SW.CreateSectionHeader(container, title, W))
 
     -- Position de cette ligne d'auras
-    ctx:Add(SW.CreateSectionHeader(container, title .. " — Position", W))
-    ctx:Add(gXY("offsetX", "offsetY", "Offset X :", "Offset Y :"))
+    ctx:Add(SW.CreateSectionHeader(container, string.format(L["SETTINGS_TA_SEC_POSITION"], title), W))
+    ctx:Add(gXY("offsetX", "offsetY", L["SETTINGS_OFFSET_X_COLON"], L["SETTINGS_OFFSET_Y_COLON"]))
 
     -- Icônes : taille, espacement, max, largeur ligne
-    local slSize = SW.CreateSlider(container, "Taille icône", 14, 48, 1, _halfW)
+    local slSize = SW.CreateSlider(container, L["SETTINGS_TA_ICON_SIZE"], 14, 48, 1, _halfW)
     slSize:SetValue(gGet("iconSize") or 26)
     slSize.onChanged = function(val) gSet("iconSize", val) end
-    local slSpacing = SW.CreateSlider(container, "Espacement", 0, 10, 1, _halfW)
+    local slSpacing = SW.CreateSlider(container, L["SETTINGS_SPACING"], 0, 10, 1, _halfW)
     slSpacing:SetValue(gGet("iconSpacing") or 2)
     slSpacing.onChanged = function(val) gSet("iconSpacing", val) end
     ctx:AddRow(8, slSize, slSpacing)
 
-    local slMax = SW.CreateSlider(container, "Nombres par ligne", 1, 40, 1, _halfW)
+    local slMax = SW.CreateSlider(container, L["SETTINGS_TA_MAX_PER_ROW"], 1, 40, 1, _halfW)
     slMax:SetValue(gGet("maxAuras") or 16)
     slMax.onChanged = function(val) gSet("maxAuras", val) end
     ctx:AddRow(8, slMax)
 
-    local slNumRows = SW.CreateSlider(container, "Nombre de lignes", 1, 5, 1, _halfW)
+    local slNumRows = SW.CreateSlider(container, L["SETTINGS_TA_NUM_ROWS"], 1, 5, 1, _halfW)
     slNumRows:SetValue(gGet("numRows") or 1)
     slNumRows.onChanged = function(val) gSet("numRows", val) end
-    local slRowSpacing = SW.CreateSlider(container, "Espace entre lignes", 0, 20, 1, _halfW)
+    local slRowSpacing = SW.CreateSlider(container, L["SETTINGS_TA_ROW_SPACING"], 0, 20, 1, _halfW)
     slRowSpacing:SetValue(gGet("rowSpacing") or 2)
     slRowSpacing.onChanged = function(val) gSet("rowSpacing", val) end
     ctx:AddRow(8, slNumRows, slRowSpacing)
 
     local cbGrowUp = ctx:Add(SW.CreateCheckbox(container,
-      "Lignes vers le haut",
-      "Les nouvelles lignes s'ajoutent vers le haut au lieu du bas.", W))
+      L["SETTINGS_TA_GROW_UP"],
+      L["SETTINGS_TA_GROW_UP_TT"], W))
     cbGrowUp:SetChecked(gGet("growUpward") == true)
     cbGrowUp.onChanged = function(val) gSet("growUpward", val) end
 
     -- Option debuff joueur uniquement
     if group == "debuffs" then
       local cbOnlyPlayer = ctx:Add(SW.CreateCheckbox(container,
-        "Debuffs du joueur uniquement",
-        "N'affiche que les debuffs appliqués par le joueur.", W))
+        L["SETTINGS_TA_ONLY_PLAYER_DEBUFFS"],
+        L["SETTINGS_TA_ONLY_PLAYER_DEBUFFS_TT"], W))
       cbOnlyPlayer:SetChecked(gGet("onlyPlayer") == true)
       cbOnlyPlayer.onChanged = function(val) gSet("onlyPlayer", val) end
     end
 
     -- Ordre de tri
     ctx:Spacer(4)
-    ctx:Add(SW.CreateSectionHeader(container, title .. " — Tri", W))
+    ctx:Add(SW.CreateSectionHeader(container, string.format(L["SETTINGS_TA_SEC_SORT"], title), W))
     local SORT_MODES = {
-      { key = "playerFirst", label = "Joueur d'abord" },
-      { key = "shortFirst",  label = "Durée courte d'abord" },
-      { key = "longFirst",   label = "Durée longue d'abord" },
-      { key = "alpha",       label = "Alphabétique" },
-      { key = "index",       label = "Ordre Blizzard" },
+      { key = "playerFirst", label = L["SETTINGS_SORT_PLAYER_FIRST"] },
+      { key = "shortFirst",  label = L["SETTINGS_SORT_SHORT_FIRST"] },
+      { key = "longFirst",   label = L["SETTINGS_SORT_LONG_FIRST"] },
+      { key = "alpha",       label = L["SETTINGS_SORT_ALPHA"] },
+      { key = "index",       label = L["SETTINGS_SORT_BLIZZARD_ORDER"] },
     }
     local sortOpts = {}
     for _, m in ipairs(SORT_MODES) do
       sortOpts[#sortOpts + 1] = { value = m.key, text = m.label }
     end
-    local ddSort = ctx:Add(SW.CreateDropdown(container, "Tri", sortOpts, W))
+    local ddSort = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_SORT"], sortOpts, W))
     do
       local cur = gGet("sortMode") or "playerFirst"
       ddSort:SetValue(cur)
@@ -6989,30 +6984,30 @@ local function BuildTargetAuras(container)
     end
 
     local cbReverse = ctx:Add(SW.CreateCheckbox(container,
-      "Inverser le tri", "Inverse l'ordre de tri sélectionné.", W))
+      L["SETTINGS_TA_REVERSE_SORT"], L["SETTINGS_TA_REVERSE_SORT_TT"], W))
     cbReverse:SetChecked(gGet("reverseSort") == true)
     cbReverse.onChanged = function(val) gSet("reverseSort", val) end
 
     -- Direction croissance
     ctx:Spacer(4)
-    ctx:Add(SW.CreateSectionHeader(container, title .. " — Direction", W))
+    ctx:Add(SW.CreateSectionHeader(container, string.format(L["SETTINGS_TA_SEC_DIRECTION"], title), W))
     ctx:Add(MakeGrowRow(group))
 
     -- Bordure
     ctx:Spacer(4)
-    ctx:Add(SW.CreateSectionHeader(container, title .. " — Bordure", W))
+    ctx:Add(SW.CreateSectionHeader(container, string.format(L["SETTINGS_TA_SEC_BORDER"], title), W))
 
     local cbBorder = ctx:Add(SW.CreateCheckbox(container,
-      "Afficher la bordure", "Active ou désactive la bordure autour des icônes.", W))
+      L["SETTINGS_SHOW_BORDER"], L["SETTINGS_TA_SHOW_BORDER_TT"], W))
     cbBorder:SetChecked(gGet("showBorder") ~= false)
     cbBorder.onChanged = function(val) gSet("showBorder", val) end
 
-    local slBorderSize = SW.CreateSlider(container, "Épaisseur bordure", 0, 4, 1, _halfW)
+    local slBorderSize = SW.CreateSlider(container, L["SETTINGS_TA_BORDER_THICKNESS"], 0, 4, 1, _halfW)
     slBorderSize:SetValue(gGet("borderSize") or 1)
     slBorderSize.onChanged = function(val) gSet("borderSize", val) end
     ctx:Add(slBorderSize)
 
-    local colBorder = ctx:Add(SW.CreateColorButton(container, "Couleur de bordure", W))
+    local colBorder = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_BORDER_COLOR"], W))
     do
       local c = gGet("borderColor") or { 1, 1, 1, 0.15 }
       colBorder:SetColor(c[1], c[2], c[3], c[4])
@@ -7021,35 +7016,35 @@ local function BuildTargetAuras(container)
 
     -- Cooldown swipe
     ctx:Spacer(4)
-    ctx:Add(SW.CreateSectionHeader(container, title .. " — Cooldown Swipe", W))
+    ctx:Add(SW.CreateSectionHeader(container, string.format(L["SETTINGS_TA_SEC_COOLDOWN_SWIPE"], title), W))
 
     local cbSwipe = ctx:Add(SW.CreateCheckbox(container,
-      "Afficher le swipe", "Active le balayage de cooldown sur les icônes.", W))
+      L["SETTINGS_TA_SHOW_SWIPE"], L["SETTINGS_TA_SHOW_SWIPE_TT"], W))
     cbSwipe:SetChecked(gGet("showSwipe") ~= false)
     cbSwipe.onChanged = function(val) gSet("showSwipe", val) end
 
     local cbRevSwipe = ctx:Add(SW.CreateCheckbox(container,
-      "Inverser le swipe", "Inverse le sens du balayage de cooldown.", W))
+      L["SETTINGS_TA_REVERSE_SWIPE"], L["SETTINGS_TA_REVERSE_SWIPE_TT"], W))
     cbRevSwipe:SetChecked(gGet("reverseSwipe") == true)
     cbRevSwipe.onChanged = function(val) gSet("reverseSwipe", val) end
 
     -- Police & couleur durée
     ctx:Spacer(4)
-    ctx:Add(SW.CreateSectionHeader(container, title .. " — Texte Durée", W))
+    ctx:Add(SW.CreateSectionHeader(container, string.format(L["SETTINGS_TA_SEC_DURATION_TEXT"], title), W))
 
-    local ddDurFont = ctx:Add(SW.CreateDropdown(container, "Police durée", ns.GetFontList(), 220))
+    local ddDurFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_TA_DURATION_FONT"], ns.GetFontList(), 220))
     do
       local v = gGet("durationFont")
       if v then ddDurFont:SetValue(v) end
     end
     ddDurFont.onChanged = function(val) gSet("durationFont", val) end
 
-    local slDurSize = SW.CreateSlider(container, "Taille durée", 6, 18, 1, _halfW)
+    local slDurSize = SW.CreateSlider(container, L["SETTINGS_TA_DURATION_SIZE"], 6, 18, 1, _halfW)
     slDurSize:SetValue(gGet("durationFontSize") or 9)
     slDurSize.onChanged = function(val) gSet("durationFontSize", val) end
     ctx:Add(slDurSize)
 
-    local colDur = ctx:Add(SW.CreateColorButton(container, "Couleur durée", W))
+    local colDur = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TA_DURATION_COLOR"], W))
     do
       local c = gGet("durationColor") or { 1, 1, 1, 1 }
       colDur:SetColor(c[1], c[2], c[3], c[4])
@@ -7058,30 +7053,30 @@ local function BuildTargetAuras(container)
 
     -- Positionnement durée
     ctx:Spacer(2)
-    local ddDurAnc = SW.CreateDropdown(container, "Ancre durée", ANCHOR_LIST, _halfW)
+    local ddDurAnc = SW.CreateDropdown(container, L["SETTINGS_TA_DURATION_ANCHOR"], ANCHOR_LIST, _halfW)
     do local v = gGet("durationAnchor"); if v then ddDurAnc:SetValue(v) end end
     ddDurAnc.onChanged = function(val) gSet("durationAnchor", val) end
     ctx:Add(ddDurAnc)
 
-    ctx:Add(gXY("durationOffX", "durationOffY", "Offset X :", "Offset Y :"))
+    ctx:Add(gXY("durationOffX", "durationOffY", L["SETTINGS_OFFSET_X_COLON"], L["SETTINGS_OFFSET_Y_COLON"]))
 
     -- Police & couleur stacks
     ctx:Spacer(4)
-    ctx:Add(SW.CreateSectionHeader(container, title .. " — Texte Stacks", W))
+    ctx:Add(SW.CreateSectionHeader(container, string.format(L["SETTINGS_TA_SEC_STACKS_TEXT"], title), W))
 
-    local ddCntFont = ctx:Add(SW.CreateDropdown(container, "Police stacks", ns.GetFontList(), 220))
+    local ddCntFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_TA_STACKS_FONT"], ns.GetFontList(), 220))
     do
       local v = gGet("countFont")
       if v then ddCntFont:SetValue(v) end
     end
     ddCntFont.onChanged = function(val) gSet("countFont", val) end
 
-    local slCntSize = SW.CreateSlider(container, "Taille stacks", 6, 18, 1, _halfW)
+    local slCntSize = SW.CreateSlider(container, L["SETTINGS_TA_STACKS_SIZE"], 6, 18, 1, _halfW)
     slCntSize:SetValue(gGet("countFontSize") or 10)
     slCntSize.onChanged = function(val) gSet("countFontSize", val) end
     ctx:Add(slCntSize)
 
-    local colCnt = ctx:Add(SW.CreateColorButton(container, "Couleur stacks", W))
+    local colCnt = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TA_STACKS_COLOR"], W))
     do
       local c = gGet("countColor") or { 1, 1, 1, 1 }
       colCnt:SetColor(c[1], c[2], c[3], c[4])
@@ -7090,15 +7085,15 @@ local function BuildTargetAuras(container)
 
     -- Positionnement stacks
     ctx:Spacer(2)
-    local ddCntAnc = SW.CreateDropdown(container, "Ancre texte", ANCHOR_LIST, _halfW)
+    local ddCntAnc = SW.CreateDropdown(container, L["SETTINGS_TA_TEXT_ANCHOR"], ANCHOR_LIST, _halfW)
     do local v = gGet("countAnchor"); if v then ddCntAnc:SetValue(v) end end
     ddCntAnc.onChanged = function(val) gSet("countAnchor", val) end
-    local ddCntRel = SW.CreateDropdown(container, "Point relatif", ANCHOR_LIST, _halfW)
+    local ddCntRel = SW.CreateDropdown(container, L["SETTINGS_TA_RELATIVE_POINT"], ANCHOR_LIST, _halfW)
     do local v = gGet("countRelPoint"); if v then ddCntRel:SetValue(v) end end
     ddCntRel.onChanged = function(val) gSet("countRelPoint", val) end
     ctx:AddRow(8, ddCntAnc, ddCntRel)
 
-    ctx:Add(gXY("countOffX", "countOffY", "Offset X :", "Offset Y :"))
+    ctx:Add(gXY("countOffX", "countOffY", L["SETTINGS_OFFSET_X_COLON"], L["SETTINGS_OFFSET_Y_COLON"]))
   end
   -- /BuildGroupSection
 
@@ -7106,16 +7101,16 @@ local function BuildTargetAuras(container)
   -- Section globale (enabled, offset, row spacing)
   ---------------------------------------------------------------------------
   local cbEn = ctx:Add(SW.CreateCheckbox(container,
-    "Activer les Auras de la cible",
-    "Affiche les buffs et debuffs de la cible sous la Top Target.", W))
+    L["SETTINGS_TA_ENABLE"],
+    L["SETTINGS_TA_ENABLE_TT"], W))
   cbEn:SetChecked(TAGet("enabled") ~= false)
   cbEn.onChanged = function(val) TASet("enabled", val) end
 
   ---------------------------------------------------------------------------
   -- Sections par groupe
   ---------------------------------------------------------------------------
-  BuildGroupSection("buffs",   "Buffs")
-  BuildGroupSection("debuffs", "Debuffs")
+  BuildGroupSection("buffs",   L["SETTINGS_BUFFS"])
+  BuildGroupSection("debuffs", L["SETTINGS_DEBUFFS"])
 
   ctx:Finalize()
 end
@@ -7130,7 +7125,7 @@ local function BuildColors(container)
     lbl:SetFont(ns.Media.fontGui, 11)
     lbl:SetTextColor(1, 0.3, 0.3, 1)
     lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 8, -16)
-    lbl:SetText("Module Colors non trouvé")
+    lbl:SetText(L["SETTINGS_COLORS_MODULE_NOT_FOUND"])
     container:SetHeight(60)
     return
   end
@@ -7162,7 +7157,7 @@ local function BuildColors(container)
   mTitle:SetFont(ns.Media.fontGui, 10, "")
   mTitle:SetPoint("TOPLEFT", modeFrame, "TOPLEFT", 10, -8)
   mTitle:SetTextColor(0.8, 0.8, 0.9, 1)
-  mTitle:SetText("MODE DES COULEURS")
+  mTitle:SetText(L["SETTINGS_COLOR_MODE_HEADER"])
   local mSep = modeFrame:CreateTexture(nil, "BORDER")
   mSep:SetSize(CONTENT_W, 1)
   mSep:SetPoint("BOTTOMLEFT", modeFrame, "BOTTOMLEFT", 0, 0)
@@ -7197,8 +7192,8 @@ local function BuildColors(container)
     btn:SetScript("OnLeave", function() lbl:SetTextColor(0.85, 0.85, 0.85, 1) end)
     return btn
   end
-  rbClassDef = MakeRadio(modeFrame, "Utiliser les couleurs de classe par défaut", -26)
-  rbCustom   = MakeRadio(modeFrame, "Utiliser des couleurs personnalisées",       -48)
+  rbClassDef = MakeRadio(modeFrame, L["SETTINGS_COLOR_MODE_CLASS_DEFAULTS"], -26)
+  rbCustom   = MakeRadio(modeFrame, L["SETTINGS_COLOR_MODE_CUSTOM"],       -48)
 
   local function ApplyClassMode(useClassDef)
     if not ns.DB then ns.DB = {} end
@@ -7400,8 +7395,8 @@ local function BuildColors(container)
             swBorder:SetColorTexture(1, 1, 1, 0.6)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText(ELEM_LABELS[ek] or ek, 1, 1, 1)
-            GameTooltip:AddLine("Clic gauche : modifier", 0.8, 0.8, 0.8)
-            GameTooltip:AddLine("Clic droit : réinitialiser au défaut", 0.8, 0.8, 0.8)
+            GameTooltip:AddLine(L["SETTINGS_TT_LEFT_CLICK_EDIT"], 0.8, 0.8, 0.8)
+            GameTooltip:AddLine(L["SETTINGS_TT_RIGHT_CLICK_RESET_DEFAULT"], 0.8, 0.8, 0.8)
             GameTooltip:Show()
           end)
           sw:SetScript("OnLeave", function(self)
@@ -7492,23 +7487,23 @@ local function BuildSkyriding(container)
   end
 
   -- -- Activer / désactiver ------------------------------------------------
-  ctx:Add(SW.CreateSectionHeader(container, "Skyriding - Général", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SKYRIDING_GENERAL"], W))
 
   local cbEnable = ctx:Add(SW.CreateCheckbox(container,
-    "Activer le module Skyriding",
-    "Affiche les orbes de vigueur, l'anneau de vitesse\net les effets visuels lors du Skyriding.", W))
+    L["SETTINGS_SR_ENABLE"],
+    L["SETTINGS_SR_ENABLE_TT"], W))
   cbEnable.onChanged = function(val) SRSet("enabled", val) end
   cbEnable:SetChecked(SRGet("enabled") ~= false)
 
   local cbHideLanding = ctx:Add(SW.CreateCheckbox(container,
-    "Cacher à l'atterrissage",
-    "Masque automatiquement le HUD Skyriding lorsque\nla vitesse est nulle (au sol / à l'arrêt).", W))
+    L["SETTINGS_SR_HIDE_ON_LANDING"],
+    L["SETTINGS_SR_HIDE_ON_LANDING_TT"], W))
   cbHideLanding.onChanged = function(val) SRSet("hideAtLanding", val) end
   cbHideLanding:SetChecked(SRGet("hideAtLanding") == true)
 
   -- -- Modules à masquer pendant le vol ------------------------------------
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Masquer pendant le vol", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SR_HIDE_DURING_FLIGHT"], W))
 
   -- Helper : crée une checkbox liée à un toggle skyriding et l'applique en live
   local function MakeHideToggle(label, tooltip, key, applyFn)
@@ -7528,40 +7523,40 @@ local function BuildSkyriding(container)
   -- local RH2   = ns.Modules and ns.Modules.RotationHelper
 
   MakeHideToggle(
-    "Cercle de ressource (combat)",
-    "Masque le cercle de ressource principal\npendant le Skyriding.",
+    L["SETTINGS_SR_HIDE_RC"],
+    L["SETTINGS_SR_HIDE_RC_TT"],
     "hideResourceCircle",
     function(val)
       if RC2 then RC2.ResetVisibility(); RC2.UpdateVisibility() end
     end)
 
   MakeHideToggle(
-    "Cercle de vie (hors combat)",
-    "Masque le cercle de vie (visible lors des dégâts)\npendant le Skyriding.",
+    L["SETTINGS_SR_HIDE_HC"],
+    L["SETTINGS_SR_HIDE_HC_TT"],
     "hideHealthCircle",
     function(val)
       if HC2 then HC2.ResetVisibility(); HC2.UpdateVisibility() end
     end)
 
   MakeHideToggle(
-    "Cercle de ressource (hors combat)",
-    "Masque le cercle de ressource hors combat\npendant le Skyriding.",
+    L["SETTINGS_SR_HIDE_OCRC"],
+    L["SETTINGS_SR_HIDE_OCRC_TT"],
     "hideOOCResourceCircle",
     function(val)
       if OCRC2 then OCRC2.ResetVisibility(); OCRC2.UpdateVisibility() end
     end)
 
   MakeHideToggle(
-    "Barres d'unités",
-    "Masque les barres de joueur, cible, focus et compagnon\npendant le Skyriding.",
+    L["SETTINGS_SR_HIDE_UB"],
+    L["SETTINGS_SR_HIDE_UB_TT"],
     "hideUnitBars",
     function(val)
       if UB2 then UB2.SetSkyridingActive(val) end
     end)
 
   MakeHideToggle(
-    "Barre de priorité",
-    "Masque les 4 slots de la barre de priorité\npendant le Skyriding.",
+    L["SETTINGS_SR_HIDE_PB"],
+    L["SETTINGS_SR_HIDE_PB_TT"],
     "hidePriorityBar",
     function(val)
       if PB2 then PB2.SetSkyridingActive(val) end
@@ -7580,7 +7575,7 @@ local function BuildSkyriding(container)
 
   -- -- Position X/Y --------------------------------------------------------
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Position & Échelle", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_POSITION_SCALE"], W))
 
   local posRow = CreateFrame("Frame", nil, container)
   posRow:SetSize(W, 32)
@@ -7606,13 +7601,13 @@ local function BuildSkyriding(container)
       eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
       eb:SetScript("OnEditFocusLost", Commit)
     end
-    MakePosInput("X :", "x", "AishaddonSRXEditBox", 0)
-    MakePosInput("Y :", "y", "AishaddonSRYEditBox", W / 2)
+    MakePosInput(L["SETTINGS_AXIS_X"], "x", "AishaddonSRXEditBox", 0)
+    MakePosInput(L["SETTINGS_AXIS_Y"], "y", "AishaddonSRYEditBox", W / 2)
   end
   ctx:Add(posRow)
 
   ctx:Spacer(4)
-  local scaleSlider = SW.CreateSlider(container, "Échelle globale", 0.4, 1.5, 0.05, W)
+  local scaleSlider = SW.CreateSlider(container, L["SETTINGS_SR_GLOBAL_SCALE"], 0.4, 1.5, 0.05, W)
   scaleSlider.onChanged = function(val) SRSet("scale", val) end
   scaleSlider:SetValue(SRGet("scale") or 0.8)
   ctx:Add(scaleSlider)
@@ -7637,17 +7632,17 @@ local function BuildSkyriding(container)
   _srLabel:SetFont(ns.Media.fontGui, 11)
   _srLabel:SetPoint("CENTER")
   _srLabel:SetTextColor(unpack(ns.Theme.textNormal))
-  _srLabel:SetText("Déplacer (glisser-déposer)")
+  _srLabel:SetText(L["UI_MOVE_DRAG_DROP"])
 
   local function SetSRDragBtnState(active)
     if active then
       _srBg:SetColorTexture(0.05, 0.18, 0.08, 1)
       _srLabel:SetTextColor(0.3, 1.0, 0.3, 1)
-      _srLabel:SetText("Glissez l'anneau  \226\128\148  cliquez pour terminer")
+      _srLabel:SetText(L["SETTINGS_SR_DRAG_HINT"])
     else
       _srBg:SetColorTexture(0.10, 0.10, 0.13, 1)
       _srLabel:SetTextColor(unpack(ns.Theme.textNormal))
-      _srLabel:SetText("Déplacer (glisser-déposer)")
+      _srLabel:SetText(L["UI_MOVE_DRAG_DROP"])
     end
   end
 
@@ -7673,73 +7668,73 @@ local function BuildSkyriding(container)
   local hint = container:CreateFontString(nil, "OVERLAY")
   hint:SetFont(ns.Media.fontGui, 9)
   hint:SetTextColor(0.65, 0.65, 0.65, 1)
-  hint:SetText("Glissez l'anneau avec clic gauche, cliquez de nouveau pour terminer.")
+  hint:SetText(L["SETTINGS_SR_DRAG_HINT_LONG"])
   hint:SetJustifyH("LEFT")
   hint:SetSize(W - 10, 22)
   ctx:Add(hint)
 
   -- -- Taille des cercles --------------------------------------------------
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Taille des cercles", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SR_CIRCLE_SIZES"], W))
 
   local _srSL2 = math.floor((W - 8) / 2)
   local _srSL3 = math.floor((W - 16) / 3)
-  local slBg = SW.CreateSlider(container, "Fond (BG)", 40, 250, 1, _srSL3)
+  local slBg = SW.CreateSlider(container, L["SETTINGS_SR_BG"], 40, 250, 1, _srSL3)
   slBg.onChanged = function(val) SRSet("bgSize", val) end
   slBg:SetValue(SRGet("bgSize") or 120)
-  local slSpeed = SW.CreateSlider(container, "Cercle Vitesse", 40, 250, 1, _srSL3)
+  local slSpeed = SW.CreateSlider(container, L["SETTINGS_SR_SPEED_CIRCLE"], 40, 250, 1, _srSL3)
   slSpeed.onChanged = function(val) SRSet("speedSize", val) end
   slSpeed:SetValue(SRGet("speedSize") or 110)
-  local slM1 = SW.CreateSlider(container, "Masque 1", 20, 240, 1, _srSL3)
+  local slM1 = SW.CreateSlider(container, L["SETTINGS_SR_MASK_1"], 20, 240, 1, _srSL3)
   slM1.onChanged = function(val) SRSet("mask1Size", val) end
   slM1:SetValue(SRGet("mask1Size") or 102)
   ctx:AddRow(8, slBg, slSpeed, slM1)
 
-  local slAsc = SW.CreateSlider(container, "Cercle Ascension", 20, 240, 1, _srSL3)
+  local slAsc = SW.CreateSlider(container, L["SETTINGS_SR_ASCENT_CIRCLE"], 20, 240, 1, _srSL3)
   slAsc.onChanged = function(val) SRSet("ascentSize", val) end
   slAsc:SetValue(SRGet("ascentSize") or 98)
-  local slM2 = SW.CreateSlider(container, "Masque 2", 10, 200, 1, _srSL3)
+  local slM2 = SW.CreateSlider(container, L["SETTINGS_SR_MASK_2"], 10, 200, 1, _srSL3)
   slM2.onChanged = function(val) SRSet("mask2Size", val) end
   slM2:SetValue(SRGet("mask2Size") or 85)
-  local slOrb = SW.CreateSlider(container, "Orbes — taille", 4, 60, 1, _srSL3)
+  local slOrb = SW.CreateSlider(container, L["SETTINGS_SR_ORB_SIZE"], 4, 60, 1, _srSL3)
   slOrb.onChanged = function(val) SRSet("orbSize", val) end
   slOrb:SetValue(SRGet("orbSize") or 19)
   ctx:AddRow(8, slAsc, slM2, slOrb)
 
-  local slOrbRad = SW.CreateSlider(container, "Orbes — rayon", 10, 200, 1, _srSL3)
+  local slOrbRad = SW.CreateSlider(container, L["SETTINGS_SR_ORB_RADIUS"], 10, 200, 1, _srSL3)
   slOrbRad.onChanged = function(val) SRSet("orbRadius", val) end
   slOrbRad:SetValue(SRGet("orbRadius") or 65)
-  local slOrbStart = SW.CreateSlider(container, "Orbes — départ (E)", 0, 359, 1, _srSL3)
+  local slOrbStart = SW.CreateSlider(container, L["SETTINGS_SR_ORB_START_ANGLE"], 0, 359, 1, _srSL3)
   slOrbStart.onChanged = function(val) SRSet("orbStartAngle", val) end
   slOrbStart:SetValue(SRGet("orbStartAngle") or 210)
-  local slOrbSpacing = SW.CreateSlider(container, "Orbes — écart (E)", 1, 90, 1, _srSL3)
+  local slOrbSpacing = SW.CreateSlider(container, L["SETTINGS_SR_ORB_SPACING"], 1, 90, 1, _srSL3)
   slOrbSpacing.onChanged = function(val) SRSet("orbSpacing", val) end
   slOrbSpacing:SetValue(SRGet("orbSpacing") or 24)
   ctx:AddRow(8, slOrbRad, slOrbStart, slOrbSpacing)
 
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Points Second Souffle", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SR_SECOND_WIND"], W))
 
-  local slDotSz = SW.CreateSlider(container, "Taille points", 1, 20, 1, _srSL3)
+  local slDotSz = SW.CreateSlider(container, L["SETTINGS_SR_DOT_SIZE"], 1, 20, 1, _srSL3)
   slDotSz.onChanged = function(val) SRSet("dotSize", val) end
   slDotSz:SetValue(SRGet("dotSize") or 3)
-  local slDotX = SW.CreateSlider(container, "Position X", -80, 80, 1, _srSL3)
+  local slDotX = SW.CreateSlider(container, L["SETTINGS_SR_DOT_POS_X"], -80, 80, 1, _srSL3)
   slDotX.onChanged = function(val) SRSet("dotOffsetX", val) end
   slDotX:SetValue(SRGet("dotOffsetX") or 0)
-  local slDotY = SW.CreateSlider(container, "Position Y", -80, 80, 1, _srSL3)
+  local slDotY = SW.CreateSlider(container, L["SETTINGS_SR_DOT_POS_Y"], -80, 80, 1, _srSL3)
   slDotY.onChanged = function(val) SRSet("dotOffsetY", val) end
   slDotY:SetValue(SRGet("dotOffsetY") or -12)
   ctx:AddRow(8, slDotSz, slDotX, slDotY)
 
   -- -- Texte ---------------------------------------------------------------
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Texte vitesse", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SR_SPEED_TEXT"], W))
 
-  local slTxt = ctx:Add(SW.CreateSlider(container, "Taille police", 6, 30, 1, W))
+  local slTxt = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 30, 1, W))
   slTxt.onChanged = function(val) SRSet("textSize", val) end
   slTxt:SetValue(SRGet("textSize") or 14)
 
-  local ddSRFont = ctx:Add(SW.CreateDropdown(container, "Police vitesse", ns.GetFontList(), 220))
+  local ddSRFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_SR_SPEED_FONT"], ns.GetFontList(), 220))
   do
     local _v = SRGet("font"); if _v then ddSRFont:SetValue(_v) end
     ddSRFont.onChanged = function(val) SRSet("font", val) end
@@ -7747,7 +7742,7 @@ local function BuildSkyriding(container)
 
   -- -- Couleurs ------------------------------------------------------------
   ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, "Couleurs", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_COLORS"], W))
 
   -- Trois boutons exclusifs : Spé / Monture / Custom
   local cbCustom, cbSpec, cbMount
@@ -7759,32 +7754,32 @@ local function BuildSkyriding(container)
   end
 
   cbSpec = ctx:Add(SW.CreateCheckbox(container,
-    "Couleur de la spécialisation",
-    "Sans buff : Power Text de la spé.\nAvec buff + boost : Power Circle de la spé.", W))
+    L["SETTINGS_SR_COLOR_SPEC"],
+    L["SETTINGS_SR_COLOR_SPEC_TT"], W))
   cbSpec.onChanged = function(val) if val then SetColorMode("spec") end end
   cbSpec:SetChecked((SRGet("colorMode") or "custom") == "spec")
 
   cbMount = ctx:Add(SW.CreateCheckbox(container,
-    "Couleur de la monture",
-    "Dégradé extrait de la barre de cast au décollage :\npremière couleur = sans buff, seconde = avec buff + boost.", W))
+    L["SETTINGS_SR_COLOR_MOUNT"],
+    L["SETTINGS_SR_COLOR_MOUNT_TT"], W))
   cbMount.onChanged = function(val) if val then SetColorMode("mount") end end
   cbMount:SetChecked((SRGet("colorMode") or "custom") == "mount")
 
   cbCustom = ctx:Add(SW.CreateCheckbox(container,
-    "Couleur personnalisée",
-    "Utilise les deux couleurs définies ci-dessous.", W))
+    L["SETTINGS_SR_COLOR_CUSTOM"],
+    L["SETTINGS_SR_COLOR_CUSTOM_TT"], W))
   cbCustom.onChanged = function(val) if val then SetColorMode("custom") end end
   cbCustom:SetChecked((SRGet("colorMode") or "custom") == "custom")
 
   ctx:Spacer(4)
-  local colNoGlow = ctx:Add(SW.CreateColorButton(container, "Couleur sans buff", W))
+  local colNoGlow = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_SR_COLOR_NO_BUFF"], W))
   do
     local v = SRGet("colorNoGlow") or { 0.45, 0.45, 0.45, 1 }
     colNoGlow:SetColor(v[1], v[2], v[3], v[4] or 1)
     colNoGlow.onChanged = function(val) SRSet("colorNoGlow", val) end
   end
 
-  local colGlow = ctx:Add(SW.CreateColorButton(container, "Couleur avec buff / boost", W))
+  local colGlow = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_SR_COLOR_WITH_BUFF"], W))
   do
     local v = SRGet("colorGlow") or { 0, 0.8824, 0.5373, 1 }
     colGlow:SetColor(v[1], v[2], v[3], v[4] or 1)
@@ -7827,13 +7822,13 @@ local function ShowExportPopup(text)
     local titleLbl = f:CreateFontString(nil, "OVERLAY")
     titleLbl:SetFont(ns.Media.fontGui, 13)
     titleLbl:SetTextColor(1, 0.88, 0.3)
-    titleLbl:SetText("Export du profil")
+    titleLbl:SetText(L["SETTINGS_EXPORT_PROFILE_TITLE"])
     titleLbl:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -16)
 
     local hint = f:CreateFontString(nil, "OVERLAY")
     hint:SetFont(ns.Media.fontGui, 9)
     hint:SetTextColor(0.5, 0.5, 0.5)
-    hint:SetText("Sélectionnez tout (Ctrl+A) puis copiez (Ctrl+C).")
+    hint:SetText(L["SETTINGS_SELECT_COPY_HINT"])
     hint:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -36)
 
     local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
@@ -7859,7 +7854,7 @@ local function ShowExportPopup(text)
     local doneBtn = CreateFrame("Button", nil, f, "GameMenuButtonTemplate")
     doneBtn:SetSize(130, 26)
     doneBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 12)
-    doneBtn:SetText("Fermer")
+    doneBtn:SetText(L["SETTINGS_CLOSE"])
     doneBtn:SetScript("OnClick", function() f:Hide() end)
 
     _exportPopup = f
@@ -7914,7 +7909,7 @@ local function ShowNamePopup(title, onConfirm)
     local confirmBtn = CreateFrame("Button", nil, f, "GameMenuButtonTemplate")
     confirmBtn:SetSize(130, 26)
     confirmBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 12)
-    confirmBtn:SetText("Confirmer")
+    confirmBtn:SetText(L["SETTINGS_CONFIRM"])
     confirmBtn:SetScript("OnClick", function()
       if f._onConfirm then f._onConfirm(f._eb:GetText()) end
       f:Hide()
@@ -7923,7 +7918,7 @@ local function ShowNamePopup(title, onConfirm)
     local cancelBtn = CreateFrame("Button", nil, f, "GameMenuButtonTemplate")
     cancelBtn:SetSize(130, 26)
     cancelBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 12)
-    cancelBtn:SetText("Annuler")
+    cancelBtn:SetText(L["SETTINGS_CANCEL"])
     cancelBtn:SetScript("OnClick", function() f:Hide() end)
 
     _namePopup = f
@@ -7960,7 +7955,7 @@ local function ShowImportPopup(onConfirm)
     local titleLbl = f:CreateFontString(nil, "OVERLAY")
     titleLbl:SetFont(ns.Media.fontGui, 13)
     titleLbl:SetTextColor(0.5, 0.8, 1)
-    titleLbl:SetText("Importer un profil")
+    titleLbl:SetText(L["SETTINGS_IMPORT_PROFILE_TITLE"])
     titleLbl:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -16)
 
     local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
@@ -7971,7 +7966,7 @@ local function ShowImportPopup(onConfirm)
     local nameLbl = f:CreateFontString(nil, "OVERLAY")
     nameLbl:SetFont(ns.Media.fontGui, 10)
     nameLbl:SetTextColor(0.7, 0.7, 0.7)
-    nameLbl:SetText("Nom du nouveau profil :")
+    nameLbl:SetText(L["SETTINGS_NEW_PROFILE_NAME"])
     nameLbl:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -42)
 
     local nameEB = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
@@ -7988,7 +7983,7 @@ local function ShowImportPopup(onConfirm)
     local pasteLbl = f:CreateFontString(nil, "OVERLAY")
     pasteLbl:SetFont(ns.Media.fontGui, 10)
     pasteLbl:SetTextColor(0.7, 0.7, 0.7)
-    pasteLbl:SetText("Collez ici la chaîne de profil (cliquez dans la zone noire puis Ctrl+V) :")
+    pasteLbl:SetText(L["SETTINGS_PASTE_PROFILE_STRING"])
     pasteLbl:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -96)
 
     -- Fond noir visible derrière la zone de collage
@@ -8034,7 +8029,7 @@ local function ShowImportPopup(onConfirm)
     local importBtn = CreateFrame("Button", nil, f, "GameMenuButtonTemplate")
     importBtn:SetSize(160, 26)
     importBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 14)
-    importBtn:SetText("Importer")
+    importBtn:SetText(L["SETTINGS_IMPORT"])
     importBtn:SetScript("OnClick", function()
       local name = f._nameEB:GetText() or ""
       local str  = f._eb:GetText() or ""
@@ -8050,7 +8045,7 @@ local function ShowImportPopup(onConfirm)
     local cancelBtn = CreateFrame("Button", nil, f, "GameMenuButtonTemplate")
     cancelBtn:SetSize(130, 26)
     cancelBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
-    cancelBtn:SetText("Annuler")
+    cancelBtn:SetText(L["SETTINGS_CANCEL"])
     cancelBtn:SetScript("OnClick", function() f:Hide() end)
 
     _importPopup = f
@@ -8085,7 +8080,7 @@ local function BuildProfiles(container)
   local P   = ns.Profiles
 
   -- -- Profil actuel + Réinitialiser ------------------------------------
-  ctx:Add(SW.CreateSectionHeader(container, "Profils", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_PROFILES"], W))
 
   local currentLabel = container:CreateFontString(nil, "OVERLAY")
   currentLabel:SetFont(ns.Media.fontGui, 11)
@@ -8096,7 +8091,7 @@ local function BuildProfiles(container)
   ctx.y = ctx.y + 20
 
   local function UpdateCurrentLabel()
-    currentLabel:SetText("Profil actuel : |cffffd700" .. P.GetActive() .. "|r")
+    currentLabel:SetText(string.format(L["SETTINGS_CURRENT_PROFILE"], "|cffffd700" .. P.GetActive() .. "|r"))
   end
   UpdateCurrentLabel()
 
@@ -8109,29 +8104,29 @@ local function BuildProfiles(container)
     bg:SetAllPoints(); bg:SetColorTexture(0.18, 0.10, 0.00, 0.95)
     local lbl = resetBtn:CreateFontString(nil, "OVERLAY")
     lbl:SetFont(ns.Media.fontGui, 10); lbl:SetPoint("CENTER")
-    lbl:SetText("Réinitialiser")
+    lbl:SetText(L["UI_RESET"])
     lbl:SetTextColor(1, 0.65, 0.15)
     resetBtn._lbl = lbl
   end
   resetBtn:SetScript("OnClick", function()
     if not resetBtn._confirmPending then
       resetBtn._confirmPending = true
-      resetBtn._lbl:SetText("Confirmer ?")
+      resetBtn._lbl:SetText(L["SETTINGS_CONFIRM_QUESTION"])
       C_Timer.After(4, function()
         if resetBtn._confirmPending then
           resetBtn._confirmPending = false
-          resetBtn._lbl:SetText("Réinitialiser")
+          resetBtn._lbl:SetText(L["UI_RESET"])
         end
       end)
     else
       resetBtn._confirmPending = false
-      resetBtn._lbl:SetText("Réinitialiser")
+      resetBtn._lbl:SetText(L["UI_RESET"])
       local active = P.GetActive()
       local ok, err = P.Reset(active)
       if not ok then
-        print("|cff00b0ff[Aishaddon Profils]|r |cffff4444" .. tostring(err) .. "|r")
+        print(string.format(L["SETTINGS_PROFILE_ERROR_MSG"], tostring(err)))
       else
-        print("|cff00b0ff[Aishaddon Profils]|r Profil |cffffd700" .. active .. "|r réinitialisé.")
+        print(string.format(L["SETTINGS_PROFILE_RESET_MSG"], "|cffffd700" .. active .. "|r"))
       end
     end
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
@@ -8140,7 +8135,7 @@ local function BuildProfiles(container)
 
   -- -- Nouveau profil ---------------------------------------------------
   ctx:Spacer(10)
-  ctx:Add(SW.CreateSectionHeader(container, "Nouveau profil", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_NEW_PROFILE"], W))
 
   local EB_NEW_W = 100
   local OK_W     = 36
@@ -8159,7 +8154,7 @@ local function BuildProfiles(container)
     bg:SetAllPoints(); bg:SetColorTexture(0.06, 0.22, 0.06, 0.95)
     local lbl = okBtn:CreateFontString(nil, "OVERLAY")
     lbl:SetFont(ns.Media.fontGui, 10); lbl:SetPoint("CENTER")
-    lbl:SetText("OK"); lbl:SetTextColor(0.4, 1, 0.4)
+    lbl:SetText(L["SETTINGS_OK"]); lbl:SetTextColor(0.4, 1, 0.4)
   end
 
   local function DoCreateProfile()
@@ -8167,7 +8162,7 @@ local function BuildProfiles(container)
     if name == "" then return end
     local ok, err = P.Create(name)
     if not ok then
-      print("|cff00b0ff[Aishaddon Profils]|r |cffff4444" .. tostring(err) .. "|r")
+      print(string.format(L["SETTINGS_PROFILE_ERROR_MSG"], tostring(err)))
     else
       nameEB:SetText("")
       okBtn:Hide()
@@ -8194,7 +8189,7 @@ local function BuildProfiles(container)
 
   -- -- Profils existants ------------------------------------------------
   ctx:Spacer(10)
-  ctx:Add(SW.CreateSectionHeader(container, "Profils existants", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_EXISTING_PROFILES"], W))
 
   local existDDLbl = container:CreateFontString(nil, "OVERLAY")
   existDDLbl:SetFont(ns.Media.fontGui, 10)
@@ -8202,7 +8197,7 @@ local function BuildProfiles(container)
   existDDLbl:SetJustifyH("LEFT")
   existDDLbl:SetWidth(W)
   existDDLbl:SetHeight(14)
-  existDDLbl:SetText("Profil actif")
+  existDDLbl:SetText(L["SETTINGS_ACTIVE_PROFILE"])
   ctx:Add(existDDLbl)
   ctx:Spacer(5)
 
@@ -8212,7 +8207,7 @@ local function BuildProfiles(container)
   existDD._btn:SetSize(100, 20)
   existDD._btn:HookScript("OnEnter", function()
     GameTooltip:SetOwner(existDD._btn, "ANCHOR_RIGHT")
-    GameTooltip:SetText("Sélectionnez un profil pour l'activer.", 1, 1, 1, 1)
+    GameTooltip:SetText(L["SETTINGS_TT_SELECT_PROFILE_ACTIVATE"], 1, 1, 1, 1)
     GameTooltip:Show()
   end)
   existDD._btn:HookScript("OnLeave", function() GameTooltip:Hide() end)
@@ -8220,8 +8215,8 @@ local function BuildProfiles(container)
   -- Profil global ou par personnage
   local function RefreshCharCB() end  -- sera défini plus bas
   local charCB = ctx:Add(SW.CreateCheckbox(container,
-    "Utiliser ce profil pour tous les personnages",
-    "Coché : le profil actif s'applique à tous vos personnages.\nDécoché : ce profil est lié uniquement au personnage actuel.",
+    L["SETTINGS_PROFILE_USE_FOR_ALL_CHARS"],
+    L["SETTINGS_PROFILE_USE_FOR_ALL_CHARS_TT"],
     W))
   -- Coché = global (pas de liaison per-char)
   charCB:SetChecked(P.GetCharBinding() == nil)
@@ -8241,7 +8236,7 @@ local function BuildProfiles(container)
 
   -- -- Profils de spécialisation ----------------------------------------
   ctx:Spacer(10)
-  ctx:Add(SW.CreateSectionHeader(container, "Profils de spécialisation", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SPEC_PROFILES"], W))
 
   local specDesc = container:CreateFontString(nil, "OVERLAY")
   specDesc:SetFont(ns.Media.fontGui, 10)
@@ -8250,12 +8245,12 @@ local function BuildProfiles(container)
   specDesc:SetWordWrap(true)
   specDesc:SetWidth(W)
   specDesc:SetHeight(40)
-  specDesc:SetText("Associe un profil différent à chaque spécialisation. Le profil bascule automatiquement lors d'un changement de spec.")
+  specDesc:SetText(L["SETTINGS_SPEC_PROFILES_DESC"])
   ctx:Add(specDesc)
 
   local specCB = ctx:Add(SW.CreateCheckbox(container,
-    "Activer les profils de spécialisation",
-    "Bascule automatiquement de profil selon votre spécialisation active.",
+    L["SETTINGS_SPEC_PROFILES_ENABLE"],
+    L["SETTINGS_SPEC_PROFILES_ENABLE_TT"],
     W))
   specCB:SetChecked(P.GetSpecProfilesEnabled())
 
@@ -8306,10 +8301,10 @@ local function BuildProfiles(container)
     for i = 1, numSpecs do
       local specID, specName = GetSpecializationInfo(i)
       specIDs[i]   = specID
-      specNames[i] = specName or ("Spec " .. i)
+      specNames[i] = specName or string.format(L["SETTINGS_SPEC_FALLBACK_NAME"], i)
       local col = CreateSpecColumn()
       local labelTxt = specNames[i]
-      if specID == activeID then labelTxt = labelTxt .. " |cffffff00- Actif|r" end
+      if specID == activeID then labelTxt = labelTxt .. L["SETTINGS_SPEC_ACTIVE_SUFFIX"] end
       col:SetLabelText(labelTxt)
       specDDs[i] = col
     end
@@ -8352,7 +8347,7 @@ local function BuildProfiles(container)
         end
         col:SetValue(val)
         local labelTxt = specNames[i]
-        if specIDs[i] == activeID then labelTxt = labelTxt .. " |cffffff00- Actif|r" end
+        if specIDs[i] == activeID then labelTxt = labelTxt .. L["SETTINGS_SPEC_ACTIVE_SUFFIX"] end
         col:SetLabelText(labelTxt)
         col._dd.onChanged = (function(sid, isActive)
           return function(name)
@@ -8407,7 +8402,7 @@ local function BuildProfiles(container)
 
   -- -- Copier à partir de -----------------------------------------------
   ctx:Spacer(10)
-  ctx:Add(SW.CreateSectionHeader(container, "Copier à partir de", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_COPY_FROM"], W))
 
   local copyDesc = container:CreateFontString(nil, "OVERLAY")
   copyDesc:SetFont(ns.Media.fontGui, 10)
@@ -8416,7 +8411,7 @@ local function BuildProfiles(container)
   copyDesc:SetWordWrap(true)
   copyDesc:SetWidth(W)
   copyDesc:SetHeight(26)
-  copyDesc:SetText("Copie les paramètres d'un profil déjà existant dans le profil actuellement actif.")
+  copyDesc:SetText(L["SETTINGS_COPY_FROM_DESC"])
   ctx:Add(copyDesc)
 
   local copyLbl = container:CreateFontString(nil, "OVERLAY")
@@ -8425,7 +8420,7 @@ local function BuildProfiles(container)
   copyLbl:SetJustifyH("LEFT")
   copyLbl:SetWidth(W)
   copyLbl:SetHeight(14)
-  copyLbl:SetText("Copier à partir de")
+  copyLbl:SetText(L["SETTINGS_SEC_COPY_FROM"])
   ctx:Add(copyLbl)
   ctx:Spacer(5)
 
@@ -8437,9 +8432,9 @@ local function BuildProfiles(container)
   copyDD.onChanged = function(src)
     local ok, err = P.CopyFrom(src)
     if not ok then
-      print("|cff00b0ff[Aishaddon Profils]|r |cffff4444" .. tostring(err) .. "|r")
+      print(string.format(L["SETTINGS_PROFILE_ERROR_MSG"], tostring(err)))
     else
-      print("|cff00b0ff[Aishaddon Profils]|r |cffffd700" .. src .. "|r copié dans |cffffd700" .. P.GetActive() .. "|r.")
+      print(string.format(L["SETTINGS_PROFILE_COPIED_MSG"], "|cffffd700" .. src .. "|r", "|cffffd700" .. P.GetActive() .. "|r"))
     end
     -- Réinitialiser le dropdown après copie
     C_Timer.After(0.05, function()
@@ -8451,7 +8446,7 @@ local function BuildProfiles(container)
 
   -- -- Supprimer un profil -----------------------------------------------
   ctx:Spacer(10)
-  ctx:Add(SW.CreateSectionHeader(container, "Supprimer un profil", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_DELETE_PROFILE"], W))
 
   local delDesc = container:CreateFontString(nil, "OVERLAY")
   delDesc:SetFont(ns.Media.fontGui, 10)
@@ -8460,7 +8455,7 @@ local function BuildProfiles(container)
   delDesc:SetWordWrap(true)
   delDesc:SetWidth(W)
   delDesc:SetHeight(16)
-  delDesc:SetText("Seuls les profils inactifs peuvent être supprimés.")
+  delDesc:SetText(L["SETTINGS_DELETE_PROFILE_DESC"])
   ctx:Add(delDesc)
 
   local delDDLbl = container:CreateFontString(nil, "OVERLAY")
@@ -8469,7 +8464,7 @@ local function BuildProfiles(container)
   delDDLbl:SetJustifyH("LEFT")
   delDDLbl:SetWidth(W)
   delDDLbl:SetHeight(14)
-  delDDLbl:SetText("Profil à supprimer")
+  delDDLbl:SetText(L["SETTINGS_PROFILE_TO_DELETE"])
   ctx:Add(delDDLbl)
   ctx:Spacer(5)
 
@@ -8484,7 +8479,7 @@ local function BuildProfiles(container)
     bg:SetAllPoints(); bg:SetColorTexture(0.22, 0.04, 0.04, 0.95)
     local lbl = delBtn:CreateFontString(nil, "OVERLAY")
     lbl:SetFont(ns.Media.fontGui, 10); lbl:SetPoint("CENTER")
-    lbl:SetText("Supprimer le profil sélectionné")
+    lbl:SetText(L["SETTINGS_DELETE_SELECTED_PROFILE"])
     lbl:SetTextColor(1, 0.4, 0.4)
     delBtn._lbl = lbl
     delBtn:SetSize(lbl:GetStringWidth() + 24, 22)
@@ -8492,26 +8487,26 @@ local function BuildProfiles(container)
   delBtn:SetScript("OnClick", function()
     local name = deleteDD:GetValue()
     if not name then
-      print("|cff00b0ff[Aishaddon Profils]|r Sélectionnez un profil à supprimer.")
+      print(L["SETTINGS_PROFILE_SELECT_TO_DELETE_MSG"])
       return
     end
     if not delBtn._confirmPending then
       delBtn._confirmPending = true
-      delBtn._lbl:SetText("Confirmer la suppression de « " .. name .. " » ?")
+      delBtn._lbl:SetText(string.format(L["SETTINGS_CONFIRM_DELETE_PROFILE"], name))
       C_Timer.After(5, function()
         if delBtn._confirmPending then
           delBtn._confirmPending = false
-          delBtn._lbl:SetText("Supprimer le profil sélectionné")
+          delBtn._lbl:SetText(L["SETTINGS_DELETE_SELECTED_PROFILE"])
         end
       end)
     else
       delBtn._confirmPending = false
-      delBtn._lbl:SetText("Supprimer le profil sélectionné")
+      delBtn._lbl:SetText(L["SETTINGS_DELETE_SELECTED_PROFILE"])
       local ok, err = P.Delete(name)
       if not ok then
-        print("|cff00b0ff[Aishaddon Profils]|r |cffff4444" .. tostring(err) .. "|r")
+        print(string.format(L["SETTINGS_PROFILE_ERROR_MSG"], tostring(err)))
       else
-        print("|cff00b0ff[Aishaddon Profils]|r Profil |cffffd700" .. name .. "|r supprimé.")
+        print(string.format(L["SETTINGS_PROFILE_DELETED_MSG"], "|cffffd700" .. name .. "|r"))
       end
     end
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
@@ -8520,7 +8515,7 @@ local function BuildProfiles(container)
 
   -- -- Import / Export -------------------------------------------------
   ctx:Spacer(10)
-  ctx:Add(SW.CreateSectionHeader(container, "Import / Export", W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_IMPORT_EXPORT"], W))
 
   local exportBtn = CreateFrame("Button", nil, container)
   do
@@ -8528,14 +8523,14 @@ local function BuildProfiles(container)
     bg:SetAllPoints(); bg:SetColorTexture(0.06, 0.16, 0.06, 0.95)
     local lbl = exportBtn:CreateFontString(nil, "OVERLAY")
     lbl:SetFont(ns.Media.fontGui, 10); lbl:SetPoint("CENTER")
-    lbl:SetText("Exporter le profil actif\226\128\166")
+    lbl:SetText(L["SETTINGS_EXPORT_ACTIVE_PROFILE_BTN"])
     lbl:SetTextColor(0.4, 1, 0.4)
     exportBtn:SetSize(lbl:GetStringWidth() + 24, 22)
   end
   exportBtn:SetScript("OnClick", function()
     local str, err = P.Export(P.GetActive())
     if not str then
-      print("|cff00b0ff[Aishaddon Profils]|r |cffff4444Erreur : " .. tostring(err) .. "|r")
+      print(string.format(L["SETTINGS_PROFILE_ERROR_MSG_LABELED"], tostring(err)))
     else
       ShowExportPopup(str)
     end
@@ -8548,7 +8543,7 @@ local function BuildProfiles(container)
     bg:SetAllPoints(); bg:SetColorTexture(0.06, 0.12, 0.22, 0.95)
     local lbl = importBtn:CreateFontString(nil, "OVERLAY")
     lbl:SetFont(ns.Media.fontGui, 10); lbl:SetPoint("CENTER")
-    lbl:SetText("Importer un profil…")
+    lbl:SetText(L["SETTINGS_IMPORT_PROFILE_BTN"])
     lbl:SetTextColor(0.5, 0.8, 1)
     importBtn:SetSize(lbl:GetStringWidth() + 24, 22)
   end
@@ -8556,9 +8551,9 @@ local function BuildProfiles(container)
     ShowImportPopup(function(name, str)
       local ok, err = P.Import(str, name)
       if not ok then
-        print("|cff00b0ff[Aishaddon Profils]|r |cffff4444Erreur : " .. tostring(err) .. "|r")
+        print(string.format(L["SETTINGS_PROFILE_ERROR_MSG_LABELED"], tostring(err)))
       else
-        print("|cff00b0ff[Aishaddon Profils]|r Profil |cffffd700" .. name .. "|r importé. Basculement…")
+        print(string.format(L["SETTINGS_PROFILE_IMPORTED_MSG"], "|cffffd700" .. name .. "|r"))
         P.SetActive(name)
       end
       PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
@@ -8608,7 +8603,7 @@ local function BuildProfiles(container)
   existDD.onChanged = function(name)
     local ok, err = P.SetActive(name)
     if not ok then
-      print("|cff00b0ff[Aishaddon Profils]|r |cffff4444Erreur : " .. tostring(err) .. "|r")
+      print(string.format(L["SETTINGS_PROFILE_ERROR_MSG_LABELED"], tostring(err)))
     end
     -- PROFILE_CHANGED déclenche RefreshAll
   end
@@ -8681,61 +8676,61 @@ end
 local CATEGORIES = {
   {
     id    = "profiles",
-    label = "Profils",
+    label = L["SETTINGS_SEC_PROFILES"],
     icon  = "Interface\\Icons\\Achievement_GuildPerk_EverybodysFriend",
     build = BuildProfiles,
   },
   {
     id    = "castBar",
-    label = "Barre de Cast",
+    label = L["SETTINGS_SEC_CAST_BAR"],
     icon  = "Interface\\Icons\\spell_holy_borrowedtime",
     build = BuildCastBar,
   },
   {
     id    = "targetCastBar",
-    label = "Cast Cible",
+    label = L["SETTINGS_CAT_TARGET_CAST"],
     icon  = "Interface\\Icons\\ability_warrior_charge",
     build = BuildTargetCastBar,
   },
   {
     id    = "skyriding",
-    label = "Skyriding",
+    label = L["SETTINGS_CAT_SKYRIDING"],
     icon  = "Interface\\Icons\\ability_mount_drake_twilight",
     build = BuildSkyriding,
   },
   {
     id    = "topTargetBar",
-    label = "Top Target",
+    label = L["SETTINGS_CAT_TOP_TARGET"],
     icon  = "Interface\\Icons\\ability_hunter_snipershot",
     build = BuildTopTargetBar,
   },
   {
     id    = "targetAuras",
-    label = "Auras Cible",
+    label = L["SETTINGS_CAT_TARGET_AURAS"],
     icon  = "Interface\\Icons\\spell_holy_divinespirit",
     build = BuildTargetAuras,
   },
   {
     id    = "unitBars",
-    label = "Barres de Vie",
+    label = L["SETTINGS_CAT_HEALTH_BARS"],
     icon  = "Interface\\Icons\\ability_warrior_defensivestance",
     build = BuildUnitBars,
   },
   {
     id    = "resourceCircle",
-    label = "Cercle central",
+    label = L["SETTINGS_CAT_CENTRAL_CIRCLE"],
     icon  = "Interface\\Icons\\ability_mage_incantersabsorbtion",
     build = BuildResourceCircle,
   },
   {
     id    = "outOfCombat",
-    label = "Cercles Hors Combat",
+    label = L["SETTINGS_CAT_OOC_CIRCLES"],
     icon  = "Interface\\Icons\\spell_holy_sealofsacrifice",
     build = BuildOutOfCombat,
   },
   {
     id    = "priorityBar",
-    label = "Priority Bar",
+    label = L["SETTINGS_SEC_PRIORITY_BAR"],
     icon  = "Interface\\Icons\\ability_warrior_savageblow",
     build = BuildPriorityBar,
   },
@@ -8749,56 +8744,56 @@ local CATEGORIES = {
 --]]
   {
     id    = "spellEffects",
-    label = "Animations 3D",
+    label = L["SETTINGS_SEC_3D_ANIMATIONS"],
     icon  = "Interface\\Icons\\spell_arcane_arcane01",
     build = BuildSpellEffects,
   },
   {
     id    = "xpBar",
-    label = "Barre d'XP",
+    label = L["SETTINGS_CAT_XP_BAR"],
     icon  = "Interface\\Icons\\inv_misc_note_01",
     build = BuildXPBar,
   },
   {
     id    = "colors",
-    label = "Couleurs",
+    label = L["SETTINGS_CAT_COLORS"],
     icon  = "Interface\\Icons\\inv_misc_gem_variety_02",
     build = BuildColors,
   },
   -- Auras & Procs (fusionné depuis AishUIAura)
   {
     id    = "aurasTracked",
-    label = "Auras à tracker",
+    label = L["SETTINGS_CAT_AURAS_TRACKED"],
     icon  = "Interface\\Icons\\inv_misc_note_06",
     build = BuildAurasTactics,
   },
   {
     id    = "aurasIconlist",
-    label = "Liste d'icônes",
+    label = L["SETTINGS_CAT_ICON_LIST"],
     icon  = "Interface\\Icons\\spell_shadow_curseofmannoroth",
     build = function(c) BuildAurasRender(c, "iconlist") end,
   },
   {
     id    = "aurasFreebars",
-    label = "Barres de cercle",
+    label = L["SETTINGS_CAT_CIRCLE_BARS"],
     icon  = "Interface\\Icons\\spell_holy_divineprotection",
     build = function(c) BuildAurasRender(c, "freebars") end,
   },
   {
     id    = "aurasIcons",
-    label = "Icones",
+    label = L["SETTINGS_CAT_ICONS"],
     icon  = "Interface\\Icons\\spell_arcane_prismaticcloak",
     build = function(c) BuildAurasRender(c, "icons") end,
   },
   {
     id    = "aurasCirclebars",
-    label = "Barres libres",
+    label = L["SETTINGS_CAT_FREE_BARS"],
     icon  = "Interface\\Icons\\spell_nature_timestop",
     build = function(c) BuildAurasRender(c, "circlebars") end,
   },
   {
     id    = "aurasTrinkets",
-    label = "Trinkets",
+    label = L["SETTINGS_CAT_TRINKETS"],
     icon  = "Interface\\Icons\\inv_jewelry_trinketpvp_01",
     build = BuildAurasEquipment,
   },
@@ -8816,11 +8811,11 @@ local CATEGORIES = {
 -- Groupes de la sidebar (style AishUI : headers parchemin + sections cliquables)
 ---------------------------------------------------------------------------
 local SIDEBAR_GROUPS = {
-  { label = "CADRES D'UNITÉS", ids = { "unitBars", "targetCastBar", "topTargetBar", "targetAuras" } },
-  { label = "COMBAT",         ids = { "resourceCircle", "priorityBar", "castBar", "targetCastBar" } },
-  { label = "MONDE",          ids = { "outOfCombat", "xpBar", "skyriding" } },
-  { label = "AURAS & PROCS",  ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTrinkets", "spellEffects" } },
-  { label = "GLOBAL",         ids = { "colors", "profiles" } },
+  { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "targetCastBar", "topTargetBar", "targetAuras" } },
+  { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "castBar", "targetCastBar" } },
+  { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "xpBar", "skyriding" } },
+  { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTrinkets", "spellEffects" } },
+  { label = L["SETTINGS_GROUP_GLOBAL"],      ids = { "colors", "profiles" } },
 }
 
 -- Table catId → bouton (remplace l'ancien tableau indexé)
@@ -8920,7 +8915,7 @@ local function BuildSidebar()
   placeholder:SetFont(ns.Media.fontGui, 10)
   placeholder:SetPoint("LEFT", searchBox, "LEFT", 8, 0)
   placeholder:SetTextColor(Theme.textDim[1], Theme.textDim[2], Theme.textDim[3], 0.7)
-  placeholder:SetText("Rechercher…")
+  placeholder:SetText(L["SETTINGS_SEARCH_PLACEHOLDER"])
 
   searchBox:SetScript("OnEditFocusGained", function(self)
     self:SetBackdropBorderColor(_gold[1], _gold[2], _gold[3], 0.85)
@@ -9208,7 +9203,7 @@ end
 
 function MainFrame:Toggle()
   if InCombatLockdown() then
-    print("|cff00b0ff[Aishaddon]|r Impossible d'ouvrir le panneau en combat.")
+    print(L["SETTINGS_CANNOT_OPEN_IN_COMBAT"])
     return
   end
   if self:IsShown() then
@@ -9224,7 +9219,7 @@ MainFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 MainFrame:HookScript("OnEvent", function(self, event)
   if event == "PLAYER_REGEN_DISABLED" and self:IsShown() then
     self:Hide()
-    print("|cff00b0ff[Aishaddon]|r Panneau fermé automatiquement (combat).")
+    print(L["SETTINGS_PANEL_AUTO_CLOSED"])
   end
 end)
 
@@ -9371,8 +9366,8 @@ end
 local function BuildExportString()
   local lines = {}
   lines[#lines + 1] = "-- AISHADDON EXPORT"
-  lines[#lines + 1] = "-- Colle ces lignes à l'intérieur du { } de AishaddonDB dans :"
-  lines[#lines + 1] = "-- WTF/Account/<compte>/SavedVariables/AishaddonDB.lua"
+  lines[#lines + 1] = L["SETTINGS_EXPORT_PASTE_INSTRUCTIONS"]
+  lines[#lines + 1] = L["SETTINGS_EXPORT_PATH_HINT"]
   lines[#lines + 1] = ""
 
   -- modelTagKeywords (depuis MODEL_TAGS actuellement chargé)
@@ -9391,7 +9386,7 @@ local function BuildExportString()
     lines[#lines + 1] = '    },'
     lines[#lines + 1] = ""
   else
-    lines[#lines + 1] = "-- (aucun keyword chargé — modelTagKeywords non exporté)"
+    lines[#lines + 1] = L["SETTINGS_EXPORT_NO_KEYWORDS"]
     lines[#lines + 1] = ""
   end
 
@@ -9413,7 +9408,7 @@ local function BuildExportString()
     end
     lines[#lines + 1] = '    },'
   else
-    lines[#lines + 1] = "-- (aucun tag manuel — modelCustomTags vide)"
+    lines[#lines + 1] = L["SETTINGS_EXPORT_NO_CUSTOM_TAGS"]
   end
 
   -- specDefaults (couleurs de spés depuis Colors.SPEC_DEFAULTS)
@@ -9437,7 +9432,7 @@ local function BuildExportString()
     end
     lines[#lines + 1] = '    },'
   else
-    lines[#lines + 1] = "-- (SPEC_DEFAULTS vide — non exporté)"
+    lines[#lines + 1] = L["SETTINGS_EXPORT_NO_SPEC_DEFAULTS"]
   end
 
   return table.concat(lines, "\n")
@@ -9469,13 +9464,13 @@ local function EnsureExportFrame()
   title:SetFont(ns.Media.fontTitle, 13, "OUTLINE")
   title:SetPoint("TOP", f, "TOP", 0, -10)
   title:SetTextColor(unpack(Theme.accent))
-  title:SetText("Export Aishaddon - Keywords & Tags")
+  title:SetText(L["SETTINGS_EXPORT_KEYWORDS_TITLE"])
 
   local hint = f:CreateFontString(nil, "OVERLAY")
   hint:SetFont(ns.Media.fontGui, 10, "")
   hint:SetPoint("TOP", title, "BOTTOM", 0, -4)
   hint:SetTextColor(0.75, 0.75, 0.75, 1)
-  hint:SetText("Clique dans la zone - Ctrl+A pour tout sélectionner — Ctrl+C pour copier")
+  hint:SetText(L["SETTINGS_EXPORT_SELECT_COPY_HINT"])
 
   local closeBtn = CreateFrame("Button", nil, f)
   closeBtn:SetSize(18, 18)
@@ -9488,7 +9483,7 @@ local function EnsureExportFrame()
   local refreshBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
   refreshBtn:SetSize(100, 22)
   refreshBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 8)
-  refreshBtn:SetText("Rafraîchir")
+  refreshBtn:SetText(L["SETTINGS_REFRESH"])
 
   -- ScrollFrame + EditBox
   local sf = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
@@ -9544,7 +9539,7 @@ SlashCmdList["AISHADDON"] = function(msg)
   elseif _origAish then
     _origAish(msg)
   else
-    print("|cff00b0ff[Aishaddon]|r Commandes : /aishaddon export")
+    print(L["SETTINGS_SLASH_COMMANDS_HINT"])
   end
 end
 
@@ -9552,7 +9547,7 @@ end
 -- Méthode Toggle (ouvrir/fermer, utilisée par la slash-cmd et le bouton minimap)
 function MainFrame:Toggle()
   if InCombatLockdown() then
-    print("|cff00b0ff[Aishaddon]|r Impossible d'ouvrir le panneau en combat.")
+    print(L["SETTINGS_CANNOT_OPEN_IN_COMBAT"])
     return
   end
   if self:IsShown() then
@@ -9591,12 +9586,7 @@ local function RegisterWoWSettings()
 
   -- Description
   local desc = canvas:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  desc:SetText(
-    "Custom UI overlay — cercles de ressource \& santé, effets de sorts,\n" ..
-    "barre de rotation, barres d'unité, barre XP…\n\n" ..
-    "Aishaddon dispose d'un panneau de configuration complet et flottant.\n" ..
-    "Cliquez sur le bouton ci-dessous ou utilisez |cff00b0ff/aish|r pour l'ouvrir."
-  )
+  desc:SetText(L["SETTINGS_WOW_PANEL_DESC"])
   desc:SetWidth(680)
   desc:SetJustifyH("LEFT")
   desc:SetPoint("TOPLEFT", logoTex, "BOTTOMLEFT", 0, -20)
@@ -9604,7 +9594,7 @@ local function RegisterWoWSettings()
   -- Bouton principal
   local openBtn = CreateFrame("Button", nil, canvas, "UIPanelButtonTemplate")
   openBtn:SetSize(240, 34)
-  openBtn:SetText("Ouvrir les paramètres Aishaddon")
+  openBtn:SetText(L["SETTINGS_OPEN_AISHADDON_SETTINGS"])
   openBtn:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -20)
   openBtn:SetScript("OnClick", function()
     -- Fermer le panneau Options WoW
