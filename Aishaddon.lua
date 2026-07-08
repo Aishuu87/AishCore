@@ -420,6 +420,13 @@ SlashCmdList["AISHADDON"] = function(msg)
     else
       print("|cffff4444[Aishaddon]|r ResourceCircle introuvable")
     end
+  elseif msg:find("^locale") then
+    local arg = msg:match("^locale%s*(.*)")
+    if ns.SetLocale and ns.SetLocale(arg) then
+      print("|cff00ccff[Aishaddon]|r Locale -> " .. tostring(ns.GetActiveLocaleCode()))
+    else
+      print("|cffff4444[Aishaddon]|r Usage : /aish locale enUS|frFR|reset")
+    end
   elseif ns.SettingsPanel then
     ns.SettingsPanel:Toggle()
   end
