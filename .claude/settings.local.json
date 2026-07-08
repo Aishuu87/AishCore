@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-Item \"UI\\\\SettingsPanel.lua\" | Select-Object Name, Length; \\(Get-Content \"UI\\\\SettingsPanel.lua\" | Measure-Object -Line\\).Lines)",
+      "PowerShell(\\(Get-Content \"h:\\\\JEUX\\\\World of Warcraft\\\\_retail_\\\\Interface\\\\AddOns\\\\Aishaddon\\\\Modules\\\\UnitBars.lua\" | Measure-Object -Line\\).Lines)",
+      "PowerShell(Select-String -Path \"h:\\\\JEUX\\\\World of Warcraft\\\\_retail_\\\\Interface\\\\AddOns\\\\Aishaddon\\\\Modules\\\\SpellEffects.lua\" -Pattern \"ScanAuraCombos|_auraPresence|AuraSourceIsPlayerBuff\" | Select-Object -First 20 | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" })",
+      "PowerShell(Select-String -Path \"h:\\\\JEUX\\\\World of Warcraft\\\\_retail_\\\\Interface\\\\AddOns\\\\Aishaddon\\\\Modules\\\\Auras\\\\Core\\\\Defaults.lua\" -Pattern \"SpellDefaults|barColor|bc\\\\b|color\" | Select-Object -First 30 | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" })",
+      "PowerShell(Select-String -Path \"h:\\\\JEUX\\\\World of Warcraft\\\\_retail_\\\\Interface\\\\AddOns\\\\Aishaddon\\\\Modules\\\\Auras\\\\Core\\\\Defaults.lua\" -Pattern \"dndArc\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line\\)\" })",
+      "PowerShell(Select-String -Path \"h:\\\\JEUX\\\\World of Warcraft\\\\_retail_\\\\Interface\\\\AddOns\\\\Aishaddon\\\\Config\\\\Defaults.lua\" -Pattern \"dndArc\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line\\)\" })",
+      "Read(//h/JEUX/World of Warcraft/_retail_/Interface/AddOns/**)"
+    ]
+  }
+}
