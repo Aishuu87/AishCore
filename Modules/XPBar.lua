@@ -338,7 +338,7 @@ local function GetRepDataForFaction(factionID, factionName, factionData)
         pct         = math.max(0, math.min(1, pct)),
         cur         = cur,
         max         = max,
-        standing    = string.format("Renom %d", mf.renownLevel),
+        standing    = string.format(L["XP_RENOWN_LEVEL"], mf.renownLevel),
         isBattalion = isBattalion,
       }
     end
@@ -495,7 +495,7 @@ local function GetCompanionXPData()
       local maxXP = (fr.nextThreshold or 0) - (fr.reactionThreshold or 0)
       if maxXP <= 0 then maxXP = 1 end
       local pct  = math.max(0, math.min(1, xp / maxXP))
-      local name = fr.name or "Compagnon"
+      local name = fr.name or L["XP_COMPANION_FALLBACK_NAME"]
       return {
         name     = name,
         letter   = string.upper(string.sub(name, 1, 3)) .. ".",
@@ -735,7 +735,7 @@ local function UpdateTooltip()
     -- Priorité 1 (max level) : compagnon de gouffre
     local comp = GetCompanionXPData()
     if comp then
-      tooltipXP:SetText(string.format("Niv. %d / %d  —  %.2f%%", comp.level, comp.maxLevel or 60, comp.pct * 100))
+      tooltipXP:SetText(string.format(L["XP_TOOLTIP_COMPANION_LEVEL"], comp.level, comp.maxLevel or 60, comp.pct * 100))
       tooltipRested:Hide()
       tooltipFrame:SetHeight(28)
       tooltipFrame:Show()
@@ -756,10 +756,10 @@ local function UpdateTooltip()
     tooltipXP:SetText(standingFull)
     -- Ligne 2 : bataillon ou non
     if rep.isBattalion then
-      tooltipRested:SetText("Réputation de bataillon")
+      tooltipRested:SetText(L["XP_BATTALION_REP"])
       tooltipRested:SetTextColor(0.40, 0.80, 1.00, 1)
     else
-      tooltipRested:SetText("Non partagée au bataillon")
+      tooltipRested:SetText(L["XP_BATTALION_REP_NOT_SHARED"])
       tooltipRested:SetTextColor(0.50, 0.50, 0.50, 1)
     end
     tooltipRested:Show()
@@ -775,12 +775,12 @@ local function UpdateTooltip()
   local xp     = UnitXP("player")
   local maxXP  = UnitXPMax("player")
   local pct    = (maxXP > 0) and (xp / maxXP * 100) or 0
-  tooltipXP:SetText(string.format("Total : %.2f%%", pct))
+  tooltipXP:SetText(string.format(L["XP_TOOLTIP_TOTAL"], string.format("%.2f%%", pct)))
 
   local rested    = GetXPExhaustion() or 0
   local restedPct = (maxXP > 0) and (rested / maxXP * 100) or 0
   if restedPct > 0 then
-    tooltipRested:SetText(string.format("Rested : %.2f%%", restedPct))
+    tooltipRested:SetText(string.format(L["XP_TOOLTIP_RESTED"], string.format("%.2f%%", restedPct)))
     tooltipRested:Show()
     tooltipFrame:SetHeight(48)
   else
@@ -1802,8 +1802,8 @@ function XPBar.SetLayoutMode(enabled)
     -- Montre les frames meme si barre cachee
     levelBg:Show()
     tooltipFrame:Show()
-    tooltipXP:SetText("Total : --.--%%")
-    tooltipRested:SetText("Rested : --.--%%")
+    tooltipXP:SetText(string.format(L["XP_TOOLTIP_TOTAL"], "--.--%%"))
+    tooltipRested:SetText(string.format(L["XP_TOOLTIP_RESTED"], "--.--%%"))
     tooltipRested:Show()
     -- Bordures
     lbBorder:Show(); tfBorder:Show()

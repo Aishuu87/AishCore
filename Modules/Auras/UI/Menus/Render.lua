@@ -2,6 +2,7 @@
 -- Per-render menu (Debuffs / Cooldowns / Procs / Buffs): layout cards + accordion sections
 ------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
 
 local TC = 0.07
@@ -68,8 +69,8 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
     local FONT = ns.Media.font
 
     local y=0
-    local dispLabels={iconlist="(sous le cercle)",circlebars="(barre laterale)",icons="(sous le portrait joueur)",freebars="(autour du cercle de ressource)"}
-    local dH=SW.CreateSectionHeader(p,"Disposition "..( dispLabels[rk] or ""),cw-20); dH:SetPoint("TOPLEFT",10,-y); y=y+22
+    local dispLabels={iconlist=L["AURASMENU_RENDER_DISPOSITION_ICONLIST"],circlebars=L["AURASMENU_RENDER_DISPOSITION_CIRCLEBARS"],icons=L["AURASMENU_RENDER_DISPOSITION_ICONS"],freebars=L["AURASMENU_RENDER_DISPOSITION_FREEBARS"]}
+    local dH=SW.CreateSectionHeader(p,string.format(L["AURASMENU_RENDER_DISPOSITION_HEADER"], dispLabels[rk] or ""),cw-20); dH:SetPoint("TOPLEFT",10,-y); y=y+22
     local lays=({iconlist={"center_mirror","center_dual"},circlebars={"side_large","side_compact","side_banner"},icons={"portrait_small"},freebars={"resource_circle"}})[rk] or {}
     local cardW,gap=140,15; local sx=math.max(10,(cw-#lays*(cardW+gap)+gap)/2)
     local cfg=ns.db and ns.db[rk]; local al=cfg and cfg.layout

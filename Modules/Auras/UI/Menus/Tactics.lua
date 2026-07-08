@@ -202,7 +202,7 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
         else
             gFus:SetBackdropColor(0.06,0.06,0.10,0.6)
             gFus:SetBackdropBorderColor(0.18,0.18,0.22,0.5)
-            gFusTx:SetText("Glow off")
+            gFusTx:SetText(L["AURASMENU_EQUIPMENT_GLOW_OFF"])
             gFusTx:SetTextColor(0.30, 0.30, 0.34)
         end
     end
@@ -210,7 +210,7 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
 
     -- Desat : clic = toggle
     dBtn:SetScript("OnClick",function() info.desat = not info.desat; RGD(); onChg() end)
-    dBtn:SetScript("OnEnter",function() dIco:SetAlpha(1); GameTooltip:SetOwner(dBtn,"ANCHOR_TOP"); GameTooltip:SetText("Desaturer l'icone",1,1,1); GameTooltip:Show() end)
+    dBtn:SetScript("OnEnter",function() dIco:SetAlpha(1); GameTooltip:SetOwner(dBtn,"ANCHOR_TOP"); GameTooltip:SetText(L["AURASMENU_EQUIPMENT_DESATURATE_TOOLTIP"],1,1,1); GameTooltip:Show() end)
     dBtn:SetScript("OnLeave",function() RGD(); GameTooltip:Hide() end)
 
     -- Glow fusionné : clic gauche = toggle, clic droit = picker (si actif)
@@ -232,9 +232,9 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
         local glc = info.glowColor or info.color or ns.barColor
         gFus:SetBackdropBorderColor(glc[1],glc[2],glc[3],1)
         GameTooltip:SetOwner(gFus,"ANCHOR_TOP")
-        GameTooltip:SetText(info.glow and "Glow actif" or "Glow desactive",1,1,1)
-        GameTooltip:AddLine("Clic gauche : activer/desactiver", 0.7, 0.7, 0.7)
-        GameTooltip:AddLine("Clic droit : choisir le type", 0.7, 0.7, 0.7)
+        GameTooltip:SetText(info.glow and L["AURASMENU_EQUIPMENT_GLOW_ACTIVE"] or L["AURASMENU_EQUIPMENT_GLOW_INACTIVE"],1,1,1)
+        GameTooltip:AddLine(L["AURASMENU_EQUIPMENT_GLOW_TOOLTIP_LEFT"], 0.7, 0.7, 0.7)
+        GameTooltip:AddLine(L["AURASMENU_EQUIPMENT_GLOW_TOOLTIP_RIGHT"], 0.7, 0.7, 0.7)
         GameTooltip:Show()
     end)
     gFus:SetScript("OnLeave",function() RGD(); GameTooltip:Hide() end)
@@ -281,8 +281,8 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
             btn:SetScript("OnEnter",function()
                 btn:SetBackdropBorderColor(Theme.accent[1], Theme.accent[2], Theme.accent[3], 1)
                 GameTooltip:SetOwner(btn,"ANCHOR_TOP")
-                local names = { iconlist = "Liste d'icônes", freebars = "Barres de cercle", circlebars = "Barres libres", icons = "Icones" }
-                GameTooltip:SetText((names[bd.key] or bd.key).." : cliquer pour toggler", 1, 1, 1)
+                local names = { iconlist = L["AURASMENU_PREVIEW_RENDER_ICONLIST"], freebars = L["AURASMENU_PREVIEW_RENDER_CIRCLE_BARS"], circlebars = L["AURASMENU_PREVIEW_RENDER_FREE_BARS"], icons = L["AURASMENU_PREVIEW_RENDER_ICONS"] }
+                GameTooltip:SetText(string.format(L["AURASMENU_TACTICS_DEST_TOOLTIP"], (names[bd.key] or bd.key)), 1, 1, 1)
                 GameTooltip:Show()
             end)
             btn:SetScript("OnLeave",function() Ref(); GameTooltip:Hide() end)
@@ -319,7 +319,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
     local FONT = ns.Media.font
 
     -- ● TOGGLE CDM NATIF (unique point de contrôle pour tous les renders)
-    local cbCDM = SW.CreateCheckbox(p, "Utiliser le CDM natif  |cff888888(désactive toutes nos barres/icônes custom)|r", cw-20)
+    local cbCDM = SW.CreateCheckbox(p, L["AURASMENU_TACTICS_USE_NATIVE_CDM"], cw-20)
     cbCDM:SetPoint("TOPLEFT", 10, 0)
     cbCDM:SetChecked(ns.db and ns.db.useNativeCDM == true)
     local cdmSep = p:CreateTexture(nil, "ARTWORK"); cdmSep:SetSize(cw-20, 1)
@@ -351,9 +351,9 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         pcall(ns.RefreshCDMMask)
     end
 
-    local dH=SW.CreateSectionHeader(p,"Auras decouvertes (CDM)",cw-20); dH:SetPoint("TOPLEFT",10,-40)
+    local dH=SW.CreateSectionHeader(p,L["AURASMENU_TACTICS_DISCOVERED_AURAS"],cw-20); dH:SetPoint("TOPLEFT",10,-40)
     local leg=p:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(leg,FONT,10); leg:SetPoint("TOPLEFT",10,-60)
-    leg:SetTextColor(unpack(Theme.textDim)); leg:SetText("[L] Liste d'icônes  [C] Barres de cercle  [I] Icones  [B] Barres libres")
+    leg:SetTextColor(unpack(Theme.textDim)); leg:SetText(L["AURASMENU_TACTICS_LEGEND"])
 
     local function Build()
         -- Nettoie l'ancien contenu avant de reconstruire
@@ -366,7 +366,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         if not spells or not next(spells) then
             local nd=p:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(nd,FONT,11)
             nd:SetPoint("TOP",0,-100); nd:SetTextColor(unpack(Theme.textDim))
-            nd:SetText("Aucun sort decouvert.")
+            nd:SetText(L["AURASMENU_TACTICS_NO_SPELL_DISCOVERED"])
             nd._isSpellContent = true
             p:SetHeight(160); return
         end
@@ -434,7 +434,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
                 local t = cont:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(t,FONT,11)
                 t:SetPoint("TOPLEFT",10,-y); t:SetPoint("TOPRIGHT",-10,-y)
                 t:SetJustifyH("CENTER"); t:SetTextColor(unpack(Theme.textDim))
-                t:SetText(emptyMsg or "(aucun)")
+                t:SetText(emptyMsg or L["AURASMENU_TACTICS_EMPTY_PLACEHOLDER"])
                 local h = emptyMsg and (EMPTY_HEIGHT * 2 + 8) or EMPTY_HEIGHT
                 t:SetHeight(h)
                 y = y + h
@@ -442,8 +442,8 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
             y = y + SECTION_SPACING
         end
 
-        RenderSection("DEBUFFS CIBLE", deb)
-        RenderSection("BUFFS JOUEUR",  buf)
+        RenderSection(L["AURASMENU_TACTICS_SECTION_DEBUFFS_TARGET"], deb)
+        RenderSection(L["AURASMENU_TACTICS_SECTION_BUFFS_PLAYER"],  buf)
 
         -- Section ACTIONS à la fin (3 boutons)
         y = y + 6  -- petit espace avant les boutons
@@ -451,7 +451,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         ns.ApplyFont(actHdr,FONT,10,"OUTLINE")
         actHdr:SetPoint("TOPLEFT",10,-y); actHdr:SetPoint("TOPRIGHT",-10,-y)
         actHdr:SetJustifyH("LEFT"); actHdr:SetTextColor(unpack(Theme.textDim))
-        actHdr:SetText("ACTIONS")
+        actHdr:SetText(L["AURASMENU_TACTICS_SECTION_ACTIONS"])
         local actLine = cont:CreateTexture(nil,"OVERLAY")
         actLine:SetHeight(1); actLine:SetPoint("TOPLEFT",10,-y-12); actLine:SetPoint("TOPRIGHT",-10,-y-12)
         actLine:SetColorTexture(Theme.separator[1], Theme.separator[2], Theme.separator[3], 0.5)
@@ -462,7 +462,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         local dark = {0.06, 0.06, 0.08}  -- fond commun (cohérent avec cardBg assombri)
 
         -- Tout cocher : accent or (action positive, principal)
-        local b1 = SW.CreateActionBtn(cont, "Tout cocher", 200,
+        local b1 = SW.CreateActionBtn(cont, L["AURASMENU_TACTICS_CHECK_ALL"], 200,
             dark,
             {Theme.accent[1], Theme.accent[2], Theme.accent[3], 0.75},
             {Theme.accent[1], Theme.accent[2], Theme.accent[3]})
@@ -471,7 +471,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         y = y + 28
 
         -- Tout décocher : bordure neutre, texte gris clair (action neutre)
-        local b2 = SW.CreateActionBtn(cont, "Tout decocher", 200,
+        local b2 = SW.CreateActionBtn(cont, L["AURASMENU_TACTICS_UNCHECK_ALL"], 200,
             dark,
             {Theme.border[1], Theme.border[2], Theme.border[3], 0.8},
             {Theme.textDim[1]*1.5, Theme.textDim[2]*1.5, Theme.textDim[3]*1.5})
@@ -480,7 +480,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         y = y + 28
 
         -- Rescanner : re-classifie les debuffs actifs + redécouvre via CDM
-        local b3 = SW.CreateActionBtn(cont, "Rescanner les auras", 200,
+        local b3 = SW.CreateActionBtn(cont, L["AURASMENU_TACTICS_RESCAN_AURAS"], 200,
             dark,
             {0.25, 0.40, 0.55, 0.75},
             {0.55, 0.75, 0.90})
@@ -493,7 +493,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         y = y + 28
 
         -- Vider sorts découverts : rouge brique désaturé (action destructive mais tenue dans le thème)
-        local b4 = SW.CreateActionBtn(cont, "Vider sorts decouverts", 200,
+        local b4 = SW.CreateActionBtn(cont, L["AURASMENU_TACTICS_CLEAR_DISCOVERED"], 200,
             dark,
             {0.55, 0.22, 0.15, 0.75},
             {0.75, 0.35, 0.25})

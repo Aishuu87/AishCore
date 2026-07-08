@@ -1,5 +1,6 @@
 -- TargetCastBar.lua : Barre de cast de la cible
 local addonName, ns = ...
+local L = ns.L
 
 ns.Modules = ns.Modules or {}
 local TargetCastBar = {}
@@ -445,7 +446,7 @@ local function InterruptCast()
     if frame.impBar then frame.impBar:SetAlpha(0) end
     if frame.impNameFrame then frame.impNameFrame:SetAlpha(0) end
     if frame.impTimerFrame then frame.impTimerFrame:SetAlpha(0) end
-    frame.nameTxt:SetText("Interrompu")
+    frame.nameTxt:SetText(L["CASTBAR_INTERRUPTED"])
     frame.nameTxt:SetTextColor(0.90, 0.25, 0.15, 1)
     frame:Show()
 
@@ -845,7 +846,7 @@ function TargetCastBar.ApplySettings()
     -- Preview
     if state.preview then
         frame:Show()
-        frame.nameTxt:SetText(state.name or "Boule de Feu")
+        frame.nameTxt:SetText(state.name or L["CASTBAR_PREVIEW_SPELL_NAME"])
         frame.timerTxt:SetText(FormatTime(math.max(0, state.endTime - GetTime())))
     end
 end
@@ -861,16 +862,16 @@ function TargetCastBar.SetPreview(on)
         state.channeling       = false
         state.startTime        = GetTime() - 0.9
         state.endTime          = GetTime() + 2.1
-        state.name                 = "Sort de Cible"
+        state.name                 = L["TARGETCAST_PREVIEW_SPELL_NAME"]
         state.spellId              = nil
         state.rawNotInterruptible  = false
         state.rawImportant         = nil
         state.useTimerDuration     = false
         ApplyBarColor()
         frame.nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
-        frame.nameTxt:SetText("Sort de Cible")
-        if frame.notIntNameTxt then frame.notIntNameTxt:SetText("Sort de Cible") end
-        if frame.impNameTxt then frame.impNameTxt:SetText("Sort de Cible") end
+        frame.nameTxt:SetText(L["TARGETCAST_PREVIEW_SPELL_NAME"])
+        if frame.notIntNameTxt then frame.notIntNameTxt:SetText(L["TARGETCAST_PREVIEW_SPELL_NAME"]) end
+        if frame.impNameTxt then frame.impNameTxt:SetText(L["TARGETCAST_PREVIEW_SPELL_NAME"]) end
         frame.timerTxt:SetText("2.1")
         if frame.notIntTimerTxt then frame.notIntTimerTxt:SetText("2.1") end
         if frame.impTimerTxt then frame.impTimerTxt:SetText("2.1") end

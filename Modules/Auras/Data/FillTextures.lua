@@ -13,25 +13,26 @@
 -- ============================================================================
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 
 local TEX_BASE = "Interface\\AddOns\\Aishaddon\\Media\\UI\\FillTextures\\"
 
 ns.FillTextures = {
-    { id="FillBrique",          label="Brique",            scrollDef=0   },
-    { id="FillOr",              label="Or",                scrollDef=0   },
-    { id="FillBleu",            label="Bleu",              scrollDef=0   },
-    { id="FillLisse",           label="Lisse",             scrollDef=0   },
-    { id="FillFlamme",          label="Flamme",            scrollDef=0.7 },
-    { id="FillPlasma",          label="Plasma",            scrollDef=0.5 },
-    { id="FillFoudre",          label="Foudre",            scrollDef=1.0 },
-    { id="FillVague",           label="Vague",             scrollDef=0.3 },
-    { id="FillEau",             label="Eau",               scrollDef=0.15},
-    { id="FillTrame",           label="Trame oblique",     scrollDef=0   },
-    { id="FillFumee",           label="Fumee",             scrollDef=0.2 },
-    { id="FillStripesFin",      label="Rayures fines",     scrollDef=0   },
-    { id="FillStripesEpais",    label="Rayures epaisses",  scrollDef=0   },
-    { id="FillRayuresObliques", label="Chevrons or",       scrollDef=0   },
-    { id="FillBande",           label="Bande lumineuse",   scrollDef=0   },
+    { id="FillBrique",          label=L["AURASDATA_FILLTEX_BRICK"],            scrollDef=0   },
+    { id="FillOr",              label=L["AURASDATA_FILLTEX_GOLD"],                scrollDef=0   },
+    { id="FillBleu",            label=L["AURASDATA_FILLTEX_BLUE"],              scrollDef=0   },
+    { id="FillLisse",           label=L["AURASDATA_FILLTEX_SMOOTH"],             scrollDef=0   },
+    { id="FillFlamme",          label=L["AURASDATA_FILLTEX_FLAME"],             scrollDef=0.7 },
+    { id="FillPlasma",          label=L["AURASDATA_FILLTEX_PLASMA"],             scrollDef=0.5 },
+    { id="FillFoudre",          label=L["AURASDATA_FILLTEX_LIGHTNING"],            scrollDef=1.0 },
+    { id="FillVague",           label=L["AURASDATA_FILLTEX_WAVE"],             scrollDef=0.3 },
+    { id="FillEau",             label=L["AURASDATA_FILLTEX_WATER"],               scrollDef=0.15},
+    { id="FillTrame",           label=L["AURASDATA_FILLTEX_DIAGONAL_WEAVE"],     scrollDef=0   },
+    { id="FillFumee",           label=L["AURASDATA_FILLTEX_SMOKE"],             scrollDef=0.2 },
+    { id="FillStripesFin",      label=L["AURASDATA_FILLTEX_THIN_STRIPES"],     scrollDef=0   },
+    { id="FillStripesEpais",    label=L["AURASDATA_FILLTEX_THICK_STRIPES"],  scrollDef=0   },
+    { id="FillRayuresObliques", label=L["AURASDATA_FILLTEX_GOLD_CHEVRONS"],       scrollDef=0   },
+    { id="FillBande",           label=L["AURASDATA_FILLTEX_LUMINOUS_BAND"],   scrollDef=0   },
 }
 
 -- Helper : retourne le path complet pour une texture id
@@ -42,7 +43,7 @@ end
 
 -- Helper : retourne le label d'une texture id (pour affichage UI)
 function ns.GetFillTextureLabel(id)
-    if not id or id == "" then return "(aucune)" end
+    if not id or id == "" then return L["AURASDATA_FILLTEX_NONE"] end
     -- Si l'id contient deja le path complet, on extrait juste le nom de fichier
     local justId = id:match("([^\\/]+)$") or id
     for _, t in ipairs(ns.FillTextures) do

@@ -15,6 +15,7 @@
 -- qui detecte automatiquement les rows ayant barL+barR et anime les deux.
 ------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 local Buffs = {}
 ns.RegisterRender("freebars", Buffs)
 local CreateFrame, math, pcall = CreateFrame, math, pcall
@@ -333,7 +334,7 @@ function Buffs:Init()
     -- Drag & drop : Alt+clic gauche pour deplacer (cohérent avec Debuffs.lua)
     local lbl = cont:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     lbl:SetPoint("BOTTOM", cont, "TOP", 0, 2)
-    lbl:SetText("|cffffcc00Alt+Drag|r"); lbl:Hide()
+    lbl:SetText("|cffffcc00"..L["AURASFEAT_ALT_DRAG_HINT"].."|r"); lbl:Hide()
     cont:SetScript("OnMouseDown", function(s, b)
         if b == "LeftButton" and IsAltKeyDown() then
             s:SetPropagateMouseClicks(false)  -- bloquer la propagation pendant le drag

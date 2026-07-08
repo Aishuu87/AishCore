@@ -2,6 +2,7 @@
 -- Aegis (miroir) + Berserk (dual) — layouts centraux sous le cercle
 ------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 local Debuffs = {}
 ns.RegisterRender("iconlist", Debuffs)
 local CreateFrame, math, pcall = CreateFrame, math, pcall
@@ -631,7 +632,7 @@ function Debuffs:Init()
 
     local lbl = cont:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     lbl:SetPoint("BOTTOM", cont, "TOP", 0, 2)
-    lbl:SetText("|cffffcc00Alt+Drag|r"); lbl:Hide()
+    lbl:SetText("|cffffcc00"..L["AURASFEAT_ALT_DRAG_HINT"].."|r"); lbl:Hide()
     cont:SetScript("OnMouseDown", function(s, b)
         if b == "LeftButton" and IsAltKeyDown() then
             s:SetPropagateMouseClicks(false)  -- bloquer la propagation pendant le drag

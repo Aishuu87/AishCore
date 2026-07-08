@@ -1,5 +1,6 @@
 -- CastBar.lua : Barre de cast du joueur
 local addonName, ns = ...
+local L = ns.L
 
 ns.Modules = ns.Modules or {}
 local CastBar = {}
@@ -418,7 +419,7 @@ local function InterruptCast()
 
     -- Barre rouge figee, texte "Interrompu"
     frame.bar:SetStatusBarColor(0.85, 0.15, 0.10, 1)
-    frame.nameTxt:SetText("Interrompu")
+    frame.nameTxt:SetText(L["CASTBAR_INTERRUPTED"])
     frame.nameTxt:SetTextColor(0.90, 0.25, 0.15, 1)
     frame:Show()
 
@@ -731,7 +732,7 @@ function CastBar.ApplySettings()
     if state.preview then
         frame:Show()
         -- Forcer le texte pour que les changements d'ancre/justify soient visibles
-        frame.nameTxt:SetText(state.name or "Boule de Feu")
+        frame.nameTxt:SetText(state.name or L["CASTBAR_PREVIEW_SPELL_NAME"])
         frame.timerTxt:SetText(FormatTime(math.max(0, state.endTime - GetTime())))
     end
 end
@@ -747,12 +748,12 @@ function CastBar.SetPreview(on)
         state.channeling = false
         state.startTime  = GetTime() - 0.9   -- simule 30% écoulé
         state.endTime    = GetTime() + 2.1   -- total 3s
-        state.name       = "Boule de Feu"
+        state.name       = L["CASTBAR_PREVIEW_SPELL_NAME"]
         state.spellId    = 133               -- Fireball : utile pour colorBySchool
         state.spellIcon  = 0
         frame.nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
-        ApplyBarColor(133, "Boule de Feu", 0)
-        frame.nameTxt:SetText("Boule de Feu")
+        ApplyBarColor(133, L["CASTBAR_PREVIEW_SPELL_NAME"], 0)
+        frame.nameTxt:SetText(L["CASTBAR_PREVIEW_SPELL_NAME"])
         frame.timerTxt:SetText("2.1")
         frame.bar:SetValue(0.3)
         frame.spark:Show()

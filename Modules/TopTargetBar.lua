@@ -2,6 +2,7 @@
 -- Barre de cible détaillée (haut d'écran) + cible de la cible
 -- Portage fidèle du groupe WeakAuras [TOP TARGET]
 local addonName, ns = ...
+local L = ns.L
 
 ns.Modules = ns.Modules or {}
 local TopTargetBar = {}
@@ -144,8 +145,8 @@ local function GetLevelPrefix(unit)
     local sep = " " .. BULLET .. " "
     if     lvl == -1              then return "???" .. sep
     elseif classif == "worldboss" then return "\226\152\133" .. sep
-    elseif classif == "rareelite" then return "RAREÉLITE" .. sep .. lvl .. sep
-    elseif classif == "rare"      then return "RARE" .. sep .. lvl .. sep
+    elseif classif == "rareelite" then return L["TOPTARGET_LABEL_RAREELITE"] .. sep .. lvl .. sep
+    elseif classif == "rare"      then return L["TOPTARGET_LABEL_RARE"] .. sep .. lvl .. sep
     elseif classif == "elite"     then return lvl .. "+" .. sep
     else                               return lvl .. sep
     end
@@ -514,7 +515,7 @@ local function _UpdateTargetName()
         local nc = REACTION_COLORS.hostile
         f_target.nameTxt:SetText(string.format("|cff%02x%02x%02x90 \226\128\162 |r|cff%02x%02x%02x%s|r",
             math.floor(lc[1]*255), math.floor(lc[2]*255), math.floor(lc[3]*255),
-            math.floor(nc[1]*255), math.floor(nc[2]*255), math.floor(nc[3]*255), "Target Name"))
+            math.floor(nc[1]*255), math.floor(nc[2]*255), math.floor(nc[3]*255), L["TOPTARGET_PREVIEW_NAME"]))
         return
     end
     if f_target.nameFrame then f_target.nameFrame:Show() end
@@ -561,7 +562,7 @@ local function _UpdateTTName()
         if not f_tt then return end
         local nc = REACTION_COLORS.friendly
         f_tt.nameTxt:SetText(string.format("|cff%02x%02x%02x%s|r",
-            math.floor(nc[1]*255), math.floor(nc[2]*255), math.floor(nc[3]*255), "Target of Target Name"))
+            math.floor(nc[1]*255), math.floor(nc[2]*255), math.floor(nc[3]*255), L["TOPTARGET_PREVIEW_TT_NAME"]))
         return
     end
     local rawName = UnitName("targettarget")
