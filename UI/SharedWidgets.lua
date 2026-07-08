@@ -1,5 +1,6 @@
 -- UI/SharedWidgets.lua : Widgets reutilisables pour le panneau de settings
 local addonName, ns = ...
+local L = ns.L
 
 local SharedWidgets = {}
 ns.SharedWidgets = SharedWidgets
@@ -946,12 +947,12 @@ function SharedWidgets.CreateToggle(parent, width)
     if f._on then
       f:SetBackdropColor(g[1], g[2], g[3], 0.95)
       f:SetBackdropBorderColor(g[1] * 0.6, g[2] * 0.6, g[3] * 0.4, 1)
-      lbl:SetText("ON")
+      lbl:SetText(L["WIDGET_TOGGLE_ON"])
       lbl:SetTextColor(0.05, 0.05, 0.05, 1)
     else
       f:SetBackdropColor(0.06, 0.06, 0.07, 1)
       f:SetBackdropBorderColor(g[1] * 0.55, g[2] * 0.55, g[3] * 0.45, 0.85)
-      lbl:SetText("OFF")
+      lbl:SetText(L["WIDGET_TOGGLE_OFF"])
       lbl:SetTextColor(g[1] * 0.85, g[2] * 0.85, g[3] * 0.85, 1)
     end
   end

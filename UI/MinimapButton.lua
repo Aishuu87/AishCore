@@ -2,6 +2,7 @@
 -- Clic gauche : ouvrir/fermer le panneau de config
 -- Glisser (clic gauche) : repositionner autour de la minimap
 local addonName, ns = ...
+local L = ns.L
 
 -- Format recommandé : TGA 32-bit avec canal alpha (fond transparent)
 -- Placer le fichier dans : Media/logo.tga
@@ -83,9 +84,9 @@ end)
 ---------------------------------------------------------------------------
 btn:SetScript("OnEnter", function(self)
   GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-  GameTooltip:AddLine("Aishaddon", 0, 0.69, 1)
-  GameTooltip:AddLine("Clic gauche : ouvrir les paramètres", 1, 1, 1)
-  GameTooltip:AddLine("Glisser : déplacer le bouton", 0.8, 0.8, 0.8)
+  GameTooltip:AddLine(L["MINIMAP_TOOLTIP_TITLE"], 0, 0.69, 1)
+  GameTooltip:AddLine(L["MINIMAP_TOOLTIP_LEFT_CLICK"], 1, 1, 1)
+  GameTooltip:AddLine(L["MINIMAP_TOOLTIP_DRAG"], 0.8, 0.8, 0.8)
   GameTooltip:Show()
 end)
 
