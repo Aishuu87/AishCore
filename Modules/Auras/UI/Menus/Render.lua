@@ -143,7 +143,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
         -- Label "ACTIF" sous le label nom, centré (pas dans le coin)
         local actTx=nil
         if isAct then actTx=card:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(actTx,FONT,8); actTx:SetPoint("BOTTOM",0,5)
-            actTx:SetTextColor(unpack(Theme.accent)); actTx:SetText("ACTIF") end
+            actTx:SetTextColor(unpack(Theme.accent)); actTx:SetText(L["AURASMENU_EQUIPMENT_ACTIVE_LABEL"]) end
 
         layoutCards[#layoutCards+1] = {key=lk, card=card, ico=ico, lbl=clbl, actTx=actTx}
 
@@ -153,7 +153,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
             for _, lc in ipairs(layoutCards) do
                 if not lc.actTx then
                     lc.actTx=lc.card:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lc.actTx,FONT,8)
-                    lc.actTx:SetPoint("BOTTOM",0,5); lc.actTx:SetTextColor(unpack(Theme.accent)); lc.actTx:SetText("ACTIF")
+                    lc.actTx:SetPoint("BOTTOM",0,5); lc.actTx:SetTextColor(unpack(Theme.accent)); lc.actTx:SetText(L["AURASMENU_EQUIPMENT_ACTIVE_LABEL"])
                 end
             end
             RefreshLayoutCards(); pcall(ns.RebuildDisplay)
@@ -177,10 +177,10 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
     local sections = {}
     -- GLOW : override le glow de tous les sorts dans ce render
     if HasSection(rk, "glow") then
-        sections[#sections+1] = {name="GLOW",category="APPARENCE",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+        sections[#sections+1] = {id="GLOW",name=L["AURASMENU_RENDER_SECTION_GLOW"],category="APPARENCE",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
             local info=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(info,FONT,9)
             info:SetPoint("TOPLEFT",15,-cy); info:SetTextColor(unpack(Theme.textDim))
-            info:SetText("Override le glow de tous les sorts dans ce rendu"); cy=cy+18
+            info:SetText(L["AURASMENU_RENDER_GLOW_OVERRIDE_INFO"]); cy=cy+18
             local pf=CreateFrame("Frame",nil,c); pf:SetSize(48,48); pf:SetPoint("TOP",0,-cy); pf:SetFrameStrata("DIALOG"); pf:SetFrameLevel(c:GetFrameLevel()+10)
             local pfIco=pf:CreateTexture(nil,"ARTWORK"); pfIco:SetAllPoints(); pfIco:SetTexCoord(TC,1-TC,TC,1-TC)
             pcall(function() pfIco:SetTexture(134154) end)
@@ -195,20 +195,20 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
                     end
                 end)
             end
-            local glOpts={{value=0,text="Par sort (defaut)"}}
+            local glOpts={{value=0,text=L["AURASMENU_RENDER_GLOW_PER_SPELL_DEFAULT"]}}
             for idx,def in ipairs(ns.GLOW_DEFS) do if not def.isProcStart then glOpts[#glOpts+1]={value=idx,text=def.name} end end
-            local gdd=SW.CreateDropdown(c,"Type de glow",glOpts,w-30); gdd:SetPoint("TOPLEFT",15,-cy)
+            local gdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_GLOW_TYPE"],glOpts,w-30); gdd:SetPoint("TOPLEFT",15,-cy)
             gdd:SetValue(cf.glowOverrideIdx or 0)
             gdd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowOverrideIdx=(v>0 and v or nil); cf.glowOverrideIdx=(v>0 and v or nil) end; RefreshRenderGlowPreview(); pcall(ns.ScanAuras) end
             cy=cy+50
-            local gcc=SW.CreateColorButton(c,"Couleur glow",slW); gcc:SetPoint("TOPLEFT",ox,-cy)
+            local gcc=SW.CreateColorButton(c,L["AURASMENU_TACTICS_GLOW_COLOR"],slW); gcc:SetPoint("TOPLEFT",ox,-cy)
             local gc=ns.barColor
             gcc:SetColor(cf.glowOverrideR or gc[1], cf.glowOverrideG or gc[2], cf.glowOverrideB or gc[3])
             gcc.onChanged=function(col) if ns.db and ns.db[rk] then ns.db[rk].glowOverrideR=col[1]; ns.db[rk].glowOverrideG=col[2]; ns.db[rk].glowOverrideB=col[3]; cf.glowOverrideR=col[1]; cf.glowOverrideG=col[2]; cf.glowOverrideB=col[3] end; RefreshRenderGlowPreview(); pcall(ns.ScanAuras) end
-            local goa=SW.CreateSlider(c,"Opacite",0,1,0.05,slW); goa:SetPoint("TOPLEFT",ox+slW+gap,-cy); goa:SetValue(cf.glowOverrideAlpha or 0.7)
+            local goa=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_OPACITY"],0,1,0.05,slW); goa:SetPoint("TOPLEFT",ox+slW+gap,-cy); goa:SetValue(cf.glowOverrideAlpha or 0.7)
             goa.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowOverrideAlpha=v end; RefreshRenderGlowPreview(); pcall(ns.ScanAuras) end
             cy=cy+60
-            local gsc=SW.CreateSlider(c,"Taille",0.3,3.0,0.1,slW); gsc:SetPoint("TOPLEFT",ox,-cy); gsc:SetValue(cf.glowOverrideScale or 1.0)
+            local gsc=SW.CreateSlider(c,L["AURASMENU_RENDER_SIZE_GENERIC"],0.3,3.0,0.1,slW); gsc:SetPoint("TOPLEFT",ox,-cy); gsc:SetValue(cf.glowOverrideScale or 1.0)
             gsc.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowOverrideScale=v end; RefreshRenderGlowPreview(); pcall(ns.ScanAuras) end
             cy=cy+60
             C_Timer.After(0.1, RefreshRenderGlowPreview)
@@ -216,39 +216,40 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
     end
     -- DIMENSIONS : taille des barres et icones, espacements
     -- Le titre s'adapte selon que le render a des icones ou non.
-    local dimSectionName = HasFeature(rk, "iconSize") and "ICONES & DIMENSIONS" or "DIMENSIONS"
-    sections[#sections+1] = {name=dimSectionName,category="STRUCTURE",build=function(c,w) local cy,cf=0,ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+    local dimSectionId = HasFeature(rk, "iconSize") and "ICONES_DIMENSIONS" or "DIMENSIONS"
+    local dimSectionName = HasFeature(rk, "iconSize") and L["AURASMENU_RENDER_SECTION_ICONS_DIMENSIONS"] or L["AURASMENU_RENDER_SECTION_DIMENSIONS"]
+    sections[#sections+1] = {id=dimSectionId,name=dimSectionName,category="STRUCTURE",build=function(c,w) local cy,cf=0,ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
             if HasFeature(rk, "iconSize") then
-                local s1=SW.CreateSlider(c,"Largeur icone",10,80,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.iconW or 25)
+                local s1=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_ICON_WIDTH"],10,80,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.iconW or 25)
                 s1.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].iconW=v end; pcall(ns.RebuildDisplay) end
-                local s2=SW.CreateSlider(c,"Hauteur icone",10,80,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.iconH or 25)
+                local s2=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_ICON_HEIGHT"],10,80,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.iconH or 25)
                 s2.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].iconH=v end; pcall(ns.RebuildDisplay) end; cy=cy+60
             end
             -- Bar dimensions (Debuffs/Cooldowns: barW/barH, Procs: showBar + barUnderHeight)
             if rk == "icons" then
-                local cbBar=SW.CreateCheckbox(c,"Afficher barre",slW); cbBar:SetPoint("TOPLEFT",ox,-cy); cbBar:SetChecked(cf.showBarUnderIcon ~= false)
+                local cbBar=SW.CreateCheckbox(c,L["AURASMENU_RENDER_SHOW_BAR"],slW); cbBar:SetPoint("TOPLEFT",ox,-cy); cbBar:SetChecked(cf.showBarUnderIcon ~= false)
                 cbBar.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].showBarUnderIcon=v end; pcall(ns.RebuildDisplay) end
-                local sbh=SW.CreateSlider(c,"Hauteur barre",1,15,1,slW); sbh:SetPoint("TOPLEFT",ox+slW+gap,-cy); sbh:SetValue(cf.barUnderHeight or 3)
+                local sbh=SW.CreateSlider(c,L["AURASMENU_RENDER_BAR_HEIGHT"],1,15,1,slW); sbh:SetPoint("TOPLEFT",ox+slW+gap,-cy); sbh:SetValue(cf.barUnderHeight or 3)
                 sbh.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].barUnderHeight=v end; pcall(ns.RebuildDisplay) end; cy=cy+60
-                local bpOpts={{value="BOTTOM",text="Sous l'icone"},{value="TOP",text="Au-dessus"}}
-                local bpdd=SW.CreateDropdown(c,"Position barre",bpOpts,slW); bpdd:SetPoint("TOPLEFT",ox,-cy)
+                local bpOpts={{value="BOTTOM",text=L["AURASMENU_RENDER_BELOW_ICON"]},{value="TOP",text=L["AURASMENU_RENDER_ABOVE"]}}
+                local bpdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_BAR_POSITION"],bpOpts,slW); bpdd:SetPoint("TOPLEFT",ox,-cy)
                 bpdd:SetValue(cf.barPosition or "BOTTOM")
                 bpdd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].barPosition=v end; pcall(ns.RebuildDisplay) end
-                local cbRev=SW.CreateCheckbox(c,"Inverser remplissage",slW); cbRev:SetPoint("TOPLEFT",ox+slW+gap,-cy); cbRev:SetChecked(cf.barReverseFill == true)
+                local cbRev=SW.CreateCheckbox(c,L["AURASMENU_RENDER_REVERSE_FILL"],slW); cbRev:SetPoint("TOPLEFT",ox+slW+gap,-cy); cbRev:SetChecked(cf.barReverseFill == true)
                 cbRev.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].barReverseFill=v end; pcall(ns.RebuildDisplay) end; cy=cy+50
             else
-                local s3=SW.CreateSlider(c,"Largeur barre",10,300,1,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(cf.barW or 80)
+                local s3=SW.CreateSlider(c,L["AURASMENU_RENDER_BAR_WIDTH"],10,300,1,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(cf.barW or 80)
                 s3.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].barW=v end; pcall(ns.RebuildDisplay) end
-                local s4=SW.CreateSlider(c,"Hauteur barre",1,30,1,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(cf.barH or 4)
+                local s4=SW.CreateSlider(c,L["AURASMENU_RENDER_BAR_HEIGHT"],1,30,1,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(cf.barH or 4)
                 s4.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].barH=v end; pcall(ns.RebuildDisplay) end; cy=cy+60
             end
-            local sg=SW.CreateSlider(c,"Espacement",0,150,1,slW); sg:SetPoint("TOPLEFT",ox,-cy); sg:SetValue(cf.gap or 4)
+            local sg=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_SPACING"],0,150,1,slW); sg:SetPoint("TOPLEFT",ox,-cy); sg:SetValue(cf.gap or 4)
             sg.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].gap=v end; pcall(ns.RebuildDisplay) end
-            local srg=SW.CreateSlider(c,"Espacement lignes",0,20,1,slW); srg:SetPoint("TOPLEFT",ox+slW+gap,-cy); srg:SetValue(cf.rowGap or 2)
+            local srg=SW.CreateSlider(c,L["AURASMENU_RENDER_ROW_SPACING"],0,20,1,slW); srg:SetPoint("TOPLEFT",ox+slW+gap,-cy); srg:SetValue(cf.rowGap or 2)
             srg.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].rowGap=v end; pcall(ns.RebuildDisplay) end; cy=cy+60
             if HasFeature(rk, "desatSwipe") then
-                local dsOpts={{value="nil",text="Par sort"},{value="true",text="Toujours gris"},{value="false",text="Jamais gris"}}
-                local dsdd=SW.CreateDropdown(c,"Desaturation",dsOpts,slW); dsdd:SetPoint("TOPLEFT",ox,-cy)
+                local dsOpts={{value="nil",text=L["AURASMENU_RENDER_PER_SPELL"]},{value="true",text=L["AURASMENU_RENDER_ALWAYS_GRAY"]},{value="false",text=L["AURASMENU_RENDER_NEVER_GRAY"]}}
+                local dsdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_DESATURATION"],dsOpts,slW); dsdd:SetPoint("TOPLEFT",ox,-cy)
                 local dsVal = cf.desatOverride == nil and "nil" or tostring(cf.desatOverride)
                 dsdd:SetValue(dsVal)
                 dsdd.onChanged=function(v)
@@ -258,22 +259,22 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
                         else ns.db[rk].desatOverride = false end
                     end; pcall(ns.ScanAuras)
                 end
-                local cbs=SW.CreateCheckbox(c,"Swipe cooldown",slW); cbs:SetPoint("TOPLEFT",ox+slW+gap,-cy); cbs:SetChecked(cf.swipeEnabled == true)
+                local cbs=SW.CreateCheckbox(c,L["AURASMENU_RENDER_SWIPE_COOLDOWN"],slW); cbs:SetPoint("TOPLEFT",ox+slW+gap,-cy); cbs:SetChecked(cf.swipeEnabled == true)
                 cbs.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].swipeEnabled=v end; pcall(ns.ScanAuras) end
                 cy=cy+50
             end
             c:SetHeight(cy) end}
-    sections[#sections+1] = {name="POSITION",category="STRUCTURE",build=function(c,w) local cy,cf=0,ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
-            local s1=SW.CreateSlider(c,"Position X",-1000,1000,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.x or 0)
+    sections[#sections+1] = {id="POSITION",name=L["AURASMENU_RENDER_SECTION_POSITION"],category="STRUCTURE",build=function(c,w) local cy,cf=0,ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+            local s1=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_POSITION_X"],-1000,1000,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.x or 0)
             s1.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].x=v end; pcall(ns.RebuildDisplay) end
-            local s2=SW.CreateSlider(c,"Position Y",-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.y or 0)
+            local s2=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_POSITION_Y"],-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.y or 0)
             s2.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].y=v end; pcall(ns.RebuildDisplay) end; cy=cy+60
             if HasFeature(rk, "growthDirection") then
-                local growOpts={{value="DOWN",text="Haut vers bas"},{value="UP",text="Bas vers haut"},{value="LEFT",text="Droite vers gauche"},{value="RIGHT",text="Gauche vers droite"}}
-                local gdd=SW.CreateDropdown(c,"Direction empilement",growOpts,slW); gdd:SetPoint("TOPLEFT",ox,-cy)
+                local growOpts={{value="DOWN",text=L["AURASMENU_RENDER_GROWTH_TOP_TO_BOTTOM"]},{value="UP",text=L["AURASMENU_RENDER_GROWTH_BOTTOM_TO_TOP"]},{value="LEFT",text=L["AURASMENU_RENDER_GROWTH_RIGHT_TO_LEFT"]},{value="RIGHT",text=L["AURASMENU_RENDER_GROWTH_LEFT_TO_RIGHT"]}}
+                local gdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_STACK_DIRECTION"],growOpts,slW); gdd:SetPoint("TOPLEFT",ox,-cy)
                 gdd:SetValue(cf.growth or "DOWN")
                 gdd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].growth=v end; pcall(ns.RebuildDisplay) end
-                local sm=SW.CreateSlider(c,"Max barres",1,12,1,slW); sm:SetPoint("TOPLEFT",ox+slW+gap,-cy); sm:SetValue(cf.maxBars or 8)
+                local sm=SW.CreateSlider(c,L["AURASMENU_RENDER_MAX_BARS"],1,12,1,slW); sm:SetPoint("TOPLEFT",ox+slW+gap,-cy); sm:SetValue(cf.maxBars or 8)
                 sm.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].maxBars=v end; pcall(ns.RebuildDisplay) end
                 cy=cy+55
             end
@@ -288,7 +289,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
     -- restent propres à ta config. Les presets s'occupent uniquement du "moule visuel"
     -- (dimensions, spark type, spark taille).
     if rk ~= "icons" and ns.AishUITemplates then
-    sections[#sections+1] = {name="PRESETS BARRES",category="APPARENCE",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
+    sections[#sections+1] = {id="PRESETS_BARRES",name=L["AURASMENU_RENDER_SECTION_PRESETS"],category="APPARENCE",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
             -- État local de la sélection (preset courant uniquement, plus de filtre classe)
             local state = ns._aishPresetState or {}
             ns._aishPresetState = state
@@ -297,9 +298,9 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
 
             -- Dropdown PRESET : liste complète des 25 presets avec noms thématiques
             -- Occupe toute la largeur dispo puisqu'il n'y a plus de filtre classe
-            local pdd = SW.CreateDropdown(c, "Preset", {{value="", text="-- Choisir un style --"}}, w - 30); pdd:SetPoint("TOPLEFT", 15, -cy)
+            local pdd = SW.CreateDropdown(c, L["AURASMENU_RENDER_PRESET_LABEL"], {{value="", text=L["AURASMENU_RENDER_CHOOSE_STYLE"]}}, w - 30); pdd:SetPoint("TOPLEFT", 15, -cy)
 
-            local opts = {{ value = "", text = "-- Choisir un style --" }}
+            local opts = {{ value = "", text = L["AURASMENU_RENDER_CHOOSE_STYLE"] }}
             for i, p in ipairs(ns.AishUITemplates) do
                 -- Format simple : juste le nom du preset (ex: "Filet doré").
                 -- Les détails dimensionnels et la mention "+3D" sont visibles
@@ -319,7 +320,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
             -- Permet de voir à quoi ressemble le preset AVANT de cliquer "Appliquer".
             local previewLbl = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             previewLbl:SetPoint("TOPLEFT", 15, -cy)
-            previewLbl:SetText("|cff888888Apercu du preset :|r")
+            previewLbl:SetText(L["AURASMENU_RENDER_PRESET_PREVIEW_LABEL"])
             cy = cy + 18
 
             -- Container centré pour la preview (fond sombre pour faire ressortir la bar)
@@ -393,7 +394,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
 
             -- Bouton APPLIQUER LE PRESET — style maison (SW.CreateActionBtn)
             -- pour rester cohérent avec les autres boutons de l'addon.
-            local btn = SW.CreateActionBtn(c, "Appliquer le preset", 200)
+            local btn = SW.CreateActionBtn(c, L["AURASMENU_RENDER_APPLY_PRESET"], 200)
             btn:SetPoint("TOP", c, "TOP", 0, -cy)
             btn:SetScript("OnClick", function()
                 local idx = tonumber(s.preset or "")
@@ -403,7 +404,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
                     ns.ApplyAishUITemplate(rk, p)
                     local g = (ns.THEME and ns.THEME.gold) or { 0.78, 0.62, 0.30 }
                     print("|cff" .. string.format("%02x%02x%02x", math.floor(g[1]*255), math.floor(g[2]*255), math.floor(g[3]*255)) ..
-                          "[AishUI]|r Preset appliqué : " .. (p.name or "?"))
+                          string.format(L["AURASMENU_RENDER_PRESET_APPLIED_PRINT"], (p.name or "?")))
                     if ns._rebuildCurrentMenu then C_Timer.After(0.1, ns._rebuildCurrentMenu) end
                 end
             end)
