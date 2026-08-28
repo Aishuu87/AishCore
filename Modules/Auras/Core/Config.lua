@@ -150,12 +150,12 @@ ns.GLOW_DEFS = {
     { name = "Modern Glow",       atlas = "UI-HUD-ActionBar-Proc-Loop-Flipbook" },
     { name = "Assist Blue",       atlas = "RotationHelper-ProcLoopBlue-Flipbook" },
     { name = "Assist Ants",       atlas = "RotationHelper_Ants_Flipbook" },
-    { name = "Assist White",      texture = "Interface/addons/ActionBarsEnhanced/assets/flipbook2.tga" },
-    { name = "Assist Rainbow",    texture = "Interface/addons/ActionBarsEnhanced/assets/ABE_flipbook_rainbow.png",
+    { name = "Assist White",      texture = "Interface/AddOns/Aishaddon/Media/Glows/flipbook2.tga" },
+    { name = "Assist Rainbow",    texture = "Interface/AddOns/Aishaddon/Media/Glows/ABE_flipbook_rainbow.png",
       rows=6, columns=10, frames=60, duration=0.9, frameW=80, frameH=80, scale=1.05 },
     { name = "Classic Glow",      texture = "Interface\\SpellActivationOverlay\\IconAlertAnts",
       rows=5, columns=5, frames=25, duration=0.3, frameW=48, frameH=48, scale=0.85 },
-    { name = "ABE Classic-like",  texture = "Interface/addons/ActionBarsEnhanced/assets/AB_ClassicLike_Glow.tga",
+    { name = "ABE Classic-like",  texture = "Interface/AddOns/Aishaddon/Media/Glows/AB_ClassicLike_Glow.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=1 },
     { name = "GCD",               atlas = "UI-CooldownManager-Alert-Flipbook",
       rows=11, columns=2, frames=22, duration=1.0, scale=0.7 },
@@ -225,80 +225,81 @@ ns.GLOW_DEFS = {
     { name = "FX Eye",            atlas="groupfinder-eye-flipbook-foundfx", rows=5, columns=15, frames=75, duration=1.0, scale=1.0 },
     { name = "Arrow",             atlas="Ping_Marker_FlipBook_OnMyWay", rows=4, columns=6, frames=24, duration=1.0, scale=0.7 },
     { name = "Soul",              atlas="UF-SoulShards-Flipbook-Soul", rows=3, columns=7, frames=21, duration=1.2, scale=0.9 },
-    -- Textures externes (require l'addon ActionBarsEnhanced installé)
-    { name = "ABE Assist White",  texture="Interface/addons/ActionBarsEnhanced/assets/flipbook2.tga" },
-    { name = "ABE Rainbow",       texture="Interface/addons/ActionBarsEnhanced/assets/ABE_flipbook_rainbow.png",
+    -- Textures ABE copiees localement dans Media/Glows/ (portage figé,
+    -- ne dependent plus de l'addon externe ActionBarsEnhanced installe)
+    { name = "ABE Assist White",  texture="Interface/AddOns/Aishaddon/Media/Glows/flipbook2.tga" },
+    { name = "ABE Rainbow",       texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_flipbook_rainbow.png",
       rows=6, columns=10, frames=60, duration=0.9, frameW=80, frameH=80, scale=1.05 },
-    { name = "ABE Classic-like",  texture="Interface/addons/ActionBarsEnhanced/assets/AB_ClassicLike_Glow.tga",
+    { name = "ABE Classic-like",  texture="Interface/AddOns/Aishaddon/Media/Glows/AB_ClassicLike_Glow.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=1 },
-    { name = "ABE Star 1",        texture="Interface/addons/ActionBarsEnhanced/assets/stars_new2.tga",
+    { name = "ABE Star 1",        texture="Interface/AddOns/Aishaddon/Media/Glows/stars_new2.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=0.9 },
-    { name = "ABE Star 2",        texture="Interface/addons/ActionBarsEnhanced/assets/stars_new.tga",
+    { name = "ABE Star 2",        texture="Interface/AddOns/Aishaddon/Media/Glows/stars_new.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=0.9 },
-    { name = "ABE Star Rainbow",  texture="Interface/addons/ActionBarsEnhanced/assets/stars_rainbow_new.tga",
+    { name = "ABE Star Rainbow",  texture="Interface/AddOns/Aishaddon/Media/Glows/stars_rainbow_new.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=0.9 },
-    { name = "ABE Lines",         texture="Interface/addons/ActionBarsEnhanced/assets/AB_Lines.tga",
+    { name = "ABE Lines",         texture="Interface/AddOns/Aishaddon/Media/Glows/AB_Lines.tga",
       rows=6, columns=4, frames=24, duration=1.0, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Lines Pixel",   texture="Interface/addons/ActionBarsEnhanced/assets/AB_Lines_Pixel.tga",
+    { name = "ABE Lines Pixel",   texture="Interface/AddOns/Aishaddon/Media/Glows/AB_Lines_Pixel.tga",
       rows=6, columns=2, frames=12, duration=0.35, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Leaves",        texture="Interface/addons/ActionBarsEnhanced/assets/AB_Leaves.tga",
+    { name = "ABE Leaves",        texture="Interface/AddOns/Aishaddon/Media/Glows/AB_Leaves.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Void",          texture="Interface/addons/ActionBarsEnhanced/assets/AB_Void.tga",
+    { name = "ABE Void",          texture="Interface/AddOns/Aishaddon/Media/Glows/AB_Void.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Garg",          texture="Interface/addons/ActionBarsEnhanced/assets/AB_Garg.tga",
+    { name = "ABE Garg",          texture="Interface/AddOns/Aishaddon/Media/Glows/AB_Garg.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=100, frameH=100, scale=0.85 },
-    { name = "ABE Energy",        texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Energy.tga",
+    { name = "ABE Energy",        texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Energy.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=72, frameH=72, scale=0.85 },
-    { name = "ABE Fire",          texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Fire.tga",
+    { name = "ABE Fire",          texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Fire.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=72, frameH=72, scale=0.9 },
-    { name = "ABE Fire2",         texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Fire2.tga",
+    { name = "ABE Fire2",         texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Fire2.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=80, frameH=80, scale=0.9 },
-    { name = "ABE Antorus",       texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Antorus.tga",
+    { name = "ABE Antorus",       texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Antorus.tga",
       rows=6, columns=5, frames=30, duration=0.9, frameW=100, frameH=100, scale=0.85 },
-    { name = "ABE Lightning",     texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Lightning.tga",
+    { name = "ABE Lightning",     texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Lightning.tga",
       rows=6, columns=5, frames=30, duration=1.2, frameW=100, frameH=100, scale=0.85 },
-    { name = "ABE Zereth Square", texture="Interface/addons/ActionBarsEnhanced/assets/proc_4.tga",
+    { name = "ABE Zereth Square", texture="Interface/AddOns/Aishaddon/Media/Glows/proc_4.tga",
       rows=6, columns=5, frames=30, duration=1.2, frameW=100, frameH=100, scale=1.01 },
-    { name = "ABE Pulse",         texture="Interface/addons/ActionBarsEnhanced/assets/pulse_01.tga",
+    { name = "ABE Pulse",         texture="Interface/AddOns/Aishaddon/Media/Glows/pulse_01.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=100, frameH=100, scale=0.95 },
-    { name = "ABE Square Pixel",  texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Square_PixelLike.png",
+    { name = "ABE Square Pixel",  texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Square_PixelLike.png",
       rows=6, columns=5, frames=30, duration=0.35, frameW=100, frameH=100, scale=0.82 },
-    { name = "ABE Arc Raiders",   texture="Interface/addons/ActionBarsEnhanced/assets/ABE_ArcRaiders.png",
+    { name = "ABE Arc Raiders",   texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_ArcRaiders.png",
       rows=10, columns=6, frames=60, duration=1, frameW=100, frameH=100, scale=1 },
-    { name = "GCD 2",             texture="Interface/addons/ActionBarsEnhanced/assets/GCD_2.tga",
+    { name = "GCD 2",             texture="Interface/AddOns/Aishaddon/Media/Glows/GCD_2.tga",
       rows=6, columns=2, frames=12, duration=0.5, frameW=47, frameH=47, scale=0.7 },
     -- PROC START (entry animations)
     { name = "Proc: Blizzard",    isProcStart=true, atlas="UI-HUD-ActionBar-Proc-Start-Flipbook" },
     { name = "Proc: Blue",        isProcStart=true, atlas="RotationHelper-ProcStartBlue-Flipbook-2x" },
-    { name = "Proc: Short",       isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartYellow.tga",
+    { name = "Proc: Short",       isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartYellow.tga",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: Shorter",     isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartYellow_Shorter.tga",
+    { name = "Proc: Shorter",     isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartYellow_Shorter.tga",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: Blue Short",  isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartBlue.tga",
+    { name = "Proc: Blue Short",  isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartBlue.tga",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: Blue Shorter",isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartBlue_Shorter.tga",
+    { name = "Proc: Blue Shorter",isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartBlue_Shorter.tga",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: White Short", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartWhite.tga",
+    { name = "Proc: White Short", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartWhite.tga",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: White Shorter",isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartWhite_Shorter.tga",
+    { name = "Proc: White Shorter",isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartWhite_Shorter.tga",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: Rainbow",     isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ABE_ProcRainbow_Short.png",
+    { name = "Proc: Rainbow",     isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_ProcRainbow_Short.png",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: Rainbow Shorter", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ABE_ProcRainbow_Shorter.png",
+    { name = "Proc: Rainbow Shorter", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_ProcRainbow_Shorter.png",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: Classic-like", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ClassicLike_Flipbook.tga",
+    { name = "Proc: Classic-like", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ClassicLike_Flipbook.tga",
       rows=4, columns=3, frames=12, duration=0.25, frameW=80, frameH=80, scale=0.9 },
-    { name = "Proc: ABE Burst Square", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_square.tga",
+    { name = "Proc: ABE Burst Square", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_square.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Burst Rune", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_2.tga",
+    { name = "Proc: ABE Burst Rune", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_2.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Burst Rune 2", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_3.tga",
+    { name = "Proc: ABE Burst Rune 2", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_3.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Burst Zereth", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_4.tga",
+    { name = "Proc: ABE Burst Zereth", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_4.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.42 },
-    { name = "Proc: ABE Ring",     isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_5.tga",
+    { name = "Proc: ABE Ring",     isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_5.tga",
       rows=6, columns=5, frames=30, duration=0.7, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Ring 2",   isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_6.tga",
+    { name = "Proc: ABE Ring 2",   isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_6.tga",
       rows=6, columns=5, frames=30, duration=0.4, frameW=100, frameH=100, scale=0.38 },
     { name = "Proc: Flash In",    isProcStart=true, useAlphaPulse=true, texture="Interface\\SpellActivationOverlay\\IconAlert",
       texCoord={0.00781250,0.50781250,0.27734375,0.52734375}, blendMode="ADD", fromAlpha=0.0, toAlpha=1.0, duration=0.15 },
@@ -447,4 +448,97 @@ end
 ns.RenderRegistry = {}
 function ns.RegisterRender(id, renderTable)
     ns.RenderRegistry[id] = renderTable
+end
+
+------------------------------------------------------------------------
+-- TOOLTIP au survol des icônes buff/debuff (Debuffs/Cooldowns/Procs).
+-- Partagé entre les 3 renders pour éviter de dupliquer la logique 3 fois.
+-- Option dédiée aux auras (ns.db.tooltipAltCombatOnly, section Tactics du
+-- menu Auras) — INDÉPENDANTE de l'équivalent priorityBar.tooltipAltCombatOnly
+-- utilisé par la barre de priorité (les deux réglages étaient partagés à
+-- l'origine, séparés sur demande pour pouvoir les activer/désactiver
+-- indépendamment). En combat, le tooltip n'apparaît que tant qu'ALT est
+-- maintenu (évite de saturer l'écran de tooltips en plein combat). Hors
+-- combat, le tooltip s'affiche normalement au survol. MODIFIER_STATE_CHANGED
+-- + PLAYER_REGEN_DISABLED/ENABLED permettent de montrer/cacher le tooltip EN
+-- TEMPS RÉEL pendant qu'on survole une icône (appuyer/relâcher ALT sans
+-- bouger la souris doit réagir immédiatement).
+------------------------------------------------------------------------
+-- GameTooltip:SetUnitAura(unit, index, filter) attend un INDEX de position
+-- dans la liste d'auras, pas un auraInstanceID (d'où un tooltip vide : l'API
+-- cherchait la Nième aura au lieu de l'aura ciblée). Les instanceID ont leurs
+-- propres méthodes dédiées — même pattern déjà utilisé et fonctionnel dans
+-- Modules/TargetAuras.lua (Aura_OnEnter).
+local function _SetUnitAuraTooltip(unit, instID, filter)
+    if filter == "HELPFUL" then
+        GameTooltip:SetUnitBuffByAuraInstanceID(unit, instID)
+    else
+        GameTooltip:SetUnitDebuffByAuraInstanceID(unit, instID)
+    end
+end
+
+local function ShouldShowAuraTooltip()
+    if not (ns.db and ns.db.tooltipAltCombatOnly) then return true end
+    if not UnitAffectingCombat("player") then return true end
+    return IsAltKeyDown()
+end
+
+local _ttDebug = false
+local function _ttp(msg) if _ttDebug then DEFAULT_CHAT_FRAME:AddMessage("|cff00ff88[RCTT]|r " .. tostring(msg)) end end
+
+local hoveredAuraIcon
+local function RefreshAuraTooltip()
+    if not hoveredAuraIcon or GameTooltip:IsForbidden() then return end
+    if not ShouldShowAuraTooltip() then
+        _ttp("RefreshAuraTooltip: ShouldShowAuraTooltip=false -> Hide()")
+        GameTooltip:Hide()
+        return
+    end
+    GameTooltip:SetOwner(hoveredAuraIcon, "ANCHOR_BOTTOMRIGHT", 5, -5)
+    _ttp(string.format("RefreshAuraTooltip: unit=%s auraInstanceID=%s spellID=%s",
+        tostring(hoveredAuraIcon.unit), tostring(hoveredAuraIcon.auraInstanceID), tostring(hoveredAuraIcon.spellID)))
+    local gotAura = false
+    if hoveredAuraIcon.unit and hoveredAuraIcon.auraInstanceID then
+        local ok = pcall(_SetUnitAuraTooltip, hoveredAuraIcon.unit, hoveredAuraIcon.auraInstanceID,
+            hoveredAuraIcon.unit == "player" and "HELPFUL" or "HARMFUL")
+        gotAura = ok and GameTooltip:NumLines() > 0
+    end
+    if not gotAura and hoveredAuraIcon.spellID then
+        -- Pas d'aura active (proc "prêt" sans buff en cours) OU auraInstanceID
+        -- périmé (aura déjà retombée entre le dernier scan et le survol) : on
+        -- retombe sur le tooltip de sort générique plutôt que de laisser un
+        -- tooltip vide (SetOwner+Show sans contenu, quasi invisible à l'écran).
+        pcall(GameTooltip.SetSpellByID, GameTooltip, hoveredAuraIcon.spellID)
+    end
+    GameTooltip:Show()
+    _ttp("RefreshAuraTooltip: NumLines=" .. tostring(GameTooltip:NumLines()))
+end
+
+function ns.AuraIconOnEnter(self)
+    local w, h = self:GetSize()
+    _ttp(string.format("OnEnter appelé. Forbidden=%s IsVisible=%s size=%sx%s unit=%s auraInstanceID=%s spellID=%s",
+        tostring(GameTooltip:IsForbidden()), tostring(self:IsVisible()), tostring(w), tostring(h),
+        tostring(self.unit), tostring(self.auraInstanceID), tostring(self.spellID)))
+    if GameTooltip:IsForbidden() or not self:IsVisible() then return end
+    hoveredAuraIcon = self
+    RefreshAuraTooltip()
+    _ttp("Après RefreshAuraTooltip : GameTooltip:IsShown()=" .. tostring(GameTooltip:IsShown()))
+end
+
+function ns.AuraIconOnLeave(self)
+    _ttp("OnLeave appelé.")
+    if hoveredAuraIcon == self then hoveredAuraIcon = nil end
+    if not GameTooltip:IsForbidden() then GameTooltip:Hide() end
+end
+
+local _tooltipWatcher = CreateFrame("Frame")
+_tooltipWatcher:RegisterEvent("MODIFIER_STATE_CHANGED")
+_tooltipWatcher:RegisterEvent("PLAYER_REGEN_DISABLED")
+_tooltipWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+_tooltipWatcher:SetScript("OnEvent", RefreshAuraTooltip)
+
+SLASH_RCTTDEBUG1 = "/rctt"
+SlashCmdList["RCTTDEBUG"] = function()
+    _ttDebug = not _ttDebug
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff88[RCTT]|r debug tooltip = " .. tostring(_ttDebug))
 end
