@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------
 -- Config/Profiles.lua
--- Système de profils Aishaddon :
+-- Système de profils AishCore :
 --   • Profils nommés multiples (CRUD complet)
 --   • Liaison par personnage optionnelle
 --   • Sérialisation texte (export / import / partage Patreon)
@@ -110,7 +110,7 @@ end
 local function Deserialize(str)
   if type(str) ~= "string" then return nil, L["PROFILE_DESERIALIZE_NOT_STRING"] end
   -- loadstring() : API Lua 5.1 disponible dans WoW (load() 4-args non garanti)
-  local fn, err = loadstring("return " .. str, "aishaddon_profile_import")
+  local fn, err = loadstring("return " .. str, "aishcore_profile_import")
   if not fn then return nil, tostring(err) end
   local ok, result = pcall(fn)
   if not ok then return nil, tostring(result) end
@@ -121,10 +121,11 @@ end
 ---------------------------------------------------------------------------
 -- VERSION marker dans les exports
 ---------------------------------------------------------------------------
-local EXPORT_PREFIX = "AISHADDON_PROFILE_V1:"
+local EXPORT_PREFIX = "AISHCORE_PROFILE_V1:"
+local LEGACY_EXPORT_PREFIX = "AISHADDON_PROFILE_V1:" -- compat imports faits avant le renommage AishCore
 
 ---------------------------------------------------------------------------
--- InitDB — appelé par LoadDatabase() dans Aishaddon.lua
+-- InitDB — appelé par LoadDatabase() dans AishCore.lua
 -- Remplace l'ancien code « ns.DB = ns.MergeDefaults(AishaddonDB, ns.Defaults) »
 ---------------------------------------------------------------------------
 function P.InitDB()
@@ -230,6 +231,30 @@ function P.InitDB()
   -- Pointer ns.DB sur le profil actif (merge defaults)
   --------------------------------------------------------------------------
   root._profiles[activeName] = ns.MergeDefaults(root._profiles[activeName], ns.Defaults)
+
+  -- Purge les entrees VIDES de spellEffects.auraCombos -- UI/SettingsPanel.lua
+  -- creait autrefois une entree au simple CLIC de selection dans la liste de
+  -- gauche (juste pour parcourir/regarder), meme sans jamais configurer
+  -- d'animation -- des sorts d'AUTRES classes/spes jamais reellement utilises
+  -- s'accumulaient ainsi indefiniment (combo = {} vide), et etaient iteres
+  -- pour rien toutes les 2s par SpellEffects.lua::ScanAuraCombos. Le bug de
+  -- creation est corrige (SettingsPanel.lua), ceci nettoie retroactivement ce
+  -- qui s'est deja accumule. One-shot PAR PROFIL (flag sur le profil, pas sur
+  -- root -- chaque profil a sa propre copie de spellEffects).
+  do
+      local prof = root._profiles[activeName]
+      if not prof._auraCombosCleanupV1 then
+          if prof.spellEffects and prof.spellEffects.auraCombos then
+              for auraID, combo in pairs(prof.spellEffects.auraCombos) do
+                  if not (combo and #combo > 0) then
+                      prof.spellEffects.auraCombos[auraID] = nil
+                  end
+              end
+          end
+          prof._auraCombosCleanupV1 = true
+      end
+  end
+
   ns.DB                 = root._profiles[activeName]
   ns._activeProfileName = activeName
   ns._charKey           = charKey
@@ -417,6 +442,7 @@ function P.Import(str, newName)
   str = str:match("^%s*(.-)%s*$")
 
   local payload = str:match("^" .. EXPORT_PREFIX .. "(.+)$")
+    or str:match("^" .. LEGACY_EXPORT_PREFIX .. "(.+)$")
   if not payload then
     return false, string.format(L["PROFILE_IMPORT_FORMAT_UNRECOGNIZED"], EXPORT_PREFIX)
   end
@@ -499,10 +525,160 @@ local function ApplySpecProfile()
 end
 P.ApplySpecProfile = ApplySpecProfile
 
+---------------------------------------------------------------------------
+-- Cooldown Manager par spécialisation (stocké DANS le profil actif :
+-- ns.DB.cdmBySpec[specID] = { data = "<blob C_CooldownViewer>", savedAt }).
+-- Volontairement PAS dans AishaddonDB._specProfiles (compte, non partagé) :
+-- vivre dans ns.DB fait que la sérialisation export/import EXISTANTE de
+-- Profiles.lua transporte automatiquement ces données, sans code de
+-- sérialisation dédié -- exactement le but : partager un profil AishCore
+-- (Patreon, etc.) doit aussi partager le CDM déjà configuré par spé, pour
+-- que quiconque l'importe retrouve un Cooldown Manager pré-rempli des la
+-- premiere connexion sur n'importe quel perso/classe.
+--
+-- Utilise C_CooldownViewer.GetLayoutData()/SetLayoutData() -- API PUBLIQUE
+-- (namespace C_, contrairement au mixin interne CooldownViewerSettings
+-- utilise par ns.Auras.PinAuraToCDM/SyncCDMPins pour l'edition sort-par-
+-- sort) : capture/restaure TOUT l'etat CDM en un seul blob opaque. Reutilise
+-- quand meme ns.Auras.MarkCDMReloadPending/PromptCDMReloadIfPending par
+-- prudence (cf. CDMHooks.lua) -- pas de preuve que cette API soit
+-- totalement exempte de taint, seulement qu'elle l'est pour l'usage limite
+-- observe dans l'addon de reference (CooldownManagerProfiles) dont ce code
+-- s'inspire.
+---------------------------------------------------------------------------
+function P.GetCDMAutoApplyEnabled()
+  if ns.DB.cdmAutoApply == nil then return true end  -- actif par defaut : un profil importe doit "juste marcher"
+  return ns.DB.cdmAutoApply == true
+end
+
+function P.SetCDMAutoApplyEnabled(val)
+  ns.DB.cdmAutoApply = val and true or false
+end
+
+--- Sauvegarde l'etat CDM actuel (tel que configure en jeu, cf. Edit Mode /
+--- ns.Auras.SyncCDMPins) comme profil CDM de specID dans le profil AishCore
+--- ACTIF. Ecrase silencieusement une precedente sauvegarde pour ce specID.
+function P.SaveCDMForSpec(specID)
+  if not specID then return false, "specID manquant" end
+  if not (C_CooldownViewer and C_CooldownViewer.GetLayoutData) then
+    return false, "API C_CooldownViewer indisponible"
+  end
+  local ok, data = pcall(C_CooldownViewer.GetLayoutData)
+  if not ok or not data or data == "" then
+    return false, "aucune donnee CDM a sauvegarder (configure le Cooldown Manager d'abord)"
+  end
+  ns.DB.cdmBySpec = ns.DB.cdmBySpec or {}
+  ns.DB.cdmBySpec[specID] = { data = data, savedAt = time() }
+  return true
+end
+
+--- Renvoie l'entree CDM sauvegardee pour specID dans le profil ACTIF (ou nil).
+function P.GetCDMForSpec(specID)
+  return ns.DB.cdmBySpec and ns.DB.cdmBySpec[specID]
+end
+
+--- Liste les specID pour lesquels le profil ACTIF a une sauvegarde CDM.
+function P.ListCDMSpecs()
+  local ids = {}
+  if ns.DB.cdmBySpec then
+    for specID in pairs(ns.DB.cdmBySpec) do ids[#ids + 1] = specID end
+    table.sort(ids)
+  end
+  return ids
+end
+
+local pendingCDMSpecApply
+--- Applique (C_CooldownViewer.SetLayoutData) le profil CDM sauvegarde pour
+--- specID, si l'auto-apply est active et qu'une sauvegarde existe pour ce
+--- specID dans le profil actif. Ne fait RIEN si aucune sauvegarde -- ne
+--- supprime jamais un CDM configure manuellement par l'utilisateur pour une
+--- spe qu'il n'a pas encore sauvegardee dans AishCore.
+-- DESACTIVE TEMPORAIREMENT : confirme en jeu comme la source d'un taint qui
+-- fait planter le Cooldown Manager natif de Blizzard -- SetLayoutData/
+-- SyncCDMPins (appeles plus bas) taintent l'execution, et Blizzard's
+-- CooldownViewer.lua (refresh natif juste apres) plante en comparant un
+-- champ ("allowAvailableAlert") devenu secret a cause de ce taint : "attempt
+-- to perform boolean test on ... a secret boolean value, while execution
+-- tainted by 'AishCore'". Ne PAS retirer ce garde sans d'abord comprendre
+-- precisement pourquoi SetLayoutData/SyncCDMPins laissent Blizzard dans cet
+-- etat. Remettre `return` en commentaire (ou supprimer ce bloc) pour
+-- reactiver.
+function P.ApplyCDMForSpec(specID)
+  do return end
+  if not specID then return end
+  if not P.GetCDMAutoApplyEnabled() then return end
+  local entry = P.GetCDMForSpec(specID)
+  if not entry or not entry.data or entry.data == "" then return end
+  if not (C_CooldownViewer and C_CooldownViewer.SetLayoutData and C_CooldownViewer.GetLayoutData) then return end
+  if InCombatLockdown and InCombatLockdown() then
+    pendingCDMSpecApply = specID
+    return
+  end
+  -- Déjà appliqué CETTE VERSION précise du snapshot (entry._appliedData,
+  -- persisté -- pas juste "égal à l'état live actuel") : ne PAS réappliquer.
+  -- Sans cette garde : dès que ns.Auras.SyncCDMPins (CDMHooks.lua) épingle
+  -- un sort de la whitelist ABSENT de ce snapshot (ajouté/activé après le
+  -- clic "Sauvegarder"), curData diverge en permanence de entry.data -- la
+  -- comparaison "curData == entry.data" ci-dessous échoue alors à CHAQUE
+  -- connexion, réappliquant indéfiniment le VIEUX snapshot (qui écrase le pin
+  -- tout juste fait) et remarquant un reload comme nécessaire -- boucle
+  -- infinie où le sort épinglé n'apparaît JAMAIS réellement, et le popup de
+  -- reload revient à chaque fermeture du GUI sans le moindre changement.
+  -- Avec cette garde, le snapshot ne s'applique qu'UNE fois par version --
+  -- un nouveau clic sur "Sauvegarder" (qui change entry.data) le rend de
+  -- nouveau applicable une fois, comme attendu.
+  if entry._appliedData == entry.data then return end
+  -- Skip silencieux si deja applique (meme blob) : evite de re-proposer un
+  -- reload a chaque connexion/changement de spe une fois le profil deja en
+  -- place cote client.
+  local okCur, curData = pcall(C_CooldownViewer.GetLayoutData)
+  if okCur and curData == entry.data then
+    entry._appliedData = entry.data
+    return
+  end
+  local ok = pcall(C_CooldownViewer.SetLayoutData, entry.data)
+  if ok then
+    entry._appliedData = entry.data
+    if ns.Auras and ns.Auras.MarkCDMReloadPending then
+      ns.Auras.MarkCDMReloadPending(1)
+    end
+    -- Rattrape immédiatement tout sort de la whitelist active absent de ce
+    -- snapshot qu'on vient de restaurer (cf. commentaire ci-dessus) --
+    -- important surtout pour la TOUTE PREMIÈRE application (import d'un
+    -- profil partagé sur un nouveau perso, par exemple), où le snapshot est
+    -- volontairement incomplet vis-à-vis d'une whitelist qui a évolué depuis.
+    if ns.Auras and ns.Auras.SyncCDMPins then
+      pcall(ns.Auras.SyncCDMPins)
+    end
+  end
+end
+
 local specEventFrame = CreateFrame("Frame")
 specEventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 specEventFrame:RegisterEvent("PLAYER_LOGIN")
+specEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 specEventFrame:SetScript("OnEvent", function(_, event)
+  if event == "PLAYER_REGEN_ENABLED" then
+    if pendingCDMSpecApply then
+      local specID = pendingCDMSpecApply
+      pendingCDMSpecApply = nil
+      P.ApplyCDMForSpec(specID)
+    end
+    return
+  end
   ApplySpecProfile()
+  local specIndex = GetSpecialization()
+  local specID = specIndex and GetSpecializationInfo(specIndex)
+  if specID then
+    if event == "PLAYER_LOGIN" then
+      -- Le Cooldown Manager natif n'est pas forcement pret au tout premier
+      -- PLAYER_LOGIN (cf. C_CooldownViewer.IsCooldownViewerAvailable dans
+      -- CDMHooks.lua/Events.lua, meme constat) -- petit delai avant le
+      -- premier essai plutot qu'un echec silencieux.
+      C_Timer.After(3, function() P.ApplyCDMForSpec(specID) end)
+    else
+      P.ApplyCDMForSpec(specID)
+    end
+  end
   ns.CallbackRegistry:Trigger("SPEC_CHANGED")
 end)

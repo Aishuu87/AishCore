@@ -75,7 +75,28 @@ end
 
 function ns.UpdateRenderFade(renderKey)
     local cfg = ns.db and ns.db[renderKey]; if not cfg then return end
-    local frames = ns.renderFrames[renderKey]; if not frames or not frames.container then return end
+    local frames = ns.renderFrames[renderKey]
+    -- "icons" (Procs.lua), "freebars" (Buffs.lua, onglet GUI "Circle Bars"),
+    -- "circlebars" (Cooldowns.lua, onglet GUI "Free Bars") et "iconlist" (Debuffs.lua,
+    -- onglet GUI "Liste d'icones") : le conteneur enregistre dans
+    -- ns.renderFrames est l'ANCIEN rendu manuel, definitivement cache
+    -- (alpha=0) depuis leurs migrations respectives -- fader ce cadre-la n'a
+    -- plus aucun effet visible. Le vrai conteneur affiche a l'ecran est le
+    -- groupe natif Blizzard (AuraTrackerContainer.lua), expose via
+    -- ns.GetIconsNativeContainer / ns.GetCircleBarsNativeContainer /
+    -- ns.GetFreeBarsNativeContainer / ns.GetIconListNativeContainer.
+    local container
+    if renderKey == "icons" and ns.GetIconsNativeContainer then
+        container = ns.GetIconsNativeContainer()
+    elseif renderKey == "freebars" and ns.GetCircleBarsNativeContainer then
+        container = ns.GetCircleBarsNativeContainer()
+    elseif renderKey == "circlebars" and ns.GetFreeBarsNativeContainer then
+        container = ns.GetFreeBarsNativeContainer()
+    elseif renderKey == "iconlist" and ns.GetIconListNativeContainer then
+        container = ns.GetIconListNativeContainer()
+    end
+    container = container or (frames and frames.container)
+    if not container then return end
     -- combatOnly : si vrai, le container est totalement cache hors combat (alpha 0).
     -- Utilise par le render Buffs notamment, pour ne pas polluer l'UI hors combat.
     --
@@ -97,7 +118,7 @@ function ns.UpdateRenderFade(renderKey)
     -- tab target, équivalent à l'instantané ElvUI. Hors combat : durée complète
     -- (0.35s par défaut) pour garder le transitions douces du combat → OOC.
     local duration = ns._inCombat and 0.05 or (cfg.fadeDuration or 0.35)
-    ns.FadeTo(frames.container, target, duration, delay)
+    ns.FadeTo(container, target, duration, delay)
 
     -- FIX combatOnly : quand le container est cache (target=0), il faut cacher
     -- MANUELLEMENT les modeles 3D bar (PlayerModel) des rows actives. Le PlayerModel
@@ -109,7 +130,7 @@ function ns.UpdateRenderFade(renderKey)
     -- aura est active). Faire Show ici reviendrait a reveiller des clips orphelins
     -- qui appartenaient a des rows non-actives -> PlayerModels visibles a l'ecran
     -- sans barre/icone associee (bug observe a la fermeture du menu /aa).
-    if frames.rows and target == 0 then
+    if frames and frames.rows and target == 0 then
         for _, row in ipairs(frames.rows) do
             local function HideClip(wrap)
                 if wrap and wrap._fx3dBar and wrap._fx3dBar.clip then
@@ -630,6 +651,64 @@ local function _ApplyTier1SetValue(bar, durObj)
     bar:SetValue(durObj:GetRemainingDuration(), INTERP_IMMEDIATE)
 end
 
+------------------------------------------------------------------------
+-- DURÉE EN COMBAT PAR BINDING NATIF (Tier 2)
+--
+-- Toutes les pistes de forward manuel ont echoue (durObj jamais fourni par
+-- Blizzard pour la duree des buffs, texte de decompte natif supprime sur un
+-- SetCooldown transmis par du code addon). Solution retenue (inspiree
+-- d'ElvUI) : button:SetDurationBar(statusBar), une methode de BINDING
+-- native -- Blizzard anime lui-meme la StatusBar donnee, sans jamais
+-- qu'aucune valeur secrete ne transite par du Lua.
+--
+-- CONTRAINTE CONFIRMEE EN JEU (plusieurs tests, AddAuraSlot ET AddAuraGroup) :
+-- l'AuraButton natif ET tout enfant qu'on y cree deviennent "forbidden" pour
+-- du code addon des que l'aura associee devient secrete (Show/SetAllPoints/
+-- SetStatusBarColor plantent tous) -- SEULE la methode SetDurationBar elle-
+-- meme reste utilisable apres coup. Consequence : la barre fantome doit etre
+-- creee, positionnee, stylee, affichee ET bindee EN UNE FOIS dans
+-- initializeFrame (AuraTrackerContainer.lua), hors combat -- plus jamais
+-- retouchee ensuite. Ce fichier n'a donc plus rien a faire reactivement ici :
+-- la barre fantome (position fixe, cf. AuraTrackerContainer.lua) s'anime
+-- toute seule cote Blizzard des sa creation. Notre barre custom (bar) reste
+-- affichee telle quelle (figee) en complement -- pas de bascule Show/Hide
+-- pour l'instant, priorite donnee au fonctionnel.
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+-- Diagnostic : /aishdebug bars. Dump l'etat interne des barres de duree
+-- (circlebars/freebars) : voit-on un bouton natif disponible pour ce
+-- spellID, le binding a-t-il ete pose, quelle est la valeur actuelle.
+------------------------------------------------------------------------
+function ns.DebugDurationBars()
+    local P = function(s) print("|cff33aaff[Bars]|r " .. s) end
+    for _, key in ipairs({ "circlebars", "freebars" }) do
+        local gfx = ns.renderFrames and ns.renderFrames[key]
+        local auras = ns.auraData and ns.auraData[key] or {}
+        P(string.format("== %s == rows=%s auras=%d", key,
+            tostring(gfx and gfx.rows and #gfx.rows or "nil"), #auras))
+        if gfx and gfx.rows then
+            for i, row in ipairs(gfx.rows) do
+                if row:IsShown() then
+                    local a = auras[i]
+                    if a and a.unit and a.spellID then
+                        local nativeBtn = ns.GetNativeAuraButton and ns.GetNativeAuraButton(a.unit, a.spellID)
+                        local sb = ns.GetNativeShadowBar and ns.GetNativeShadowBar(a.unit, a.spellID)
+                        -- Ne PAS appeler sb:IsShown()/GetValue() ici : confirme en jeu
+                        -- que meme la LECTURE de ces methodes plante ("forbidden object")
+                        -- une fois l'aura secrete -- on se limite a l'existence de la reference.
+                        P(string.format(
+                            "  row%d useCDMSwipe=%s spellID=%s unit=%s durObj=%s | nativeBtn=%s shadowBar=%s",
+                            i, tostring(a.useCDMSwipe), tostring(a.spellID), tostring(a.unit),
+                            tostring(a.durObj ~= nil),
+                            tostring(nativeBtn ~= nil), tostring(sb ~= nil)))
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function AnimateBar(bar, entry, cR, cG, cB, isReverse, cfg)
     if not bar then return end
 
@@ -662,6 +741,16 @@ local function AnimateBar(bar, entry, cR, cG, cB, isReverse, cfg)
         bar:SetMinMaxValues(0, 1)
         bar:SetValue(pct)
         bar:SetStatusBarColor(cR, cG, cB)
+        return
+    end
+
+    -- TIER 2 : binding natif (cf. bloc de commentaires plus haut). Deja pose
+    -- une fois pour toutes hors combat (AuraTrackerContainer.lua) -- rien a
+    -- faire ici, la barre fantome s'anime toute seule cote Blizzard. On
+    -- laisse juste bar telle quelle (pas de StopTimerMode : entry.durObj
+    -- est nil par construction dans ce cas, Tier0/1 ne peuvent rien faire
+    -- de toute facon).
+    if entry.useCDMSwipe then
         return
     end
 
@@ -1182,7 +1271,14 @@ local function AnimDriverTick(self, elapsed)
     -- ShowBarModel/HideBarModel dans SpellEffects.lua.
     local hasActiveAuras = (ns._activeAuraCount or 0) > 0
     local hasActiveFx3d = (ns._fx3dBarActiveCount or 0) > 0
-    if not hasActiveAuras and not hasActiveFx3d then
+    -- BUG CORRIGE (2026-08-16) : le mode apercu (fausses barres injectees par
+    -- Procs.lua/Cooldowns.lua/Debuffs.lua/Buffs.lua quand ns._previewBars est
+    -- actif, menu Reglages) ne passe jamais par Scan.lua -- ns._activeAuraCount
+    -- reste a 0 pendant tout l'apercu. Sans ce garde, le driver s'arretait
+    -- immediatement et AnimateOne/ns.AnchorSpark2D n'etaient jamais appeles :
+    -- le spark de la fausse barre restait cree mais JAMAIS ancre, donc invisible.
+    local hasPreview = ns._previewBars == true
+    if not hasActiveAuras and not hasActiveFx3d and not hasPreview then
         self._running = false
         self:SetScript("OnUpdate", nil)
         return

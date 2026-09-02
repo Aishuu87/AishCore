@@ -32,7 +32,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         -- depuis les cartouches Modules pour coherence visuelle avec la sidebar.
         -- Liseré or interne integre dans la texture, slice margins 16px pour bien
         -- preserver les coins arrondis quel que soit le redimensionnement.
-        local PARCHEMIN_PATH = "Interface\\AddOns\\Aishaddon\\Media\\UI\\AishParchemin"
+        local PARCHEMIN_PATH = "Interface\\AddOns\\AishCore\\Media\\UI\\AishParchemin"
         local ACTIVE_TEXT = {1, 1, 1}                      -- blanc brillant pour l'actif
         local INACTIVE_TEXT = ns.THEME.textDim or {0.5, 0.5, 0.55}
         -- Selection dans la liste des sorts a gauche : fond noir un peu plus opaque
@@ -293,9 +293,8 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         end
 
         -- Premier appel : applique la visibilite selon la vue initiale (TOUTES par defaut).
-        -- Met aussi en place le cas ou l'utilisateur revient sur le menu apres avoir
-        -- selectionne une vue precise (ns._selectedFx3dView serait utile, mais ca n'a
-        -- pas l'air d'etre persistant donc on reste sur "all" au premier load).
+        -- ns._selectedFx3dView n'est pas persistant, donc on reste sur "all"
+        -- a chaque premier chargement du menu.
         RefreshTabVisibility()
 
         -- Preview 3D inline (affiche le modèle de la couche sélectionnée)
@@ -682,8 +681,8 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                         local LH2 = 330; lf2:SetHeight(LH2)
                         MkSl(L["AURASMENU_EFFECTS_SCALE"],0.10,5.00,0.05,0,0,"scale"); MkSl(L["AURASMENU_EFFECTS_ROTATION"],0,360,5,1,0,"rotation"); MkSl(L["AURASMENU_EQUIPMENT_OPACITY"],0,1,0.05,2,0,"alpha")
                         MkSl(L["AURASMENU_EFFECTS_FX_WIDTH"],5,400,1,0,1,"fxW"); MkSl(L["AURASMENU_EFFECTS_FX_HEIGHT"],2,400,1,1,1,"fxH"); MkSl(L["AURASMENU_EFFECTS_Z_DEPTH"],-30,30,0.5,2,1,"z")
-                        MkSl(L["AURASMENU_EFFECTS_X_OFFSET"],-30,30,0.5,0,2,"x"); MkSl(L["AURASMENU_EFFECTS_Y_OFFSET"],-30,30,0.5,1,2,"y"); MkSl(L["AURASMENU_EFFECTS_POS_X"],-800,800,1,2,2,"posX")
-                        MkSl(L["AURASMENU_EFFECTS_POS_Y"],-800,800,1,0,3,"posY")
+                        MkSl(L["SETTINGS_OFFSET_X"],-30,30,0.5,0,2,"x"); MkSl(L["SETTINGS_OFFSET_Y"],-30,30,0.5,1,2,"y"); MkSl(L["SETTINGS_POSITION_X"],-800,800,1,2,2,"posX")
+                        MkSl(L["SETTINGS_POSITION_Y"],-800,800,1,0,3,"posY")
                         -- Buttons inside card
                         local rB=CreateFrame("Button",nil,lf2,"BackdropTemplate"); rB:SetSize(90,20); rB:SetPoint("BOTTOMLEFT",5,5)
                         rB:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
@@ -792,7 +791,9 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                         end
                         allEntries[#allEntries+1]={id=sid,info=spells[sid],name=ns.Providers:GetSlotName(slot),isWG=true,tex=ns.Providers:GetSlotTexture(slot)}
                     end end end end
-        table.sort(allEntries,function(a,b) return (a.name or"")<(b.name or"") end)
+        -- _addon.FoldAccentsLower (Core.lua) : cf. Tactics.lua -- strcmputf8i
+        -- seul ne suffisait pas pour ce client (toujours classé après Z).
+        table.sort(allEntries,function(a,b) return _addon.FoldAccentsLower(a.name or"") < _addon.FoldAccentsLower(b.name or"") end)
         local spellRowBgs = {}
         for _,entry in ipairs(allEntries) do
             local sr=CreateFrame("Button",nil,lf); sr:SetSize(LEFT_W,26); sr:SetPoint("TOPLEFT",0,-ly)

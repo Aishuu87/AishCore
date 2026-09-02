@@ -83,6 +83,9 @@ end
 -- Crop constant for circle_piecrop.tga (texture pre-croppee, bas transparent supprime)
 local ARC_CROP_H = 0.88
 
+-- Coeur central : taille fixe (px, avant application du scale global du cercle).
+local HEART_SIZE = 8
+
 -- Suivi de l'état "blessé" via événements (contourne les secret numbers)
 local playerIsDamaged = false
 local lastHealthChangeTime = 0
@@ -127,9 +130,17 @@ end)
 function HealthCircle.ShouldShow()
   if ns.IsInBlockedState() then return false end
   if ns.skyridingActive and ns.GetCfg("skyriding").hideHealthCircle ~= false then return false end
-  if UnitAffectingCombat("player") then return false end
   local cfg = ns.GetCfg("healthCircle")
   if cfg.enabled == false then return false end
+  -- Ne jamais s'afficher si la vraie barre de vie du joueur (UnitBars) est
+  -- deja visible : ce cercle n'est qu'un rappel minimaliste hors combat pour
+  -- quand cette barre n'est PAS affichee -- double affichage sinon (meme info).
+  local UB = ns.Modules and ns.Modules.UnitBars
+  if UB and UB.IsPlayerBarShown and UB.IsPlayerBarShown() then return false end
+  -- "Toujours actif en instance" : ignore les transitions combat tant qu'on
+  -- est en donjon/raid (ns.inInstance, cf. Core.lua).
+  if cfg.alwaysInInstance and ns.inInstance then return true end
+  if UnitAffectingCombat("player") then return false end
   local vMode = cfg.visibilityMode or "important"
   if vMode == "always" then return true end
   -- "important" (default) : visible seulement quand le joueur est blesse
@@ -183,17 +194,14 @@ function HealthCircle.ApplySettings()
   local textC  = dotC  -- texte du cercle de vie = couleur OoC Dot
   bar.text:SetTextColor(textC[1], textC[2], textC[3], textC[4] or 1)
   if bar.arc then bar.arc:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1) end
-  -- Redimensionner les dots proportionnellement
+  -- Redimensionner le coeur central proportionnellement
   local baseSize = ns.Defaults.healthCircle.size
   local scale = size / baseSize
-  for i = 1, 5 do
-    local dot = bar["dot" .. i]
-    if dot then
-      dot:SetSize(cfg.dotSizes[i] * scale, cfg.dotSizes[i] * scale)
-      dot:ClearAllPoints()
-      dot:SetPoint("BOTTOM", bar, "BOTTOM", cfg.dotPositions[i][1] * scale, cfg.dotPositions[i][2] * scale)
-      dot:SetVertexColor(dotC[1], dotC[2], dotC[3], 1)
-    end
+  if bar.dot3 then
+    bar.dot3:SetSize(HEART_SIZE * scale, HEART_SIZE * scale)
+    bar.dot3:ClearAllPoints()
+    bar.dot3:SetPoint("BOTTOM", bar, "BOTTOM", cfg.dotPositions[3][1] * scale, cfg.dotPositions[3][2] * scale)
+    bar.dot3:SetVertexColor(dotC[1], dotC[2], dotC[3], 1)
   end
   local sw = UIParent:GetWidth()
   local sh = UIParent:GetHeight()
@@ -221,7 +229,7 @@ function HealthCircle.Create(parent)
   if bar then return bar end
   local cfg = ns.GetCfg("healthCircle")
 
-  bar = CreateFrame("Frame", "AishaddonHealthRing", parent)
+  bar = CreateFrame("Frame", "AishCoreHealthRing", parent)
   bar:SetSize(cfg.size, cfg.size)
   bar:SetFrameStrata("LOW")
 
@@ -245,11 +253,11 @@ function HealthCircle.Create(parent)
 
   -- Arc (remplissage bas -> haut, texture circulaire pre-croppee)
   local arcPx = cfg.size * (cfg.arcSizeRatio or 1.0)
-  local arc = CreateFrame("StatusBar", "AishaddonHealthRingArc", bar)
+  local arc = CreateFrame("StatusBar", "AishCoreHealthRingArc", bar)
   arc:SetFrameLevel(bar:GetFrameLevel() + 1)
   arc:SetSize(arcPx, arcPx * ARC_CROP_H)
   arc:SetPoint("TOP", bar, "CENTER", 0, arcPx / 2)
-  arc:SetStatusBarTexture("Interface\\AddOns\\Aishaddon\\Media\\circle_piecrop.tga")
+  arc:SetStatusBarTexture("Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
   arc:SetStatusBarColor(unpack(cfg.barColor))
   arc:SetOrientation("VERTICAL")
   arc:SetMinMaxValues(0, 100)
@@ -275,15 +283,14 @@ function HealthCircle.Create(parent)
   textFrame:SetFrameLevel(overlayFrame:GetFrameLevel() + 1)
   textFrame:SetAllPoints(bar)
 
-  -- 5 petits cercles colorés en bas (sur textFrame pour passer au-dessus de l'overlay)
-  for i = 1, 5 do
-    local dot = textFrame:CreateTexture(nil, "OVERLAY")
-    dot:SetTexture(ns.Media.circle)
-    dot:SetSize(cfg.dotSizes[i], cfg.dotSizes[i])
-    dot:SetPoint("BOTTOM", bar, "BOTTOM", cfg.dotPositions[i][1], cfg.dotPositions[i][2])
-    dot:SetVertexColor(cfg.dotColors[i][1], cfg.dotColors[i][2], cfg.dotColors[i][3], 1)
-    bar["dot" .. i] = dot
-  end
+  -- Coeur central (remplace les 5 dots) : au milieu, en bas du cercle hors combat.
+  -- Reprend taille/position/couleur du dot central (index 3, le plus gros).
+  local dot = textFrame:CreateTexture(nil, "OVERLAY")
+  dot:SetTexture("Interface\\AddOns\\AishCore\\Media\\UI\\heart.tga")
+  dot:SetSize(HEART_SIZE, HEART_SIZE)
+  dot:SetPoint("BOTTOM", bar, "BOTTOM", cfg.dotPositions[3][1], cfg.dotPositions[3][2])
+  dot:SetVertexColor(cfg.dotColors[3][1], cfg.dotColors[3][2], cfg.dotColors[3][3], 1)
+  bar.dot3 = dot
 
   local text = textFrame:CreateFontString(nil, "OVERLAY")
   text:SetFont(ns.Media.font, cfg.fontSize)
@@ -297,7 +304,7 @@ function HealthCircle.Create(parent)
 
   bar:Hide()
 
-  -- Pré-allouer la table d'éléments pour AnimateVisibility (9 slots fixes).
+  -- Pré-allouer la table d'éléments pour AnimateVisibility (5 slots fixes).
   -- Les frame-refs (bar.arc, etc.) sont stables après Create() : on ne les recrée jamais.
   do
     local si = 0.04
@@ -306,10 +313,6 @@ function HealthCircle.Create(parent)
     _hcAnimElems[3] = { element = bar.arc,          delay = si * 2 }
     _hcAnimElems[4] = { element = bar.overlayFrame, delay = si * 2 }
     _hcAnimElems[5] = { element = bar.dot3,         delay = si * 3 }
-    _hcAnimElems[6] = { element = bar.dot2,         delay = si * 4 }
-    _hcAnimElems[7] = { element = bar.dot4,         delay = si * 4 }
-    _hcAnimElems[8] = { element = bar.dot1,         delay = si * 5 }
-    _hcAnimElems[9] = { element = bar.dot5,         delay = si * 5 }
   end
 
   return bar
@@ -362,8 +365,7 @@ function HealthCircle.SetPreview(on)
     bar:Show()
     bar:SetAlpha(1)
     bar:SetScale(1)
-    local elements = { bar.bgLarge, bar.text, bar.arc }
-    for i = 1, 5 do elements[#elements+1] = bar["dot" .. i] end
+    local elements = { bar.bgLarge, bar.text, bar.arc, bar.dot3 }
     for _, el in ipairs(elements) do
       if el then
         el:Show()
@@ -456,9 +458,7 @@ function HealthCircle.UpdateVisibility()
     if bar.overlayFrame then bar.overlayFrame:Show(); bar.overlayFrame:SetAlpha(1); bar.overlayFrame:SetScale(1) end
     bar.bgLarge:Show()
     bar.text:Show()
-    for i = 1, 5 do
-      if bar["dot" .. i] then bar["dot" .. i]:Show() end
-    end
+    if bar.dot3 then bar.dot3:Show() end
     if not bar._healthShown then
       bar._healthShown = true
       HealthCircle.AnimateVisibility(true)

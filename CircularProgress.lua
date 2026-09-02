@@ -1,4 +1,4 @@
--- CircularProgress.lua : Moteur de rendu circulaire (port de WeakAuras)
+-- CircularProgress.lua : Moteur de rendu circulaire (arcs/progressions)
 local addonName, ns = ...
 
 -- TextureCoords : gestion des coordonnées de texture pour le rendu circulaire

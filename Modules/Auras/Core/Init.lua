@@ -99,14 +99,14 @@ end
 -- ModelPicker, ce qui économise ~25 MB de RAM pour les utilisateurs qui
 -- n'ouvrent jamais le picker.
 --
--- PARTAGE AVEC Aishaddon (économie ~5-10 MB de doublon RAM) :
--- Si l'user a aussi Aishaddon installé, Aishaddon expose sa table
+-- PARTAGE AVEC AishCore (économie ~5-10 MB de doublon RAM) :
+-- Si l'user a aussi AishCore installé, AishCore expose sa table
 -- aplatie sous _G.AishSharedModelFlat (globale pont). AishUIAura la
--- détecte et la réutilise sans flatten. Dégrade proprement si Aishaddon
+-- détecte et la réutilise sans flatten. Dégrade proprement si AishCore
 -- n'est pas à jour (flatten local classique).
 --
 -- On expose aussi NOTRE _modelFlat sous _G.AishSharedModelFlat pour que
--- toute version future d'Aishaddon puisse faire le partage inverse.
+-- toute version future d'AishCore puisse faire le partage inverse.
 --
 -- Retourne true si la table est prête à l'usage (ns._modelFlat), false sinon.
 ------------------------------------------------------------------------
@@ -114,7 +114,7 @@ function ns.EnsureModelPaths()
     -- Déjà chargée et aplatie : rien à faire
     if ns._modelFlat and #ns._modelFlat > 0 then return true end
 
-    -- PARTAGE 1 : une table aplatie existe déjà en globale pont (Aishaddon
+    -- PARTAGE 1 : une table aplatie existe déjà en globale pont (AishCore
     -- à jour, ou autre addon partenaire). On la référence directement, 0 copie.
     if _G.AishSharedModelFlat and #_G.AishSharedModelFlat > 0 then
         ns._modelFlat = _G.AishSharedModelFlat
@@ -128,8 +128,8 @@ function ns.EnsureModelPaths()
     end)
 
     -- Fallback : si AishUIAuraModelPaths existe déjà (ex : injection manuelle
-    -- ou présence d'un addon partenaire avec AishaddonModelPaths), on l'utilise directement
-    local rawPaths = AishUIAuraModelPaths or AishaddonModelPaths
+    -- ou présence d'un addon partenaire avec AishCoreModelPaths), on l'utilise directement
+    local rawPaths = AishUIAuraModelPaths or AishCoreModelPaths
     if not rawPaths then
         return false
     end
@@ -150,12 +150,12 @@ function ns.EnsureModelPaths()
     for _, cat in pairs(rawPaths) do Flatten(cat) end
 
     -- Expose notre table aplatie via globale pont, pour partage inverse
-    -- (si Aishaddon ouvre son ModelPicker après le nôtre)
+    -- (si AishCore ouvre son ModelPicker après le nôtre)
     _G.AishSharedModelFlat = ns._modelFlat
 
     -- Libère l'arbre original : on ne garde que la version aplatie
     AishUIAuraModelPaths = nil
-    AishaddonModelPaths = nil
+    AishCoreModelPaths = nil
     collectgarbage("collect")
 
     return true
@@ -170,8 +170,8 @@ end
 -- qui rechargera via le sous-addon LoadOnDemand.
 --
 -- PARTAGE : si notre table est en fait la globale pont _G.AishSharedModelFlat
--- (= partagée avec Aishaddon), on NE la libère PAS (car Aishaddon en a besoin).
--- On se contente de lâcher notre référence. Aishaddon la libérera de son côté,
+-- (= partagée avec AishCore), on NE la libère PAS (car AishCore en a besoin).
+-- On se contente de lâcher notre référence. AishCore la libérera de son côté,
 -- et le GC la récupérera quand plus personne ne pointe dessus.
 --
 -- Coût de ré-ouverture : ~0.3-0.5s (charge + aplatissement) si on a flatten.
@@ -182,13 +182,13 @@ function ns.ReleaseModelPaths()
     local wasShared = (ns._modelFlat == _G.AishSharedModelFlat)
     ns._modelFlat = nil
     -- Si c'était la table partagée, on ne libère PAS la globale pont :
-    -- Aishaddon (ou un autre addon partenaire) pourrait encore en avoir besoin.
+    -- AishCore (ou un autre addon partenaire) pourrait encore en avoir besoin.
     if not wasShared then
         _G.AishSharedModelFlat = nil
     end
     -- Au cas où : nettoie aussi les globales qui pourraient avoir été ré-exposées
     AishUIAuraModelPaths = nil
-    AishaddonModelPaths = nil
+    AishCoreModelPaths = nil
     collectgarbage("collect")
     return true
 end
@@ -196,6 +196,12 @@ end
 ------------------------------------------------------------------------
 -- HELPERS DE SPÉCIALISATION
 ------------------------------------------------------------------------
+-- Cle = "CLASSE_SPE" uniquement (PAS de nom/royaume de personnage) : la DB
+-- (AishUIAuraDB) est deja partagee tout le compte, donc une liste "Auras a
+-- tracker" configuree sur un personnage doit etre retrouvee telle quelle par
+-- n'importe quel AUTRE personnage de la meme classe/spe -- notamment un
+-- personnage tout juste cree. Ancien format (incluait nom-realm) migre une
+-- seule fois vers ce format par MigrateSpecKeys (cf. ns.InitDB).
 function ns.GetSpecKey()
     local key
     pcall(function()
@@ -206,9 +212,7 @@ function ns.GetSpecKey()
         if not specID then return end
         local m = ns.SPEC_MAP[specID]
         if m then
-            local name = UnitName("player") or "?"
-            local realm = GetRealmName() or "?"
-            key = name .. "-" .. realm .. "_" .. m.class .. "_" .. m.spec
+            key = m.class .. "_" .. m.spec
         end
     end)
     return key
@@ -220,6 +224,31 @@ function ns.GetSpecSpells()
     if not ns.db.discoveredSpells then ns.db.discoveredSpells = {} end
     if not ns.db.discoveredSpells[key] then ns.db.discoveredSpells[key] = {} end
     return ns.db.discoveredSpells[key], key
+end
+
+-- /aishsourcelist : liste tous les sorts classes source="debuff"
+-- (Essentiel/Utilitaire, cf. CDMHooks.lua::InitCDMHooks) pour la spec courante --
+-- sert a distinguer manuellement les VRAIS debuffs cible des auto-buffs
+-- mal classifies (ex: Rapidite de la nature/378081, decouvert via un viewer
+-- Essentiel/Utilitaire alors que c'est un buff joueur).
+SLASH_AISHSOURCELIST1 = "/aishsourcelist"
+SlashCmdList["AISHSOURCELIST"] = function()
+    local P = "|cff00ffff[AishCore]|r "
+    local spells, key = ns.GetSpecSpells()
+    if not spells then
+        print(P .. "GetSpecSpells() indisponible.")
+        return
+    end
+    print(P .. string.format("Spec courante : %s", tostring(key)))
+    local n = 0
+    for spellID, info in pairs(spells) do
+        if info.source == "debuff" then
+            n = n + 1
+            local name = (GetSpellName and GetSpellName(spellID)) or info.name or "?"
+            print(P .. string.format("  %d (%s)", spellID, tostring(name)))
+        end
+    end
+    print(P .. string.format("Total : %d sort(s) classe(s) \"debuff\".", n))
 end
 
 ------------------------------------------------------------------------
@@ -267,11 +296,198 @@ local function MigrateRenderKeys(raw)
     end
 end
 
+-- Migration : InitCDMHooks (CDMHooks.lua) etiquette TOUT sort decouvert via
+-- un viewer Essentiel/Utilitaire comme source="debuff" (heuristique correcte
+-- pour la majorite des capacites offensives/CC, mais fausse pour les
+-- capacites qui s'octroient un buff a elles-memes -- Blizzard ne distingue
+-- pas les deux au niveau du viewer). Sorts concernes (via /aishsourcelist) :
+-- Rapidite de la nature/378081 (TOUJOURS le joueur qui la lance), Furie
+-- sanguinaire/2825 (buff raid, mais le lanceur le recoit toujours),
+-- Remous/61295 (HoT castable sur n'importe quel allie -- verifie ici sur le
+-- joueur, malgre l'imprecision pour les casts sur un autre allie). Corrige
+-- une bonne fois les entrees deja decouvertes sur TOUS les personnages/spes
+-- -- le hook auto-correcteur dans CDMHooks.lua::SetAuraInstanceInfo (ajoute
+-- en meme temps) evite que de FUTURS sorts similaires retombent dans le
+-- meme piege.
+local _MISCLASSIFIED_SELF_BUFFS = { [378081] = true, [2825] = true, [61295] = true }
+local function MigrateMisclassifiedSelfBuffSource(raw)
+    if not raw or not raw.discoveredSpells then return end
+    for _, specSpells in pairs(raw.discoveredSpells) do
+        for spellID, info in pairs(specSpells) do
+            if _MISCLASSIFIED_SELF_BUFFS[spellID] and info.source == "debuff" then
+                info.source = "buff"
+            end
+        end
+    end
+end
+
+-- Migration : ns.GetSpecKey() incluait auparavant nom-realm du
+-- personnage ("Perso-Royaume_CLASSE_SPE"), fragmentant par PERSONNAGE une DB
+-- (AishUIAuraDB) pourtant déjà partagée tout le compte -- un nouveau
+-- personnage de la même classe/spé repartait donc de zéro (whitelist "Auras
+-- à tracker" vide) au lieu de retrouver la liste déjà configurée. Nouveau
+-- format : "CLASSE_SPE" seul (cf. ns.GetSpecKey). Fusionne ADDITIVEMENT
+-- (n'écrase jamais une entrée déjà présente sous la nouvelle clé) le contenu
+-- de chaque ancienne clé vers sa nouvelle clé -- déduite en cherchant un
+-- suffixe "_CLASSE_SPE" connu (ns.SPEC_MAP) en fin de clé.
+--
+-- SUPPRESSION DES ANCIENNES CLES (checkup mémoire) : une première approche
+-- les laissait volontairement en place (coût mémoire supposé négligeable) --
+-- mesure en pratique sur une DB réelle à plusieurs dizaines de personnages :
+-- ces clés mortes représentaient ~52% du contenu de discoveredSpells (fusion
+-- déjà additive et sans perte -- une clé vidée ici a déjà TOUJOURS son
+-- contenu recopié dans la clé cible avant suppression). Supprimées
+-- maintenant que la migration a eu le temps de tourner sans régression
+-- signalée.
+--
+-- Exposée sur ns (pas locale) et SANS garde interne (idempotente par
+-- nature -- une fusion additive ne fait rien la 2e fois, et une clé déjà
+-- supprimée n'est simplement plus visitée) : réutilisée par Prof:Import
+-- (Profiles.lua) pour normaliser un profil exporté par un client
+-- pré-migration, pas seulement au login. ns.InitDB pose son propre flag
+-- one-shot autour de l'appel pour éviter le coût du scan à chaque login.
+function ns.MigrateSpecKeys(raw)
+    if not raw or not raw.discoveredSpells then return end
+
+    local validKeys = {}
+    for _, m in pairs(ns.SPEC_MAP) do
+        validKeys[m.class .. "_" .. m.spec] = true
+    end
+
+    -- Copie de la liste des clés AVANT mutation : on va potentiellement créer
+    -- de nouvelles clés (les cibles) dans raw.discoveredSpells pendant la
+    -- boucle, ce qu'un pairs() en cours d'itération ne garantit pas de gérer
+    -- proprement.
+    local existingKeys = {}
+    for key in pairs(raw.discoveredSpells) do existingKeys[#existingKeys + 1] = key end
+
+    for _, key in ipairs(existingKeys) do
+        if not validKeys[key] then
+            for suffix in pairs(validKeys) do
+                if key:sub(-(#suffix + 1)) == ("_" .. suffix) then
+                    local specSpells = raw.discoveredSpells[key]
+                    if not raw.discoveredSpells[suffix] then raw.discoveredSpells[suffix] = {} end
+                    local target = raw.discoveredSpells[suffix]
+                    for sid, info in pairs(specSpells) do
+                        if target[sid] == nil then target[sid] = info end
+                    end
+                    -- Fusion terminee (additive, aucune perte) : la clé
+                    -- source ne sert plus jamais à rien -- supprimée.
+                    raw.discoveredSpells[key] = nil
+                    break
+                end
+            end
+        end
+    end
+end
+
+-- CHECKUP MEMOIRE : nettoyage one-shot supplémentaire, distinct
+-- du flag _specKeyMigratedV1 (déjà consommé par l'ancienne version
+-- de MigrateSpecKeys qui ne supprimait rien) -- sans un NOUVEAU flag, la
+-- migration corrigée ci-dessus ne serait jamais re-déclenchée pour les
+-- comptes déjà migrés. Nettoie aussi AishUIAuraDB.profiles[*].discoveredSpells :
+-- CE CHAMP N'EST JAMAIS LU DEPUIS UN PROFIL (confirmé sur les 3 seuls points
+-- d'accès : Prof:InitDB/SetActive réassignent toujours `profile.discoveredSpells
+-- = db.discoveredSpells` -- la référence PARTAGÉE, pas la copie sauvegardée
+-- dans le profil -- et Prof:Export reconstruit `data.discoveredSpells` depuis
+-- `db.discoveredSpells` aussi) -- donc écrit sur disque à chaque sauvegarde
+-- (chaque table Lua référencée deux fois est sérialisée deux fois par le
+-- moteur SavedVariables, même si elles pointent vers le même objet en
+-- mémoire) mais 100% mort : sans risque à vider.
+local function CleanupDeadDBBloat(raw)
+    if not raw then return end
+    pcall(ns.MigrateSpecKeys, raw)
+    if raw.profiles then
+        for _, prof in pairs(raw.profiles) do
+            if type(prof) == "table" then prof.discoveredSpells = nil end
+        end
+    end
+end
+
+-- BULK GLOW PAR DEFAUT : remplace le glow par defaut de TOUTES les spes
+-- deja enregistrees dans le profil "Default" (db.defaultGlowBySpec[cle], cf.
+-- GetDefaultGlowCfg dans UI/Menus/Tactics.lua) par Type="Assist White"
+-- (index 6 dans ns.GLOW_DEFS) / Opacite=0.6, au lieu d'avoir a le refaire
+-- spe par spe dans le panneau d'options. N'ecrase QUE idx/alpha
+-- (couleur/echelle/proc laisses intacts). Met aussi a jour
+-- profile.defaultGlowIdx/defaultGlowAlpha (les cles "seed" globales lues
+-- par GetDefaultGlowCfg pour toute spe PAS ENCORE visitee) -- couvre donc
+-- aussi les spes jamais ouvertes dans le panneau. One-shot
+-- (raw._defaultGlowBulkSetV1) : ne re-ecrasera jamais un reglage fait apres
+-- cette migration. Uniquement le profil "Default", pas les autres profils
+-- ni ns.Defaults (qui resterait a Modern Glow/0.7 pour un profil flambant
+-- neuf).
+local function BulkSetDefaultGlow(raw)
+    if not raw or not raw.profiles then return end
+    local profile = raw.profiles["Default"]
+    if type(profile) ~= "table" then return end
+    profile.defaultGlowIdx = 6
+    profile.defaultGlowAlpha = 0.6
+    if type(profile.defaultGlowBySpec) == "table" then
+        for _, cfg in pairs(profile.defaultGlowBySpec) do
+            if type(cfg) == "table" then
+                cfg.idx = 6
+                cfg.alpha = 0.6
+            end
+        end
+    end
+end
+
+-- BULK ANIMATION PROC PAR DEFAUT (en complement de BulkSetDefaultGlow
+-- ci-dessus) : le glow EN BOUCLE (Type de Glow, deja migre) et l'ANIMATION
+-- PROC (flourish d'apparition, defaultProcGlowIdx/cfg.procIdx) sont deux
+-- reglages SEPARES -- ce dernier n'avait jamais ete touche, restait a 1
+-- ("Aucun") pour toute spe n'ayant jamais ete personnalisee (verifie via
+-- ns.Defaults.defaultProcGlowIdx=1 et ns.SpellDefaults.procGlowIdx=1), alors
+-- que le reglage voulu etait "Proc: White Short" actif partout.
+-- Index 75 = "Proc: White Short" dans ns.GLOW_DEFS (Config.lua, verifie par
+-- comptage : 1 Aucun + 67 boucle, "Proc: White Short" est la 7e entree de
+-- la section proc). Meme structure/portee que BulkSetDefaultGlow (profil
+-- "Default" uniquement, one-shot via un flag DISTINCT -- necessaire pour se
+-- redeclencher malgre _defaultGlowBulkSetV1 deja consomme).
+local function BulkSetDefaultProcGlow(raw)
+    if not raw or not raw.profiles then return end
+    local profile = raw.profiles["Default"]
+    if type(profile) ~= "table" then return end
+    profile.defaultProcGlowIdx = 75
+    if type(profile.defaultGlowBySpec) == "table" then
+        for _, cfg in pairs(profile.defaultGlowBySpec) do
+            if type(cfg) == "table" then
+                cfg.procIdx = 75
+            end
+        end
+    end
+end
+
 function ns.InitDB()
     if not AishUIAuraDB then AishUIAuraDB = {} end
     local raw = AishUIAuraDB
     -- Migration des anciennes clés avant tout MergeDefaults
     MigrateRenderKeys(raw)
+    if not raw._specKeyMigratedV1 then
+        ns.MigrateSpecKeys(raw)
+        raw._specKeyMigratedV1 = true
+    end
+    -- CHECKUP MEMOIRE : nouveau flag distinct de _specKeyMigratedV1
+    -- ci-dessus (deja consomme par l'ancienne version qui ne supprimait rien) --
+    -- necessaire pour redeclencher le nettoyage UNE fois sur les comptes deja
+    -- migres. cf. CleanupDeadDBBloat.
+    if not raw._dbCleanupV1 then
+        CleanupDeadDBBloat(raw)
+        raw._dbCleanupV1 = true
+    end
+    if not raw._defaultGlowBulkSetV1 then
+        BulkSetDefaultGlow(raw)
+        raw._defaultGlowBulkSetV1 = true
+    end
+    if not raw._defaultProcGlowBulkSetV1 then
+        BulkSetDefaultProcGlow(raw)
+        raw._defaultProcGlowBulkSetV1 = true
+    end
+    if not raw._misclassifiedSelfBuffSourceV1 then
+        MigrateMisclassifiedSelfBuffSource(raw)
+        raw._misclassifiedSelfBuffSourceV1 = true
+    end
     ns.MergeDefaults(raw, ns.Defaults)
     for _, key in ipairs({"iconlist","freebars","circlebars","icons","equipment"}) do
         if not raw[key] or type(raw[key]) ~= "table" then
@@ -292,6 +508,12 @@ function ns.InitDB()
             if info.desat == nil then info.desat = false end
             if not info.procGlowIdx then info.procGlowIdx = 1 end
             if not info.procGlowScale then info.procGlowScale = 1.0 end
+            -- Migration _glowCustom (feature GLOW PAR DEFAUT) : les sorts deja
+            -- decouverts avant cette version n'ont pas ce flag. On verrouille
+            -- (_glowCustom=true) tout sort qui avait deja un glow actif, pour ne
+            -- jamais ecraser silencieusement un reglage choisi par l'utilisateur.
+            -- Les sorts sans glow actif restent libres de suivre le defaut.
+            if info._glowCustom == nil then info._glowCustom = (info.glow == true) end
         end
     end
     ns.db = db
@@ -304,10 +526,29 @@ end
 function ns.ScanAuras()
     if not ns._whitelistBuilt then ns.BuildWhitelist() end
     if ns.Scan then ns.Try("Scan:Run", ns.Scan.Run, ns.Scan) end
+    -- Scan.Run ne reveille l'animDriver que si de VRAIES auras sont actives
+    -- (ns._activeAuraCount > 0) -- le mode apercu (fausses barres injectees
+    -- par les 5 points d'entree qui posent ns._previewBars, tous suivis d'un
+    -- ns.ScanAuras()) n'a aucune vraie aura, donc ne reveille jamais le
+    -- driver de lui-meme. Sans cet appel explicite, AnimateOne/
+    -- ns.AnchorSpark2D ne tourneraient jamais : le spark de la fausse barre
+    -- resterait cree mais jamais ancre -- invisible en preview.
+    if ns._previewBars and ns.WakeAnimDriver then ns.WakeAnimDriver() end
 end
 
 function ns.InitAllRenders()
     if not ns.db or not ns.db.enabled then return end
+    -- Chaque render:Init() (re)cree ses conteneurs from scratch, ce qui
+    -- inclut des appels comme SetPropagateMouseClicks() -- proteges en
+    -- combat des lors qu'ils partent d'un appel qui remonte a un reload
+    -- pendant un pull (ADDON_LOADED tombant en plein combat). Confirme en
+    -- jeu : ADDON_ACTION_BLOCKED sur AishDebuffsCont:SetPropagateMouseClicks.
+    -- On differe tout le cycle d'init au prochain PLAYER_REGEN_ENABLED
+    -- (cf. Events.lua) plutot que de laisser chaque render planter un a un.
+    if InCombatLockdown and InCombatLockdown() then
+        ns._pendingRenderInit = true
+        return
+    end
     if ns.db.useNativeCDM then
         for _, rf in pairs(ns.renderFrames) do
             if rf and rf.container then

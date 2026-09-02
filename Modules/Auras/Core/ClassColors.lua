@@ -34,3 +34,42 @@ do
         ns.THEME.checkboxOn = { g[1], g[2], g[3] }
     end
 end
+
+---------------------------------------------------------------------------
+-- Accent thematique du GUI Auras (dots/hairlines des headers de section +
+-- leur texte) : equivalent de SharedWidgets.RefreshAccentTheme dans
+-- UI/SharedWidgets.lua (addon principal), mais pour le namespace separe
+-- _addon.Auras.THEME. Meme repartition des couleurs :
+--   - ns.THEME.gold/accent (dots, hairlines)  = "Points de Puissance A"
+--   - ns.THEME.accentText  (texte des labels) = "Points de Puissance B"
+-- Gate par le meme toggle que le panneau principal (_addon.DB.colors.themeGUI,
+-- actif par defaut) -- _addon ici designe le namespace racine de l'addon
+-- (ns = _addon.Auras dans ce fichier), pas ns.DB/ns.Modules qui n'existent
+-- pas a ce niveau.
+---------------------------------------------------------------------------
+local ACCENT_STATIC      = { 0.78, 0.62, 0.30 }
+local ACCENT_TEXT_STATIC = { 0.776, 0.710, 0.471 }
+function ns.RefreshAccentTheme()
+    if not ns.THEME then return end
+    local useTheme = not (_addon.DB and _addon.DB.colors and _addon.DB.colors.themeGUI == false)
+    local g, tc = ACCENT_STATIC, ACCENT_TEXT_STATIC
+    if useTheme then
+        local CLR = _addon.Modules and _addon.Modules.Colors
+        local dc = CLR and CLR.Get and CLR.Get("powerdotsa")
+        if dc then g = dc end
+        local tt = CLR and CLR.Get and CLR.Get("powerdotsb")
+        if tt then tc = tt end
+    end
+    ns.THEME.gold       = ns.THEME.gold or {}
+    ns.THEME.accent     = ns.THEME.accent or {}
+    ns.THEME.accentText = ns.THEME.accentText or {}
+    for i = 1, 3 do
+        ns.THEME.gold[i]       = g[i]
+        ns.THEME.accent[i]     = g[i]
+        ns.THEME.accentText[i] = tc[i]
+    end
+    ns.THEME.checkboxOn = ns.THEME.accent
+    if ns.SharedWidgets and ns.SharedWidgets.RefreshSectionHeaderColors then
+        ns.SharedWidgets.RefreshSectionHeaderColors()
+    end
+end

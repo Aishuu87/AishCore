@@ -9,7 +9,9 @@ local CreateFrame, C_Timer, InCombatLockdown = CreateFrame, C_Timer, InCombatLoc
 local ipairs, pairs = ipairs, pairs
 
 -- Compteur de refresh par auraInstanceID. Incrémenté par UNIT_AURA.updatedAuraInstanceIDs
--- (event Blizzard 100% non-secret : l'event vient avec des IDs, pas des valeurs d'aura).
+-- quand le payload n'est PAS secret (cf. guard issecretvalue(info.isFullUpdate) dans le
+-- handler UNIT_AURA plus bas -- depuis le patch 12.1, ce payload peut lui-même devenir
+-- intégralement secret, y compris isFullUpdate).
 -- Utilisé par GetAuraKey pour forcer le relancement de SetTimerDuration au recast,
 -- sans JAMAIS lire les valeurs potentiellement secret des auras.
 ns._refreshCounter = ns._refreshCounter or {}
@@ -141,6 +143,7 @@ ef:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         pcall(function() ns.InitDB() end)
         pcall(function() ns.InitAllRenders() end)
+        pcall(function() if ns.MissingBuffs then ns.MissingBuffs.Init() end end)
 
         -- Note : l'aplatissement de la bibliothèque de modèles 3D (~19 MB) a été
         -- déplacé en lazy-load. Il est désormais déclenché par ns.EnsureModelPaths()
@@ -171,7 +174,7 @@ ef:SetScript("OnEvent", function(_, event, arg1)
             -- ou mal configurées au /reload.
             C_Timer.After(0.5, function() ns._initComplete = true; ns.ScanAuras() end)
         end)
-        print("|cff00b0ffAishaddon|r [Auras] v" .. ns.ADDON_VERSION .. " — |cffffcc00/aa|r ou |cffffcc00/aishaura|r")
+        print("|cff00b0ffAishCore|r [Auras] v" .. ns.ADDON_VERSION .. " — |cffffcc00/aa|r ou |cffffcc00/aishaura|r")
 
     elseif event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "ZONE_CHANGED_NEW_AREA" then
         ns._inCombat = InCombatLockdown(); ns._whitelistBuilt = false
@@ -328,10 +331,44 @@ ef:SetScript("OnEvent", function(_, event, arg1)
         local info = arg2
         local anyWL = ns.anyWhitelist
 
+        -- Secret Values (patch 12.1+, 2026-08-11) : depuis ce patch, TOUT le
+        -- payload UNIT_AURA (isFullUpdate inclus -- un simple booleen) devient
+        -- secret des que des auras concernees sont secretes -- meme un `if
+        -- info.isFullUpdate` plante desormais (crash reproduit en jeu le
+        -- 2026-08-12, cf. Config/ResourceMap.lua qui avait le meme pattern).
+        -- issecretvalue() est la seule facon sure de sonder ce champ AVANT de
+        -- le tester. Si le payload est secret, on ne peut plus se fier a
+        -- AUCUN de ses sous-champs (addedAuras/updatedAuraInstanceIDs/
+        -- removedAuraInstanceIDs peuvent etre des "secret table" -- meme les
+        -- iterer avec ipairs planterait). On saute alors directement le
+        -- refresh counter + l'optimisation ShouldSkipAuraUpdate et on
+        -- retombe sur le meme debounce que le chemin normal, juste sans
+        -- pouvoir skip -- moins optimal, mais jamais un crash.
+        if info and issecretvalue and issecretvalue(info.isFullUpdate) then
+            if arg1 == "target" and ns._awaitingTargetFullUpdate then
+                ns._awaitingTargetFullUpdate = false
+                _CancelTargetRetries()
+                pcall(ns.ScanAuras)
+                return
+            end
+            if arg1 == "target" then
+                if not ns._targetScanPending then
+                    ns._targetScanPending = true
+                    C_Timer.After(0.05, _TargetScanDebounced)
+                end
+            elseif arg1 == "player" and not ns._playerScanPending then
+                ns._playerScanPending = true
+                C_Timer.After(0.1, _PlayerScanDebounced)
+            end
+            return
+        end
+
         -- REFRESH COUNTER : Blizzard fire UNIT_AURA avec updatedAuraInstanceIDs au recast
         -- d'un DOT. On incrémente un compteur par instID. GetAuraKey utilise ce compteur
         -- pour changer la clé d'aura → SetTimerDuration est relancé avec le durObj frais.
-        -- 100% non-secret : l'event vient avec des IDs, pas des valeurs d'aura.
+        -- A ce stade le payload est confirmé NON secret (guard ci-dessus, sorti sinon) --
+        -- avant le patch 12.1 on pensait ce payload "100% non-secret" par nature, ce qui
+        -- s'est révélé faux (isFullUpdate/les listes d'IDs peuvent être secrets ensemble).
         --
         -- EXCEPTION TAB TARGET : dans les 300ms suivant un PLAYER_TARGET_CHANGED, Blizzard
         -- fire des UNIT_AURA.updated pour CONFIRMER l'état initial des auras sur la nouvelle
@@ -380,33 +417,14 @@ ef:SetScript("OnEvent", function(_, event, arg1)
                 local ok, result = pcall(AuraUtil.ShouldSkipAuraUpdate, info, isRelevant)
                 if ok then shouldSkip = result end
             end
-            -- Une aura whitelistée peut avoir été RETIRÉE (removedAuraInstanceIDs).
-            -- Dans ce cas il faut rescanner pour faire disparaître la bar.
-            -- Source de verite : ns.cdmData (mis a jour event-driven par CDMHooks).
-            if shouldSkip and info.removedAuraInstanceIDs then
-                local cdmU = ns.cdmData and ns.cdmData[arg1]
-                if cdmU then
-                    for _, instID in ipairs(info.removedAuraInstanceIDs) do
-                        local entry = cdmU[instID]
-                        if entry and entry.spellId and anyWL and anyWL[entry.spellId] then
-                            shouldSkip = false; break
-                        end
-                    end
-                end
-            end
-            -- FIX REFRESH : une aura whitelistée peut avoir été REFRESH (updatedAuraInstanceIDs).
-            -- Pareil : on double-check via cdmData. Si l'une est dans notre whitelist, on rescanne.
-            if shouldSkip and info.updatedAuraInstanceIDs then
-                local cdmU = ns.cdmData and ns.cdmData[arg1]
-                if cdmU then
-                    for _, instID in ipairs(info.updatedAuraInstanceIDs) do
-                        local entry = cdmU[instID]
-                        if entry and entry.spellId and anyWL and anyWL[entry.spellId] then
-                            shouldSkip = false; break
-                        end
-                    end
-                end
-            end
+            -- Ex-double-check "aura whitelistée retirée/refresh" via cdmU[instID] :
+            -- supprimé. cdmData est désormais clé par spellID (pas par instID,
+            -- cf. CDMHooks.lua, Secret Values 12.0+) donc ce lookup direct par
+            -- instID n'a plus de sens, et le reconstruire nécessiterait de
+            -- comparer des instID potentiellement secrets (== interdit). On
+            -- fait désormais confiance à AuraUtil.ShouldSkipAuraUpdate +
+            -- isRelevant (qui reçoit déjà les auras fraîches, y compris pour
+            -- addedAuras/updatedAuraInstanceIDs) comme seul filtre.
         end
 
         if shouldSkip then return end  -- Zero-cost exit : aucune aura whitelistée touchée
@@ -438,10 +456,24 @@ ef:SetScript("OnEvent", function(_, event, arg1)
         end
 
     elseif event == "PLAYER_REGEN_ENABLED" then
-        ns._inCombat = false; ns.BuildWhitelist(); ns.ScanAuras(); ns.UpdateAllFades()
+        ns._inCombat = false
+        -- Rattrape un InitAllRenders() saute pendant le combat (ex. reload
+        -- pendant un pull) : cf. le guard InCombatLockdown dans
+        -- ns.InitAllRenders (Init.lua), qui pose ce flag au lieu de laisser
+        -- chaque render planter sur un SetPropagateMouseClicks protege.
+        if ns._pendingRenderInit then
+            ns._pendingRenderInit = false
+            pcall(ns.InitAllRenders)
+        end
+        ns.BuildWhitelist(); ns.ScanAuras(); ns.UpdateAllFades()
         -- Fin de combat : programme un wipe idle 5 min plus tard pour nettoyer
         -- les caches si l'user reste inactif. Annulé si re-combat avant.
         ScheduleIdleWipe()
+        -- Rattrape les relais de stacks (AuraTextRelay.lua) qui n'ont pas pu
+        -- se créer pendant le combat (BuildWhitelist ci-dessus les retente déjà,
+        -- mais un flush explicite couvre aussi les cas où BuildWhitelist n'a
+        -- rien de nouveau à traiter).
+        if ns.FlushPendingAuraTextOverlays then ns.FlushPendingAuraTextOverlays() end
 
     elseif event == "PLAYER_REGEN_DISABLED" then
         ns._inCombat = true; ns.UpdateAllFades()

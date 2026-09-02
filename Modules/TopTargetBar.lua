@@ -1,6 +1,5 @@
 ﻿-- Modules/TopTargetBar.lua
 -- Barre de cible détaillée (haut d'écran) + cible de la cible
--- Portage fidèle du groupe WeakAuras [TOP TARGET]
 local addonName, ns = ...
 local L = ns.L
 
@@ -241,7 +240,7 @@ end
 ---------------------------------------------------------------------------
 local function CreateTargetBar()
     -- Frame conteneur (530×35 → TOP ancré sur WorldFrame pour coller au bord physique)
-    local f = CreateFrame("Button", "AishaddonTopTarget", UIParent, "SecureUnitButtonTemplate")
+    local f = CreateFrame("Button", "AishCoreTopTarget", UIParent, "SecureUnitButtonTemplate")
     f:SetSize(530, 35)
     f:SetFrameStrata("MEDIUM")
     f:SetMovable(true)
@@ -262,7 +261,7 @@ local function CreateTargetBar()
     -- Drag : disponible seulement quand le panel est ouvert et hors combat
     f:HookScript("OnDragStart", function(self)
         if InCombatLockdown() then return end
-        local panel = _G["AishaddonSettingsPanel"]
+        local panel = _G["AishCoreSettingsPanel"]
         if not panel or not panel:IsShown() then return end
         self._dragging = true
         self:StartMoving()
@@ -342,7 +341,7 @@ local function CreateTargetBar()
     local nox  = (db2 and db2.nameOX) or 0
     local noy  = (db2 and db2.nameOY) or -5
 
-    local nameFrame = CreateFrame("Frame", "AishaddonTopTargetNameFrame", UIParent)
+    local nameFrame = CreateFrame("Frame", "AishCoreTopTargetNameFrame", UIParent)
     nameFrame:SetSize(420, 30)
     nameFrame:SetFrameStrata("MEDIUM")
     nameFrame:SetFrameLevel(f:GetFrameLevel() + 2)
@@ -371,7 +370,7 @@ local function CreateTargetBar()
     local hpts    = (db2 and db2.hpFontSize) or 10
     local hanchor = (db2 and db2.hpAnchor)   or "LEFT"
 
-    local hpFrame = CreateFrame("Frame", "AishaddonTopTargetHP", UIParent)
+    local hpFrame = CreateFrame("Frame", "AishCoreTopTargetHP", UIParent)
     hpFrame:SetSize(bgfW, 20)
     hpFrame:SetFrameStrata("TOOLTIP")
     hpFrame:SetPoint(hanchor, bgFull, hanchor, hox, hoy)
@@ -399,7 +398,7 @@ end
 ---------------------------------------------------------------------------
 local function CreateTargetTargetBar()
     -- Conteneur 125×24 cliquable (SecureUnitButtonTemplate)
-    local f = CreateFrame("Button", "AishaddonTopTargetTarget", UIParent, "SecureUnitButtonTemplate")
+    local f = CreateFrame("Button", "AishCoreTopTargetTarget", UIParent, "SecureUnitButtonTemplate")
     f:SetSize(125, 24)
     f:SetFrameStrata("MEDIUM")
     f:SetMovable(true)
@@ -418,7 +417,7 @@ local function CreateTargetTargetBar()
 
     f:HookScript("OnDragStart", function(self)
         if InCombatLockdown() then return end
-        local panel = _G["AishaddonSettingsPanel"]
+        local panel = _G["AishCoreSettingsPanel"]
         if not panel or not panel:IsShown() then return end
         self._dragging = true
         self:StartMoving()
@@ -590,8 +589,15 @@ local function UpdateTarget()
         return
     end
     if not UnitExists("target") then
-        if f_target.nameFrame then f_target.nameFrame:Hide() end
-        if f_target.hpFrame   then f_target.hpFrame:Hide()   end
+        -- Mode preview (panel ouvert, pas de vraie cible) : NE PAS masquer --
+        -- sinon tout ApplySettings() (donc CHAQUE reglage change sur cette
+        -- page, ex. le toggle "barre de ressource") repasse ici et fait
+        -- disparaitre nameFrame/hpFrame, alors que _UpdateTargetName/
+        -- _UpdateTTName savent deja afficher des valeurs de test.
+        if not ttbPreviewMode then
+            if f_target.nameFrame then f_target.nameFrame:Hide() end
+            if f_target.hpFrame   then f_target.hpFrame:Hide()   end
+        end
         return
     end
     -- S'assurer que nameFrame est visible avant les updates (peut avoir ete
@@ -722,7 +728,7 @@ function TopTargetBar.Create()
 
     -- Visibilité quand le panel de config s'ouvre
     C_Timer.After(0, function()
-        local panel = _G["AishaddonSettingsPanel"]
+        local panel = _G["AishCoreSettingsPanel"]
         if panel then
             panel:HookScript("OnShow", function()
                 -- Preview : forcer l'affichage + noms de test
@@ -743,6 +749,12 @@ function TopTargetBar.Create()
                     f_target.bar:SetValue(0.75)
                     if f_target.hpFrame then f_target.hpFrame:Show() end
                     if f_target.hpTxt   then f_target.hpTxt:SetText("75K") end
+                    -- Barre de ressource a 60% pour la preview (sinon vide/a
+                    -- 0 tant qu'aucune vraie cible n'existe, cf. _TickTargetPower).
+                    if f_target.powerBar then
+                        f_target.powerBar:SetMinMaxValues(0, 1)
+                        f_target.powerBar:SetValue(0.6)
+                    end
                 end
                 if f_tt then
                     f_tt.bar:SetMinMaxValues(0, 1)

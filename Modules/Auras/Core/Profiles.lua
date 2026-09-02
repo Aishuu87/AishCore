@@ -156,6 +156,11 @@ function Prof:Import(encoded, targetName, overwrite)
                 else for sid, info in pairs(sp) do if not db.discoveredSpells[sk][sid] then db.discoveredSpells[sk][sid] = info end end end
             end
         end
+        -- Normalise un export produit par un client pré-migration (clé
+        -- "Perso-Royaume_CLASSE_SPE") vers le format actuel "CLASSE_SPE"
+        -- (cf. ns.GetSpecKey/ns.MigrateSpecKeys, Init.lua) -- sinon la liste
+        -- importée resterait invisible de GetSpecSpells sur ce client.
+        if ns.MigrateSpecKeys then pcall(ns.MigrateSpecKeys, db) end
     end
 
     -- Clean export metadata before saving

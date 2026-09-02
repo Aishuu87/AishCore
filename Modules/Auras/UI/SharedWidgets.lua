@@ -53,7 +53,7 @@ function SW.CreateSlider(parent, label, minVal, maxVal, step, width)
     local tr = sl:CreateTexture(nil,"BACKGROUND"); tr:SetPoint("LEFT"); tr:SetPoint("RIGHT"); tr:SetHeight(5); tr:SetColorTexture(unpack(Theme.sliderTrack))
     -- Circular white thumb (Circle_Smooth2)
     local th = sl:CreateTexture(nil,"ARTWORK"); th:SetSize(14,14)
-    th:SetTexture("Interface\\AddOns\\Aishaddon\\Media\\Wheel\\Circle_Smooth2")
+    th:SetTexture("Interface\\AddOns\\AishCore\\Media\\Wheel\\Circle_Smooth2")
     th:SetVertexColor(1, 1, 1, 1)
     sl:SetThumbTexture(th)
     local mnT = c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(mnT,FONT,9); mnT:SetPoint("TOPLEFT",sl,"BOTTOMLEFT",0,-2)
@@ -135,14 +135,28 @@ function SW.CreateColorButton(parent, label, width)
     c.label=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(c.label,FONT,11); c.label:SetPoint("LEFT",8,0)
     c.label:SetTextColor(unpack(Theme.textNormal)); c.label:SetText(label or "")
     local sw=CreateFrame("Button",nil,c); sw:SetSize(20,20); sw:SetPoint("RIGHT",-8,0)
+    c._swatch = sw  -- expose pour un tooltip custom cote appelant (cf. OnEnter/OnLeave optionnels)
+    -- Clic droit = reset (meme convention que UI/SettingsPanel.lua, grille de
+    -- couleurs Colors : clic gauche ouvre le picker, clic droit reinitialise).
+    -- CreateColorButton ne connait pas la notion de "valeur par defaut" du
+    -- champ qu'il pilote (c'est propre a chaque appelant) : c.onReset laisse
+    -- l'appelant decider quoi faire (nil'er sa valeur stockee, recalculer un
+    -- fallback...), on se contente ici de relayer le clic droit.
+    sw:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     local sc=sw:CreateTexture(nil,"ARTWORK"); sc:SetAllPoints(); sc:SetColorTexture(1,1,1)
     local sb=sw:CreateTexture(nil,"BORDER"); sb:SetPoint("TOPLEFT",-1,1); sb:SetPoint("BOTTOMRIGHT",1,-1); sb:SetColorTexture(unpack(Theme.border))
     c.currentColor={1,1,1}
     function c:SetColor(r,g,b) self.currentColor={r or 1,g or 1,b or 1}; sc:SetColorTexture(r or 1,g or 1,b or 1) end
-    sw:SetScript("OnClick",function() local r,g,b=unpack(c.currentColor)
+    sw:SetScript("OnClick",function(_, btn)
+        if btn == "RightButton" then
+            if c.onReset then c.onReset() end
+            return
+        end
+        local r,g,b=unpack(c.currentColor)
         ColorPickerFrame:SetupColorPickerAndShow({r=r,g=g,b=b,
         swatchFunc=function() local nr,ng,nb=ColorPickerFrame:GetColorRGB(); c:SetColor(nr,ng,nb); if c.onChanged then c.onChanged({nr,ng,nb}) end end,
-        cancelFunc=function(p) if p then c:SetColor(p.r,p.g,p.b); if c.onChanged then c.onChanged(c.currentColor) end end end}) end)
+        cancelFunc=function(p) if p then c:SetColor(p.r,p.g,p.b); if c.onChanged then c.onChanged(c.currentColor) end end end})
+    end)
     return c
 end
 
@@ -153,29 +167,65 @@ end
 function SW.CreateSectionHeader(parent, text, width)
     width = width or 260
     local f = CreateFrame("Frame",nil,parent); f:SetSize(width, 24)
-    local g = Theme.gold or {0.78, 0.62, 0.30}
+    -- Theme.gold (dot+hairline, "Points de Puissance A") / Theme.accentText
+    -- (label, "Points de Puissance B") -- tenus a jour par
+    -- _addon.Auras.RefreshAccentTheme(), cf. Core/ClassColors.lua. Meme
+    -- convention que UI/SharedWidgets.lua (addon principal) -- ce fichier-ci
+    -- est une IMPLEMENTATION SEPAREE (namespace _addon.Auras), pas la meme
+    -- fonction, donc avec son propre mecanisme de refresh.
+    local g  = Theme.gold or {0.78, 0.62, 0.30}
+    local tc = Theme.accentText or Theme.textNormal or {0.92, 0.92, 0.93}
     -- Single gold dot in front
     local dot1 = f:CreateTexture(nil,"OVERLAY")
     dot1:SetSize(7,7); dot1:SetPoint("LEFT",2,0)
-    dot1:SetTexture("Interface\\AddOns\\Aishaddon\\Media\\Wheel\\circleflat2")
+    dot1:SetTexture("Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2")
     dot1:SetVertexColor(g[1],g[2],g[3],1)
     -- Label
     local lbl = f:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lbl,FONT,11)
     lbl:SetPoint("LEFT",14,0)
-    lbl:SetTextColor(unpack(Theme.textNormal))
+    lbl:SetTextColor(tc[1], tc[2], tc[3], 1)
     lbl:SetText((text or ""):upper())
     -- Gold gradient hairline
     local line = f:CreateTexture(nil,"ARTWORK"); line:SetHeight(1)
     line:SetPoint("LEFT", lbl,"RIGHT", 10, 0); line:SetPoint("RIGHT",-2,0)
     line:SetColorTexture(1,1,1,1)
-    pcall(function()
-        if CreateColor then
-            line:SetGradient("HORIZONTAL",
-                CreateColor(g[1],g[2],g[3],0.85),
-                CreateColor(g[1]*0.20, g[2]*0.20, g[3]*0.20, 0.10))
-        end
-    end)
+    local function ApplyGradient(color)
+        pcall(function()
+            if CreateColor then
+                line:SetGradient("HORIZONTAL",
+                    CreateColor(color[1],color[2],color[3],0.85),
+                    CreateColor(color[1]*0.20, color[2]*0.20, color[3]*0.20, 0.10))
+            end
+        end)
+    end
+    ApplyGradient(g)
+
+    -- Ce header peut etre construit une seule fois puis mis en cache (meme
+    -- risque que UI/SharedWidgets.lua) -- RefreshColor() + le registre
+    -- ci-dessous permettent de le retenter au changement de spe/toggle sans
+    -- reconstruire les menus (cf. SW.RefreshSectionHeaderColors, appele
+    -- depuis _addon.Auras.RefreshAccentTheme).
+    function f:RefreshColor()
+        local gg = Theme.gold or {0.78, 0.62, 0.30}
+        local tt = Theme.accentText or Theme.textNormal or {0.92, 0.92, 0.93}
+        dot1:SetVertexColor(gg[1], gg[2], gg[3], 1)
+        lbl:SetTextColor(tt[1], tt[2], tt[3], 1)
+        ApplyGradient(gg)
+    end
+
+    SW._sectionHeaders = SW._sectionHeaders or {}
+    table.insert(SW._sectionHeaders, f)
+
     return f
+end
+
+-- Recolore tous les section headers Auras deja construits (cf. f:RefreshColor
+-- ci-dessus) -- meme convention que SharedWidgets.RefreshSectionHeaderColors
+-- dans UI/SharedWidgets.lua (addon principal).
+function SW.RefreshSectionHeaderColors()
+    for _, f in ipairs(SW._sectionHeaders or {}) do
+        if f.RefreshColor then f:RefreshColor() end
+    end
 end
 
 ------------------------------------------------------------------------

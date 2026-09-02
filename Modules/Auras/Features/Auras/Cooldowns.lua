@@ -14,11 +14,20 @@ local HideRowModels
 
 local function Dims()
     local c = ns.db and ns.db.circlebars or ns.Defaults.circlebars
-    return c.barW or 147, c.barH or 4, c.iconW or 28, c.iconH or 19, c.gap or 3, c.rowGap or 1
+    local iw, gp = c.iconW or 28, c.gap or 3
+    if c.hideIcon then iw, gp = 0, 0 end  -- collapse la place réservée à l'icône (mode "barres seules")
+    return c.barW or 147, c.barH or 4, iw, c.iconH or 19, gp, c.rowGap or 1
 end
 
 local function MakeIcon(parent, w, h, cfg)
     local ib = CreateFrame("Button", nil, parent); ib:SetSize(w, h)
+    -- Insets négatifs : élargit légèrement la zone de survol au-delà du cadre
+    -- visuel pour absorber les écarts d'arrondi pixel entre ib et le Cooldown
+    -- superposé (cd), qui pouvaient laisser une fine bande (1-2px) sur un bord
+    -- comme seule zone réellement réactive au tooltip.
+    ib:SetHitRectInsets(-1, -1, -1, -1)
+    ib:SetScript("OnEnter", ns.AuraIconOnEnter)
+    ib:SetScript("OnLeave", ns.AuraIconOnLeave)
     local icon = ib:CreateTexture(nil, "ARTWORK"); icon:SetAllPoints()
     -- Crop centré : recadre verticalement si le frame est plus large que haut
     -- (ex. 28×19 par défaut) pour ne pas étirer l'icône carrée.
@@ -37,6 +46,7 @@ local function MakeIcon(parent, w, h, cfg)
     end
     local cd = CreateFrame("Cooldown", nil, ib, "CooldownFrameTemplate")
     cd:SetAllPoints(ib)
+    cd:EnableMouse(false) -- purement visuel (swipe) : ne doit jamais intercepter le survol de ib
     cd:SetHideCountdownNumbers(true); cd:SetReverse(true)
     cd:SetDrawSwipe(cfg.swipeEnabled == true); cd:SetDrawEdge(cfg.swipeEnabled == true)
     -- Stack text (sublevel 7) — stacks d'aura
@@ -166,9 +176,13 @@ end
 
 local function CreateBannerRow(cont, i, cfg)
     local bw, bh, iw, ih, gp = Dims()
-    local row = CreateFrame("Frame", "AishFBR"..i, cont); row:SetSize(iw, ih + gp + bh)
+    -- Banner reutilise normalement iw comme largeur de barre (barre = largeur
+    -- icone) : si l'icone est masquee (hideIcon, iw=0), retombe sur bw pour
+    -- ne pas ecraser la barre a largeur nulle.
+    local barW = cfg.hideIcon and bw or iw
+    local row = CreateFrame("Frame", "AishFBR"..i, cont); row:SetSize(barW, ih + gp + bh)
     local ib, icon, cd = MakeIcon(row, iw, ih, cfg); ib:SetPoint("TOP")
-    local wr, bar, spark = MakeBarWrap(row, iw, bh, cfg.reverse or false, cfg)
+    local wr, bar, spark = MakeBarWrap(row, barW, bh, cfg.reverse or false, cfg)
     wr:SetPoint("TOP", ib, "BOTTOM", 0, -gp)
     row:Hide(); row.iconBtn=ib; row.icon=icon; row.iconCD=cd; row.bar=bar; row.wrap=wr; row.spark=spark; row._isBanner=true
     row._aishHideCleanup = function() HideRowModels(row) end
@@ -298,7 +312,10 @@ function Cooldowns:Init()
     local bw, bh, iw, ih, gp, rg = Dims()
     local rowW, rowH
     if layout == "side_compact" then rowW = bw*2+iw+gp*2; rowH = ih
-    elseif layout == "side_banner" then rowW = iw; rowH = ih + gp + bh
+    -- side_banner reutilise iw comme largeur de barre (barre = largeur icone,
+    -- cf. CreateBannerRow) : si l'icone est masquee (hideIcon, iw=0), retombe
+    -- sur bw pour ne pas ecraser le container a largeur nulle.
+    elseif layout == "side_banner" then rowW = (cfg.hideIcon and bw or iw); rowH = ih + gp + bh
     else rowW = iw + gp + bw; rowH = ih end
     local growth = cfg.growth or "DOWN"
     if layout == "side_banner" and cfg.bannerGrowth then growth = cfg.bannerGrowth end
@@ -306,8 +323,18 @@ function Cooldowns:Init()
     local cont = CreateFrame("Frame", nil, UIParent)
     if isH then cont:SetSize(maxBars * (rowW + rg), rowH)
     else cont:SetSize(rowW, maxBars * (rowH + rg)) end
-    cont:SetFrameStrata("MEDIUM"); cont:SetMovable(true); cont:SetClampedToScreen(true); cont:EnableMouse(true)
-    cont:SetPropagateMouseClicks(true)  -- click-through par défaut (caméra, sélection, etc.)
+    cont:SetFrameStrata("MEDIUM"); cont:SetMovable(true); cont:SetClampedToScreen(true); _addon.EnableMouseOnlyOnAlt(cont)
+    -- SetPropagateMouseClicks est PROTEGE en combat -- pcall() catche
+    -- l'erreur mais NE PREVIENT PAS le taint (l'addon reste marque "tainted"
+    -- meme si l'erreur est catchee, ce qui bloque ensuite toute lecture de
+    -- donnee secrete -- dont les auras -- pour le reste de la session,
+    -- confirme en jeu). Il faut donc EVITER l'appel entierement en combat,
+    -- pas juste catcher son echec. Si ce Init() tombe pile en combat
+    -- (reload en plein pull), on saute l'appel : le comportement par defaut
+    -- (clic non transparent) est un compromis mineur face au risque de taint.
+    if not InCombatLockdown() then
+      cont:SetPropagateMouseClicks(true)  -- click-through par défaut (caméra, sélection, etc.)
+    end
     local rows = {}
     for i = 1, maxBars do
         if layout == "side_compact" then rows[i] = CreateSparteRow(cont, i, cfg)
@@ -324,11 +351,12 @@ function Cooldowns:Init()
     lbl:SetPoint("BOTTOM", cont, "TOP", 0, 2); lbl:SetText("|cffffcc00"..L["AURASFEAT_ALT_DRAG_HINT"].."|r"); lbl:Hide()
     cont:SetScript("OnMouseDown", function(s, b)
         if b == "LeftButton" and IsAltKeyDown() then
+            s._aishDragging = true
             s:SetPropagateMouseClicks(false)  -- bloquer la propagation pendant le drag
             s:StartMoving(); lbl:Show()
         end
     end)
-    cont:SetScript("OnMouseUp", function(s) s:StopMovingOrSizing()
+    cont:SetScript("OnMouseUp", function(s) s._aishDragging = false; s:StopMovingOrSizing()
         s:SetPropagateMouseClicks(true)  -- rétablir le click-through
         lbl:Hide()
         local sx, sy = GetScreenWidth()/2, GetScreenHeight()/2
@@ -353,20 +381,30 @@ function Cooldowns:Init()
 end
 
 ------------------------------------------------------------------------
--- UPDATE
+-- UPDATE : rendu REEL supprime (2026-08-16, meme methodologie que
+-- Procs.lua/"icons" et Buffs.lua/"Circle Bars") -- remplace par le systeme
+-- AddAuraGroup natif partage (AuraTrackerContainer.lua,
+-- ns.EnsureFreeBarsNativeGrid/RepositionFreeBarsNativeGrid) : icone/
+-- cooldown/stacks/glow/barre(s) de duree combat-safe pilotes directement
+-- par Blizzard, sans jamais dependre du pin CDM, pour les auras du JOUEUR.
+--
+-- PREVIEW CONSERVE (2026-08-16, bug rapporte : l'apercu en direct dans le
+-- menu "Auras & Procs" ne marchait plus) -- cf. commentaire equivalent dans
+-- Buffs.lua pour le detail complet du pourquoi. Logique ORIGINALE restauree
+-- telle quelle (geometrie/icone/barre/glow, inchangee), gardee UNIQUEMENT
+-- pour un apercu actif de cette destination -- le rendu reel est 100%
+-- natif. Cooldowns:Init() reste inchangee.
 ------------------------------------------------------------------------
 function Cooldowns:Update(auras)
-    -- INIT FLAG
-    if not ns._initComplete then
+    local previewActive = ns._previewBars and (ns._previewMode == "all" or ns._previewMode == "circlebars")
+    if not previewActive then
         if ns.renderFrames.circlebars and ns.renderFrames.circlebars.container then
             ns.renderFrames.circlebars.container:SetAlpha(0)
+            ns.renderFrames.circlebars.container:Hide()
         end
         return
     end
-    if ns.db and (not ns.db.circlebarsEnabled or ns.db.useNativeCDM) then
-        if ns.renderFrames.circlebars and ns.renderFrames.circlebars.container then ns.renderFrames.circlebars.container:SetAlpha(0) end
-        return
-    end
+
     local gfx = ns.renderFrames.circlebars; if not gfx then return end
     local cfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
     local rows, growth = gfx.rows, gfx.growth or "DOWN"
@@ -376,23 +414,10 @@ function Cooldowns:Update(auras)
     if gfx.layout == "side_compact" then rowW = bw*2+iw+gp*2; rowH = ih
     elseif gfx.layout == "side_banner" then rowW = iw; rowH = ih+gp+bh
     else rowW = iw+gp+bw; rowH = ih end
-    -- Pattern anti-flicker : on marque inactive et on défère le Hide()
-    -- de 100ms. Les rows qui sont re-activées plus bas appelleront CancelDeferredHide
-    -- et feront Show+alpha1. Les rows vraiment inactives (>100ms) seront cachées pour de bon.
-    --
-    -- FIX v268 : on ne fait PLUS HideRowModels(r) ici. Ca causait un clignotement
-    -- des FX 3D toutes les 50ms en combat (release + reacquire du PlayerModel a
-    -- chaque scan). Maintenant ApplyBarModels gere les transitions via _fxAuraID,
-    -- et quand la row est vraiment Hide() les enfants 3D deviennent invisibles.
-    -- NOTE : HideGlow est intentionnellement absent de cette boucle (meme raison
-    -- que Procs.lua : appelé ici, il effacait _glowActiveIdx sur toutes les rows
-    -- a chaque scan et redemarrait l'animation du glow en boucle).
     for _, r in ipairs(rows) do
         ns.MarkRowInactive(r)
     end
     local wl = ns.whitelistByDest and ns.whitelistByDest.circlebars
-    if not wl then return end
-    -- Double-buffer pour éviter l'allocation de curIDs à chaque scan
     if not ns._cdIDsA then ns._cdIDsA = {}; ns._cdIDsB = {}; ns._cdIDsUseA = true end
     local prevIDs = ns._cdIDsUseA and ns._cdIDsB or ns._cdIDsA
     local curIDs  = ns._cdIDsUseA and ns._cdIDsA or ns._cdIDsB
@@ -404,8 +429,6 @@ function Cooldowns:Update(auras)
         if not a or not a.spellID then break end
         if a.spellID <= 900000 and not (wl and wl[a.spellID]) then break end
         vis = vis + 1
-        -- Skip le SetPoint si la row est déjà à la bonne position
-        -- (évite reflow Blizzard redondant, gain perceptible en multi-rows)
         if row._aishPosIdx ~= vis or row._aishPosGrowth ~= growth then
             row._aishPosIdx = vis
             row._aishPosGrowth = growth
@@ -417,54 +440,47 @@ function Cooldowns:Update(auras)
             else row:SetPoint("TOP", gfx.container, "TOP", 0, -off) end
         end
 
-        -- IMPORTANT : row:Show() AVANT les ApplyIconModels/ApplyBarModels.
-        -- Sinon les PlayerModels 3D sont Show() alors que leur parent (row)
-        -- est encore Hide -> IsVisible=false -> invisibles a l'ecran jusqu'au
-        -- prochain scan. Bug observe : "le 3D apparait quand je pose une 2e aura".
         row:Show(); row:SetAlpha(1); ns.CancelDeferredHide(row)
 
-        -- Icon texture
         if a._previewIcon then pcall(ns._SetIconTexture, row.icon, a._previewIcon)
         elseif a.aura then pcall(ns._SetIconTexture, row.icon, a.aura.icon)
         elseif a.spellID then pcall(ns._SetIconTextureFromSpellID, row.icon, a.spellID) end
         row.iconBtn.unit = a.unit or "target"; row.iconBtn.auraInstanceID = a.auraInstanceID
-        -- Desaturation (per-render override)
         if cfg.desatOverride ~= nil then row.icon:SetDesaturated(cfg.desatOverride)
         else row.icon:SetDesaturated(a.desat and true or false) end
 
-        -- Cooldown swipe : pattern CDM-only "show but don't know".
-        -- SetCooldownFromDurationObject prend le durObj direct (combat-safe Midnight 12.0).
-        -- Blizzard gere l'idempotence cote C++ : pas besoin de cache _lastStart/_lastDur.
         if a.durObj then
             pcall(ns._SetCDFromDurObj, row.iconCD, a.durObj)
+        elseif a._isPreview then
+            -- BUG CORRIGE (2026-08-16) : cf. Procs.lua, meme repli synthetique.
+            pcall(row.iconCD.SetCooldown, row.iconCD, GetTime(), 12)
         end
         row.iconCD:SetDrawSwipe(cfg.swipeEnabled == true); row.iconCD:SetDrawEdge(cfg.swipeEnabled == true)
-        -- Native countdown timer
         row.iconCD:SetHideCountdownNumbers(not (cfg.timerIconEnabled))
         if cfg.timerIconEnabled then
             pcall(ns._StyleCountdownFS, row.iconCD,
                 cfg.timerFont or ns.Media.font, cfg.timerSize or 11,
                 cfg.timerColorR, cfg.timerColorG, cfg.timerColorB,
+                cfg.timerPos or "CENTER", row.iconBtn, cfg.timerPos or "CENTER",
                 cfg.timerIconOffX or 0, cfg.timerIconOffY or 0)
         end
 
         row.iconBtn:SetAlpha(cfg.iconAlpha or 1)
-            if ns.Anim and ns.Anim.IconPopIn and auras[i] then
-                local instID = auras[i].auraInstanceID
-                if row._iconPopInstID ~= instID then
-                    row._iconPopInstID = instID
-                    ns.Anim.IconPopIn(row.iconBtn, cfg, cfg.iconAlpha or 1)
-                end
+        if ns.Anim and ns.Anim.IconPopIn and auras[i] then
+            local instID = auras[i].auraInstanceID
+            if row._iconPopInstID ~= instID then
+                row._iconPopInstID = instID
+                ns.Anim.IconPopIn(row.iconBtn, cfg, cfg.iconAlpha or 1)
             end
-        -- Stacks + charges (helper partagé hoist, évite closures par aura par scan)
+        end
         if ns._ApplyStackCharges then ns._ApplyStackCharges(row.iconBtn, a, cfg) end
         ApplyIconModels(row.iconBtn, a)
 
-        -- Glow (with render override)
         local glIdx = a.glowIdx; local glColor = a.glowColor or a.spellColor; local glAlpha = a.glowAlpha
         local glScale = a.glowScale or 1.0
         local hasGlow = a.spellGlow and glIdx and glIdx > 1
-        if cfg.glowOverrideIdx and cfg.glowOverrideIdx > 1 then
+        -- Override render DESACTIVE via `false and`, cf. AuraTrackerContainer.lua::ApplySpellGlow.
+        if false and cfg.glowOverrideIdx and cfg.glowOverrideIdx > 1 then
             glIdx = cfg.glowOverrideIdx; hasGlow = true
             if cfg.glowOverrideR ~= nil then glColor = {cfg.glowOverrideR, cfg.glowOverrideG or 0.5, cfg.glowOverrideB or 0.5} end
             glScale = cfg.glowOverrideScale or glScale; glAlpha = cfg.glowOverrideAlpha or glAlpha
@@ -473,13 +489,11 @@ function Cooldowns:Update(auras)
             if ns.ShowGlow then ns.ShowGlow(row.iconBtn, glIdx, glColor, glAlpha, glScale) end
         else if ns.HideGlow then ns.HideGlow(row.iconBtn) end end
 
-        -- Proc start
         curIDs[a.spellID] = true
         if not prevIDs[a.spellID] and a.procGlowIdx and a.procGlowIdx > 1 then
             if ns.PlayProcStart then ns.PlayProcStart(row.iconBtn, a.procGlowIdx, a.glowColor or a.spellColor, a.procGlowScale) end
         end
 
-        -- Bars
         local function SBC(bar) ns.ApplyBarColor(bar, "circlebars", a) end
         if row.barL and row.barR then
             row.barL:Show(); SBC(row.barL); row.wrapL:Show(); row.wrapL:SetAlpha(cfg.barAlpha or 1); ApplyBarModels(row.wrapL, a)
@@ -487,19 +501,12 @@ function Cooldowns:Update(auras)
         elseif row.bar then
             row.bar:Show(); SBC(row.bar); row.wrap:Show(); row.wrap:SetAlpha(cfg.barAlpha or 1); ApplyBarModels(row.wrap, a)
         end
-        -- Pop animation : declenche si auraInstanceID a change. Le sens de
-        -- deploiement est determine par l'ancrage des wraps (cf. CreateVanguardRow,
-        -- CreateSparteRow, CreateBannerRow) :
-        --   - Vanguard : wrap ancre cote icone → deploie depuis l'icone
-        --   - Sparte (miroir) : wrapL/wrapR ancres au centre → deploie du centre
-        --   - Banner : wrap ancre TOP → deploie verticalement (anim de width neanmoins)
         if a.auraInstanceID and row._popInstID ~= a.auraInstanceID then
             row._popInstID = a.auraInstanceID
             if ns.StartPopAnim then
                 if row.barL and row.barR then
                     ns.StartPopAnim(row, {row.wrapL, row.wrapR}, bw, cfg.barAlpha or 1, cfg)
                 elseif row.wrap then
-                    -- Vanguard : barW. Banner : iw (la barre a la largeur de l'icone).
                     local tw = row._isBanner and iw or bw
                     ns.StartPopAnim(row, {row.wrap}, tw, cfg.barAlpha or 1, cfg)
                 end
@@ -507,8 +514,6 @@ function Cooldowns:Update(auras)
         end
     end
 
-    -- Defer hide pour les rows inactives (>100ms)
-    -- HideGlow ici uniquement pour les rows inactives (voir pre-loop pour detail).
     for _, r in ipairs(rows) do
         if not r._aishActiveNow then
             if ns.HideGlow then pcall(function() ns.HideGlow(r.iconBtn) end) end
@@ -516,9 +521,10 @@ function Cooldowns:Update(auras)
         end
     end
 
+    -- SetAlpha(1) explicite (pas ns.UpdateRenderFade) : cette fonction route
+    -- desormais "circlebars" vers le conteneur NATIF (rendu reel), pas vers
+    -- ce conteneur Lua de preview -- l'appeler ici ne touchait donc jamais
+    -- l'alpha de CE conteneur, qui restait bloque a 0 (cf. lecon Buffs.lua).
     gfx.container:Show()
-    -- FIX v269 : on appelle TOUJOURS UpdateRenderFade. Voir Debuffs.lua pour le detail
-    -- du fix anti-flicker container (combat sur sort CDM secret -> scan vide intermittent
-    -- -> container fade out 50ms -> reapparait au scan suivant = clignotement).
-    ns.UpdateRenderFade("circlebars")
+    gfx.container:SetAlpha(1)
 end

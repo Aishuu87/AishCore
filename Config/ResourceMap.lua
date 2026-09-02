@@ -99,14 +99,8 @@ ns.AuraStacks = {}     -- key -> number (0-N)
 ns.AuraText   = {}     -- key -> string ("0"-"N")
 ns.AuraPct    = {}     -- key -> number (0-100) pour l'arc
 
--- Lookup inverse spellID -> key, et instanceID -> key (pour tracked auras)
-local spellToKey = {}
-for key, def in pairs(ns.AuraResources) do
-  spellToKey[def.spellID] = key
-end
-local trackedInstances = {}  -- auraInstanceID -> key
-
 local pctMap = { [0]=0,[1]=10,[2]=20,[3]=30,[4]=40,[5]=50,[6]=60,[7]=70,[8]=80,[9]=90,[10]=100 }
+local HAS_ISSECRET = (type(issecretvalue) == "function")
 
 local function SetAuraStacks(key, stacks)
   ns.AuraStacks[key] = stacks
@@ -114,89 +108,91 @@ local function SetAuraStacks(key, stacks)
   ns.AuraPct[key]    = pctMap[stacks] or 100
 end
 
--- Scan initial (hors combat, utilise l'API classique)
+---------------------------------------------------------------------------
+-- LECTURE DES STACKS (Secret Values, patch 12.1+, 2026-08-11)
+--
+-- Depuis ce patch, le payload UNIT_AURA devient integralement secret des
+-- que des auras sont secretes -- meme isFullUpdate (un booleen) l'est,
+-- donc un simple `if updateInfo.isFullUpdate` plante desormais. Les
+-- AuraData renvoyees par GetPlayerAuraBySpellID / GetAuraDataByAuraInstanceID
+-- sont elles aussi "toujours totalement secretes" (patch note officiel).
+-- Lire applications/auraInstanceID a la main sur ces structures n'est donc
+-- plus une option viable, meme hors combat -- il faut changer de methode,
+-- pas juste ajouter des garde-fous.
+--
+-- On reprend le pattern "show but don't know" deja utilise ailleurs dans
+-- l'addon pour les auras du CDM (cf. Modules/Auras/Features/Auras/CenterArc.lua
+-- GetCDMStackCount) : le Cooldown Manager Blizzard nous donne le spellID en
+-- clair via le hook SetAuraInstanceInfo (CDMHooks.lua, jamais secret), et
+-- GetAuraApplicationDisplayCount est l'API Blizzard prevue precisement pour
+-- lire un compte de stacks AFFICHABLE sans jamais exposer la donnee secrete
+-- a l'addon. Ce canal reste fiable car il ne depend d'aucun champ du
+-- payload UNIT_AURA ni d'aucune AuraData brute.
+---------------------------------------------------------------------------
+-- Tier 1 : CDM. cdmData est desormais cle par spellID (pas par instID, cf.
+-- CDMHooks.lua) -> lookup direct O(1), toujours peuple des que Blizzard a
+-- notifie ce spellID via le hook (plus de skip-on-secret depuis le rekey).
+-- GetAuraApplicationDisplayCount est une API d'AFFICHAGE (le nom le dit) :
+-- elle peut renvoyer une string formatee (ex: "10+") plutot qu'un nombre pur
+-- des que le compte approche/depasse maxDisplay -- confirme en jeu ("attempt
+-- to compare number with string" sur stacks >= 10 alors que ns.AuraStacks est
+-- documente comme number). tonumber() ici : ns.AuraStacks doit rester un
+-- nombre utilisable en comparaison (>=), ns.AuraText peut garder la version
+-- texte via SetAuraStacks -> tostring().
+local function GetCDMStackCount(spellID)
+  local cdmPlayer = ns.Auras and ns.Auras.cdmData and ns.Auras.cdmData.player
+  local cdmEntry = cdmPlayer and cdmPlayer[spellID]
+  if not (cdmEntry and cdmEntry.instID) then return nil end
+  local ok, disp = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, cdmEntry.instID, 1, 999)
+  if ok and disp ~= nil then return tonumber(disp) end
+  return nil
+end
+
+-- Tier 2 : GetPlayerAuraBySpellID -- lookup DIRECT par spellID (Blizzard fait
+-- le matching en interne, cote sain -- aucune comparaison d.spellId==spellID
+-- necessaire de notre cote). C'etait le premier essai de "tier 2" ici
+-- (GetAuraDataByIndex + comparaison spellId manuelle) qui echouait TOUJOURS :
+-- confirme en jeu, un Maelstrom Weapon actif (verifie via l'UI Blizzard)
+-- restait a AuraStacks=0 -- la comparaison d.spellId==spellID plante en
+-- silence (pcall) des que spellId est secret, donc AUCUNE entree ne matchait
+-- jamais, peu importe la presence reelle de l'aura. GetPlayerAuraBySpellID
+-- n'a pas ce probleme car spellID est un PARAMETRE d'entree, pas une valeur
+-- qu'on doit lire puis comparer -- et confirme en jeu : son retour est lu
+-- sans probleme (applications/spellId/expirationTime tous lisibles).
+local function GetPlayerAuraStackCount(spellID)
+  local ok, auraData = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
+  if not ok or not auraData then return nil end
+  local okApp, app = pcall(function() return auraData.applications end)
+  if okApp and app ~= nil and not (HAS_ISSECRET and issecretvalue(app)) and tonumber(app) then
+    return tonumber(app)
+  end
+  -- Fallback : applications illisible (secret en combat) -> compte affichable
+  -- via l'instanceID (deja present sur cette meme AuraData, pas de re-lecture
+  -- risquee necessaire).
+  local okInst, instID = pcall(function() return auraData.auraInstanceID end)
+  if okInst and instID then
+    local okDisp, disp = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, instID, 1, 999)
+    if okDisp and disp ~= nil and tonumber(disp) then return tonumber(disp) end
+  end
+  return 1  -- aura confirmee presente (auraData non-nil), compte illisible : au moins 1
+end
+
+-- Scan complet : relit les stacks de toutes les ressources trackees via le CDM,
+-- avec repli sur GetPlayerAuraBySpellID si le CDM ne suit pas ce spellID.
 function ns.ScanAuraStacks()
   for key, def in pairs(ns.AuraResources) do
-    local ok, auraData = pcall(C_UnitAuras.GetPlayerAuraBySpellID, def.spellID)
-    if ok and auraData then
-      local stacks = auraData.applications or 0
-      if stacks == 0 then stacks = 1 end
-      SetAuraStacks(key, stacks)
-      -- Tracker l'instanceID pour les updates futures
-      if auraData.auraInstanceID then
-        trackedInstances[auraData.auraInstanceID] = key
-      end
-    else
-      SetAuraStacks(key, 0)
-    end
+    local disp = GetCDMStackCount(def.spellID) or GetPlayerAuraStackCount(def.spellID)
+    SetAuraStacks(key, disp or 0)
   end
 end
 
--- Traite le payload de UNIT_AURA (pas d'appel API, donnees directes)
+-- UNIT_AURA : le contenu du payload n'est plus exploitable directement (cf.
+-- commentaire ci-dessus, jusqu'a isFullUpdate lui-meme). On se contente de
+-- redeclencher un scan CDM -- seul canal fiable restant -- qui reste bon
+-- marche (une poignee d'entrees dans cdmData.player, jamais purge mais petit).
 function ns.HandleUnitAura(updateInfo)
-  if not updateInfo then return false end
-  local changed = false
-
-  -- Full update : re-scan complet
-  if updateInfo.isFullUpdate then
-    ns.ScanAuraStacks()
-    return true
-  end
-
-  -- Nouvelles auras ajoutees (donnees completes dans le payload)
-  if updateInfo.addedAuras then
-    for _, aura in ipairs(updateInfo.addedAuras) do
-      -- Certains champs d'aura sont marques "secret" par Blizzard
-      -- pcall sur tout le bloc pour eviter les erreurs d'acces
-      local ok, key, stacks, instID = pcall(function()
-        local sid = aura.spellId
-        if not sid or type(sid) ~= "number" then return nil end
-        local k = spellToKey[sid]
-        if not k then return nil end
-        local s = aura.applications or 0
-        if s == 0 then s = 1 end
-        return k, s, aura.auraInstanceID
-      end)
-      if ok and key then
-        SetAuraStacks(key, stacks)
-        if instID then
-          trackedInstances[instID] = key
-        end
-        changed = true
-      end
-    end
-  end
-
-  -- Auras mises a jour (stacks change)
-  if updateInfo.updatedAuraInstanceIDs then
-    for _, instanceID in ipairs(updateInfo.updatedAuraInstanceIDs) do
-      local key = trackedInstances[instanceID]
-      if key then
-        -- Essayer de lire les donnees mises a jour
-        local ok, aura = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", instanceID)
-        if ok and aura then
-          local stacks = aura.applications or 0
-          if stacks == 0 then stacks = 1 end
-          SetAuraStacks(key, stacks)
-        end
-        changed = true
-      end
-    end
-  end
-
-  -- Auras retirees
-  if updateInfo.removedAuraInstanceIDs then
-    for _, instanceID in ipairs(updateInfo.removedAuraInstanceIDs) do
-      local key = trackedInstances[instanceID]
-      if key then
-        SetAuraStacks(key, 0)
-        trackedInstances[instanceID] = nil
-        changed = true
-      end
-    end
-  end
-
-  return changed
+  ns.ScanAuraStacks()
+  return true
 end
 
 ---------------------------------------------------------------------------
@@ -434,10 +430,42 @@ ns.RawDisplayResources = {
 ---------------------------------------------------------------------------
 ns.SecondaryResourceDefs = {
   -- Death Knight Blood (spec 250) : Bone Shield (aura stackable)
-  [250] = { spellID  = 195181, color = { 0.75, 0.88, 1.00, 1 }, maxStacks = 10 },
-  -- Demon Hunter Vengeance (spec 581) : Soul Fragments via UnitPower (powerType 7)
-  [581] = { powerType = 7,     color = { 0.70, 0.30, 1.00, 1 }, maxStacks = 5  },
+  [250] = { spellID  = 195181, useStacks = true, color = { 0.75, 0.88, 1.00, 1 }, maxStacks = 10 },
+  -- Demon Hunter Vengeance (spec 581) : Soul Fragments. spellID=203981 n'est
+  -- PAS une aura à stacks classique -- son effet réel (fiche Wowhead) est
+  -- "Apply Aura: Set Action Button Spell Count", donc ni GetPlayerAuraBySpellID
+  -- ni l'énumération HELPFUL ne le trouvent jamais (2 fragments actifs donne
+  -- hasAura=false partout). Même mécanisme que Thé de Mana (270) :
+  -- castCountSpellID = Bombe d'esprit/Spirit Bomb (247454), dont le compteur de
+  -- charges REFLÈTE le nombre de fragments.
+  [581] = { spellID = 203981, useStacks = true, castCountSpellID = 247454,
+            color = { 0.70, 0.30, 1.00, 1 }, maxStacks = 5 },
   -- Demon Hunter Devourer (spec 1480, hero spec 12.0) : stacks de l'aura 1225789
   -- altSpellID = fragments de vide (1227702) affichés sous Métamorphose du vide
-  [1480] = { spellID = 1225789, useStacks = true, altSpellID = 1227702 },
+  -- maxStacks=50 : plage de l'arc de ressource secondaire optionnel (cf.
+  -- CENTER_ARC_SPELLS[1480] dans CenterArc.lua / _arcSpec dans SettingsPanel.lua).
+  [1480] = { spellID = 1225789, useStacks = true, altSpellID = 1227702, maxStacks = 50 },
+  -- Warrior Protection (spec 73) : Dur Au Mal / Ignore Pain (190456), montant d'absorption restant.
+  -- color = fallback si GetDurationArcColor (ResourceCircle.lua) ne renvoie rien ; en pratique la
+  -- couleur affichée est toujours celle de l'arc de durée (même rouge que Dur au Mal par défaut).
+  [73] = { spellID = 190456, useAbsorb = true, color = { 0.78, 0.25, 0.25, 1 } },
+  -- Monk Mistweaver (spec 270) : Thé de Mana / Mana Tea. Le buff (115867)
+  -- n'est ni suivi par le CDM Blizzard ni trouvable via GetPlayerAuraBySpellID
+  -- (confirmé en jeu), donc inutilisable en combat pour ApplyStacksToText --
+  -- castCountSpellID (115294, le sort ACTIVABLE) sert de repli via
+  -- ApplyCastCountToText, même mécanisme que Don de Sheilun (PriorityBar.lua).
+  [270] = { spellID = 115867, useStacks = true, castCountSpellID = 115294,
+            color = { 0.25, 0.85, 0.55, 1 }, maxStacks = 20 },
+  -- Mage Givre (spec 64) : debuff de la CIBLE (1221319, stacks), pas une aura du
+  -- joueur -- useTargetDebuff bascule ResourceCircle.UpdateSecondaryResource sur
+  -- ApplyTargetStacksToText (lit "target" au lieu de "player"). Indépendant du
+  -- texte principal du cercle (stacks de Glaçons/205473, cf. ResourceCircle.Update),
+  -- et pas d'arc secondaire pour cette spé (pas d'entrée dans CENTER_ARC_SPELLS).
+  [64] = { spellID = 1221389, useTargetDebuff = true, color = { 0.55, 0.85, 1.00, 1 } },
+  -- Warlock Démonologie (spec 266) : stacks de Cœur Démoniaque (264173, buff
+  -- joueur stackable) -- useStacks = même chemin que Bone Shield/Soul Fragments
+  -- ci-dessus (ApplyStacksToText, CDM -> fallback1 -> fallback2), qui masque
+  -- déjà le texte (SetSecResShown(false)) quand l'aura est absente au lieu
+  -- d'afficher "0" -- aucun code supplémentaire nécessaire pour ce comportement.
+  [266] = { spellID = 264173, useStacks = true, color = { 0.53, 0.53, 0.93, 1 } },
 }

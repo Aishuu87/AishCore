@@ -112,7 +112,7 @@ local function CreateContainer()
   if containerFrame then return containerFrame end
   local cfg = ns.GetCfg("rotationHelper") or {}
 
-  containerFrame = CreateFrame("Frame", "AishaddonRotationHelperBar", UIParent)
+  containerFrame = CreateFrame("Frame", "AishCoreRotationHelperBar", UIParent)
   containerFrame:SetSize(1, 1)
   containerFrame:SetPoint(
     cfg.anchor or "TOP",

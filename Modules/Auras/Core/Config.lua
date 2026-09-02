@@ -5,11 +5,15 @@
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 ns.ADDON_VERSION = "0.0.0"
 
--- Partage des utilitaires du namespace parent (définis dans Core.lua d'Aishaddon)
+-- Partage des utilitaires du namespace parent (définis dans Core.lua d'AishCore)
 ns.DeepCopy     = ns.DeepCopy     or _addon.DeepCopy
 ns.MergeDefaults = ns.MergeDefaults or _addon.MergeDefaults
 ns.FONT_LIST    = ns.FONT_LIST    or _addon.FONT_LIST
 ns.GetFontList  = ns.GetFontList  or _addon.GetFontList
+ns.GetTextOutlineStyles = ns.GetTextOutlineStyles or _addon.GetTextOutlineStyles
+ns.CreateSlugRing       = ns.CreateSlugRing       or _addon.CreateSlugRing
+ns.ApplyTextOutlineStyle = ns.ApplyTextOutlineStyle or _addon.ApplyTextOutlineStyle
+ns.SetSlugRingText      = ns.SetSlugRingText      or _addon.SetSlugRingText
 
 ------------------------------------------------------------------------
 -- SAFE FONT  (essaie le path, fallback FRIZQT si échec)
@@ -57,28 +61,28 @@ ns.LAYOUT_NAMES = {
 }
 
 ns.LAYOUT_ICONS = {
-    CENTER_MIRROR        = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_aegis",
-    RESOURCE_CIRCLE = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_resourcecircle",
-    CENTER_DUAL    = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_berserk",
-    SIDE_LARGE     = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_vanguard",
-    SIDE_COMPACT   = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_sparte",
-    SIDE_BANNER    = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_banner",
-    PORTRAIT_SMALL = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_fury",
-    GRID_FIXED     = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_shieldwall",
-    GRID_FREE      = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_ronin",
+    CENTER_MIRROR        = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_aegis",
+    RESOURCE_CIRCLE = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_resourcecircle",
+    CENTER_DUAL    = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_berserk",
+    SIDE_LARGE     = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_vanguard",
+    SIDE_COMPACT   = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_sparte",
+    SIDE_BANNER    = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_banner",
+    PORTRAIT_SMALL = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_fury",
+    GRID_FIXED     = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_shieldwall",
+    GRID_FREE      = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_ronin",
 }
 
 -- Versions INACTIVE (grisées N&B) — utilisées quand la disposition n'est pas active
 ns.LAYOUT_ICONS_INACTIVE = {
-    CENTER_MIRROR        = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_aegis_inactive",
-    RESOURCE_CIRCLE = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_resourcecircle_inactive",
-    CENTER_DUAL    = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_berserk_inactive",
-    SIDE_LARGE     = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_vanguard_inactive",
-    SIDE_COMPACT   = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_sparte_inactive",
-    SIDE_BANNER    = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_banner_inactive",
-    PORTRAIT_SMALL = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_fury_inactive",
-    GRID_FIXED     = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_shieldwall_inactive",
-    GRID_FREE      = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_ronin_inactive",
+    CENTER_MIRROR        = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_aegis_inactive",
+    RESOURCE_CIRCLE = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_resourcecircle_inactive",
+    CENTER_DUAL    = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_berserk_inactive",
+    SIDE_LARGE     = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_vanguard_inactive",
+    SIDE_COMPACT   = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_sparte_inactive",
+    SIDE_BANNER    = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_banner_inactive",
+    PORTRAIT_SMALL = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_fury_inactive",
+    GRID_FIXED     = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_shieldwall_inactive",
+    GRID_FREE      = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_ronin_inactive",
 }
 
 ns.LAYOUT_ICON_FALLBACKS = {
@@ -131,6 +135,11 @@ ns.THEME = {
     -- AISHUI signature gold (used on ornaments — dots, spines, hairlines)
     gold          = { 0.78, 0.62, 0.30 },
 
+    -- Accent de TEXTE des headers de section (labels) -- distinct de gold/
+    -- accent (dots, hairlines) : mute dynamiquement par
+    -- _addon.Auras.RefreshAccentTheme(), cf. Core/ClassColors.lua.
+    accentText    = { 0.776, 0.710, 0.471 },
+
     -- Form controls
     checkboxOn    = { 0.92, 0.92, 0.93 },     -- gets class color
     checkboxOff   = { 0.180, 0.180, 0.195 },
@@ -150,12 +159,12 @@ ns.GLOW_DEFS = {
     { name = "Modern Glow",       atlas = "UI-HUD-ActionBar-Proc-Loop-Flipbook" },
     { name = "Assist Blue",       atlas = "RotationHelper-ProcLoopBlue-Flipbook" },
     { name = "Assist Ants",       atlas = "RotationHelper_Ants_Flipbook" },
-    { name = "Assist White",      texture = "Interface/AddOns/Aishaddon/Media/Glows/flipbook2.tga" },
-    { name = "Assist Rainbow",    texture = "Interface/AddOns/Aishaddon/Media/Glows/ABE_flipbook_rainbow.png",
+    { name = "Assist White",      texture = "Interface/AddOns/AishCore/Media/Glows/flipbook2.tga" },
+    { name = "Assist Rainbow",    texture = "Interface/AddOns/AishCore/Media/Glows/ABE_flipbook_rainbow.png",
       rows=6, columns=10, frames=60, duration=0.9, frameW=80, frameH=80, scale=1.05 },
     { name = "Classic Glow",      texture = "Interface\\SpellActivationOverlay\\IconAlertAnts",
       rows=5, columns=5, frames=25, duration=0.3, frameW=48, frameH=48, scale=0.85 },
-    { name = "ABE Classic-like",  texture = "Interface/AddOns/Aishaddon/Media/Glows/AB_ClassicLike_Glow.tga",
+    { name = "ABE Classic-like",  texture = "Interface/AddOns/AishCore/Media/Glows/AB_ClassicLike_Glow.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=1 },
     { name = "GCD",               atlas = "UI-CooldownManager-Alert-Flipbook",
       rows=11, columns=2, frames=22, duration=1.0, scale=0.7 },
@@ -225,81 +234,80 @@ ns.GLOW_DEFS = {
     { name = "FX Eye",            atlas="groupfinder-eye-flipbook-foundfx", rows=5, columns=15, frames=75, duration=1.0, scale=1.0 },
     { name = "Arrow",             atlas="Ping_Marker_FlipBook_OnMyWay", rows=4, columns=6, frames=24, duration=1.0, scale=0.7 },
     { name = "Soul",              atlas="UF-SoulShards-Flipbook-Soul", rows=3, columns=7, frames=21, duration=1.2, scale=0.9 },
-    -- Textures ABE copiees localement dans Media/Glows/ (portage figé,
-    -- ne dependent plus de l'addon externe ActionBarsEnhanced installe)
-    { name = "ABE Assist White",  texture="Interface/AddOns/Aishaddon/Media/Glows/flipbook2.tga" },
-    { name = "ABE Rainbow",       texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_flipbook_rainbow.png",
+    -- Textures d'animation bundlees localement dans Media/Glows/
+    { name = "ABE Assist White",  texture="Interface/AddOns/AishCore/Media/Glows/flipbook2.tga" },
+    { name = "ABE Rainbow",       texture="Interface/AddOns/AishCore/Media/Glows/ABE_flipbook_rainbow.png",
       rows=6, columns=10, frames=60, duration=0.9, frameW=80, frameH=80, scale=1.05 },
-    { name = "ABE Classic-like",  texture="Interface/AddOns/Aishaddon/Media/Glows/AB_ClassicLike_Glow.tga",
+    { name = "ABE Classic-like",  texture="Interface/AddOns/AishCore/Media/Glows/AB_ClassicLike_Glow.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=1 },
-    { name = "ABE Star 1",        texture="Interface/AddOns/Aishaddon/Media/Glows/stars_new2.tga",
+    { name = "ABE Star 1",        texture="Interface/AddOns/AishCore/Media/Glows/stars_new2.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=0.9 },
-    { name = "ABE Star 2",        texture="Interface/AddOns/Aishaddon/Media/Glows/stars_new.tga",
+    { name = "ABE Star 2",        texture="Interface/AddOns/AishCore/Media/Glows/stars_new.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=0.9 },
-    { name = "ABE Star Rainbow",  texture="Interface/AddOns/Aishaddon/Media/Glows/stars_rainbow_new.tga",
+    { name = "ABE Star Rainbow",  texture="Interface/AddOns/AishCore/Media/Glows/stars_rainbow_new.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=0.9 },
-    { name = "ABE Lines",         texture="Interface/AddOns/Aishaddon/Media/Glows/AB_Lines.tga",
+    { name = "ABE Lines",         texture="Interface/AddOns/AishCore/Media/Glows/AB_Lines.tga",
       rows=6, columns=4, frames=24, duration=1.0, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Lines Pixel",   texture="Interface/AddOns/Aishaddon/Media/Glows/AB_Lines_Pixel.tga",
+    { name = "ABE Lines Pixel",   texture="Interface/AddOns/AishCore/Media/Glows/AB_Lines_Pixel.tga",
       rows=6, columns=2, frames=12, duration=0.35, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Leaves",        texture="Interface/AddOns/Aishaddon/Media/Glows/AB_Leaves.tga",
+    { name = "ABE Leaves",        texture="Interface/AddOns/AishCore/Media/Glows/AB_Leaves.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Void",          texture="Interface/AddOns/Aishaddon/Media/Glows/AB_Void.tga",
+    { name = "ABE Void",          texture="Interface/AddOns/AishCore/Media/Glows/AB_Void.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Garg",          texture="Interface/AddOns/Aishaddon/Media/Glows/AB_Garg.tga",
+    { name = "ABE Garg",          texture="Interface/AddOns/AishCore/Media/Glows/AB_Garg.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=100, frameH=100, scale=0.85 },
-    { name = "ABE Energy",        texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Energy.tga",
+    { name = "ABE Energy",        texture="Interface/AddOns/AishCore/Media/Glows/ABE_Energy.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=72, frameH=72, scale=0.85 },
-    { name = "ABE Fire",          texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Fire.tga",
+    { name = "ABE Fire",          texture="Interface/AddOns/AishCore/Media/Glows/ABE_Fire.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=72, frameH=72, scale=0.9 },
-    { name = "ABE Fire2",         texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Fire2.tga",
+    { name = "ABE Fire2",         texture="Interface/AddOns/AishCore/Media/Glows/ABE_Fire2.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=80, frameH=80, scale=0.9 },
-    { name = "ABE Antorus",       texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Antorus.tga",
+    { name = "ABE Antorus",       texture="Interface/AddOns/AishCore/Media/Glows/ABE_Antorus.tga",
       rows=6, columns=5, frames=30, duration=0.9, frameW=100, frameH=100, scale=0.85 },
-    { name = "ABE Lightning",     texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Lightning.tga",
+    { name = "ABE Lightning",     texture="Interface/AddOns/AishCore/Media/Glows/ABE_Lightning.tga",
       rows=6, columns=5, frames=30, duration=1.2, frameW=100, frameH=100, scale=0.85 },
-    { name = "ABE Zereth Square", texture="Interface/AddOns/Aishaddon/Media/Glows/proc_4.tga",
+    { name = "ABE Zereth Square", texture="Interface/AddOns/AishCore/Media/Glows/proc_4.tga",
       rows=6, columns=5, frames=30, duration=1.2, frameW=100, frameH=100, scale=1.01 },
-    { name = "ABE Pulse",         texture="Interface/AddOns/Aishaddon/Media/Glows/pulse_01.tga",
+    { name = "ABE Pulse",         texture="Interface/AddOns/AishCore/Media/Glows/pulse_01.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=100, frameH=100, scale=0.95 },
-    { name = "ABE Square Pixel",  texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_Square_PixelLike.png",
+    { name = "ABE Square Pixel",  texture="Interface/AddOns/AishCore/Media/Glows/ABE_Square_PixelLike.png",
       rows=6, columns=5, frames=30, duration=0.35, frameW=100, frameH=100, scale=0.82 },
-    { name = "ABE Arc Raiders",   texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_ArcRaiders.png",
+    { name = "ABE Arc Raiders",   texture="Interface/AddOns/AishCore/Media/Glows/ABE_ArcRaiders.png",
       rows=10, columns=6, frames=60, duration=1, frameW=100, frameH=100, scale=1 },
-    { name = "GCD 2",             texture="Interface/AddOns/Aishaddon/Media/Glows/GCD_2.tga",
+    { name = "GCD 2",             texture="Interface/AddOns/AishCore/Media/Glows/GCD_2.tga",
       rows=6, columns=2, frames=12, duration=0.5, frameW=47, frameH=47, scale=0.7 },
     -- PROC START (entry animations)
     { name = "Proc: Blizzard",    isProcStart=true, atlas="UI-HUD-ActionBar-Proc-Start-Flipbook" },
     { name = "Proc: Blue",        isProcStart=true, atlas="RotationHelper-ProcStartBlue-Flipbook-2x" },
-    { name = "Proc: Short",       isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartYellow.tga",
+    { name = "Proc: Short",       isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartYellow.tga",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: Shorter",     isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartYellow_Shorter.tga",
+    { name = "Proc: Shorter",     isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartYellow_Shorter.tga",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: Blue Short",  isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartBlue.tga",
+    { name = "Proc: Blue Short",  isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartBlue.tga",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: Blue Shorter",isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartBlue_Shorter.tga",
+    { name = "Proc: Blue Shorter",isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartBlue_Shorter.tga",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: White Short", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartWhite.tga",
+    { name = "Proc: White Short", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartWhite.tga",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: White Shorter",isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ProcStartWhite_Shorter.tga",
+    { name = "Proc: White Shorter",isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartWhite_Shorter.tga",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: Rainbow",     isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_ProcRainbow_Short.png",
+    { name = "Proc: Rainbow",     isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ABE_ProcRainbow_Short.png",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: Rainbow Shorter", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ABE_ProcRainbow_Shorter.png",
+    { name = "Proc: Rainbow Shorter", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ABE_ProcRainbow_Shorter.png",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: Classic-like", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/ClassicLike_Flipbook.tga",
+    { name = "Proc: Classic-like", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ClassicLike_Flipbook.tga",
       rows=4, columns=3, frames=12, duration=0.25, frameW=80, frameH=80, scale=0.9 },
-    { name = "Proc: ABE Burst Square", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_square.tga",
+    { name = "Proc: ABE Burst Square", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_square.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Burst Rune", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_2.tga",
+    { name = "Proc: ABE Burst Rune", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_2.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Burst Rune 2", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_3.tga",
+    { name = "Proc: ABE Burst Rune 2", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_3.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Burst Zereth", isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_4.tga",
+    { name = "Proc: ABE Burst Zereth", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_4.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.42 },
-    { name = "Proc: ABE Ring",     isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_5.tga",
+    { name = "Proc: ABE Ring",     isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_5.tga",
       rows=6, columns=5, frames=30, duration=0.7, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Ring 2",   isProcStart=true, texture="Interface/AddOns/Aishaddon/Media/Glows/burst_6.tga",
+    { name = "Proc: ABE Ring 2",   isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_6.tga",
       rows=6, columns=5, frames=30, duration=0.4, frameW=100, frameH=100, scale=0.38 },
     { name = "Proc: Flash In",    isProcStart=true, useAlphaPulse=true, texture="Interface\\SpellActivationOverlay\\IconAlert",
       texCoord={0.00781250,0.50781250,0.27734375,0.52734375}, blendMode="ADD", fromAlpha=0.0, toAlpha=1.0, duration=0.15 },
@@ -341,11 +349,11 @@ ns.GLOW_DEFS = {
 -- BAR TEXTURES  (~45)
 ------------------------------------------------------------------------
 ns.BAR_TEXTURES = {
-    { value = "aish_grad",   text = "Aish Gradient",     path = "Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_gradient" },
-    { value = "aish_grad2",  text = "Aish Gradient 2",   path = "Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_gradient2" },
-    { value = "aish_grad3",  text = "Aish Gradient 3",   path = "Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_gradient3" },
-    { value = "aish_fx",     text = "Aish Effect",       path = "Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_effect" },
-    { value = "aish_fx2",    text = "Aish Effect 2",     path = "Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_effect2" },
+    { value = "aish_grad",   text = "Aish Gradient",     path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient" },
+    { value = "aish_grad2",  text = "Aish Gradient 2",   path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient2" },
+    { value = "aish_grad3",  text = "Aish Gradient 3",   path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient3" },
+    { value = "aish_fx",     text = "Aish Effect",       path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_effect" },
+    { value = "aish_fx2",    text = "Aish Effect 2",     path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_effect2" },
     { value = "toxiui",     text = "ToxiUI Clean",     path = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga", lsm = "ToxiUI-clean" },
     { value = "birg00",     text = "Birg00",            lsm = "Birg00" },
     { value = "charcoal",   text = "Charcoal",          lsm = "Charcoal" },

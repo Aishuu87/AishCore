@@ -35,6 +35,15 @@ ns.SPEC_MAP = {
 ns.Defaults = {
     addonVersion = "0.0.0", enabled = true, useSpellColors = true,
     hideCDMBuffFrames = true, useNativeCDM = false,
+    -- Tooltip au survol des icônes de buff/debuff : indépendant du réglage
+    -- équivalent de la barre de priorité (priorityBar.tooltipAltCombatOnly).
+    -- Si true, en combat le tooltip n'apparaît que tant qu'ALT est maintenu ;
+    -- hors combat il reste toujours visible au survol.
+    tooltipAltCombatOnly = false,
+    -- GLOW PAR DEFAUT : applique automatiquement aux auras cochees qui n'ont pas
+    -- de glow personnalise (voir info._glowCustom dans UI/Menus/Tactics.lua).
+    defaultGlowIdx = 2, defaultGlowColorR = nil, defaultGlowColorG = nil, defaultGlowColorB = nil,
+    defaultGlowAlpha = 0.7, defaultGlowScale = 1.0, defaultProcGlowIdx = 1,
     iconlistEnabled = true, circlebarsEnabled = true, iconsEnabled = true,
     freebarsEnabled = true,
     equipmentEnabled = true, effectsEnabled = false,
@@ -54,7 +63,7 @@ ns.Defaults = {
         swipeEnabled=false,
         sparkEnabled=true, sparkW=17, sparkH=6, sparkAlpha=1.0, sparkOffY=0, sparkGradient=false, sparkGradR2=nil, sparkGradG2=nil, sparkGradB2=nil, sparkTexture="atlas:honorsystem-bar-spark", sparkLayer="front",
         sparkColorR=nil, sparkColorG=nil, sparkColorB=nil,
-        timerIconEnabled=false, timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
+        timerIconEnabled=false, timerPos="CENTER", timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
         timerSize=12,
         timerColorR=1, timerColorG=1, timerColorB=1,
         timerIconOffX=0, timerIconOffY=0,
@@ -77,13 +86,13 @@ ns.Defaults = {
         fadeIC=1.0, fadeOOC=0.4, fadeDelayIC=0, fadeDelayOOC=0, fadeDuration=0.35,
         iconBorder="square", desatOverride=nil, glowEnabled=true,
         glowOverrideIdx=nil, glowOverrideR=nil, glowOverrideG=nil, glowOverrideB=nil, glowOverrideScale=nil,
-        iconPos="RIGHT", reverse=true,
+        iconPos="RIGHT", reverse=true, hideIcon=false,
         barBgR=0, barBgG=0, barBgB=0, barBgAlpha=0,
         barColorR=nil, barColorG=nil, barColorB=nil,
         swipeEnabled=false, bannerGrowth="RIGHT",
         sparkEnabled=true, sparkW=17, sparkH=6, sparkAlpha=1.0, sparkOffY=0, sparkGradient=false, sparkGradR2=nil, sparkGradG2=nil, sparkGradB2=nil, sparkTexture="atlas:honorsystem-bar-spark", sparkLayer="front",
         sparkColorR=nil, sparkColorG=nil, sparkColorB=nil,
-        timerIconEnabled=false, timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
+        timerIconEnabled=false, timerPos="CENTER", timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
         timerSize=11,
         timerColorR=1, timerColorG=1, timerColorB=1,
         timerIconOffX=0, timerIconOffY=0,
@@ -109,7 +118,7 @@ ns.Defaults = {
         showBarUnderIcon=true, barUnderHeight=3, barPosition="BOTTOM", barReverseFill=false, swipeEnabled=false, barBgR=0, barBgG=0, barBgB=0, barBgAlpha=0,
         sparkEnabled=true, sparkW=12, sparkH=5, sparkAlpha=1.0, sparkOffY=0, sparkGradient=false, sparkGradR2=nil, sparkGradG2=nil, sparkGradB2=nil, sparkTexture="atlas:honorsystem-bar-spark", sparkLayer="front",
         sparkColorR=nil, sparkColorG=nil, sparkColorB=nil,
-        timerIconEnabled=false, timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
+        timerIconEnabled=false, timerPos="CENTER", timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
         timerSize=10,
         timerColorR=1, timerColorG=1, timerColorB=1,
         timerIconOffX=0, timerIconOffY=0,
@@ -122,7 +131,7 @@ ns.Defaults = {
     },
     freebars = {
         -- Layout "Buff autour du cercle" : 2 barres miroir sans icone,
-        -- positionnees a l'emplacement standard du Resource Circle d'Aishaddon.
+        -- positionnees a l'emplacement standard du Resource Circle d'AishCore.
         -- L'utilisateur peut deplacer via Alt+clic gauche sur les barres.
         --
         -- NOTE : ce render n'a ni icone, ni glow, ni stacks, ni charges.
@@ -133,7 +142,7 @@ ns.Defaults = {
         -- Duree (texte centre sur la row, dans l'espace entre les 2 barres miroir).
         -- Reutilise les memes cles que timerIcon (iconlist/circlebars/icons) pour
         -- beneficier du meme code de rendu (UpdateTimersForRender / UpdRow).
-        timerIconEnabled=false, timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
+        timerIconEnabled=false, timerPos="CENTER", timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
         timerSize=11, timerColorR=1, timerColorG=1, timerColorB=1,
         timerIconOffX=0, timerIconOffY=0, timerDecimals=1,
         -- Note : pas de champ 'growth' (placement auto-alterne haut/bas geré par Buffs.lua)
@@ -181,6 +190,54 @@ ns.Defaults = {
         borderStyle="square", borderWidth=1,
         borderColor={0.055, 0.055, 0.055, 1},
     },
+    -- "Buffs manquants" (cf. Modules/Auras/Core/MissingBuffs.lua)
+    missingBuffs = {
+        enabled = true,
+        makeIconClickable = true,
+        ignoreBuffsWhileMounted = true,
+        ignoreWhileResting = false,
+        debounceThrottle = 0.25,
+        showBuffsInCombat = false,
+        hideText = false,
+        locked = false,
+        framePoint = nil, -- {point, relPoint, x, y}, defini au premier drag
+        ignoredSettingsIds = {}, -- [settingsId] = true
+        -- Par classe
+        ignoreWarriorStances = false, overrideWarriorStance = nil,
+        ignorePaladinAuras = false, overridePaladinAura = nil,
+        ignoreEvokerAttunements = false, overrideEvokerAttunement = nil,
+        ignoreHunterPets = false, overrideHunterPet = nil,
+        ignoreWarlockPets = false, overrideWarlockPet = nil,
+        ignoreLethalPoisons = false, overrideLethalPoison = nil,
+        ignoreNonlethalPoisons = false, overrideNonlethalPoison = nil,
+        -- Rappel "bientot expire" (2026-08-30) : affiche l'alerte native
+        -- (texte "RAFRAICHIR") quand un buff suivi sur SOI est encore actif
+        -- mais expire dans moins de expiringSoonThreshold MINUTES -- cf.
+        -- Modules/Auras/Core/MissingBuffs.lua::GetSelfBuffExpiringSoon
+        -- (converti en secondes au point d'usage).
+        expiringSoonEnabled = false,
+        expiringSoonThreshold = 5,
+        -- Apparence icone (valeurs par defaut = rendu identique a avant
+        -- l'ajout de la personnalisation, cf. Modules/Auras/Core/MissingBuffs.lua)
+        iconSize = 64,
+        iconMaskIndex = 1,
+        borderEnabled = true,
+        borderColor = {1, 0.15, 0.15, 0.9},
+        borderThickness = 2,
+        -- Apparence texte
+        textFont = nil, -- nil = ns.Media.font
+        textSize = 12,
+        textColor = {1, 0.9, 0.3},
+        textOffsetX = 0,
+        textOffsetY = -2,
+        -- Toggles independants (combinables, ex: rebond + clignotement en meme temps)
+        textAnimPulse = false,
+        textAnimBounce = false,
+        textAnimBlink = false,
+        -- Style de contour du texte : "OUTLINE" (fin), "THICKOUTLINE" (epais)
+        -- ou "SLUG" (anneau de copies noires, cf. Core.lua ApplyTextOutlineStyle).
+        textOutlineStyle = "OUTLINE",
+    },
 }
 
 ns.SlotDefaults = {
@@ -195,6 +252,9 @@ ns.SpellDefaults = {
     destinations = { iconlist=false, circlebars=false, icons=false, freebars=false },
     color=nil, glowColor=nil, glow=false, glowIdx=2, glowAlpha=0.7,
     desat=false, procGlowIdx=1, procGlowScale=1.0,
+    -- _glowCustom=false : suit le glow par defaut (voir GLOW PAR DEFAUT dans Auras a tracker).
+    -- Passe a true des que l'utilisateur touche manuellement au glow de ce sort.
+    _glowCustom=false,
     -- 3D models (0 = off)
     barModelID=0, barModelA=0.5, barModelRot=0,
     barModelX=0, barModelY=0, barModelZ=0, barModelS=1.0,

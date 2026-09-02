@@ -102,7 +102,6 @@ end
 
 ---------------------------------------------------------------------------
 -- Couleurs par défaut par spécialisation
--- Source : COLOR MASTER - AISHUI (WeakAuras export)
 -- Vide par défaut — chargé depuis ns.DB.specDefaults au PLAYER_LOGIN (version Adept)
 -- Les utilisateurs standard auront le fallback couleur de classe.
 ---------------------------------------------------------------------------
@@ -208,6 +207,19 @@ _colEvt:RegisterEvent("PLAYER_LOGIN")
 _colEvt:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_SPECIALIZATION_CHANGED" then
         C_Timer.After(0.1, Colors.Broadcast)
+        -- Le container "resourceCircle" du panneau d'options est construit une
+        -- fois puis mis en cache pour toute la session (cf. GetOrBuildContainer
+        -- dans SettingsPanel.lua) : son contenu spec-dependant (_arcSpec, arc de
+        -- stagger, dots secondaires...) lu au moment du build ne se remet donc
+        -- JAMAIS a jour tout seul apres un changement de spe -- confirme en jeu
+        -- (section d'arc manquante apres bascule vers une nouvelle spe). Scope
+        -- volontairement narrow (uniquement sur le vrai changement de spe, pas
+        -- le Broadcast generique declenche aussi par un simple edit de couleur,
+        -- qui rebuildrait sinon tout l'onglet a chaque pick de couleur).
+        local SP = ns.SettingsPanel
+        if SP and SP.InvalidateCategory then
+            C_Timer.After(0.1, function() pcall(SP.InvalidateCategory, "resourceCircle") end)
+        end
     elseif event == "PLAYER_LOGIN" then
         self:UnregisterEvent("PLAYER_LOGIN")
         -- Merge des couleurs de spés depuis SavedVariables (version Adept)
@@ -221,8 +233,13 @@ _colEvt:SetScript("OnEvent", function(self, event)
                     Colors.SPEC_DEFAULTS[classKey][specID] = elements
                 end
             end
-            C_Timer.After(0.1, Colors.Broadcast)
         end
+        -- Toujours Broadcast au login (meme sans specDefaults) : c'est ce qui
+        -- initialise Theme.gold/Theme.accent (cf. SW.RefreshAccentTheme, appele
+        -- depuis Colors.RegisterCallback ci-dessous) sur la bonne couleur de spe
+        -- des le tout premier affichage du panneau d'options, au lieu de rester
+        -- sur l'ocre statique jusqu'au premier changement de spe.
+        C_Timer.After(0.1, Colors.Broadcast)
     end
 end)
 
@@ -248,6 +265,44 @@ Colors.RegisterCallback(function()
 
     local XB = ns.Modules.XPBar
     if XB and XB.ApplySettings then pcall(XB.ApplySettings) end
+
+    -- Niveau d'objet global (Fiche Personnage) et Nom du joueur (Ecran AFK) :
+    -- toggle "Couleur de specialisation" (Colors.Get("powercircle")) --
+    -- doivent se reappliquer en direct au changement de spe/couleur, comme
+    -- les autres consommateurs de Colors.Get ci-dessus.
+    local CA = ns.Modules.CharacterArmory
+    if CA and CA.ApplySettings then pcall(CA.ApplySettings) end
+
+    local AM = ns.Modules.AFKMode
+    if AM and AM.ApplySettings then pcall(AM.ApplySettings) end
+
+    -- Glow par defaut des "Auras a tracker" (Modules/Auras) : type/anim/opacite/
+    -- taille/couleur sont maintenant stockes par spe (ns.db.defaultGlowBySpec,
+    -- cf. GetDefaultGlowCfg dans Tactics.lua) -- on re-applique aux sorts deja
+    -- actifs (RollDefaultGlow ignore ceux avec un glow personnalise,
+    -- _glowCustom=true) ET on resynchronise les controles du menu Tactics s'il
+    -- est deja construit/affiche, sinon ils resteraient figes sur les valeurs
+    -- de l'ancienne spe jusqu'au prochain re-Build.
+    local AurasNS = ns.Auras
+    if AurasNS and AurasNS.RollDefaultGlow then pcall(AurasNS.RollDefaultGlow) end
+    if AurasNS and AurasNS.RefreshDefaultGlowWidgets then pcall(AurasNS.RefreshDefaultGlowWidgets) end
+
+    -- Accent thematique du panneau d'options (points de section, hairlines,
+    -- fond actif de la sidebar, et ~60 autres accents dores qui lisent tous
+    -- Theme.gold/Theme.accent) : un seul point de mise a jour centralise --
+    -- cf. SharedWidgets.RefreshAccentTheme pour le detail (mute Theme.gold/
+    -- accent EN PLACE, gate par ns.DB.colors.themeGUI). Remplace les 2 appels
+    -- separes RefreshSidebarColors/RefreshSectionHeaderColors d'avant (les
+    -- deux sont maintenant inclus dedans).
+    local SW = ns.SharedWidgets
+    if SW and SW.RefreshAccentTheme then pcall(SW.RefreshAccentTheme) end
+
+    -- Meme accent thematique, mais pour le namespace SEPARE du module Auras
+    -- (_addon.Auras.THEME, jamais partage avec ns.Theme) -- cf.
+    -- Modules/Auras/Core/ClassColors.lua:RefreshAccentTheme. Sans cet appel,
+    -- les headers de section des menus Auras (Tactics/Render/...) restaient
+    -- figes sur un blanc fixe (confirme en jeu).
+    if AurasNS and AurasNS.RefreshAccentTheme then pcall(AurasNS.RefreshAccentTheme) end
 end)
 
 ---------------------------------------------------------------------------

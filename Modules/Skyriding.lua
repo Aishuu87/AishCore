@@ -1,5 +1,5 @@
 -- Modules/Skyriding.lua
--- Port natif du WeakAura "[SKYRIDING] - FIXE"
+-- Suivi natif de la vigueur et de la vitesse en vol dragon (Skyriding).
 -- Cercle de vitesse, charges de vigueur, second souffle.
 -- FX 3D : désactivés pour l'instant (phase ultérieure).
 local addonName, ns = ...
@@ -47,11 +47,11 @@ local MODEL_CRAWTH     = 4520560    -- galeforce precast (orbes + souffle)
 
 -- Textures
 local TEX_CIRCLEFLAT   = "Interface\\AddOns\\AishuuMedia\\ElvUI\\circleflat"
-local TEX_CIRCLE_SMOOTH = "Interface\\AddOns\\Aishaddon\\Media\\Skyriding\\Circle_Smooth"
-local TEX_SQUARE_WHITE = "Interface\\AddOns\\Aishaddon\\Media\\Skyriding\\Square_FullWhite"
+local TEX_CIRCLE_SMOOTH = "Interface\\AddOns\\AishCore\\Media\\Skyriding\\Circle_Smooth"
+local TEX_SQUARE_WHITE = "Interface\\AddOns\\AishCore\\Media\\Skyriding\\Square_FullWhite"
 local FONT_MONTSERRAT_B = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat-Bold.ttf"
 
--- Couleurs (extraites des données WeakAuras)
+-- Couleurs
 local COL_BG            = { 0.0549, 0.0549, 0.0549, 1 }
 local COL_SPEED_NORMAL  = { 0, 0.8824, 0.5373, 1 }          -- teal (buff actif)
 local COL_SPEED_BOOST   = { 0, 1, 0.8118, 1 }               -- cyan (ascension)
@@ -198,7 +198,11 @@ local function ResolveDisplayColor(hasThrill, boosting, specSlowKey, specFastKey
     local Colors = ns.Modules and ns.Modules.Colors
     cslow   = Colors and Colors.Get(specSlowKey)
     cbuffed = Colors and Colors.Get(specFastKey)
-  elseif mode == "mount" then
+  elseif mode == "mount" and ns.HasHeroicFeatures and ns.HasHeroicFeatures() then
+    -- Reglage reserve, cf. Core.lua:ns.HasHeroicFeatures -- si le mode est
+    -- "mount" (config importee, ancienne valeur...) mais le flag absent, on
+    -- traverse simplement ce elseif sans rien affecter : cslow/cbuffed
+    -- restent nil et retombent sur les valeurs par defaut plus bas.
     cslow   = mountColorSlow
     cbuffed = mountColorBuffed
   end
@@ -533,7 +537,7 @@ function Skyriding.Create()
   ---------------------------------------------------------------------------
   -- Container
   ---------------------------------------------------------------------------
-  container = CreateFrame("Frame", "AishaddonSkyridingFrame", UIParent)
+  container = CreateFrame("Frame", "AishCoreSkyridingFrame", UIParent)
   container:SetSize(10, 10)
   container:SetFrameStrata("MEDIUM")
   container:Hide()
@@ -998,10 +1002,10 @@ function Skyriding.SetLayoutMode(enable)
       -- Les valeurs DB sont déjà à jour (écrites au fil du OnUpdate).
       -- Mettre à jour les champs X/Y du panneau de config.
       local db = ns.DB.skyriding or {}
-      local xEb = _G["AishaddonSRXEditBox"]
-      local yEb = _G["AishaddonSRYEditBox"]
-      if xEb then xEb:SetText(tostring(db.x or 0)) end
-      if yEb then yEb:SetText(tostring(db.y or 0)) end
+      local xSl = _G["AishCoreSRPosXSlider"]
+      local ySl = _G["AishCoreSRPosYSlider"]
+      if xSl then xSl:SetValue(db.x or 0) end
+      if ySl then ySl:SetValue(db.y or 0) end
     end)
 
     layoutHighlight:SetScript("OnUpdate", function()

@@ -20,7 +20,7 @@ ns.CategoryDispatcher = {}
 local CreateFrame, pcall = CreateFrame, pcall
 
 -- ============================================================================
--- Placeholder "À venir" pour sections non-encore-branchées (Aishaddon futur)
+-- Placeholder "À venir" pour sections non-encore-branchées (AishCore futur)
 -- ============================================================================
 local function BuildPlaceholder(parent, contentW, section)
     local FONT = ns.Media.font

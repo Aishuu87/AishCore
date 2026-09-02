@@ -6,14 +6,14 @@ local L = ns.L
 
 -- Format recommandé : TGA 32-bit avec canal alpha (fond transparent)
 -- Placer le fichier dans : Media/logo.tga
-local ICON_PATH   = "Interface\\AddOns\\Aishaddon\\Media\\logo_icon.tga"
+local ICON_PATH   = "Interface\\AddOns\\AishCore\\Media\\logo_icon.tga"
 local BUTTON_SIZE = 32
 local RADIUS      = 80   -- distance du centre de la minimap
 
 ---------------------------------------------------------------------------
 -- Création du bouton
 ---------------------------------------------------------------------------
-local btn = CreateFrame("Button", "AishaddonMinimapButton", Minimap)
+local btn = CreateFrame("Button", "AishCoreMinimapButton", Minimap)
 btn:SetSize(BUTTON_SIZE, BUTTON_SIZE)
 btn:SetFrameStrata("MEDIUM")
 btn:SetFrameLevel(8)

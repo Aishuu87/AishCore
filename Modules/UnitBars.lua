@@ -196,6 +196,10 @@ local function ShouldShowBar(frame)
     if inVehicle                then return false end
     if inPetBattle              then return false end
     local unit  = frame._def.unit
+    -- "Toujours actif en instance" : ignore les transitions combat tant qu'on
+    -- est en donjon/raid (ns.inInstance, cf. Core.lua) -- le unit doit quand
+    -- meme exister (pas de barre "target" sans cible, meme en instance).
+    if db and db.alwaysInInstance and ns.inInstance then return UnitExists(unit) end
     local vMode = (db and db.visibilityMode)
     if not vMode then
         vMode = (db and db.hideOutOfCombat) and "combat" or "target"
@@ -204,8 +208,11 @@ local function ShouldShowBar(frame)
         return UnitExists(unit)
     elseif vMode == "combat" then
         return UnitAffectingCombat("player") and UnitExists(unit)
-    else  -- "target"
-        return UnitExists(unit)
+    else  -- "target" : n'affiche RIEN sans cible, meme la barre du joueur
+        -- (UnitExists("player") est toujours vrai -- sans ce garde explicite
+        -- sur la cible, la barre joueur restait affichee en permanence dans
+        -- ce mode, cible ou non).
+        return UnitExists("target") and UnitExists(unit)
     end
 end
 
@@ -228,9 +235,16 @@ end
 -- Même logique que TopTargetBar.GetUnitColor, avec alpha (4ème composante).
 local function GetClassFillColor(unit, fallback)
     if UnitIsPlayer(unit) then
-        local ok, classFile = pcall(function() return select(2, UnitClass(unit)) end)
-        if ok and classFile and CLASS_COLORS[classFile] then
-            return CLASS_COLORS[classFile]
+        -- L'indexation CLASS_COLORS[classFile] DOIT rester dans le même pcall
+        -- que UnitClass() : classFile peut être une valeur secrète (observé
+        -- sur targettarget), et indexer une table avec une clé secrète lève
+        -- une erreur Lua non catchée si elle est faite hors du pcall.
+        local ok, color = pcall(function()
+            local classFile = select(2, UnitClass(unit))
+            return classFile and CLASS_COLORS[classFile]
+        end)
+        if ok and color then
+            return color
         end
         return fallback
     end
@@ -266,7 +280,7 @@ local function CreateUnitBar(def)
 
     -- Frame racine (draggable, taille totale incluant les dots)
     local frameH = math.max(dotsW > 0 and dotSizes[3] or 0, h) + 4
-    local frame = CreateFrame("Button", "AishaddonUnitBar_" .. def.key, UIParent, "SecureUnitButtonTemplate")
+    local frame = CreateFrame("Button", "AishCoreUnitBar_" .. def.key, UIParent, "SecureUnitButtonTemplate")
     frame:SetSize(totalW, frameH)
     frame:SetFrameStrata("MEDIUM")
     frame:SetMovable(true)
@@ -284,7 +298,7 @@ local function CreateUnitBar(def)
     frame:SetAlpha(0)
     frame:SetScript("OnDragStart", function(self)
         if InCombatLockdown() then return end
-        local panel = _G["AishaddonSettingsPanel"]
+        local panel = _G["AishCoreSettingsPanel"]
         if not panel or not panel:IsShown() then return end
         if ns.GetCfg("unitBars") and ns.GetCfg("unitBars").locked then return end
         self._dragging = true
@@ -337,6 +351,8 @@ local function CreateUnitBar(def)
     local bgTex = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
     bgTex:SetSize(w, barH)
     bgTex:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", barOffX, (frameH - barH) / 2)
+    frame._barOffX = barOffX
+    frame._barOffY = (frameH - barH) / 2
     frame.bgTex = bgTex
 
     -- StatusBar de remplissage HP (doit exister avant absorbTex qui s'ancre sur son fill)
@@ -393,7 +409,7 @@ local function CreateUnitBar(def)
     border:SetColorTexture(DARK, DARK, DARK, 1)
 
     -- Glow au survol : BackdropTemplate + GlowTex.tga (même technique qu'ElvUI)
-    local GLOW_TEX  = "Interface\\AddOns\\Aishaddon\\GlowTex.tga"
+    local GLOW_TEX  = "Interface\\AddOns\\AishCore\\GlowTex.tga"
     local GLOW_SIZE = 5
     local fc0 = cfg.fillColor or def.defaults.fillColor
     local glowFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
@@ -431,10 +447,12 @@ local function CreateUnitBar(def)
                 dx = w + dotGap + totalOff + sz / 2
             end
             d:SetPoint("CENTER", frame, "BOTTOMLEFT", dx, dotYCenter)
-            d:SetTexture("Interface\\AddOns\\Aishaddon\\circleflat2.tga")
+            d:SetTexture("Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2.tga")
             d:SetVertexColor(dotColors[i][1], dotColors[i][2], dotColors[i][3], 1)
             frame["dot" .. i] = d
+            frame["dot" .. i .. "_dx"] = dx
         end
+        frame._dotYCenter = dotYCenter
     end
 
     -- -----------------------------------------------------------------------
@@ -462,7 +480,8 @@ local function CreateUnitBar(def)
         local txt = tbFrame:CreateFontString(nil, "OVERLAY")
         local ubCfg   = ns.GetCfg("unitBars")
         local txtSize = (ubCfg and ubCfg.textSize) or 8
-        txt:SetFont(ns.Media.font, txtSize, "OUTLINE")
+        frame.hpTextSlug = ns.CreateSlugRing(tbFrame, txt)
+        ns.ApplyTextOutlineStyle(txt, frame.hpTextSlug, ns.Media.font, txtSize, ubCfg and ubCfg.hpOutlineStyle)
         txt:SetAlpha(0.66)
         txt:SetJustifyH("CENTER")
         txt:SetTextColor(1, 1, 1, 1)
@@ -497,14 +516,16 @@ local function CreateUnitBar(def)
         local anchorA = (justify == "LEFT") and "TOPLEFT"     or "TOPRIGHT"    -- haut de bgTex
 
         local nameTxt = frame:CreateFontString(nil, "OVERLAY")
-        nameTxt:SetFont(BEBAS_FONT, nSize, "OUTLINE")
+        frame.nameTxtSlug = ns.CreateSlugRing(frame, nameTxt)
+        ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, BEBAS_FONT, nSize, db and db.nameOutlineStyle)
         nameTxt:SetJustifyH(justify)
         nameTxt:SetShadowColor(0, 0, 0, 0.7)
-        nameTxt:SetShadowOffset(1, -1)
         nameTxt:SetTextColor(1, 1, 1, 1)
         nameTxt:SetPoint(anchorS, bgTex, anchorA, nOffX, nOffY)
         nameTxt:SetText("")
         frame.nameTxt = nameTxt
+        frame._nameAnchorS, frame._nameAnchorA = anchorS, anchorA
+        frame._nameOffX, frame._nameOffY = nOffX, nOffY
     end
 
     return frame
@@ -689,6 +710,27 @@ local function UpdateBarName(frame)
     end
 end
 
+-- Repositionne frame selon cfg.x/y, avec un decalage horizontal temporaire
+-- optionnel (extraX) utilise par l'animation de slide-in/out. Factorise pour
+-- que l'animation puisse repositionner a chaque tick sans dupliquer le cas
+-- particulier "pet ancre sur la barre du joueur".
+local function PositionBarFrame(frame, extraX)
+    local def = frame._def
+    local cfg = Cfg(def.key)
+    local x   = (cfg.x or def.defaults.x) + (extraX or 0)
+    local y   = cfg.y or def.defaults.y
+    frame:ClearAllPoints()
+    if def.key == "pet" and bars.player then
+        local pDef = BAR_DEFS[1].defaults
+        local pCfg = Cfg("player")
+        local px   = pCfg.x or pDef.x
+        local py   = pCfg.y or pDef.y
+        frame:SetPoint("BOTTOM", bars.player, "BOTTOM", x - px, y - py)
+    else
+        frame:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
+    end
+end
+
 ---------------------------------------------------------------------------
 -- Application des settings sur un bar déjà créé (ApplySettings)
 ---------------------------------------------------------------------------
@@ -727,6 +769,8 @@ local function ApplyBarSettings(frame)
     frame.bgTex:SetSize(w, h)
     frame.bgTex:ClearAllPoints()
     frame.bgTex:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", barOffX, (frameH - h) / 2)
+    frame._barOffX = barOffX
+    frame._barOffY = (frameH - h) / 2
     frame.bar:SetSize(w, h)
     frame.bar:ClearAllPoints()
     frame.bar:SetPoint("TOPLEFT", frame.bgTex)
@@ -780,8 +824,10 @@ local function ApplyBarSettings(frame)
                     end
                     d:SetPoint("CENTER", frame, "BOTTOMLEFT", dx, dotYCenter)
                     d:SetVertexColor(dotColors[i][1], dotColors[i][2], dotColors[i][3], 1)
+                    frame["dot" .. i .. "_dx"] = dx
                 end
             end
+            frame._dotYCenter = dotYCenter
         end
     end
 
@@ -798,7 +844,7 @@ local function ApplyBarSettings(frame)
         if frame.hpText then
             local ubCfg   = ns.GetCfg("unitBars")
             local txtSize = (ubCfg and ubCfg.textSize) or 8
-            frame.hpText:SetFont((ubCfg and ubCfg.font) or ns.Media.font, txtSize, "OUTLINE")
+            ns.ApplyTextOutlineStyle(frame.hpText, frame.hpTextSlug, (ubCfg and ubCfg.font) or ns.Media.font, txtSize, ubCfg and ubCfg.hpOutlineStyle)
         end
     end
 
@@ -812,10 +858,12 @@ local function ApplyBarSettings(frame)
         local justify_n = def.nameJustify or "LEFT"
         local anchorS = (justify_n == "LEFT") and "BOTTOMLEFT"  or "BOTTOMRIGHT"
         local anchorA = (justify_n == "LEFT") and "TOPLEFT"     or "TOPRIGHT"
-        frame.nameTxt:SetFont((ubCfg and ubCfg.nameFont) or BEBAS_FONT, nSize, "OUTLINE")
+        ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, (ubCfg and ubCfg.nameFont) or BEBAS_FONT, nSize, ubCfg and ubCfg.nameOutlineStyle)
         frame.nameTxt:SetJustifyH(justify_n)
         frame.nameTxt:ClearAllPoints()
         frame.nameTxt:SetPoint(anchorS, frame.bgTex, anchorA, nOffX, nOffY)
+        frame._nameAnchorS, frame._nameAnchorA = anchorS, anchorA
+        frame._nameOffX, frame._nameOffY = nOffX, nOffY
     end
 
     -- Repositionner la lueur
@@ -826,18 +874,7 @@ local function ApplyBarSettings(frame)
     end
 
     -- Position frame (ancre bas)
-    local x = cfg.x or def.defaults.x
-    local y = cfg.y or def.defaults.y
-    frame:ClearAllPoints()
-    if def.key == "pet" and bars.player then
-        local pDef = BAR_DEFS[1].defaults
-        local pCfg = Cfg("player")
-        local px   = pCfg.x or pDef.x
-        local py   = pCfg.y or pDef.y
-        frame:SetPoint("BOTTOM", bars.player, "BOTTOM", x - px, y - py)
-    else
-        frame:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
-    end
+    PositionBarFrame(frame, 0)
 
     -- Réévaluer la visibilité après changement de settings
     ubLastVisState[def.key] = nil
@@ -847,11 +884,117 @@ local function ApplyBarSettings(frame)
 end
 
 ---------------------------------------------------------------------------
--- Animation de visibilité (fade in/out) — remplace les StateDrivers
+-- Animation de visibilité (fade + slide in/out) — remplace les StateDrivers
 ---------------------------------------------------------------------------
+-- Sens du glissement par barre : +1 = arrive EN VENANT de la droite (part
+-- decalee vers la droite, glisse vers la gauche jusqu'a sa position finale),
+-- -1 = arrive en venant de la gauche. Independant de la position finale a
+-- l'ecran (target finit a droite mais arrive quand meme depuis la gauche,
+-- pour un effet de croisement avec la barre du joueur/pet).
+local SLIDE_DIR = {
+    player       = 1,
+    pet          = 1,
+    target       = -1,
+    focus        = -1,
+    targettarget = -1,
+}
+local SLIDE_DISTANCE  = 55    -- px de glissement pour la barre elle-meme
+local FADE_DURATION   = 0.75  -- s (entree)
+local DOT_STAGGER     = 0.13  -- s de decalage entree entre chaque etape (gros -> moyen -> petit -> nom)
+local FADE_DURATION_OUT = 0.45  -- s (sortie -- plus rapide que l'entree)
+local DOT_STAGGER_OUT   = 0.08  -- s de decalage sortie entre chaque etape
+local DOT_SLIDE_EXTRA = 18    -- px de glissement supplementaire des dots (meme sens que la barre)
+local DOT_SCALE_START = 0.35  -- taille de depart des dots (ratio de la taille finale)
+local BAR_SCALE_START = 0.15  -- largeur de depart de la barre (ratio de sa largeur finale)
+local NAME_SLIDE_EXTRA = 18   -- px de glissement supplementaire du nom (meme sens que la barre)
+
+-- Amorti ease-out QUINT (teste puis abandonne : ease-out expo, trop agressif
+-- au gout de l'utilisateur -- revenu au quint).
+local function EaseOut(p)
+    if p >= 1 then return 1 end
+    if p <= 0 then return 0 end
+    return 1 - (1 - p)^5
+end
+
+-- Delais d'ARRIVEE (entree), en multiples de DOT_STAGGER, a partir du debut
+-- de l'anim : barre+dot3(gros) ensemble en premier, puis dot2, dot1, et le
+-- nom d'unite en dernier (cascade complete bar -> dots -> nom).
+local ENTER_DELAY_DOT = { [3] = 0, [2] = 1, [1] = 2 }
+local ENTER_DELAY_NAME = 3
+-- Delais de DEPART (sortie), en multiples de DOT_STAGGER_OUT : LIFO exact de
+-- la cascade d'entree -- le nom (arrive en dernier) part en premier, puis
+-- dot1, dot2, et enfin dot3+la barre ensemble (derniers arrives, derniers
+-- partis).
+local LEAVE_DELAY_DOT = { [1] = 1, [2] = 2, [3] = 3 }
+local LEAVE_DELAY_NAME = 0
+local LEAVE_DELAY_BAR = 3
+-- Duree totale d'un cycle : le dernier element demarre a 3*stagger et met
+-- lui-meme fade_duration a finir (entree et sortie ont chacune leur propre
+-- duree/stagger, la sortie etant plus rapide).
+local TOTAL_STAGGER_STEPS = 3
+local TOTAL_DURATION     = FADE_DURATION + TOTAL_STAGGER_STEPS * DOT_STAGGER
+local TOTAL_DURATION_OUT = FADE_DURATION_OUT + TOTAL_STAGGER_STEPS * DOT_STAGGER_OUT
+
+-- Scale horizontal de la barre : agit UNIQUEMENT sur frame.bgTex/frame.bar
+-- (textures/StatusBar enfants ordinaires, jamais protegees -- contrairement a
+-- `frame` lui-meme, cree via SecureUnitButtonTemplate). Toujours sur, meme en
+-- combat : border/glowFrame suivent automatiquement (ancres relatives a
+-- bgTex), et le StatusBar recalcule son propre remplissage proportionnel a
+-- sa largeur courante.
+--
+-- Cote fixe (ancre) choisi pour prolonger le sens du glissement d'arrivee, pas
+-- def.dotsLeft : player/pet arrivent en glissant vers la GAUCHE (dir>0, cf.
+-- SLIDE_DIR) donc grandissent depuis leur bord DROIT (fixe) vers la gauche --
+-- sinon le grandissement (vers la droite par defaut) allait a l'encontre du
+-- glissement. target/focus arrivent en glissant vers la droite (dir<0) et
+-- grandissent deja correctement depuis leur bord gauche (comportement par defaut).
+local function ApplyBarWidthScale(frame, ratio, dir)
+    local fullW = frame._barW
+    if not fullW then return end
+    local w = fullW * ratio
+    if frame.bgTex then
+        if (dir or 0) > 0 then
+            local offX = (frame._barOffX or 0) + (fullW - w)
+            frame.bgTex:ClearAllPoints()
+            frame.bgTex:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", offX, frame._barOffY or 0)
+        end
+        frame.bgTex:SetWidth(w)
+    end
+    if frame.bar then frame.bar:SetWidth(w) end
+end
+
+-- Remet un dot a son etat de repos (taille finale, decalage nul) -- utilise
+-- a la fin de l'animation d'entree et au debut de l'animation de sortie pour
+-- ne jamais laisser un dot bloque a mi-animation si les etats s'enchainent vite.
+local function ResetDotToRest(frame, i, dotSizes)
+    local d = frame["dot" .. i]
+    if not d then return end
+    local dx = frame["dot" .. i .. "_dx"]
+    if dx and frame._dotYCenter then
+        d:SetPoint("CENTER", frame, "BOTTOMLEFT", dx, frame._dotYCenter)
+    end
+    local sz = dotSizes[i]
+    d:SetSize(sz, sz)
+    d:SetAlpha(1)
+end
+
+-- Meme principe pour le texte de nom (fade + glissement, pas de scale --
+-- FontString n'a pas de SetScale independant du frame parent).
+local function ResetNameToRest(frame)
+    local n = frame.nameTxt
+    if not n or not frame._nameAnchorS then return end
+    n:ClearAllPoints()
+    n:SetPoint(frame._nameAnchorS, frame.bgTex, frame._nameAnchorA, frame._nameOffX, frame._nameOffY)
+    n:SetAlpha(1)
+end
+
 local function AnimateBar(frame, shouldShow)
     local key = frame._def.key
+    local def = frame._def
     if ubFadeTickers[key] then ubFadeTickers[key]:Cancel(); ubFadeTickers[key] = nil end
+    local dir = SLIDE_DIR[key] or 0
+    local dotSizes = not def.noDots and GetDotSizes() or nil
+    local hasName  = frame.nameTxt ~= nil and frame._nameAnchorS ~= nil
     -- Visibilité contrôlée exclusivement via SetAlpha() sur la frame elle-même.
     -- SetAlpha() n'est JAMAIS protégé en combat. Show()/Hide() ne sont plus appelés.
     if shouldShow then
@@ -859,9 +1002,57 @@ local function AnimateBar(frame, shouldShow)
         if startA >= 1 then UpdateBarHealth(frame); return end
         local _t0 = GetTime()
         ubFadeTickers[key] = C_Timer.NewTicker(0.016, function()
-            local _p = math.min((GetTime() - _t0) / 0.35, 1)
-            frame:SetAlpha(startA + (1 - startA) * (1 - (1 - _p)^3))
-            if _p >= 1 then ubFadeTickers[key]:Cancel(); ubFadeTickers[key] = nil end
+            local elapsed = GetTime() - _t0
+            local p = math.min(elapsed / FADE_DURATION, 1)
+            local eased = EaseOut(p)
+            frame:SetAlpha(startA + (1 - startA) * eased)
+            -- ClearAllPoints/SetPoint sur `frame` (SecureUnitButtonTemplate)
+            -- sont des appels PROTEGES -- confirme en jeu (ADDON_ACTION_BLOCKED
+            -- sur AishCoreUnitBar_target:ClearAllPoints() en combat). On saute
+            -- le glissement pendant le combat lockdown ; la barre reste alors a
+            -- sa position de repos (deja correcte) et ne fait que fondre/scaler.
+            if not InCombatLockdown() then
+                PositionBarFrame(frame, dir * SLIDE_DISTANCE * (1 - eased))
+            end
+            ApplyBarWidthScale(frame, BAR_SCALE_START + (1 - BAR_SCALE_START) * eased, dir)
+
+            if dotSizes then
+                for i = 1, 3 do
+                    local d = frame["dot" .. i]
+                    local dx = frame["dot" .. i .. "_dx"]
+                    if d and dx then
+                        local delay = (ENTER_DELAY_DOT[i] or 0) * DOT_STAGGER
+                        local dp = math.min(math.max(elapsed - delay, 0) / FADE_DURATION, 1)
+                        local dEased = EaseOut(dp)
+                        d:SetAlpha(dEased)
+                        d:SetPoint("CENTER", frame, "BOTTOMLEFT",
+                            dx + dir * DOT_SLIDE_EXTRA * (1 - dEased), frame._dotYCenter)
+                        local sz = dotSizes[i] * (DOT_SCALE_START + (1 - DOT_SCALE_START) * dEased)
+                        d:SetSize(sz, sz)
+                    end
+                end
+            end
+
+            if hasName then
+                local delay = ENTER_DELAY_NAME * DOT_STAGGER
+                local np = math.min(math.max(elapsed - delay, 0) / FADE_DURATION, 1)
+                local nEased = EaseOut(np)
+                frame.nameTxt:SetAlpha(nEased)
+                frame.nameTxt:ClearAllPoints()
+                frame.nameTxt:SetPoint(frame._nameAnchorS, frame.bgTex, frame._nameAnchorA,
+                    frame._nameOffX + dir * NAME_SLIDE_EXTRA * (1 - nEased), frame._nameOffY)
+            end
+
+            if elapsed >= TOTAL_DURATION then
+                ubFadeTickers[key]:Cancel(); ubFadeTickers[key] = nil
+                frame:SetAlpha(1)
+                if not InCombatLockdown() then PositionBarFrame(frame, 0) end
+                ApplyBarWidthScale(frame, 1, dir)
+                if dotSizes then
+                    for i = 1, 3 do ResetDotToRest(frame, i, dotSizes) end
+                end
+                if hasName then ResetNameToRest(frame) end
+            end
         end)
         UpdateBarHealth(frame)
     else
@@ -869,11 +1060,55 @@ local function AnimateBar(frame, shouldShow)
         if startA <= 0 then return end
         local _t0 = GetTime()
         ubFadeTickers[key] = C_Timer.NewTicker(0.016, function()
-            local _p = math.min((GetTime() - _t0) / 0.35, 1)
-            frame:SetAlpha(startA * (1 - _p)^3)
-            if _p >= 1 then
+            local elapsed = GetTime() - _t0
+            -- Cascade de sortie = exact LIFO de la cascade d'entree : le nom
+            -- part en premier (dernier arrive), puis dot1, dot2, et enfin
+            -- dot3+la barre ensemble (premiers arrives, derniers partis).
+            local barDelay = LEAVE_DELAY_BAR * DOT_STAGGER_OUT
+            local bp = math.min(math.max(elapsed - barDelay, 0) / FADE_DURATION_OUT, 1)
+            local bEased = EaseOut(bp)
+            frame:SetAlpha(startA * (1 - bEased))
+            if not InCombatLockdown() then
+                PositionBarFrame(frame, dir * SLIDE_DISTANCE * bEased)
+            end
+            ApplyBarWidthScale(frame, 1 - (1 - BAR_SCALE_START) * bEased, dir)
+
+            if dotSizes then
+                for i = 1, 3 do
+                    local d = frame["dot" .. i]
+                    local dx = frame["dot" .. i .. "_dx"]
+                    if d and dx then
+                        local delay = (LEAVE_DELAY_DOT[i] or 0) * DOT_STAGGER_OUT
+                        local dp = math.min(math.max(elapsed - delay, 0) / FADE_DURATION_OUT, 1)
+                        local dEased = EaseOut(dp)
+                        d:SetAlpha(1 - dEased)
+                        d:SetPoint("CENTER", frame, "BOTTOMLEFT",
+                            dx + dir * DOT_SLIDE_EXTRA * dEased, frame._dotYCenter)
+                        local sz = dotSizes[i] * (1 - (1 - DOT_SCALE_START) * dEased)
+                        d:SetSize(sz, sz)
+                    end
+                end
+            end
+
+            if hasName then
+                local delay = LEAVE_DELAY_NAME * DOT_STAGGER_OUT
+                local np = math.min(math.max(elapsed - delay, 0) / FADE_DURATION_OUT, 1)
+                local nEased = EaseOut(np)
+                frame.nameTxt:SetAlpha(1 - nEased)
+                frame.nameTxt:ClearAllPoints()
+                frame.nameTxt:SetPoint(frame._nameAnchorS, frame.bgTex, frame._nameAnchorA,
+                    frame._nameOffX + dir * NAME_SLIDE_EXTRA * nEased, frame._nameOffY)
+            end
+
+            if elapsed >= TOTAL_DURATION_OUT then
                 ubFadeTickers[key]:Cancel(); ubFadeTickers[key] = nil
                 frame:SetAlpha(0)
+                if not InCombatLockdown() then PositionBarFrame(frame, 0) end
+                ApplyBarWidthScale(frame, 1, dir)
+                if dotSizes then
+                    for i = 1, 3 do ResetDotToRest(frame, i, dotSizes) end
+                end
+                if hasName then ResetNameToRest(frame) end
             end
         end)
     end
@@ -913,6 +1148,22 @@ function UnitBars.SetGuiHidden(on)
     UnitBars.UpdateAllVisibility()
 end
 
+-- bars est locale a ce fichier, jamais de nom global par barre (contrairement
+-- a la plupart des autres modules) : accesseur pour le survol GUI -> lien
+-- direct vers la section de reglages (cf. UI/ModuleHoverOverlay.lua).
+function UnitBars.GetBars()
+    return bars
+end
+
+-- Etat de visibilite ACTUEL (pas juste la config) de la barre "player" --
+-- ubLastVisState est locale a ce fichier. Utilise par HealthCircle.ShouldShow()
+-- pour ne jamais s'afficher en double avec la vraie barre de vie du joueur :
+-- le cercle hors-combat n'est qu'un rappel minimaliste pour quand cette barre
+-- n'est PAS affichee.
+function UnitBars.IsPlayerBarShown()
+    return ubLastVisState["player"] == true
+end
+
 function UnitBars.Create(parent)
     for _, def in ipairs(BAR_DEFS) do
         if not bars[def.key] then
@@ -924,7 +1175,7 @@ function UnitBars.Create(parent)
     end
     -- Forcer la visibilité quand le panneau config s'ouvre/se ferme
     C_Timer.After(0, function()
-        local panel = _G["AishaddonSettingsPanel"]
+        local panel = _G["AishCoreSettingsPanel"]
         if panel then
             panel:HookScript("OnShow", function()
                 -- Mode preview : ShouldShowBar renvoie true pour toutes les barres.
@@ -1170,7 +1421,7 @@ end)
 -- Ticker 0.5s : targettarget + texte HP% target + masquage si unité disparue
 C_Timer.NewTicker(0.5, function()
     if not next(bars) then return end
-    local guiOpen = _G["AishaddonSettingsPanel"] and _G["AishaddonSettingsPanel"]:IsShown()
+    local guiOpen = _G["AishCoreSettingsPanel"] and _G["AishCoreSettingsPanel"]:IsShown()
     local tg = bars.target
     if tg then
         if UnitExists("target") then

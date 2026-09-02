@@ -70,24 +70,24 @@ function ns.SettingsPanel.BuildPreviewMenu(p, cw)
             ns._aishPreviewOn = v
             pcall(function()
                 if v then
-                    if SlashCmdList["AISHADDON"] then SlashCmdList["AISHADDON"]("") end
+                    if SlashCmdList["AISHCORE"] then SlashCmdList["AISHCORE"]("") end
                     C_Timer.After(0.15, function()
-                        if AishaddonSettingsPanel then
+                        if AishCoreSettingsPanel then
                             -- Move off-screen so it doesn't capture clicks
-                            ns._aishPanelPoint = {AishaddonSettingsPanel:GetPoint(1)}
-                            AishaddonSettingsPanel:ClearAllPoints()
-                            AishaddonSettingsPanel:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 5, -5)
+                            ns._aishPanelPoint = {AishCoreSettingsPanel:GetPoint(1)}
+                            AishCoreSettingsPanel:ClearAllPoints()
+                            AishCoreSettingsPanel:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 5, -5)
                         end
                     end)
                 else
-                    if AishaddonSettingsPanel then
+                    if AishCoreSettingsPanel then
                         -- Restore position and close
                         if ns._aishPanelPoint then
-                            AishaddonSettingsPanel:ClearAllPoints()
-                            AishaddonSettingsPanel:SetPoint(unpack(ns._aishPanelPoint))
+                            AishCoreSettingsPanel:ClearAllPoints()
+                            AishCoreSettingsPanel:SetPoint(unpack(ns._aishPanelPoint))
                             ns._aishPanelPoint = nil
                         end
-                        AishaddonSettingsPanel:Hide()
+                        AishCoreSettingsPanel:Hide()
                     end
                 end
             end)

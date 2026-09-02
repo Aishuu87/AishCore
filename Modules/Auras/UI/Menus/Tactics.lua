@@ -7,9 +7,26 @@ ns.SettingsPanel = ns.SettingsPanel or {}
 
 local TC = 0.07
 
+-- BUG CORRIGE (2026-08-16) : ns.ScanAuras (Scan.Run) ne pilote plus les 4
+-- destinations natives (icons/iconlist/circlebars/freebars, migrees vers
+-- AddAuraGroup -- cf. AuraTrackerContainer.lua) -- Blizzard les met a jour
+-- cote C++ des que la donnee d'aura change, jamais quand on retouche juste
+-- un reglage d'apparence. Chacune des 4 a sa propre fonction de refresh de
+-- style par bouton (couleur/spark/glow) -- a appeler explicitement partout
+-- ou un glow (par sort OU par defaut) est modifie, sinon un glow deja
+-- affiche garde son ancienne couleur/opacite/echelle jusqu'au prochain
+-- /reload ou decoche+recoche du sort. Partagee par OpenGlowPopup (glow par
+-- sort) et ns.RollDefaultGlow (glow par defaut).
+local function RefreshAllNativeGlow()
+    pcall(ns.RepositionIconsNativeGrid)      -- [I] ICONES
+    pcall(ns.RepositionCircleBarsNativeGrid) -- [C] CERCLE (GUI "Circle Bars", cle freebars)
+    pcall(ns.RepositionFreeBarsNativeGrid)   -- [B] LIBRES (GUI "Free Bars", cle circlebars)
+    pcall(ns.RepositionIconListNativeGrid)   -- [L] LISTE (GUI "Liste d'icones", cle iconlist)
+end
+
 ------------------------------------------------------------------------
 -- GLOW POPUP (floating, draggable)
--- Port depuis AishUIAura — manquant dans Aishaddon, stocké en ns._glowPopup.
+-- Port depuis AishUIAura — manquant dans AishCore, stocké en ns._glowPopup.
 ------------------------------------------------------------------------
 function ns.OpenGlowPopup(sid, info)
     local FONT  = ns.Media and ns.Media.font or "Fonts\\FRIZQT__.TTF"
@@ -89,27 +106,141 @@ function ns.OpenGlowPopup(sid, info)
         end)
     end
 
+    local RefreshNativeGlow = RefreshAllNativeGlow
+
     local go={}; for idx,def in ipairs(ns.GLOW_DEFS or {}) do if not def.isProcStart then go[#go+1]={value=idx,text=def.name} end end
     gp._glowDD:SetOptions(go); gp._glowDD:SetValue(info.glowIdx or 2)
-    gp._glowDD.onChanged=function(v) info.glowIdx=v; RefreshGlowPreview(); pcall(ns.ScanAuras) end
+    gp._glowDD.onChanged=function(v) info.glowIdx=v; info._glowCustom=true; RefreshGlowPreview(); pcall(ns.ScanAuras); RefreshNativeGlow() end
 
     local po={{value=1,text=L["AURASMENU_EQUIPMENT_BORDER_NONE"]}}; for idx,def in ipairs(ns.GLOW_DEFS or {}) do if def.isProcStart then po[#po+1]={value=idx,text=def.name} end end
     gp._entryDD:SetOptions(po); gp._entryDD:SetValue(info.procGlowIdx or 1)
-    gp._entryDD.onChanged=function(v) info.procGlowIdx=v; gp._testProcBtn:SetShown(v and v>1); gp._procScaleSlider:SetShown(v and v>1) end
+    gp._entryDD.onChanged=function(v) info.procGlowIdx=v; info._glowCustom=true; gp._testProcBtn:SetShown(v and v>1); gp._procScaleSlider:SetShown(v and v>1) end
 
     local procVisible = info.procGlowIdx and info.procGlowIdx > 1
     gp._testProcBtn:SetShown(procVisible); gp._procScaleSlider:SetShown(procVisible)
-    gp._procScaleSlider:SetValue(info.procGlowScale or 1.0); gp._procScaleSlider.onChanged=function(v) info.procGlowScale=v end
+    gp._procScaleSlider:SetValue(info.procGlowScale or 1.0); gp._procScaleSlider.onChanged=function(v) info.procGlowScale=v; info._glowCustom=true end
     gp._testProcBtn:SetScript("OnClick",function()
         local pi=info.procGlowIdx; if not pi or pi<1 then return end
         if ns.PlayProcStart then ns.PlayProcStart(gp._prevFrame,pi,info.glowColor or info.color or ns.barColor,info.procGlowScale or 1.0) end
     end)
 
     local rc = info.glowColor or info.color or ns.barColor
-    gp._colorBtn:SetColor(rc[1],rc[2],rc[3]); gp._colorBtn.onChanged=function(c) info.glowColor=c; RefreshGlowPreview(); pcall(ns.ScanAuras) end
-    gp._opacSlider:SetValue(info.glowAlpha or 0.7); gp._opacSlider.onChanged=function(v) info.glowAlpha=v; RefreshGlowPreview() end
-    gp._sizeSlider:SetValue(info.glowScale or 1.0); gp._sizeSlider.onChanged=function(v) info.glowScale=v; RefreshGlowPreview() end
+    gp._colorBtn:SetColor(rc[1],rc[2],rc[3]); gp._colorBtn.onChanged=function(c) info.glowColor=c; info._glowCustom=true; RefreshGlowPreview(); pcall(ns.ScanAuras); RefreshNativeGlow() end
+    -- BUG CORRIGE (2026-08-16) : contrairement au dropdown de style et au
+    -- color picker ci-dessus, ces deux sliders ne declenchaient meme pas
+    -- ns.ScanAuras -- la preview du popup se mettait a jour, mais l'aura
+    -- deja affichee en jeu gardait son ancienne opacite/taille de glow
+    -- jusqu'au prochain rescan (decoche/recoche du sort ou /reload).
+    gp._opacSlider:SetValue(info.glowAlpha or 0.7); gp._opacSlider.onChanged=function(v) info.glowAlpha=v; info._glowCustom=true; RefreshGlowPreview(); pcall(ns.ScanAuras); RefreshNativeGlow() end
+    gp._sizeSlider:SetValue(info.glowScale or 1.0); gp._sizeSlider.onChanged=function(v) info.glowScale=v; info._glowCustom=true; RefreshGlowPreview(); pcall(ns.ScanAuras); RefreshNativeGlow() end
     gp:Show(); C_Timer.After(0.05, RefreshGlowPreview)
+end
+
+------------------------------------------------------------------------
+-- GLOW PAR DEFAUT
+-- S'applique a toute aura qui n'a pas de glow personnalise (info._glowCustom
+-- reste false/nil tant que l'utilisateur n'a pas touche manuellement au glow
+-- de ce sort precis, cf. CreateSpellRow / OpenGlowPopup ci-dessous). Des que
+-- l'utilisateur personnalise le glow d'un sort, ce sort n'est plus jamais
+-- retouche par le defaut (_glowCustom=true, verrouille comme _colorDefault
+-- dans CDMHooks.lua).
+------------------------------------------------------------------------
+-- Couleur de repli quand l'utilisateur n'a pas choisi de couleur de glow par
+-- defaut explicite (db.defaultGlowColorR nil) : couleur "Lueur" du module
+-- Colors (element "glow"), qui suit deja la chaine override DB -> defaut de
+-- spe -> couleur de classe -- donc change automatiquement avec la spe active.
+-- ns.barColor (couleur de classe statique, Auras/Core/ClassColors.lua) ne sert
+-- plus que de tout dernier filet si le module Colors n'est pas disponible.
+-- Copie defensive ({c[1],c[2],c[3]}) : Colors.Get() peut renvoyer une
+-- reference directe vers une table interne (CLASS_FALLBACK/SPEC_DEFAULTS/
+-- overrides), jamais une valeur qu'on veut modifier/partager par accident.
+local function GetDefaultGlowColorFallback()
+    local CLR = _addon.Modules and _addon.Modules.Colors
+    local c = CLR and CLR.Get and CLR.Get("glow")
+    if c then return { c[1], c[2], c[3] } end
+    return ns.barColor or { 0.5, 0.5, 0.5 }
+end
+
+-- GLOW PAR DEFAUT PAR SPE : type/anim/opacite/taille/couleur, comme la
+-- personnalisation par sort, doivent pouvoir differer d'une spe a l'autre
+-- (ex: glow discret en Brasseur, flashy en Devastation). Stocke sous
+-- ns.db.defaultGlowBySpec[GetSpecKey()] plutot que les anciennes cles plates
+-- ns.db.defaultGlow* (globales, partagees entre TOUTES les specs -- confirme
+-- en jeu par l'utilisateur : une couleur choisie sur Moine restait affichee
+-- sur Guerrier). GetSpecKey() (Init.lua) est deja le meme identifiant
+-- (perso-realm_classe_spe) qui isole discoveredSpells par spe.
+-- Migration one-shot : au premier acces pour une spe donnee, on seede depuis
+-- les anciennes cles globales (comportement pre-per-spec) plutot que reset a
+-- zero -- evite de perdre silencieusement le reglage deja en place pour la
+-- spe active au moment de la mise a jour.
+local function GetDefaultGlowCfg()
+    local db = ns.db
+    if not db then return {} end
+    local key = ns.GetSpecKey and ns.GetSpecKey()
+    if not key then
+        -- Spe inconnue (rare) : table jetable reprenant les anciennes cles
+        -- plates en lecture (jamais persistee -- pas de cle valable pour la
+        -- stocker). db.idx/db.colorR etc n'existent pas : ne JAMAIS renvoyer
+        -- db lui-meme ici, les noms de champs ne correspondent pas.
+        return {
+            idx     = db.defaultGlowIdx,
+            colorR  = db.defaultGlowColorR,
+            colorG  = db.defaultGlowColorG,
+            colorB  = db.defaultGlowColorB,
+            alpha   = db.defaultGlowAlpha,
+            scale   = db.defaultGlowScale,
+            procIdx = db.defaultProcGlowIdx,
+        }
+    end
+    db.defaultGlowBySpec = db.defaultGlowBySpec or {}
+    local cfg = db.defaultGlowBySpec[key]
+    if not cfg then
+        cfg = {
+            idx     = db.defaultGlowIdx,
+            colorR  = db.defaultGlowColorR,
+            colorG  = db.defaultGlowColorG,
+            colorB  = db.defaultGlowColorB,
+            alpha   = db.defaultGlowAlpha,
+            scale   = db.defaultGlowScale,
+            procIdx = db.defaultProcGlowIdx,
+        }
+        db.defaultGlowBySpec[key] = cfg
+    end
+    return cfg
+end
+ns.GetDefaultGlowCfg = GetDefaultGlowCfg
+
+function ns.ApplyDefaultGlowToSpell(info)
+    if not info then return end
+    local cfg = GetDefaultGlowCfg()
+    local idx = cfg.idx or 2
+    info.glowIdx = idx
+    info.glow = idx > 1
+    if cfg.colorR then
+        info.glowColor = { cfg.colorR, cfg.colorG, cfg.colorB }
+    else
+        info.glowColor = GetDefaultGlowColorFallback()
+    end
+    info.glowAlpha = cfg.alpha or 0.7
+    info.glowScale = cfg.scale or 1.0
+    info.procGlowIdx = cfg.procIdx or 1
+    info._glowCustom = false
+end
+
+function ns.RollDefaultGlow()
+    local spells = ns.GetSpecSpells and ns.GetSpecSpells()
+    if not spells then return end
+    for _, info in pairs(spells) do
+        if info._glowCustom ~= true then
+            ns.ApplyDefaultGlowToSpell(info)
+        end
+    end
+    pcall(ns.ScanAuras)
+    -- BUG CORRIGE (2026-08-16) : meme lacune que le glow par-sort
+    -- (OpenGlowPopup) -- ns.ScanAuras seul ne touche jamais les 4
+    -- destinations natives, donc le glow par defaut (type/couleur/opacite/
+    -- echelle) ne se repercutait jamais sur les boutons deja affiches.
+    RefreshAllNativeGlow()
 end
 
 ------------------------------------------------------------------------
@@ -123,6 +254,11 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
     local row = CreateFrame("Frame",nil,par); row:SetSize(W,28); row:SetPoint("TOPLEFT",0,-y)
     local rBg = row:CreateTexture(nil,"BACKGROUND"); rBg:SetAllPoints(); rBg:SetColorTexture(0,0,0,0)
 
+    -- Forward-declare : assigne plus bas (section glow fusionne), mais doit
+    -- deja exister ici pour que la checkbox puisse rafraichir le badge glow
+    -- quand elle applique le glow par defaut a l'activation du sort.
+    local RGD
+
     local rx = 4
     -- Checkbox (activation du sort)
     local cb = CreateFrame("Button",nil,row); cb:SetSize(14,14); cb:SetPoint("LEFT",rx,0)
@@ -133,7 +269,16 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
         if info.enabled then cbBg:SetColorTexture(Theme.accent[1], Theme.accent[2], Theme.accent[3], 1); cbChk:Show()
         else cbBg:SetColorTexture(0.10,0.10,0.14,1); cbChk:Hide() end
     end; RCB()
-    cb:SetScript("OnClick",function() info.enabled=not info.enabled; RCB(); onChg() end)
+    cb:SetScript("OnClick",function()
+        info.enabled=not info.enabled
+        -- A l'activation, si ce sort n'a jamais eu de glow personnalise, on lui
+        -- applique le glow par defaut courant (voir GLOW PAR DEFAUT du menu).
+        if info.enabled and info._glowCustom ~= true and ns.ApplyDefaultGlowToSpell then
+            ns.ApplyDefaultGlowToSpell(info)
+            if RGD then RGD() end
+        end
+        RCB(); onChg()
+    end)
     rx = rx + 18
 
     -- Icône du sort (avec tooltip au survol)
@@ -178,7 +323,7 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
     gFus:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
     local gFusTx = gFus:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(gFusTx,FONT,8,"OUTLINE"); gFusTx:SetAllPoints(); gFusTx:SetJustifyH("CENTER")
 
-    local function RGD()
+    RGD = function()
         -- Desat button visuel
         dIco:SetDesaturated(true)
         if info.desat then
@@ -216,6 +361,9 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
     -- Glow fusionné : clic gauche = toggle, clic droit = picker (si actif)
     gFus:RegisterForClicks("LeftButtonUp","RightButtonUp")
     gFus:SetScript("OnClick",function(_,btn)
+        -- Toute interaction manuelle sur le glow verrouille ce sort : il ne suivra
+        -- plus jamais le glow par defaut (meme logique que _colorDefault pour la couleur).
+        info._glowCustom = true
         if btn == "RightButton" then
             -- Clic droit : ouvre le picker (active le glow si besoin)
             if not info.glow then info.glow=true; if not info.glowIdx or info.glowIdx<2 then info.glowIdx=2 end end
@@ -276,6 +424,27 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
             btn:SetScript("OnClick",function()
                 if not info.destinations then info.destinations = {iconlist=false, freebars=false, circlebars=false, icons=false} end
                 info.destinations[bd.key] = not info.destinations[bd.key]
+                -- Active/désactive automatiquement le toggle de gauche (info.enabled)
+                -- selon qu'au moins un mode d'affichage reste actif ou plus aucun --
+                -- un sort sans destination cochée n'a de toute façon aucun effet
+                -- visuel, autant que le toggle principal reflète cet état sans
+                -- action manuelle en plus.
+                local anyDest = false
+                for _, v in pairs(info.destinations) do if v then anyDest = true; break end end
+                if anyDest and not info.enabled then
+                    info.enabled = true
+                    -- Même effet de bord que le toggle de gauche lui-même (cb
+                    -- plus haut) : applique le glow par défaut si ce sort n'a
+                    -- jamais eu de glow personnalisé.
+                    if info._glowCustom ~= true and ns.ApplyDefaultGlowToSpell then
+                        ns.ApplyDefaultGlowToSpell(info)
+                        if RGD then RGD() end
+                    end
+                    RCB()
+                elseif not anyDest and info.enabled then
+                    info.enabled = false
+                    RCB()
+                end
                 Ref(); onChg()
             end)
             btn:SetScript("OnEnter",function()
@@ -318,6 +487,11 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
     local Theme = ns.THEME
     local FONT = ns.Media.font
 
+    -- Forward-declare : assigne plus bas. Permet aux controles GLOW PAR DEFAUT
+    -- (definis avant Build) de forcer un rafraichissement visuel des badges glow
+    -- de chaque ligne apres un ns.RollDefaultGlow().
+    local Build
+
     -- ● TOGGLE CDM NATIF (unique point de contrôle pour tous les renders)
     local cbCDM = SW.CreateCheckbox(p, L["AURASMENU_TACTICS_USE_NATIVE_CDM"], cw-20)
     cbCDM:SetPoint("TOPLEFT", 10, 0)
@@ -325,7 +499,17 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
     local cdmSep = p:CreateTexture(nil, "ARTWORK"); cdmSep:SetSize(cw-20, 1)
     cdmSep:SetPoint("TOPLEFT", 10, -30); cdmSep:SetColorTexture(0.25, 0.25, 0.28, 0.8)
 
-    -- Overlay de grisage : couvre tout le contenu sous le toggle
+    -- ● TOOLTIP DES AURAS EN COMBAT SEULEMENT AVEC ALT (indépendant de l'équivalent
+    -- Priority Bar) — grisé avec le reste par l'overlay CDM natif ci-dessous, puisque
+    -- sans rendu custom ce réglage n'a de toute façon aucun effet.
+    local cbTooltipAlt = SW.CreateCheckbox(p, L["AURASMENU_TACTICS_TOOLTIP_ALT_COMBAT"], cw-20)
+    cbTooltipAlt:SetPoint("TOPLEFT", 10, -40)
+    cbTooltipAlt:SetChecked(ns.db and ns.db.tooltipAltCombatOnly == true)
+    cbTooltipAlt.onChanged = function(v)
+        if ns.db then ns.db.tooltipAltCombatOnly = v end
+    end
+
+    -- Overlay de grisage : couvre tout le contenu sous le toggle CDM natif
     local overlay = CreateFrame("Frame", nil, p)
     overlay:SetPoint("TOPLEFT", p, "TOPLEFT", 0, -40)
     overlay:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, 0)
@@ -351,11 +535,146 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         pcall(ns.RefreshCDMMask)
     end
 
-    local dH=SW.CreateSectionHeader(p,L["AURASMENU_TACTICS_DISCOVERED_AURAS"],cw-20); dH:SetPoint("TOPLEFT",10,-40)
-    local leg=p:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(leg,FONT,10); leg:SetPoint("TOPLEFT",10,-60)
+    ------------------------------------------------------------------------
+    -- ● GLOW PAR DEFAUT — s'applique a toute aura cochee qui n'a pas de glow
+    -- personnalise (voir ns.ApplyDefaultGlowToSpell / ns.RollDefaultGlow plus
+    -- haut dans ce fichier). Grisee avec le reste par l'overlay CDM natif
+    -- puisqu'elle ne concerne que le rendu custom.
+    -- Layout compact : Type de glow + Anim de proc sur une ligne, puis
+    -- Opacite + Taille + Couleur sur une autre, pour limiter l'espace occupe.
+    ------------------------------------------------------------------------
+    local dgY = -66
+    local dgH=SW.CreateSectionHeader(p,L["AURASMENU_TACTICS_DEFAULT_GLOW_HEADER"],cw-20); dgH:SetPoint("TOPLEFT",10,dgY); dgY=dgY-22
+    local dgInfo=p:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(dgInfo,FONT,9)
+    dgInfo:SetPoint("TOPLEFT",10,dgY); dgInfo:SetPoint("TOPRIGHT",-10,dgY)
+    dgInfo:SetJustifyH("LEFT"); dgInfo:SetWordWrap(true)
+    dgInfo:SetTextColor(unpack(Theme.textDim)); dgInfo:SetText(L["AURASMENU_TACTICS_DEFAULT_GLOW_INFO"])
+    dgY = dgY - 28
+
+    local dgPrev = CreateFrame("Frame",nil,p); dgPrev:SetSize(32,32); dgPrev:SetPoint("TOP",0,dgY)
+    dgPrev:SetFrameLevel(p:GetFrameLevel()+10)
+    local dgPrevIco = dgPrev:CreateTexture(nil,"ARTWORK"); dgPrevIco:SetAllPoints(); dgPrevIco:SetTexCoord(TC,1-TC,TC,1-TC)
+    pcall(function() dgPrevIco:SetTexture(134154) end)
+    dgY = dgY - 40
+
+    local function RefreshDefaultGlowPreview()
+        pcall(function()
+            if ns.HideGlow then ns.HideGlow(dgPrev) end
+            local cfg = GetDefaultGlowCfg()
+            local idx = cfg.idx or 2
+            if idx > 1 then
+                local bc = GetDefaultGlowColorFallback()
+                local gc = { cfg.colorR or bc[1], cfg.colorG or bc[2], cfg.colorB or bc[3] }
+                if ns.ShowGlow then ns.ShowGlow(dgPrev, idx, gc, cfg.alpha or 0.7, cfg.scale or 1.0) end
+            end
+        end)
+    end
+
+    -- Ligne 1 : Type de glow (boucle) + Anim d'entree (proc)
+    local dgSlW = math.min(260,(cw-20)/2-20); local dgGap = 20; local dgOx = math.max(10,(cw-dgSlW*2-dgGap)/2)
+    local dgOpts={}
+    for idx,def in ipairs(ns.GLOW_DEFS or {}) do if not def.isProcStart then dgOpts[#dgOpts+1]={value=idx,text=def.name} end end
+    local dgDD = SW.CreateDropdown(p, L["AURASMENU_RENDER_GLOW_TYPE"], dgOpts, dgSlW); dgDD:SetPoint("TOPLEFT",dgOx,dgY)
+    dgDD:SetValue(GetDefaultGlowCfg().idx or 2)
+    dgDD.onChanged = function(v)
+        GetDefaultGlowCfg().idx = v
+        RefreshDefaultGlowPreview(); pcall(ns.RollDefaultGlow); if Build then Build() end
+    end
+
+    local dgEntryOpts={{value=1,text=L["AURASMENU_EQUIPMENT_BORDER_NONE"]}}
+    for idx,def in ipairs(ns.GLOW_DEFS or {}) do if def.isProcStart then dgEntryOpts[#dgEntryOpts+1]={value=idx,text=def.name} end end
+    local dgEntryDD = SW.CreateDropdown(p, L["AURASMENU_TACTICS_ENTRY_ANIMATION"], dgEntryOpts, dgSlW); dgEntryDD:SetPoint("TOPLEFT",dgOx+dgSlW+dgGap,dgY)
+    dgEntryDD:SetValue(GetDefaultGlowCfg().procIdx or 1)
+    dgEntryDD.onChanged = function(v)
+        GetDefaultGlowCfg().procIdx = v
+        pcall(ns.RollDefaultGlow)
+    end
+    dgY = dgY - 50
+
+    -- Ligne 2 : Opacite + Taille + Couleur du glow
+    local dgSlW3 = (cw-20-2*dgGap)/3; local dgOx3 = 10
+    local dgAlpha = SW.CreateSlider(p, L["AURASMENU_EQUIPMENT_OPACITY"], 0,1,0.05, dgSlW3); dgAlpha:SetPoint("TOPLEFT",dgOx3,dgY)
+    dgAlpha:SetValue(GetDefaultGlowCfg().alpha or 0.7)
+    dgAlpha.onChanged = function(v)
+        GetDefaultGlowCfg().alpha = v
+        -- Pas de Build() ici : alpha/scale n'affectent pas le badge glow des lignes
+        -- (RGD n'affiche que le type + la couleur), et le slider declenche onChanged
+        -- en continu pendant le drag (un Build() complet a chaque tick serait couteux).
+        RefreshDefaultGlowPreview(); pcall(ns.RollDefaultGlow)
+    end
+    local dgScale = SW.CreateSlider(p, L["AURASMENU_TACTICS_GLOW_SIZE"], 0.1,3.0,0.05, dgSlW3); dgScale:SetPoint("TOPLEFT",dgOx3+dgSlW3+dgGap,dgY)
+    dgScale:SetValue(GetDefaultGlowCfg().scale or 1.0)
+    dgScale.onChanged = function(v)
+        GetDefaultGlowCfg().scale = v
+        RefreshDefaultGlowPreview(); pcall(ns.RollDefaultGlow)
+    end
+    -- Largeur reduite (pas dgSlW3, contrairement aux 2 sliders de la ligne) :
+    -- CreateColorButton ancre son label a LEFT+8 et son swatch a RIGHT-8 du
+    -- conteneur -- avec la pleine largeur de colonne (dgSlW3, dimensionnee
+    -- pour un slider), le swatch se retrouvait tres loin du label "Couleur".
+    -- Le positionnement (TOPLEFT) ne depend pas de cette largeur, seule la
+    -- 3e colonne se resserre.
+    local dgColorW = 130
+    local dgColor = SW.CreateColorButton(p, L["AURASMENU_TACTICS_GLOW_COLOR"], dgColorW); dgColor:SetPoint("TOPLEFT",dgOx3+2*(dgSlW3+dgGap),dgY)
+    if dgColor._swatch then
+        dgColor._swatch:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(L["AURASMENU_TACTICS_DEFAULT_GLOW_COLOR_TOOLTIP"], 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        dgColor._swatch:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    do
+        local cfg = GetDefaultGlowCfg()
+        local dbc = GetDefaultGlowColorFallback()
+        dgColor:SetColor(cfg.colorR or dbc[1], cfg.colorG or dbc[2], cfg.colorB or dbc[3])
+    end
+    dgColor.onChanged = function(col)
+        local cfg = GetDefaultGlowCfg()
+        cfg.colorR, cfg.colorG, cfg.colorB = col[1], col[2], col[3]
+        -- Pas de Build() ici : le color picker declenche onChanged en continu
+        -- pendant le drag (un Build() complet a chaque tick serait couteux).
+        -- Les badges des lignes se rafraichiront au prochain Build() naturel.
+        RefreshDefaultGlowPreview(); pcall(ns.RollDefaultGlow)
+    end
+    -- Clic droit sur le swatch = reset : efface l'override manuel (cfg.colorR/G/B
+    -- -> nil) pour que ApplyDefaultGlowToSpell retombe sur GetDefaultGlowColorFallback
+    -- (couleur "Lueur" de la spe active, cf. plus haut).
+    dgColor.onReset = function()
+        local cfg = GetDefaultGlowCfg()
+        cfg.colorR, cfg.colorG, cfg.colorB = nil, nil, nil
+        local dbc = GetDefaultGlowColorFallback()
+        dgColor:SetColor(dbc[1], dbc[2], dbc[3])
+        RefreshDefaultGlowPreview(); pcall(ns.RollDefaultGlow)
+    end
+    dgY = dgY - 60
+    C_Timer.After(0.1, RefreshDefaultGlowPreview)
+
+    -- Resynchronise les 5 controles avec la config de la spe active : appele
+    -- au changement de spe pendant que ce menu est deja construit et affiche
+    -- (sinon les widgets resteraient figes sur les valeurs de l'ancienne spe
+    -- jusqu'au prochain re-Build). Cf. Modules/Colors.lua (callback broadcast,
+    -- deja declenche sur PLAYER_SPECIALIZATION_CHANGED).
+    ns.RefreshDefaultGlowWidgets = function()
+        local cfg = GetDefaultGlowCfg()
+        dgDD:SetValue(cfg.idx or 2)
+        dgEntryDD:SetValue(cfg.procIdx or 1)
+        dgAlpha:SetValue(cfg.alpha or 0.7)
+        dgScale:SetValue(cfg.scale or 1.0)
+        local dbc = GetDefaultGlowColorFallback()
+        dgColor:SetColor(cfg.colorR or dbc[1], cfg.colorG or dbc[2], cfg.colorB or dbc[3])
+        RefreshDefaultGlowPreview()
+    end
+
+    local dgSep = p:CreateTexture(nil, "ARTWORK"); dgSep:SetSize(cw-20, 1)
+    dgSep:SetPoint("TOPLEFT", 10, dgY-4); dgSep:SetColorTexture(0.25, 0.25, 0.28, 0.8)
+    dgY = dgY - 16
+
+    local dH=SW.CreateSectionHeader(p,L["AURASMENU_TACTICS_DISCOVERED_AURAS"],cw-20); dH:SetPoint("TOPLEFT",10,dgY)
+    local leg=p:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(leg,FONT,10); leg:SetPoint("TOPLEFT",10,dgY-20)
     leg:SetTextColor(unpack(Theme.textDim)); leg:SetText(L["AURASMENU_TACTICS_LEGEND"])
 
-    local function Build()
+    Build = function()
         -- Nettoie l'ancien contenu avant de reconstruire
         for _,c in pairs({p:GetChildren()}) do if c._isSpellContent then c:Hide() end end
 
@@ -365,10 +684,10 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         local spells=ns.GetSpecSpells()
         if not spells or not next(spells) then
             local nd=p:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(nd,FONT,11)
-            nd:SetPoint("TOP",0,-100); nd:SetTextColor(unpack(Theme.textDim))
+            nd:SetPoint("TOP",0,dgY-60); nd:SetTextColor(unpack(Theme.textDim))
             nd:SetText(L["AURASMENU_TACTICS_NO_SPELL_DISCOVERED"])
             nd._isSpellContent = true
-            p:SetHeight(160); return
+            p:SetHeight(-dgY + 120); return
         end
 
         local function onChg() pcall(function() ns.BuildWhitelist(); ns.ScanAuras() end) end
@@ -392,12 +711,17 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         end
         local function srt(a,b)
             if a.info.enabled~=b.info.enabled then return a.info.enabled end
-            return (a.info.name or "") < (b.info.name or "")
+            -- _addon.FoldAccentsLower (Core.lua) : replie chaque lettre
+            -- accentuée sur sa lettre de base (é/è/ê/ë -> e, etc.) puis
+            -- minuscule -- résultat 100% ASCII comparable au `<` normal.
+            -- strcmputf8i seul NE SUFFISAIT PAS pour ce client (confirmé en
+            -- jeu : classait toujours les noms accentués après Z).
+            return _addon.FoldAccentsLower(a.info.name or "") < _addon.FoldAccentsLower(b.info.name or "")
         end
         table.sort(deb,srt); table.sort(buf,srt)
 
         -- Conteneur principal déroulé
-        local cont=CreateFrame("Frame",nil,p); cont:SetPoint("TOPLEFT",0,-80); cont:SetSize(cw,1); cont._isSpellContent=true
+        local cont=CreateFrame("Frame",nil,p); cont:SetPoint("TOPLEFT",0,dgY-40); cont:SetSize(cw,1); cont._isSpellContent=true
 
         local y = 0
         local SECTION_SPACING = 10   -- espace entre 2 sections
@@ -502,9 +826,29 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         y = y + 28
 
         cont:SetHeight(y + 10)
-        p:SetHeight(y + 100)
+        p:SetHeight(y - dgY + 60)
     end
 
-    p:SetScript("OnShow", function() Build() end)
+    -- Preview live : tant que ce menu est ouvert, affiche les sorts coches
+    -- (avec leurs destinations reellement assignees) comme s'ils etaient
+    -- actifs, a l'emplacement concerne (L/C/I/B) — meme mecanisme que les
+    -- menus de rendu par emplacement (Render.lua), mais sans les icones
+    -- generiques de remplissage : seuls les sorts vraiment coches previsualisent,
+    -- pour rester fidele a l'etat de la liste pendant qu'on la configure.
+    p:SetScript("OnShow", function()
+        Build()
+        ns._previewBars = true
+        ns._previewMode = "all"
+        ns._previewNoFallback = true
+        if ns.UpdateAllFades then pcall(ns.UpdateAllFades) end
+        pcall(function() ns.ScanAuras() end)
+    end)
+    p:SetScript("OnHide", function()
+        ns._previewBars = false
+        ns._previewMode = nil
+        ns._previewNoFallback = nil
+        if ns.UpdateAllFades then pcall(ns.UpdateAllFades) end
+        pcall(function() ns.ScanAuras() end)
+    end)
     Build()
 end

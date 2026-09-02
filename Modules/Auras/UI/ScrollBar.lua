@@ -146,7 +146,7 @@ function ns.ScrollBar.Create(parent, scrollFrame)
     end)
     thumb:SetScript("OnMouseUp", function(self)
         bar._dragging = false
-        if not thumb:IsMouseOver() and not bar:IsMouseOver() then
+        if not _addon.IsFrameMouseOver(thumb) and not _addon.IsFrameMouseOver(bar) then
             bar._targetWidth = THUMB_WIDTH
         end
     end)

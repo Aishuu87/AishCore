@@ -149,15 +149,25 @@ local function CreateBuffRow(cont, i)
     local sR = MakeSpark(wR)
     wR._spark2D = sR  -- pour ShowSparkModel : ancrage du FX3D Spark sous le 2D
 
-    -- Duree (texte) — centre sur la row, dans l'espace entre les 2 barres miroir
-    -- (la ou se trouve normalement le Resource Circle). Reutilise les cles
-    -- timerIcon* de cfg pour beneficier du meme code de mise a jour (Animation.lua).
+    -- Duree (texte) : freebars n'a pas d'icone, donc pas de widget Cooldown existant a
+    -- reutiliser (contrairement a icons/circlebars/iconlist) -- on en cree
+    -- un DEDIE, purement pour heberger le texte de countdown NATIF Blizzard
+    -- (jamais de swipe/edge visible), positionne relatif au CONTENEUR DE
+    -- BARRE (row) plutot qu'a une icone, cf. ns._StyleCountdownFS. Le texte
+    -- reste rempli par Blizzard cote C++ (jamais de lecture de valeur
+    -- secrete) une fois liee via auraButton:SetDurationCooldown (en PLUS de
+    -- SetDurationBar sur les 2 barres miroir -- des slots de liaison
+    -- independants, meme bouton).
+    local timerCD = CreateFrame("Cooldown", nil, row, "CooldownFrameTemplate")
+    timerCD:SetAllPoints(row) -- pas de taille 1x1 (BUG CORRIGE), cf. AuraTrackerContainer.lua
+    timerCD:SetDrawSwipe(false); timerCD:SetDrawEdge(false); timerCD:SetDrawBling(false)
+    timerCD:EnableMouse(false)
+    row._timerCD = timerCD
+    -- L'ancien FontString manuel (jamais mis a jour -- ns.UpdateTimersForRender
+    -- n'a plus aucun appelant depuis la migration native, code mort) reste ici
+    -- inerte, gardee pour compat si un ancien appelant existait encore.
     local dt = row:CreateFontString(nil, "OVERLAY", nil, 7)
-    ns.ApplyFont(dt, cfg.timerFont or ns.Media.font, cfg.timerSize or 11, "OUTLINE")
-    dt:SetPoint("CENTER", row, "CENTER", cfg.timerIconOffX or 0, cfg.timerIconOffY or 0)
-    dt:SetJustifyH("CENTER")
-    dt:SetTextColor(cfg.timerColorR or 1, cfg.timerColorG or 1, cfg.timerColorB or 1, 0.9)
-    dt._lastText = ""
+    dt:Hide()
     row._durText = dt
 
     row:Hide()
@@ -295,7 +305,7 @@ function Buffs:Init()
     local cont = CreateFrame("Frame", "AishBuffsCont", UIParent)
     cont:SetSize(rowW, maxBars * (bh + rg))
     cont:SetFrameStrata("BACKGROUND")
-    cont:SetMovable(true); cont:SetClampedToScreen(true); cont:EnableMouse(true)
+    cont:SetMovable(true); cont:SetClampedToScreen(true); _addon.EnableMouseOnlyOnAlt(cont)
     cont:SetPropagateMouseClicks(true)  -- click-through par défaut (caméra, sélection, etc.)
 
     -- Position par defaut : centre de l'ecran, leg. en bas (zone Resource Circle).
@@ -337,11 +347,13 @@ function Buffs:Init()
     lbl:SetText("|cffffcc00"..L["AURASFEAT_ALT_DRAG_HINT"].."|r"); lbl:Hide()
     cont:SetScript("OnMouseDown", function(s, b)
         if b == "LeftButton" and IsAltKeyDown() then
+            s._aishDragging = true
             s:SetPropagateMouseClicks(false)  -- bloquer la propagation pendant le drag
             s:StartMoving(); lbl:Show()
         end
     end)
     cont:SetScript("OnMouseUp", function(s)
+        s._aishDragging = false
         s:StopMovingOrSizing()
         s:SetPropagateMouseClicks(true)  -- rétablir le click-through
         lbl:Hide()
@@ -353,6 +365,7 @@ function Buffs:Init()
         end
     end)
     cont:SetScript("OnHide", function(s)
+        s._aishDragging = false
         s:StopMovingOrSizing()
         s:SetPropagateMouseClicks(true)
         lbl:Hide()
@@ -378,45 +391,46 @@ local function StartBuffPopAnim(row, targetW)
 end
 
 ------------------------------------------------------------------------
--- UPDATE : montre les rows actives selon le nombre d'auras a afficher.
--- L'animation elle-meme (durees, couleurs, sparks) est geree par
--- Core/Animation.lua AnimateRender("freebars") au tick suivant.
+-- UPDATE : rendu REEL supprime (2026-08-16, meme methodologie que
+-- Procs.lua/"icons") -- remplace par le systeme AddAuraGroup natif partage
+-- (AuraTrackerContainer.lua, ns.EnsureCircleBarsNativeGrid/
+-- RepositionCircleBarsNativeGrid) : barres de duree combat-safe pilotees
+-- directement par Blizzard, sans jamais dependre du pin CDM.
+--
+-- PREVIEW CONSERVE : l'apercu en direct dans le menu "Auras & Procs" ne
+-- marchait plus autrement. Scan:Run()
+-- continue d'appeler CE Update() avec de fausses entrees (BuildPreviewEntries,
+-- cf. Scan.lua) quand le menu Circle Bars est ouvert -- le systeme natif ne
+-- peut PAS afficher de fausses auras (il ne lit que les vraies auras du
+-- joueur via AuraContainer). Sans logique de secours ici, l'apercu restait
+-- silencieusement invisible. On restaure donc la logique ORIGINALE
+-- (geometrie/couleur, inchangee) mais UNIQUEMENT quand un apercu de CETTE
+-- destination est actif -- sinon on cache comme avant (le rendu reel est
+-- 100% natif). Buffs:Init() reste inchangee (cont/rows partagent encore
+-- Dims()/MakeBarWrap utilises ailleurs).
 ------------------------------------------------------------------------
 function Buffs:Update(auras)
-    -- Init flag : on cache tant que l'addon n'est pas pret (evite flash au reload)
-    if not ns._initComplete then
+    local previewActive = ns._previewBars and (ns._previewMode == "all" or ns._previewMode == "freebars")
+    if not previewActive then
         if ns.renderFrames.freebars and ns.renderFrames.freebars.container then
             ns.renderFrames.freebars.container:SetAlpha(0)
-        end
-        return
-    end
-    if ns.db and (not ns.db.freebarsEnabled or ns.db.useNativeCDM) then
-        if ns.renderFrames.freebars and ns.renderFrames.freebars.container then
-            ns.renderFrames.freebars.container:SetAlpha(0)
+            ns.renderFrames.freebars.container:Hide()
         end
         return
     end
 
     local gfx = ns.renderFrames.freebars
     if not gfx or not gfx.rows then return end
+    gfx.container:Show(); gfx.container:SetAlpha(1)
 
     auras = auras or {}
     local n = #auras
     local cfg = ns.db and ns.db.freebars or ns.Defaults.freebars
     local targetW = cfg.barW or 45
 
-    -- Montre les n premieres rows + applique couleur/gradient/alpha sur chaque barre.
-    -- Pattern aligne sur Debuffs.lua Update (lignes 702-705) : pour chaque aura active,
-    -- on Show() la barre, on appelle ns.ApplyBarColor() qui gere :
-    --   - couleur du render (cfg.barColorR/G/B)
-    --   - gradient horizontal (cfg.gradientEnabled + cfg.gradientR2/G2/B2)
-    --   - couleur par sort (aura.spellColor) en fallback
-    -- Et on applique l'alpha de barre (cfg.barAlpha) sur le wrap.
-    -- Le row:Hide() cascade naturellement vers tous les enfants pour les rows inactives.
     for i, row in ipairs(gfx.rows) do
         if i <= n then
             local a = auras[i]
-            -- Detection apparition : la row passait d'inactive a active → declenche le pop
             local wasShown = row:IsShown()
             row:Show()
             if row.barL then
@@ -437,17 +451,30 @@ function Buffs:Update(auras)
                     ApplyBarModels(row.wrapR, a)
                 end
             end
-            -- Si la row vient juste d'apparaitre, lance l'animation de scale horizontal
             if not wasShown then
                 StartBuffPopAnim(row, targetW)
             end
+            -- Texte de duree (2026-08-16, AJOUTE) : cf. commentaire CreateBuffRow --
+            -- widget Cooldown dedie, jamais de lecture de valeur secrete, juste
+            -- restyle du FontString natif Blizzard. Cycle 12s synthetique pour
+            -- le mode preview (aucune vraie donnee de duree sur une fausse entree).
+            if row._timerCD then
+                if a._isPreview then
+                    pcall(row._timerCD.SetCooldown, row._timerCD, GetTime(), 12)
+                elseif a.durObj then
+                    pcall(ns._SetCDFromDurObj, row._timerCD, a.durObj)
+                end
+                row._timerCD:SetHideCountdownNumbers(not cfg.timerIconEnabled)
+                if cfg.timerIconEnabled then
+                    pcall(ns._StyleCountdownFS, row._timerCD,
+                        cfg.timerFont or ns.Media.font, cfg.timerSize or 11,
+                        cfg.timerColorR, cfg.timerColorG, cfg.timerColorB,
+                        cfg.timerPos or "CENTER", row, cfg.timerPos or "CENTER",
+                        cfg.timerIconOffX or 0, cfg.timerIconOffY or 0)
+                end
+            end
         else
-            -- Row inactive : on stoppe l'eventuelle anim en cours et on hide.
-            -- StopPopAnim reset les wraps a targetW pour que la prochaine apparition
-            -- reparte d'un etat propre.
             if ns.StopPopAnim then ns.StopPopAnim(row, targetW) end
-            -- Cleanup FX3D : cache les modeles 3D des wraps non actifs (gauche + droite)
-            -- pour eviter qu'ils restent visibles "fantomes" sur les rows recyclees.
             if row.wrapL then
                 row.wrapL._fxAuraID = nil
                 if row.wrapL._fx3dBar then ns.SpellFX:HideBarModel(row.wrapL._fx3dBar) end

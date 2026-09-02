@@ -1,0 +1,207 @@
+-- AishUIAura/Core/AuraTextRelay.lua
+--
+-- Relais de STACKS via le systeme AuraContainer/AuraButton natif Blizzard
+-- (patch 12.1.0+) : fonctionne EN COMBAT pour des auras a duree/stacks
+-- secrets, contrairement a TOUTE API C_UnitAuras directe
+-- (GetAuraApplicationDisplayCount, GetAuraDuration, GetPlayerAuraBySpellID,
+-- GetAuraDataByIndex -- toutes bloquees en combat).
+--
+-- PRINCIPE : un groupe (AddAuraGroup) filtre a un SEUL spellID via
+-- candidateFilters = { spellIds = {...} } -> un bouton dedie dont on connait
+-- l'identite avec certitude. Dans initializeFrame (le seul moment ou le
+-- bouton n'est pas "forbidden"), on masque son contenu visuel natif
+-- (icone -- notre propre rendu CDM s'en charge deja) et on cree une
+-- FontString reliee via SetApplicationCount -- Blizzard la tient a jour en
+-- interne indefiniment, meme apres que le bouton devienne "forbidden".
+--
+-- La duree n'a PAS besoin de ce relais : le canal cdmAuraSwipe (CDMHooks.lua,
+-- SetCooldown/Clear) pilote deja notre propre widget Cooldown avec le vrai
+-- start/duration, et son decompte texte natif (SetHideCountdownNumbers(false))
+-- suffit -- pas besoin d'un 2e canal pour ca.
+--
+-- SECURITE : creer un AuraContainer EN COMBAT plante le jeu -- les containers
+-- sont crees UNE SEULE FOIS, hors combat (PLAYER_LOGIN/PLAYER_ENTERING_WORLD).
+------------------------------------------------------------------------
+local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+
+local containers = {}  -- [unit] = AuraContainer
+local overlays = {}    -- [unit.."#"..spellID] = stackFontString
+local groupsAdded = {} -- [unit.."#"..spellID] = true (evite les AddAuraGroup en double)
+local pendingSpells = {}  -- spellID demandes avant que le container soit pret (hors combat requis)
+
+local function CreateContainer(unit)
+    if not CreateFrame then return nil end
+    if InCombatLockdown and InCombatLockdown() then return nil end
+    local ok, c = pcall(function()
+        local cc = CreateFrame("AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+        cc:SetSize(1, 1)
+        -- Hors ecran : les FontStrings de stacks sont reparentees sur nos
+        -- propres icones a chaque scan (cf. ns.ApplyAuraTextOverlay), la
+        -- position du container/bouton d'origine n'a pas d'importance.
+        cc:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -2000, -2000)
+        cc:SetUnit(unit)
+        cc:Show()
+        return cc
+    end)
+    if not ok then
+        if DPrint then DPrint("AuraTextRelay: echec creation container " .. unit .. " : " .. tostring(c)) end
+        return nil
+    end
+    return c
+end
+
+local function EnsureContainer(unit)
+    if containers[unit] then return containers[unit] end
+    local c = CreateContainer(unit)
+    if c then containers[unit] = c end
+    return c
+end
+
+-- A appeler pour chaque spellID tracke (idempotent). Doit reussir hors
+-- combat au moins une fois pour que le relais existe -- reessaie
+-- automatiquement (via ns.FlushPendingAuraTextOverlays) des que possible.
+function ns.EnsureAuraTextOverlay(unit, spellID)
+    if not unit or not spellID then return end
+    local key = unit .. "#" .. spellID
+    if groupsAdded[key] then return end
+
+    local c = EnsureContainer(unit)
+    if not c or not c.AddAuraGroup then
+        pendingSpells[key] = { unit = unit, spellID = spellID }
+        return
+    end
+
+    local filterStr = (unit == "player") and "HELPFUL" or "HARMFUL"
+    local ok = pcall(function()
+        c:AddAuraGroup(key, filterStr, {
+            maxFrameCount = 1,
+            candidateFilters = { spellIds = { [spellID] = true } },
+            initializeFrame = function(button)
+                pcall(function()
+                    if button.Icon then button.Icon:SetAlpha(0) end
+                    if button.SetSize then button:SetSize(1, 1) end
+                    local stackFS = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    if button.SetApplicationCount then
+                        pcall(button.SetApplicationCount, button, stackFS)
+                    end
+                    overlays[key] = stackFS
+                end)
+            end,
+        })
+    end)
+    if ok then
+        groupsAdded[key] = true
+        pendingSpells[key] = nil
+    else
+        pendingSpells[key] = { unit = unit, spellID = spellID }
+    end
+end
+
+-- Reessaie les demandes qui avaient echoue (typiquement : appelees pendant
+-- que le container n'existait pas encore, ou en combat). A appeler apres
+-- PLAYER_REGEN_ENABLED (sortie de combat) et PLAYER_ENTERING_WORLD.
+function ns.FlushPendingAuraTextOverlays()
+    if InCombatLockdown and InCombatLockdown() then return end
+    for key, req in pairs(pendingSpells) do
+        pendingSpells[key] = nil
+        ns.EnsureAuraTextOverlay(req.unit, req.spellID)
+    end
+end
+
+-- Variante NUMERIQUE : au lieu de repositionner la FontString sur notre UI,
+-- on LIT le texte que Blizzard y a deja ecrit (via SetApplicationCount) et
+-- on le convertit en nombre. Reprend le pattern "Secret Value
+-- Zero-Detection" deja utilise ailleurs dans ce codebase : on ne lit jamais
+-- la valeur secrete elle-meme, seulement le TEXTE que Blizzard a deja choisi
+-- d'afficher sur une FontString normale (pas une propriete de l'AuraButton
+-- "forbidden") -- cette FontString est bien peuplee meme en combat. Utile
+-- pour CenterArc.lua/ResourceCircle.lua qui ont besoin
+-- d'un NOMBRE (fraction de remplissage d'arc) plutot que d'un texte a
+-- afficher tel quel. Renvoie nil si le relais n'existe pas encore ou si le
+-- texte n'est pas un nombre exploitable (aura absente, "" etc).
+function ns.GetAuraTextOverlayStackCount(unit, spellID)
+    if not unit or not spellID then return nil end
+    local key = unit .. "#" .. spellID
+    local fs = overlays[key]
+    if not fs then
+        ns.EnsureAuraTextOverlay(unit, spellID)
+        return nil
+    end
+    local ok, text = pcall(fs.GetText, fs)
+    if not ok or not text then return nil end
+    return tonumber(text)
+end
+
+-- A appeler a chaque render (Debuffs/Cooldowns/Procs) pour rattacher
+-- visuellement la FontString de stack Blizzard sur NOTRE propre widget
+-- (stackParent = ib._stackText actuel, deja positionne/style selon la
+-- config utilisateur). Renvoie true si un relais existe et a ete applique.
+function ns.ApplyAuraTextOverlay(unit, spellID, stackParent)
+    if not unit or not spellID or not stackParent then return false end
+    local key = unit .. "#" .. spellID
+    local fs = overlays[key]
+    if not fs then
+        ns.EnsureAuraTextOverlay(unit, spellID)
+        return false
+    end
+    local ok = pcall(function()
+        -- IMPORTANT : parenter au PARENT de stackParent, pas a stackParent
+        -- lui-meme -- l'appelant cache generalement stackParent (notre propre
+        -- FontString, remplacee visuellement par ce relais), et un enfant
+        -- herite de la visibilite cachee de son parent. SetAllPoints peut en
+        -- revanche ancrer sur N'IMPORTE QUELLE region visible, donc la
+        -- position reste identique a stackParent sans en dependre pour la
+        -- visibilite.
+        local hostFrame = stackParent.GetParent and stackParent:GetParent() or stackParent
+        fs:SetParent(hostFrame)
+        fs:ClearAllPoints()
+        fs:SetAllPoints(stackParent)
+        fs:SetFont(select(1, stackParent:GetFont()) or "Fonts\\FRIZQT__.TTF", select(2, stackParent:GetFont()) or 11, select(3, stackParent:GetFont()) or "OUTLINE")
+        fs:SetTextColor(stackParent:GetTextColor())
+        fs:SetJustifyH(stackParent:GetJustifyH() or "RIGHT")
+        fs:SetDrawLayer("OVERLAY")
+        fs:Show()
+    end)
+    return ok
+end
+
+-- Diagnostic : /aatr [spellID] -- etat interne du relais (combien de
+-- groupes/overlays/attentes, et le detail pour un spellID precis).
+SLASH_AATR1 = "/aatr"
+SlashCmdList["AATR"] = function(msg)
+    local P = "|cff33aaff[AATR]|r "
+    local function p(s) print(P .. s) end
+
+    local nContainers, nGroups, nOverlays, nPending = 0, 0, 0, 0
+    for _ in pairs(containers) do nContainers = nContainers + 1 end
+    for _ in pairs(groupsAdded) do nGroups = nGroups + 1 end
+    for _ in pairs(overlays) do nOverlays = nOverlays + 1 end
+    for _ in pairs(pendingSpells) do nPending = nPending + 1 end
+    p(string.format("containers=%d groupsAdded=%d overlays=%d pendingSpells=%d",
+        nContainers, nGroups, nOverlays, nPending))
+    for unit, c in pairs(containers) do
+        p(string.format("  container[%s] : type=%s hasAddAuraGroup=%s",
+            unit, tostring(c.GetObjectType and c:GetObjectType()), tostring(c.AddAuraGroup ~= nil)))
+    end
+
+    local sid = tonumber(msg)
+    if sid then
+        for _, unit in ipairs({"player", "target"}) do
+            local key = unit .. "#" .. sid
+            local fs = overlays[key]
+            local txt, shown, parent = "n/a", "n/a", "n/a"
+            if fs then
+                local okT, t = pcall(fs.GetText, fs)
+                txt = okT and tostring(t) or ("erreur:" .. tostring(t))
+                shown = tostring(fs:IsShown())
+                local p2 = fs:GetParent()
+                parent = p2 and tostring(p2:GetName() or p2) or "aucun"
+            end
+            p(string.format("  [%s] spellID=%d groupsAdded=%s overlay=%s pending=%s texte=%s shown=%s parent=%s",
+                unit, sid, tostring(groupsAdded[key]), tostring(fs ~= nil), tostring(pendingSpells[key] ~= nil),
+                txt, shown, parent))
+        end
+    else
+        p("Usage: /aatr <spellID> pour le detail d'un sort precis (ex: /aatr 344179)")
+    end
+end

@@ -68,6 +68,14 @@ local hoverFrame
 local fxModel
 local restModel       -- animation 3D indicateur de zone de repos
 
+--- Applique le style de contour choisi (config) a levelText, a la taille
+--- demandee -- factorise les ~9 sites qui refont levelText:SetFont(...)
+--- selon le contexte affiche (niveau/lettre reputation/lettre composante).
+local function SetLevelTextFont(size)
+  ns.ApplyTextOutlineStyle(levelText, levelText.slugRing, xpFontLevel, size,
+    ns.DB.xpBar and ns.DB.xpBar.levelOutlineStyle, true)
+end
+
 -- Elements layout mode
 local lbBorder        -- Frame bordure rouge autour de levelBg
 local lbCoordText     -- FontString coordonnees levelBg
@@ -105,6 +113,7 @@ local DELVE_MAP_IDS = {
   [2507] = 2744,  -- Eminence du tourment
   [2525] = 2744,  -- Sombrevoie
   [2545] = 2744,  -- Parhélion
+  [2633] = 2744,  -- Arène de la Gloire
   -- TWW (Brann 2640) - normalement détectés via scenarioType=11
   [2269] = 2640,  -- Mines de Rampeterre
   [2250] = 2640,  -- Repos de Kriegval
@@ -1162,7 +1171,7 @@ local function OnRepChanged()
 
   -- Rafraîchit le texte/police du badge (lettre de la faction)
   if levelText then
-    levelText:SetFont(xpFontLevel, 13, "OUTLINE")
+    SetLevelTextFont(13)
     levelText:SetText(rep.letter)
     UpdateXPColors()
   end
@@ -1222,7 +1231,7 @@ local function OnCompanionUpdate()
 
   -- Rafraîchit le texte du badge (lettre du compagnon)
   if levelText and comp then
-    levelText:SetFont(xpFontLevel, 13, "OUTLINE")
+    SetLevelTextFont(13)
     levelText:SetText(comp.letter)
     UpdateXPColors()
   end
@@ -1581,20 +1590,18 @@ local function CreateXPBar_Badge(lb)
   levelTextHolder:SetFrameStrata("MEDIUM")
 
   levelText = levelTextHolder:CreateFontString(nil, "OVERLAY")
-  levelText:SetFont(xpFontLevel, 19, "OUTLINE")
+  levelText.slugRing = ns.CreateSlugRing(levelTextHolder, levelText)
+  SetLevelTextFont(19)
   levelText:SetPoint("CENTER", levelBg, "CENTER", 0, 0)
   levelText:SetJustifyH("CENTER")
-  levelText:SetShadowOffset(1, -1)
-  levelText:SetShadowColor(0, 0, 0, 1)
 
   -- Label plein nom affiché au hover en mode réputation (remplace temporairement levelText)
   -- Ancré sur UIParent BOTTOMLEFT à x=4 pour rester on-screen (lb.x=-34 serait hors-écran)
   repNameLabel = levelTextHolder:CreateFontString(nil, "OVERLAY")
-  repNameLabel:SetFont(xpFontLevel, 13, "OUTLINE")
+  repNameLabel.slugRing = ns.CreateSlugRing(levelTextHolder, repNameLabel)
+  ns.ApplyTextOutlineStyle(repNameLabel, repNameLabel.slugRing, xpFontLevel, 13, ns.DB.xpBar and ns.DB.xpBar.levelOutlineStyle, true)
   repNameLabel:SetPoint("LEFT", UIParent, "BOTTOMLEFT", 4, lb.y + lb.h * 0.45 + 2)
   repNameLabel:SetJustifyH("LEFT")
-  repNameLabel:SetShadowOffset(1, -1)
-  repNameLabel:SetShadowColor(0, 0, 0, 1)
   repNameLabel:Hide()
   levelBg:Hide()
 end
@@ -1667,7 +1674,7 @@ local function CreateXPBar_HoverAndModel(lb)
   fxModel:Hide()
 
   -- Indicateur de zone de repos : même pattern que SpellEffects (PlayerModel + SetKeepModelOnHide + SetModel(tonumber))
-  restModel = CreateFrame("PlayerModel", "AishaddonRestModel", UIParent)
+  restModel = CreateFrame("PlayerModel", "AishCoreRestModel", UIParent)
   restModel:SetSize(REST_W, REST_H)
   restModel:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, 0)
   restModel:SetFrameStrata("HIGH")
@@ -1763,7 +1770,7 @@ end
 -- Force le restModel au centre de l'écran, bypass total de toute la logique
 function XPBar.ForceRestCenter()
   if not restModel then
-    print("|cffff4444[Aishaddon]|r restModel est nil")
+    print("|cffff4444[AishCore]|r restModel est nil")
     return
   end
   restModel:ClearAllPoints()
@@ -1772,7 +1779,7 @@ function XPBar.ForceRestCenter()
   restModel:SetAlpha(1)
   restModel:SetFrameStrata("TOOLTIP")
   restModel:Show()
-  print("|cff00b0ff[Aishaddon]|r ForceRestCenter visible=" .. tostring(restModel:IsVisible()))
+  print("|cff00b0ff[AishCore]|r ForceRestCenter visible=" .. tostring(restModel:IsVisible()))
 end
 
 -- ---------------------------------------------------------------------------
@@ -1834,6 +1841,17 @@ function XPBar.GetLayoutMode()
   return isLayoutMode
 end
 
+-- hoverFrame est locale a ce fichier (jamais de nom global) : accesseur pour
+-- le survol GUI -> lien direct vers la section de reglages (cf.
+-- UI/ModuleHoverOverlay.lua). C'est hoverFrame (la zone de survol autour du
+-- badge de niveau), PAS container (la barre d'XP elle-meme), qui doit servir
+-- de hitbox : container reste cache/alpha 0 tant qu'on ne survole pas
+-- justement hoverFrame (cf. ShowXPBar/HideXPBar plus haut) -- cibler
+-- container rendrait cette hitbox inaccessible la plupart du temps.
+function XPBar.GetHoverFrame()
+  return hoverFrame
+end
+
 -- ---------------------------------------------------------------------------
 -- Update
 -- ---------------------------------------------------------------------------
@@ -1843,20 +1861,20 @@ function XPBar.Update()
   if IsMaxLevel() then
     local comp = GetCompanionXPData()
     if comp then
-      levelText:SetFont(xpFontLevel, 13, "OUTLINE")
+      SetLevelTextFont(13)
       levelText:SetText(comp.letter)
       UpdateXPColors()
       return
     end
     local rep = GetActiveRepData()
     if rep then
-      levelText:SetFont(xpFontLevel, 13, "OUTLINE")  -- plus petit pour 4 chars
+      SetLevelTextFont(13)  -- plus petit pour 4 chars
       levelText:SetText(rep.letter)
       UpdateXPColors()
     end
     return
   end
-  levelText:SetFont(xpFontLevel, 19, "OUTLINE")  -- taille normale pour le niveau
+  SetLevelTextFont(19)  -- taille normale pour le niveau
   levelText:SetText(tostring(UnitLevel("player")))
   UpdateXPColors()
   UpdateBarColor()
@@ -1893,7 +1911,7 @@ function XPBar.UpdateVisibility()
       SetBlizzXPBarHidden(true)
       if levelBg then levelBg:Show() end
       if levelText then
-        levelText:SetFont(xpFontLevel, 13, "OUTLINE")
+        SetLevelTextFont(13)
         levelText:SetText(comp.letter)
         UpdateXPColors()
       end
@@ -1918,7 +1936,7 @@ function XPBar.UpdateVisibility()
         SetBlizzXPBarHidden(true)  -- la barre Blizz peut se réafficher après un TP
         if levelBg then levelBg:Show() end
         if levelText then
-          levelText:SetFont(xpFontLevel, 13, "OUTLINE")  -- plus petit pour 4 chars
+          SetLevelTextFont(13)  -- plus petit pour 4 chars
           levelText:SetText(rep.letter)
           UpdateXPColors()
         end
@@ -1951,7 +1969,7 @@ function XPBar.UpdateVisibility()
   else
     if levelBg then levelBg:Show() end
     if levelText then
-      levelText:SetFont(xpFontLevel, 19, "OUTLINE")  -- taille normale pour le niveau
+      SetLevelTextFont(19)  -- taille normale pour le niveau
       levelText:SetText(tostring(UnitLevel("player")))
       UpdateXPColors()
     end
@@ -2010,12 +2028,12 @@ function XPBar.ApplySettings()
   -- Police du badge de niveau (mis a jour avant les fonctions dynamiques)
   xpFontLevel = cfg.fontLevel or FONT_LEVEL
   if levelText then
-    local _, sz, fl = levelText:GetFont()
-    levelText:SetFont(xpFontLevel, sz or 19, fl or "OUTLINE")
+    local _, sz = levelText:GetFont()
+    SetLevelTextFont(sz or 19)
   end
   if repNameLabel then
-    local _, sz, fl = repNameLabel:GetFont()
-    repNameLabel:SetFont(xpFontLevel, sz or 13, fl or "OUTLINE")
+    local _, sz = repNameLabel:GetFont()
+    ns.ApplyTextOutlineStyle(repNameLabel, repNameLabel.slugRing, xpFontLevel, sz or 13, cfg.levelOutlineStyle, true)
   end
   -- Re-applique positions/tailles/rotations depuis DB
   ApplyLayoutCfg()

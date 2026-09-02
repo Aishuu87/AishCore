@@ -18,6 +18,8 @@ local DEFAULTS = {
     locked        = false,
     width         = 260,
     height        = 3,
+    point         = "BOTTOM",
+    relativePoint = "CENTER",
     x             = 0,
     y             = -120,
     barColor      = { 0.471, 0.392, 0.271, 1 },
@@ -32,6 +34,7 @@ local DEFAULTS = {
     colorBySchool = false,
     font      = nil,   -- nil = utilise BEBAS_FONT (BebasNeue)
     timerFont = nil,   -- nil = utilise ns.Media.font (Montserrat)
+    timerOutlineStyle = "OUTLINE",
 }
 
 ---------------------------------------------------------------------------
@@ -122,7 +125,10 @@ local SCHOOL_GRADIENTS = {
 local function ApplyBarColor(spellId, spellName, spellIcon)
     if not frame then return end
     local cfg = Cfg()
-    if cfg.colorBySchool and spellId then
+    -- cf. Core.lua:ns.HasHeroicFeatures -- reglage reserve, ignore meme si
+    -- colorBySchool=true est deja present dans la config (config importee,
+    -- ancienne valeur...).
+    if cfg.colorBySchool and spellId and ns.HasHeroicFeatures and ns.HasHeroicFeatures() then
         -- Priorité 1 : gradient ZigiAuras (couleur custom pour le sort)
         local gradient = ns.SpellGradients and ns.SpellGradients[spellId]
         -- Priorité 2 : gradient par école via SpellMisc DBC
@@ -454,12 +460,14 @@ function CastBar.Create(parent)
     local cfg = Cfg()
     local w   = cfg.width    or DEFAULTS.width
     local h   = cfg.height   or DEFAULTS.height
+    local pt  = cfg.point         or DEFAULTS.point
+    local rpt = cfg.relativePoint or DEFAULTS.relativePoint
     local x   = cfg.x        or DEFAULTS.x
     local y   = cfg.y        or DEFAULTS.y
     local bc  = cfg.barColor or DEFAULTS.barColor
 
     -- Frame racine
-    frame = CreateFrame("Frame", "AishaddonCastBar", UIParent)
+    frame = CreateFrame("Frame", "AishCoreCastBar", UIParent)
     frame:SetSize(w, h + 30)   -- marge haute pour le texte nom
     frame:SetFrameStrata("HIGH")
     frame:SetMovable(true)
@@ -474,13 +482,23 @@ function CastBar.Create(parent)
         self:StopMovingOrSizing()
         if not ns.DB         then ns.DB = {} end
         if not ns.DB.castBar then ns.DB.castBar = {} end
-        local _, _, _, ox, oy = self:GetPoint(1)
+        -- IMPORTANT : StartMoving()/StopMovingOrSizing() peut re-ancrer la
+        -- frame sur un point/relativePoint DIFFERENT de celui d'origine (pas
+        -- garanti de rester "BOTTOM"/"CENTER") -- sauvegarder SEULEMENT ox/oy
+        -- et les rejouer plus tard via un ancrage fixe "BOTTOM"/"CENTER"
+        -- (comme le faisait ApplySettings/Create) teleportait la barre a un
+        -- endroit incoherent des qu'on relockait -- confirme en jeu. Il faut
+        -- sauvegarder ET rejouer le meme point/relativePoint que celui reellement
+        -- obtenu apres le drag.
+        local point, _, relativePoint, ox, oy = self:GetPoint(1)
+        ns.DB.castBar.point         = point
+        ns.DB.castBar.relativePoint = relativePoint
         ns.DB.castBar.x = ox
         ns.DB.castBar.y = oy
         -- dragUnlocked reste true : l'utilisateur peut replacer plusieurs fois
         -- avant de cliquer "Terminer". C'est le bouton (ou OnHide) qui verrouille.
     end)
-    frame:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
+    frame:SetPoint(pt, UIParent, rpt, x, y)
     frame:Hide()
 
     -- Fond (sublevel 1)
@@ -526,10 +544,9 @@ function CastBar.Create(parent)
     local nJustify = cfg.nameJustify or DEFAULTS.nameJustify
     local nSelf, nRel = TextAnchor(nJustify)
     local nameTxt = frame:CreateFontString(nil, "OVERLAY")
-    nameTxt:SetFont(BEBAS_FONT, nSize, "")
+    frame.nameTxtSlug = ns.CreateSlugRing(frame, nameTxt)
+    ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
     nameTxt:SetJustifyH(nJustify)
-    nameTxt:SetShadowColor(0, 0, 0, 1)
-    nameTxt:SetShadowOffset(1, -1)
     nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
     nameTxt:SetWidth(w)
     nameTxt:SetPoint(nSelf, bgTex, nRel, nOffX, nOffY)
@@ -543,10 +560,9 @@ function CastBar.Create(parent)
     local tJustify = cfg.timerJustify or DEFAULTS.timerJustify
     local tSelf, tRel = TextAnchor(tJustify)
     local timerTxt = frame:CreateFontString(nil, "OVERLAY")
-    timerTxt:SetFont(ns.Media.font, tSize, "")
+    frame.timerTxtSlug = ns.CreateSlugRing(frame, timerTxt)
+    ns.ApplyTextOutlineStyle(timerTxt, frame.timerTxtSlug, ns.Media.font, tSize, cfg.timerOutlineStyle, true)
     timerTxt:SetJustifyH(tJustify)
-    timerTxt:SetShadowColor(0, 0, 0, 1)
-    timerTxt:SetShadowOffset(1, -1)
     timerTxt:SetTextColor(0.847, 0.627, 0.380, 1)
     timerTxt:SetWidth(w)
     timerTxt:SetPoint(tSelf, bgTex, tRel, tOffX, tOffY)
@@ -686,6 +702,8 @@ function CastBar.ApplySettings()
     local cfg = Cfg()
     local w   = cfg.width    or DEFAULTS.width
     local h   = cfg.height   or DEFAULTS.height
+    local pt  = cfg.point         or DEFAULTS.point
+    local rpt = cfg.relativePoint or DEFAULTS.relativePoint
     local x   = cfg.x        or DEFAULTS.x
     local y   = cfg.y        or DEFAULTS.y
 
@@ -707,7 +725,7 @@ function CastBar.ApplySettings()
     local nOffY    = cfg.nameOffY    or DEFAULTS.nameOffY
     local nJustify = cfg.nameJustify or DEFAULTS.nameJustify
     local nSelf, nRel = TextAnchor(nJustify)
-    frame.nameTxt:SetFont(cfg.font or BEBAS_FONT, nSize, "")
+    ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
     frame.nameTxt:SetJustifyH(nJustify)
     frame.nameTxt:SetWidth(w)
     frame.nameTxt:ClearAllPoints()
@@ -718,7 +736,7 @@ function CastBar.ApplySettings()
     local tOffY    = cfg.timerOffY    or DEFAULTS.timerOffY
     local tJustify = cfg.timerJustify or DEFAULTS.timerJustify
     local tSelf, tRel = TextAnchor(tJustify)
-    frame.timerTxt:SetFont(cfg.timerFont or ns.Media.font, tSize, "")
+    ns.ApplyTextOutlineStyle(frame.timerTxt, frame.timerTxtSlug, cfg.timerFont or ns.Media.font, tSize, cfg.timerOutlineStyle, true)
     frame.timerTxt:SetJustifyH(tJustify)
     frame.timerTxt:SetWidth(w)
     frame.timerTxt:ClearAllPoints()
@@ -726,14 +744,25 @@ function CastBar.ApplySettings()
 
     -- Position
     frame:ClearAllPoints()
-    frame:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
+    frame:SetPoint(pt, UIParent, rpt, x, y)
 
-    -- Rafraîchir le preview si actif
+    -- Rafraîchir le preview si actif -- SAUF si le module est desactive (ex:
+    -- decocher "Activer" pendant que la preview tourne declenche ApplySettings
+    -- via LiveApply, qui sans ce garde reforçait frame:Show() malgre
+    -- cfg.enabled=false -- confirme en jeu). On NE remet PAS state.preview a
+    -- false ici : la page de reglages est toujours ouverte sur cette
+    -- categorie, donc re-cocher "Activer" doit refaire apparaitre la preview
+    -- tout de suite (sinon elle restait cachee jusqu'a quitter/rerentrer la
+    -- categorie -- confirme en jeu aussi).
     if state.preview then
-        frame:Show()
-        -- Forcer le texte pour que les changements d'ancre/justify soient visibles
-        frame.nameTxt:SetText(state.name or L["CASTBAR_PREVIEW_SPELL_NAME"])
-        frame.timerTxt:SetText(FormatTime(math.max(0, state.endTime - GetTime())))
+        if cfg.enabled == false then
+            frame:Hide()
+        else
+            frame:Show()
+            -- Forcer le texte pour que les changements d'ancre/justify soient visibles
+            frame.nameTxt:SetText(state.name or L["CASTBAR_PREVIEW_SPELL_NAME"])
+            frame.timerTxt:SetText(FormatTime(math.max(0, state.endTime - GetTime())))
+        end
     end
 end
 
@@ -742,6 +771,9 @@ end
 ---------------------------------------------------------------------------
 function CastBar.SetPreview(on)
     if not frame then return end
+    -- Le module desactive ne doit jamais afficher de preview (confirme en
+    -- jeu : la barre apparaissait quand meme dans les reglages meme cfg.enabled=false).
+    if on and ns.GetCfg("castBar").enabled == false then return end
     state.preview = on
     if on then
         state.active     = true

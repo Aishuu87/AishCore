@@ -51,10 +51,10 @@ local BUTTON_PREFIXES = {
 
 ---------------------------------------------------------------------------
 -- Types de glow (loop) — flipbook sprite-sheet animations
--- Les textures ABE sont copiees localement dans Media/Glows/ (portage figé,
--- ne dependent plus de l'addon externe ActionBarsEnhanced installe).
+-- Textures bundlees localement dans Media/Glows/ (aucune dependance a un
+-- addon externe).
 ---------------------------------------------------------------------------
-local ABE_ASSETS = "Interface/AddOns/Aishaddon/Media/Glows/"
+local ABE_ASSETS = "Interface/AddOns/AishCore/Media/Glows/"
 
 local LOOP_GLOW_TYPES = {
   -- 1 : Aucun
@@ -1391,7 +1391,7 @@ local function CreateSlotFrame(index, parent)
   local size = cfg.iconSize or 34
 
   -- SecureActionButton : cliquable pour caster le sort
-  local frame = CreateFrame("Button", "AishaddonPriorityBarSlot" .. index, parent, "SecureActionButtonTemplate")
+  local frame = CreateFrame("Button", "AishCorePriorityBarSlot" .. index, parent, "SecureActionButtonTemplate")
   frame:SetSize(size, size)
   frame:SetFrameStrata("MEDIUM")
   frame:SetFrameLevel(60)
@@ -1399,7 +1399,7 @@ local function CreateSlotFrame(index, parent)
 
   -- Conteneur interne : icone, cooldown, glows et texte de charges sont parentes ici.
   -- La bordure reste sur le button frame et ne glisse pas. C'est ce frame qu'on anime.
-  local inner = CreateFrame("Frame", "AishaddonPBInner" .. index, frame)
+  local inner = CreateFrame("Frame", "AishCorePBInner" .. index, frame)
   inner:SetAllPoints()
   inner:SetFrameLevel(frame:GetFrameLevel() + 1)
   frame.innerFrame = inner
@@ -1420,7 +1420,7 @@ local function CreateSlotFrame(index, parent)
   frame.slideAnimFrame = CreateFrame("Frame", nil, frame)
 
   -- Cooldown swipe – parente a inner pour suivre le slide
-  frame.cooldown = CreateFrame("Cooldown", "AishaddonPBCD" .. index, inner, "CooldownFrameTemplate")
+  frame.cooldown = CreateFrame("Cooldown", "AishCorePBCD" .. index, inner, "CooldownFrameTemplate")
   frame.cooldown:SetAllPoints()
   frame.cooldown:SetDrawSwipe(true)
   frame.cooldown:SetDrawEdge(false)
@@ -2916,8 +2916,8 @@ function PriorityBar.Init()
   initialized = true
   _initTime = GetTime()
 
-  leftContainer = CreateContainer("AishaddonPBLeft")
-  rightContainer = CreateContainer("AishaddonPBRight")
+  leftContainer = CreateContainer("AishCorePBLeft")
+  rightContainer = CreateContainer("AishCorePBRight")
 
   slotFrames[1] = CreateSlotFrame(1, leftContainer)
   slotFrames[2] = CreateSlotFrame(2, leftContainer)

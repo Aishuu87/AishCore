@@ -7,7 +7,7 @@
 --     sinon un cartouche visuel avec le label de la section en gros (fallback)
 --   • Le nom de la section en titre
 --   • La description (section.desc) en texte dim
---   • Un tag "À venir" discret si la section est un placeholder Aishaddon
+--   • Un tag "À venir" discret si la section est un placeholder AishCore
 --
 -- Usage :
 --   local info = ns.InfoPanel.Create(parent, width)
@@ -45,7 +45,7 @@ function ns.InfoPanel.Create(parent, width)
     f:SetBackdropColor(0, 0, 0, 0)         -- transparent
     f:SetBackdropBorderColor(0, 0, 0, 0)   -- transparent
 
-    -- Pas d'en-tête orné au-dessus du cadre preview (demandé par l'utilisateur).
+    -- Pas d'en-tête orné au-dessus du cadre preview.
     -- Les boutons i/x sont ajoutés par SettingsPanel dans le wrapper en haut-droite,
     -- donc on laisse juste une marge de 40px en haut pour ne pas les chevaucher.
 
@@ -80,7 +80,7 @@ function ns.InfoPanel.Create(parent, width)
     fallback:SetTextColor(Theme.textDim[1], Theme.textDim[2], Theme.textDim[3], 1)
     fallback:SetText("")
 
-    -- Tag "À venir" en overlay haut-droite du cartouche (pour les placeholders Aishaddon)
+    -- Tag "À venir" en overlay haut-droite du cartouche (pour les placeholders AishCore)
     local comingSoonTag = preview:CreateFontString(nil, "OVERLAY")
     ns.ApplyFont(comingSoonTag, FONT, 9)
     comingSoonTag:SetPoint("TOPRIGHT", -6, -6)
@@ -106,7 +106,7 @@ function ns.InfoPanel.Create(parent, width)
     desc:SetWordWrap(true); desc:SetNonSpaceWrap(false)
     desc:SetText("")
 
-    -- (Plus de tag "Source :" en bas — demandé par l'utilisateur, rend la preview plus épurée)
+    -- (Pas de tag "Source :" en bas, la preview reste épurée)
 
     -- Expose les refs en interne pour ShowFor
     f._previewImg    = previewImg

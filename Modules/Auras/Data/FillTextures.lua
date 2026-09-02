@@ -15,7 +15,7 @@
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 
-local TEX_BASE = "Interface\\AddOns\\Aishaddon\\Media\\UI\\FillTextures\\"
+local TEX_BASE = "Interface\\AddOns\\AishCore\\Media\\UI\\FillTextures\\"
 
 ns.FillTextures = {
     { id="FillBrique",          label=L["AURASDATA_FILLTEX_BRICK"],            scrollDef=0   },
