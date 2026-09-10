@@ -1,3 +1,4 @@
 __pycache__/
 *.pyc
 .claude/
+generate_model_paths.py
