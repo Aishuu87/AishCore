@@ -382,7 +382,7 @@ local function CreateUnitBar(def)
     border:SetColorTexture(DARK, DARK, DARK, 1)
 
     -- Glow au survol : BackdropTemplate + GlowTex.tga (même technique qu'ElvUI)
-    local GLOW_TEX  = "Interface\\AddOns\\AishCore\\GlowTex.tga"
+    local GLOW_TEX  = "Interface\\AddOns\\AishCore\\Media\\UI\\GlowTex.tga"
     local GLOW_SIZE = 5
     local fc0 = cfg.fillColor or def.defaults.fillColor
     local glowFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
