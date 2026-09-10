@@ -1,11 +1,4 @@
----------------------------------------------------------------------------
--- AishCore Debug — profiler léger pour identifier les sources de ticks.
--- Activé via:  /aishdebug on        (démarre le profiling)
---              /aishdebug off       (arrête + rapport final)
---              /aishdebug report    (rapport immédiat)
---              /aishdebug reset     (remet les compteurs à zéro)
---              /aishdebug ticker    (toggle suivi NewTicker séparé)
----------------------------------------------------------------------------
+-- Debug.lua : profiler léger pour identifier les sources de ticks (/aishdebug)
 local _, ns = ...
 
 local _active       = false
@@ -15,9 +8,7 @@ local _origAfter    = C_Timer.After
 local _origTicker   = C_Timer.NewTicker
 local _reportTicker = nil  -- le ticker de rapport automatique
 
--- Extrait une clé lisible depuis debugstack.
--- Montre toutes les sources (pas seulement AishCore) pour identifier
--- si c'est ElvUI / WoW / un autre addon qui génère les appels.
+-- Extrait une clé lisible depuis debugstack (toutes sources, pas juste AishCore)
 local function CleanStack(raw)
     local out = {}
     for line in raw:gmatch("[^\n]+") do
@@ -50,8 +41,7 @@ local function CleanStack(raw)
             if file then table.insert(out, "Blizzard/" .. file .. ":" .. lineno) end
         end
     end
-    -- Fallback : retourner la première ligne non-vide et non-C de la stack brute
-    -- pour identifier les appels qui ne matchent pas les patterns AddOns/Blizzard.
+    -- Fallback : première ligne non-vide/non-C de la stack brute
     if #out == 0 then
         for line in raw:gmatch("[^\n]+") do
             if line:find("Debug%.lua") then
@@ -91,9 +81,7 @@ local function UnhookTimers()
     C_Timer.NewTicker = _origTicker
 end
 
----------------------------------------------------------------------------
 -- Rapport
----------------------------------------------------------------------------
 local function SortedPairs(t)
     local keys = {}
     for k in pairs(t) do keys[#keys+1] = k end
@@ -131,9 +119,7 @@ local function PrintReport()
     end
 end
 
----------------------------------------------------------------------------
 -- Slash command
----------------------------------------------------------------------------
 SLASH_AISHDEBUG1 = "/aishdebug"
 SlashCmdList["AISHDEBUG"] = function(msg)
     msg = (msg or ""):lower():match("^%s*(.-)%s*$")
@@ -298,6 +284,14 @@ SlashCmdList["AISHDEBUG"] = function(msg)
             auras.DebugDumpCircleBarsFlow()
         end
 
+    elseif msg == "totem" then
+        local auras = ns.Auras
+        if not (auras and auras.DebugDumpTotems) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugDumpTotems introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugDumpTotems()
+        end
+
     elseif msg == "groups" then
         local auras = ns.Auras
         if not (auras and auras.DebugDumpGroupCounts) then
@@ -305,13 +299,19 @@ SlashCmdList["AISHDEBUG"] = function(msg)
         else
             auras.DebugDumpGroupCounts()
         end
-        -- Memoire Lua totale de l'addon (UpdateAddOnMemoryUsage doit tourner
-        -- recemment -- /console scriptProfile 1 ou simplement laisser la
-        -- fenetre memoire Blizzard ouverte une fois suffit a la maintenir a jour).
+        -- Memoire Lua totale (UpdateAddOnMemoryUsage doit avoir tourné récemment)
         if UpdateAddOnMemoryUsage and GetAddOnMemoryUsage then
             UpdateAddOnMemoryUsage()
             local mem = GetAddOnMemoryUsage("AishCore")
             print(string.format("|cff00ccffAishCore Debug|r Memoire Lua totale addon (instantanee) : %.2f Mo", (mem or 0) / 1024))
+        end
+
+    elseif msg == "iconlistrows" then
+        local auras = ns.Auras
+        if not (auras and auras.DebugDumpIconListRows) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugDumpIconListRows introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugDumpIconListRows()
         end
 
     elseif msg:match("^spell%s+%d") then
@@ -406,6 +406,7 @@ SlashCmdList["AISHDEBUG"] = function(msg)
         print("  /aishdebug |cffffff00syncpins|r — [EXPÉRIMENTAL v3] épingle en masse la whitelist de la spec active, reload forcé ensuite (hors combat uniquement)")
         print("  /aishdebug |cffffff00auratrace <spellID>|r — trace pas-a-pas la detection de presence pour ce sort (player+target)")
         print("  /aishdebug |cffffff00cdmreload|r — affiche le compteur de reload CDM en attente + historique des increments")
+        print("  /aishdebug |cffffff00iconlistrows|r — dump direct des boutons Liste d'icones reellement crees (joueur+cible), spellID assigne, visible ou non")
         print("  /aishdebug |cffffff00testcontainer <spellID> [spellID2...]|r — [TEST] cree un AuraContainer natif isole (icone+stacks+cooldown) pour valider l'approche, hors combat uniquement")
         print("  /aishdebug |cffffff00testbar <spellID> [spellID2...]|r — [TEST] AddAuraGroup sans icone/sans flow layout, juste une StatusBar via SetDurationBar (prepare la migration Circle Bars)")
         print("  /aishdebug |cffffff00testmulti <spellID1> <spellID2>|r — [TEST] AddAuraGroup maxFrameCount=3, 2+ sorts DIFFERENTS -- verifie si 2 candidats simultanes peuvent s'afficher en meme temps (isole de Circle Bars)")
@@ -414,12 +415,11 @@ SlashCmdList["AISHDEBUG"] = function(msg)
         print("  /aishdebug |cffffff00circlebarsflow|r — [DEBUG] dump complet de l'etat du rendu natif 'Circle Bars' (Buffs.lua/freebars)")
         print("  /aishdebug |cffffff00circlebarswatch|r — [DEBUG] force UpdateAllAuras toutes les 0.5s + log les changements (bascule on/off)")
         print("  /aishdebug |cffffff00groups|r — [CHECKUP MEMOIRE] compte les AddAuraGroup dedies crees (jamais liberables) sur les 4 destinations + memoire Lua totale de l'addon")
+        print("  /aishdebug |cffffff00totem|r — [DEBUG] dump complet de l'etat totems (sorts traques, scan GetTotemInfo brut, conteneur/widgets)")
     end
 end
 
----------------------------------------------------------------------------
 -- /aishdebug pbslots — Dump l'état actuel des 4 slots PriorityBar
----------------------------------------------------------------------------
 function DumpPBSlots()
     local P = function(s) print("|cffFF8800[PB]|r " .. s) end
     local PB = ns.Modules and ns.Modules.PriorityBar
@@ -467,11 +467,7 @@ function DumpPBSlots()
     end
 end
 
----------------------------------------------------------------------------
--- /aishdebug pbcharges — Trace la résolution des charges pour chaque slot
--- Montre exactement quel chemin le code prend : CDViewer vs fallback,
--- sous quel spellID on cherche, ce qu'on trouve.
----------------------------------------------------------------------------
+-- /aishdebug pbcharges — Trace la résolution des charges pour chaque slot (CDViewer vs fallback)
 function DumpPBCharges()
     local P = function(s) print("|cffFF8800[CHG]|r " .. s) end
     local PB = ns.Modules and ns.Modules.PriorityBar
@@ -605,11 +601,7 @@ function DumpPBCharges()
     end
 end
 
----------------------------------------------------------------------------
--- /aishdebug cdm — Dump complet du Blizzard UtilityCooldownViewer
--- Lit les champs publics de chaque item frame actif pour vérifier qu'on
--- peut s'en servir comme source de vérité pour CD/charges.
----------------------------------------------------------------------------
+-- /aishdebug cdm — Dump du UtilityCooldownViewer Blizzard (champs publics CD/charges)
 function DumpCooldownViewer()
     local P = function(s) print("|cffFF8800[CDM]|r " .. s) end
 
@@ -755,17 +747,9 @@ function DumpCooldownViewer()
     P("--- Fin V6 ---")
 end
 
----------------------------------------------------------------------------
--- /aishdebug cdmbuff — Meme sondage que DumpCooldownViewer (M1-M6) mais sur
--- BuffIconCooldownViewer/BuffBarCooldownViewer (ou vivent les buffs traques,
--- ex. 440989/190456), pas UtilityCooldownViewer (debuffs cible uniquement).
--- But : determiner si Cooldown:GetCooldownTimes()/GetCooldownDisplayDuration()
--- sont reellement lisibles (pas secretes) sur le widget Cooldown natif d'un
--- BUFF en combat -- si oui, on peut animer nos barres directement depuis ces
--- valeurs sans passer par un durObj (piste SetCooldownFromDurationObject
--- confirmee morte : jamais appelee par Blizzard pour la duree des buffs,
--- cf. journal SetCooldown vide de tout DUROBJ).
----------------------------------------------------------------------------
+-- /aishdebug cdmbuff — Meme sondage que DumpCooldownViewer mais sur BuffIcon/BuffBarCooldownViewer
+-- (buffs traqués, pas debuffs cible). Vérifie si Cooldown:GetCooldownTimes()/
+-- GetCooldownDisplayDuration() sont lisibles (non secrètes) sur un buff en combat.
 function DumpBuffCooldownViewer()
     local P = function(s) print("|cffFF8800[CDMBUFF]|r " .. s) end
 

@@ -10,6 +10,9 @@ local bar = nil
 local healthAnimTicker = nil
 local lastHealthVisState = nil
 local previewMode = false
+-- File d'attente de transition (meme principe que ResourceCircle.lua) : ne jamais interrompre une anim en cours
+local hcAnimBusy = false
+local hcAnimDirty = false
 
 -- Variable pour savoir si le bar etait montre en preview (pour annuler l'anim)
 local healthMoveTicker = nil
@@ -132,9 +135,7 @@ function HealthCircle.ShouldShow()
   if ns.skyridingActive and ns.GetCfg("skyriding").hideHealthCircle ~= false then return false end
   local cfg = ns.GetCfg("healthCircle")
   if cfg.enabled == false then return false end
-  -- Ne jamais s'afficher si la vraie barre de vie du joueur (UnitBars) est
-  -- deja visible : ce cercle n'est qu'un rappel minimaliste hors combat pour
-  -- quand cette barre n'est PAS affichee -- double affichage sinon (meme info).
+  -- Jamais affiche si la vraie barre de vie (UnitBars) l'est deja, sinon double affichage de la meme info
   local UB = ns.Modules and ns.Modules.UnitBars
   if UB and UB.IsPlayerBarShown and UB.IsPlayerBarShown() then return false end
   -- "Toujours actif en instance" : ignore les transitions combat tant qu'on
@@ -151,7 +152,6 @@ function HealthCircle.ShouldShow()
   return playerIsDamaged
 end
 
--- Création du cercle de vie
 -- Applique les settings en live (taille, police, etc.)
 function HealthCircle.ApplySettings()
   if not bar then return end
@@ -160,6 +160,10 @@ function HealthCircle.ApplySettings()
   -- Gerer l'activation/desactivation en live
   if cfg.enabled == false then
     if healthAnimTicker then healthAnimTicker:Cancel(); healthAnimTicker = nil end
+    -- Desactivation live du module : interruption immediate voulue (comme
+    -- SetPreview) -- on remet aussi le verrou de file d'attente a plat.
+    hcAnimBusy = false
+    hcAnimDirty = false
     bar:Hide()
     bar._healthShown = false
     lastHealthVisState = nil
@@ -338,11 +342,19 @@ function HealthCircle.AnimateVisibility(shouldShow)
 
   -- Table pré-allouée dans Create() : aucune allocation ici
   healthAnimTicker = ns.AnimateStagger(_hcAnimElems, shouldShow, 0.35, 0.04, function()
-    if previewMode then return end
+    if previewMode then
+      hcAnimBusy = false
+      return
+    end
     if not shouldShow then
       bar:Hide()
     else
       StartPulse()  -- démarrer le pouls une fois le cercle pleinement visible
+    end
+    hcAnimBusy = false
+    if hcAnimDirty then
+      hcAnimDirty = false
+      HealthCircle.UpdateVisibility()
     end
   end)
 end
@@ -352,8 +364,11 @@ function HealthCircle.SetPreview(on)
   previewMode = on
   if not bar then return end
 
-  -- Annuler toute animation en cours
+  -- Annuler toute animation en cours (override manuel du panneau de reglages,
+  -- pas une transition automatique -- interruption immediate voulue ici).
   if healthAnimTicker then healthAnimTicker:Cancel(); healthAnimTicker = nil end
+  hcAnimBusy = false
+  hcAnimDirty = false
   StopPulse()   -- arrêter le pouls quand on entre/sort du mode preview
 
   if on then
@@ -449,7 +464,13 @@ function HealthCircle.UpdateVisibility()
   if previewMode then return end
   local shouldShow = HealthCircle.ShouldShow()
   if lastHealthVisState == shouldShow then return end
+
+  if hcAnimBusy then
+    hcAnimDirty = true
+    return
+  end
   lastHealthVisState = shouldShow
+  hcAnimBusy = true
 
   if shouldShow then
     bar:Show()
@@ -462,6 +483,9 @@ function HealthCircle.UpdateVisibility()
     if not bar._healthShown then
       bar._healthShown = true
       HealthCircle.AnimateVisibility(true)
+    else
+      -- Deja affiche, aucune anim ne sera lancee : remettre le verrou a plat ici pour ne pas bloquer les futures demandes
+      hcAnimBusy = false
     end
   else
     bar._healthShown = false

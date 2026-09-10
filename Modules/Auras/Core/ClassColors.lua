@@ -1,6 +1,4 @@
--- AishUIAura/Core/ClassColors.lua
--- Couleurs de classe pour les barres HUD + redirection Theme.accent vers l'or AISHUI
-------------------------------------------------------------------------
+-- AishUIAura/Core/ClassColors.lua : couleurs de classe pour les barres HUD + redirection Theme.accent vers l'or AISHUI
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 
 ns.CLASS_COLORS = {
@@ -24,10 +22,7 @@ do
     local c = ns.CLASS_COLORS[cls]
     ns.barColor    = c and c[1] or { 1, 0.231, 0.039 }
     ns.sparkColor  = c and c[2] or { 1, 0.490, 0.278 }
-    -- Thème AISHUI Black & Gold : redirige Theme.accent vers l'or globalement
-    -- EVERY UI element that reads Theme.accent (checkboxes, tab highlights,
-    -- card borders, action buttons, layout pickers, etc.) renders in gold.
-    -- ns.barColor garde la couleur de classe pour les vraies barres HUD (Renders/).
+    -- Thème AISHUI Black & Gold : redirige Theme.accent vers l'or (ns.barColor garde la couleur de classe)
     if ns.THEME then
         local g = ns.THEME.gold or { 0.78, 0.62, 0.30 }
         ns.THEME.accent     = { g[1], g[2], g[3] }
@@ -35,18 +30,8 @@ do
     end
 end
 
----------------------------------------------------------------------------
--- Accent thematique du GUI Auras (dots/hairlines des headers de section +
--- leur texte) : equivalent de SharedWidgets.RefreshAccentTheme dans
--- UI/SharedWidgets.lua (addon principal), mais pour le namespace separe
--- _addon.Auras.THEME. Meme repartition des couleurs :
---   - ns.THEME.gold/accent (dots, hairlines)  = "Points de Puissance A"
---   - ns.THEME.accentText  (texte des labels) = "Points de Puissance B"
--- Gate par le meme toggle que le panneau principal (_addon.DB.colors.themeGUI,
--- actif par defaut) -- _addon ici designe le namespace racine de l'addon
--- (ns = _addon.Auras dans ce fichier), pas ns.DB/ns.Modules qui n'existent
--- pas a ce niveau.
----------------------------------------------------------------------------
+-- Accent thématique du GUI Auras (dots/texte des headers), équivalent SharedWidgets.RefreshAccentTheme
+-- pour le namespace _addon.Auras.THEME. Gate par _addon.DB.colors.themeGUI (actif par défaut).
 local ACCENT_STATIC      = { 0.78, 0.62, 0.30 }
 local ACCENT_TEXT_STATIC = { 0.776, 0.710, 0.471 }
 function ns.RefreshAccentTheme()

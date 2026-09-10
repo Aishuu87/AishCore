@@ -7,17 +7,13 @@ ns.Modules = ns.Modules or {}
 local TopTargetBar = {}
 ns.Modules.TopTargetBar = TopTargetBar
 
----------------------------------------------------------------------------
 -- Constantes
----------------------------------------------------------------------------
 local BAR_TEXTURE   = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga"
 local BEBAS_FONT    = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\BebasNeue-Regular.ttf"
 local MONTSERRAT_BI = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat-BoldItalic.ttf"
 local DARK          = 14 / 255   -- #0e0e0e
 
----------------------------------------------------------------------------
 -- Couleurs (identiques aux conditions WA)
----------------------------------------------------------------------------
 local CLASS_COLORS = {
     DEATHKNIGHT = { 0.769, 0.122, 0.231 },
     DEMONHUNTER = { 0.639, 0.188, 0.788 },
@@ -71,48 +67,50 @@ local POWER_COLORS = {
     ESSENCE      = { 0.00, 0.78, 0.87 },
 }
 
----------------------------------------------------------------------------
 -- Helpers couleur
----------------------------------------------------------------------------
 local function GetUnitColor(unit)
     if UnitIsPlayer(unit) then
-        local ok, classFile = pcall(function() return select(2, UnitClass(unit)) end)
-        if ok and classFile then return CLASS_COLORS[classFile] or { DARK, DARK, DARK } end
-        return { DARK, DARK, DARK }
+        -- Indexation CLASS_COLORS[classFile] dans le pcall : classFile peut etre une valeur secrete (cf. UnitBars.lua)
+        local ok, color = pcall(function()
+            local classFile = select(2, UnitClass(unit))
+            return classFile and CLASS_COLORS[classFile]
+        end)
+        if ok and color then return color end
+        -- UnitClass inaccessible (valeur privee/secrete) : repli sur "allie" visible plutot que DARK (sinon nom/barre invisibles)
+        return REACTION_COLORS.friendly
     end
     local ok, reaction = pcall(function() return UnitReaction(unit, "player") end)
     if ok and reaction then
-        -- UnitReaction peut retourner un nombre privé en raid : le détainter avant
-        -- toute comparaison (sinon l'opérateur == / > lève une erreur Lua attrapée
-        -- silencieusement par le pcall englobant → nom/couleur jamais mis à jour).
+        -- UnitReaction peut retourner un nombre prive en raid : le detainter avant toute comparaison
         local r = tonumber(tostring(reaction)) or 0
         if     r == 4 then return REACTION_COLORS.neutral
         elseif r  > 4 then return REACTION_COLORS.friendly
         else               return REACTION_COLORS.hostile
         end
     end
-    -- UnitReaction inaccessible (valeur privée en instance/raid) : supposer hostile.
-    -- Retourner DARK ici rendrait le nom invisible sur fond noir.
+    -- UnitReaction inaccessible (valeur privee en instance/raid) : supposer hostile (DARK rendrait le nom invisible)
     return REACTION_COLORS.hostile
 end
 
 local function GetPowerBarColor(unit)
-    local ok, powerToken = pcall(function() return select(2, UnitPowerType(unit)) end)
-    if ok and powerToken then
+    -- Meme precaution que GetUnitColor : indexation par powerToken dans le pcall (peut etre secrete)
+    local ok, color = pcall(function()
+        local powerToken = select(2, UnitPowerType(unit))
+        if not powerToken then return nil end
         -- Privilégier le tableau officiel Blizzard (contient les couleurs localisées)
         if PowerBarColor and PowerBarColor[powerToken] then
             local c = PowerBarColor[powerToken]
             return { c.r or 1, c.g or 0.82, c.b or 0 }
         end
-        if POWER_COLORS[powerToken] then return POWER_COLORS[powerToken] end
-    end
+        return POWER_COLORS[powerToken]
+    end)
+    if ok and color then return color end
     return { 1.00, 0.82, 0.00 }  -- jaune (énergie) par défaut
 end
 
 local function GetLevelColor(unit)
     if UnitIsPlayer(unit) then return GetUnitColor(unit) end
-    -- tonumber(tostring()) est nécessaire pour détainter les valeurs privées TWW
-    -- (tonumber seul ne suffit pas pour les private values, contrairement aux secret values).
+    -- tonumber(tostring()) necessaire pour detainter les valeurs privees TWW (tonumber seul ne suffit pas)
     local ok1, lvl  = pcall(function() return tonumber(tostring(UnitLevel(unit)))  or 0 end)
     local ok2, plvl = pcall(function() return tonumber(tostring(UnitLevel("player"))) or 0 end)
     local classif = UnitClassification(unit) or ""
@@ -152,8 +150,7 @@ local function GetLevelPrefix(unit)
 end
 
 local function AbbreviateNumber(n)
-    -- n est un nombre propre (fourni par Blizzard C via OnValueChanged)
-    -- Les comparaisons >= sont sûres sur des valeurs non taintées.
+    -- n est un nombre propre (fourni par Blizzard C via OnValueChanged), comparaisons >= sures
     n = tonumber(n) or 0
     if     n >= 1e9 then return string.format("%.1fG", n / 1e9)
     elseif n >= 1e6 then return string.format("%.1fM", n / 1e6)
@@ -174,22 +171,16 @@ local _hp = {
     targettarget = { cur = 0, max = 1 },
 }
 
----------------------------------------------------------------------------
 -- État des frames
----------------------------------------------------------------------------
 local f_target      = nil
 local f_tt          = nil
 local ttbPreviewMode = false  -- panel settings ouvert → noms de test
 
--- Enregistre les StateDrivers de visibilité sur f_target et f_tt.
--- Doit être appelé après Create() et à chaque ApplySettings().
--- "hide" explicite quand le module est désactivé ou en état bloqué.
--- RegisterStateDriver appelle SetAttribute qui est bloqué en combat : on diffère.
+-- Enregistre les StateDrivers de visibilité sur f_target et f_tt (appelé après Create() et à chaque ApplySettings()).
+-- RegisterStateDriver appelle SetAttribute, bloqué en combat : on diffère.
 local pendingDriverUpdate = false
--- ---------------------------------------------------------------------------
--- ElvUI : masquer la barre de cible ElvUI via alpha (SetAlpha jamais bloqué).
--- On essaie les noms connus ; pcall = silencieux si ElvUI absent.
--- ---------------------------------------------------------------------------
+
+-- ElvUI : masquer la barre de cible ElvUI via alpha (SetAlpha jamais bloqué), pcall silencieux si absent
 local function ApplyElvUITargetAlpha()
     local db = ns.GetCfg("topTargetBar")
     local alpha = (db and db.enabled == false) and 0 or 1
@@ -234,10 +225,7 @@ local function SetTTBVisibilityDrivers()
     ApplyElvUITargetAlpha()
 end
 
----------------------------------------------------------------------------
--- Création : barre target principale
--- WA : 525×2 px, centré horizontalement en haut d'écran
----------------------------------------------------------------------------
+-- Création : barre target principale (WA : 525×2 px, centré horizontalement en haut d'écran)
 local function CreateTargetBar()
     -- Frame conteneur (530×35 → TOP ancré sur WorldFrame pour coller au bord physique)
     local f = CreateFrame("Button", "AishCoreTopTarget", UIParent, "SecureUnitButtonTemplate")
@@ -286,9 +274,7 @@ local function CreateTargetBar()
     bgFull:SetColorTexture(DARK, DARK, DARK, 1)
     f.bgFull = bgFull
 
-    -- -----------------------------------------------------------------------
     -- Barre de vie — taille et offset depuis DB
-    -- -----------------------------------------------------------------------
     local db2  = ns.GetCfg("topTargetBar")
     local bw   = (db2 and db2.barW)  or 525
     local bh   = (db2 and db2.barH)  or 2
@@ -312,9 +298,7 @@ local function CreateTargetBar()
     f.bar   = bar
     f.barBg = barBg
 
-    -- -----------------------------------------------------------------------
     -- Barre de ressource (énergie / mana / rage…) — masquée par défaut
-    -- -----------------------------------------------------------------------
     local powerBar = CreateFrame("StatusBar", nil, f)
     powerBar:SetSize(bw, bh)
     powerBar:SetPoint("TOP", f, "TOP", box, boy)
@@ -333,11 +317,7 @@ local function CreateTargetBar()
     f.powerBar   = powerBar
     f.powerBarBg = powerBarBg
 
-    -- -----------------------------------------------------------------------
-    -- Texte Nom + Niveau : Frame indépendante parentée UIParent (hors hiérarchie Button)
-    -- Même raison que hpFrame : SetText sur un FontString enfant d'un
-    -- SecureUnitButtonTemplate est silencieusement ignoré en contexte tainté.
-    -- -----------------------------------------------------------------------
+    -- Texte Nom + Niveau : Frame indépendante parentée UIParent (SetText sur un FontString enfant d'un SecureUnitButtonTemplate est ignoré si tainté)
     local nox  = (db2 and db2.nameOX) or 0
     local noy  = (db2 and db2.nameOY) or -5
 
@@ -360,11 +340,7 @@ local function CreateTargetBar()
     f.nameFrame = nameFrame
     f.nameTxt   = nameTxt
 
-    -- -----------------------------------------------------------------------
-    -- Texte HP : Frame indépendante parentée UIParent (hors hiérarchie Button)
-    -- Cela garantit qu'aucun clip/strate du SecureUnitButtonTemplate ne la
-    -- cache. Sa visibilité est gérée manuellement dans UpdateTarget.
-    -- -----------------------------------------------------------------------
+    -- Texte HP : Frame indépendante parentée UIParent (aucun clip/strate du SecureUnitButtonTemplate ne la cache), visibilité gérée dans UpdateTarget
     local hox     = (db2 and db2.hpOX)       or 5
     local hoy     = (db2 and db2.hpOY)       or -19
     local hpts    = (db2 and db2.hpFontSize) or 10
@@ -393,9 +369,7 @@ local function CreateTargetBar()
     return f
 end
 
----------------------------------------------------------------------------
 -- Création : barre TargetTarget (125×24 BG + barre 124×1.7 + nom)
----------------------------------------------------------------------------
 local function CreateTargetTargetBar()
     -- Conteneur 125×24 cliquable (SecureUnitButtonTemplate)
     local f = CreateFrame("Button", "AishCoreTopTargetTarget", UIParent, "SecureUnitButtonTemplate")
@@ -483,13 +457,8 @@ local function CreateTargetTargetBar()
     return f
 end
 
----------------------------------------------------------------------------
--- Mises à jour (textes + couleurs uniquement — la visibilité est gérée
--- entièrement par RegisterStateDriver dans SetTTBVisibilityDrivers).
----------------------------------------------------------------------------
--- Fonctions pré-allouées pour pcall dans UpdateTarget/UpdateTargetTarget.
--- Evite de créer 4 nouvelles closures à chaque appel (en combat : plusieurs/sec).
--- Ces fonctions accèdent à f_target / f_tt via upvalue (référence partagée).
+-- Mises à jour (textes + couleurs uniquement — la visibilité est gérée par RegisterStateDriver dans SetTTBVisibilityDrivers).
+-- Fonctions pré-allouées pour pcall (évite 4 closures par appel, plusieurs/sec en combat), accèdent à f_target/f_tt via upvalue.
 local function _UpdateTargetColor()
     local c = GetUnitColor("target")
     f_target.bar:SetStatusBarColor(c[1], c[2], c[3], 1)
@@ -518,30 +487,20 @@ local function _UpdateTargetName()
         return
     end
     if f_target.nameFrame then f_target.nameFrame:Show() end
-    -- UnitName retourne une secret string en raid.
-    -- NE JAMAIS utiliser # ou sub() dessus dans un event handler (contexte tainte).
-    -- SetText (C-side) accepte les secret strings directement — meme approche qu'UnitBars.
+    -- UnitName retourne une secret string en raid : jamais de # ou sub() dessus, SetText (C-side) l'accepte directement (meme approche qu'UnitBars)
     local rawName = UnitName("target")
     f_target.nameTxt:SetText(rawName or "")
-    -- Colorisation : construire le texte stylistique en Lua pur (strings propres)
-    -- et passer le resultat a SetText. Si ca echoue, le nom brut est deja affiche.
-    -- Colorisation : TOUT passe via string.format %s (C-side).
-    -- Interdiction absolue de concaténer (.. ) une secret string en Lua :
-    -- meme string.format(..) .. secretStr echoue. Un seul appel string.format
-    -- avec rawName comme argument %s est la seule approche sure.
+    -- Colorisation via string.format %s uniquement : concatener une secret string echoue toujours
     local _ok, _result = pcall(function()
         local lc  = GetLevelColor("target")
         local nc  = GetUnitColor("target")
         local lvl = GetLevelPrefix("target")
-        -- lvl est une string Lua pure (construite depuis des nombres detaintés).
-        -- rawName est une secret string : passée comme %s a string.format, jamais via ..
         return string.format("|cff%02x%02x%02x%s|r|cff%02x%02x%02x%s|r",
             math.floor(lc[1]*255), math.floor(lc[2]*255), math.floor(lc[3]*255), lvl,
             math.floor(nc[1]*255), math.floor(nc[2]*255), math.floor(nc[3]*255), rawName or "")
     end)
     TopTargetBar._lastNameErr = not _ok and _result or nil
     if _ok and _result then
-        -- _result est une secret string (car rawName l'est) : SetText (C-side) l'accepte
         f_target.nameTxt:SetText(_result)
     else
         -- Fallback : nom brut + couleur hostile fixe (rouge) si tout échoue
@@ -589,19 +548,14 @@ local function UpdateTarget()
         return
     end
     if not UnitExists("target") then
-        -- Mode preview (panel ouvert, pas de vraie cible) : NE PAS masquer --
-        -- sinon tout ApplySettings() (donc CHAQUE reglage change sur cette
-        -- page, ex. le toggle "barre de ressource") repasse ici et fait
-        -- disparaitre nameFrame/hpFrame, alors que _UpdateTargetName/
-        -- _UpdateTTName savent deja afficher des valeurs de test.
+        -- Mode preview (panel ouvert, pas de vraie cible) : ne pas masquer, sinon chaque reglage change fait disparaitre nameFrame/hpFrame
         if not ttbPreviewMode then
             if f_target.nameFrame then f_target.nameFrame:Hide() end
             if f_target.hpFrame   then f_target.hpFrame:Hide()   end
         end
         return
     end
-    -- S'assurer que nameFrame est visible avant les updates (peut avoir ete
-    -- cache par un UpdateTarget precedent 'no target', ou ne jamais avoir ete montre).
+    -- S'assurer que nameFrame est visible avant les updates (peut avoir ete cache par un UpdateTarget precedent)
     if f_target.nameFrame then f_target.nameFrame:Show() end
     pcall(_UpdateTargetColor)
     pcall(_UpdateTargetName)
@@ -617,12 +571,7 @@ end
 -- Pré-alloué pour C_Timer.After sur les events rares (PLAYER_TARGET_CHANGED etc.)
 local function _DoUpdateBoth() UpdateTarget(); UpdateTargetTarget() end
 
----------------------------------------------------------------------------
--- Helpers pour accrocher la barre HP normalisée de TargetFrame (TWW).
--- Chemin trouvé via /ttbscan : children[2][1][1][2] (StatusBar anonyme,
--- valeurs 0-1 issues du C engine, jamais taintées).
--- Défini AVANT TopTargetBar.Create() pour être visible dans la closure.
----------------------------------------------------------------------------
+-- Helpers pour accrocher la barre HP normalisée de TargetFrame (TWW). Chemin trouvé via /ttbscan : children[2][1][1][2] (StatusBar anonyme, valeurs 0-1 jamais taintées).
 local function FindTargetHealthBarInTree()
     if not TargetFrame then return nil end
     local c2 = select(2, TargetFrame:GetChildren())
@@ -647,9 +596,7 @@ local function FindToTHealthBarInTree()
     return nil
 end
 
----------------------------------------------------------------------------
 -- Debug : /aish ttb debug
----------------------------------------------------------------------------
 function TopTargetBar.Debug()
   local P = function(s) print("|cff00b0ff[TTB Debug]|r " .. s) end
   local unit = "target"
@@ -707,9 +654,7 @@ function TopTargetBar.Debug()
   P("Fait.")
 end
 
----------------------------------------------------------------------------
 -- Interface publique
----------------------------------------------------------------------------
 function TopTargetBar.GetTargetFrame()
     return f_target
 end
@@ -770,14 +715,10 @@ function TopTargetBar.Create()
         end
     end)
 
-    -- -----------------------------------------------------------------------
-    -- Hook sur la StatusBar normalisée (0-1) de TargetFrame pour mettre à
-    -- jour la valeur de notre barre de vie. Pas de texte HP (secret number).
-    -- -----------------------------------------------------------------------
+    -- Hook sur la StatusBar normalisée (0-1) de TargetFrame pour mettre à jour la barre de vie. Pas de texte HP (secret number).
     C_Timer.After(3, function()
         local hbar = FindTargetHealthBarInTree()
-        -- Fonctions pré-allouées pour les hooks OnValueChanged (appelés à chaque
-        -- changement de HP de la cible → pas de closure inline).
+        -- Fonctions pré-allouées pour les hooks OnValueChanged (évite une closure inline à chaque changement de HP)
         local function _ApplyTargetBarValue(v)
             f_target.bar:SetMinMaxValues(0, 1); f_target.bar:SetValue(v)
         end
@@ -804,12 +745,7 @@ function TopTargetBar.Create()
     end)
 end
 
--- ---------------------------------------------------------------------------
--- Abréviation des HP (taint-safe)
--- AbbreviateNumbers est une C-function qui accepte les secret numbers.
--- Appelé sans second argument, elle utilise les breakpoints par défaut du
--- client (localisé "K", "M", etc.).
--- ---------------------------------------------------------------------------
+-- Abréviation des HP (taint-safe) : AbbreviateNumbers (C-function) accepte les secret numbers, breakpoints localisés par défaut ("K", "M", etc.)
 local function ShortenHP(value)
     if AbbreviateNumbers then
         local ok, str = pcall(AbbreviateNumbers, value)
@@ -821,12 +757,7 @@ local function ShortenHP(value)
     return ""
 end
 
--- ---------------------------------------------------------------------------
--- Ticker barre de vie : UnitHealth() retourne un "secret number" (protégé
--- anti-cheat PvP) qu'on NE PEUT PAS convertir en string, mais les fonctions
--- C SetMinMaxValues/SetValue l'acceptent directement via pcall.
--- Le texte HP utilise AbbreviateNumbers (C-side, taint-safe).
--- ---------------------------------------------------------------------------
+-- Ticker barre de vie : UnitHealth() retourne un "secret number" non convertible en string, mais SetMinMaxValues/SetValue l'acceptent via pcall.
 -- Fonctions pré-allouées pour pcall : évite de créer une closure à chaque tick (10/sec)
 local function _TickTargetHP()
     local cur = UnitHealth("target")
@@ -1002,8 +933,7 @@ function TopTargetBar.ApplySettings()
     UpdateTargetTarget()
     SetTTBVisibilityDrivers()
 
-    -- Force le re-rendu immédiat de la frame HP pour que la preview
-    -- dans le GUI soit à jour sans avoir à changer de cible.
+    -- Force le re-rendu immédiat de la frame HP pour que la preview GUI soit à jour sans changer de cible
     local _dbE = ns.GetCfg("topTargetBar")
     if f_target and f_target.hpFrame and UnitExists("target")
     and not (_dbE and _dbE.enabled == false) then
@@ -1018,12 +948,9 @@ function TopTargetBar.ApplySettings()
     end
 end
 
----------------------------------------------------------------------------
 -- Événements
----------------------------------------------------------------------------
 local evtFrame = CreateFrame("Frame")
--- UNIT_HEALTH / UNIT_MAXHEALTH retirés : les HP sont mis à jour par le hook
--- OnValueChanged sur TargetFrame.HealthBar — pas besoin d'un handler event ici.
+-- UNIT_HEALTH / UNIT_MAXHEALTH retirés : mis à jour par le hook OnValueChanged sur TargetFrame.HealthBar
 evtFrame:RegisterUnitEvent("UNIT_FACTION",      "target", "targettarget")
 evtFrame:RegisterUnitEvent("UNIT_NAME_UPDATE",   "target", "targettarget")
 evtFrame:RegisterUnitEvent("UNIT_DISPLAYPOWER", "target")
@@ -1075,10 +1002,7 @@ evtFrame:SetScript("OnEvent", function(self, event, arg1)
     end
 
     if event == "UNIT_FACTION" then
-        -- Seul UNIT_FACTION change les couleurs (réaction/classe).
-        -- UNIT_HEALTH / UNIT_MAXHEALTH : les valeurs HP sont déjà mises à jour
-        -- par le hook OnValueChanged sur TargetFrame → pas de C_Timer.After ici
-        -- (évite de créer un timer object à chaque point de dégâts en combat).
+        -- Seul UNIT_FACTION change les couleurs (réaction/classe) ; les HP sont déjà gérés par le hook OnValueChanged
         if     arg1 == "target"       then C_Timer.After(0, UpdateTarget)
         elseif arg1 == "targettarget" then C_Timer.After(0, UpdateTargetTarget)
         end
@@ -1094,14 +1018,10 @@ evtFrame:SetScript("OnEvent", function(self, event, arg1)
     end
 end)
 
--- Ticker : mise à jour visibilité + couleurs toutes les 500ms.
--- Rattrape les cas où un event est manqué (cible morte, sortie combat,
--- transition de zone, targettarget qui change sans UNIT_TARGET).
+-- Ticker : mise à jour visibilité + couleurs toutes les 500ms (rattrape un event manqué : cible morte, sortie combat, transition de zone)
 C_Timer.NewTicker(0.5, function()
     if not f_target then return end
-    -- Utiliser UnitExists plutôt que IsVisible() : IsVisible() peut retourner false
-    -- si un parent est temporairement masqué (transition de phase, vehicle frame, etc.)
-    -- même quand la cible existe et que le StateDriver veut afficher le frame.
+    -- UnitExists plutôt que IsVisible() : ce dernier peut être false si un parent est temporairement masqué
     if not UnitExists("target") then return end
     UpdateTarget()
     UpdateTargetTarget()

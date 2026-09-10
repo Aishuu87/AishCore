@@ -1,9 +1,5 @@
--- Modules/CharacterArmory.lua : Fiche de personnage enrichie (item level,
--- enchants, gemmes, transmog, degrade d'equipement, durabilite, fond) --
--- v2 : reglages regroupes par categorie -- + largeurs separees zone-perso/
--- colonne-stats.
--- Ne touche QUE la fiche du joueur (CharacterFrame) -- l'Inspect frame d'un
--- autre joueur est hors scope.
+-- Modules/CharacterArmory.lua : fiche perso enrichie (ilvl, enchants, gemmes, transmog, degrade, durabilite, fond).
+-- Ne touche que CharacterFrame du joueur, pas l'Inspect frame.
 local addonName, ns = ...
 local L = ns.L
 
@@ -15,9 +11,7 @@ local function cfg()
     return ns.GetCfg("characterArmory")
 end
 
--- 18 emplacements d'equipement, dans l'ordre voulu pour le rendu 2 colonnes :
--- l'ordre determine la parite impair=GAUCHE/pair=DROITE (GEAR_DIRECTION plus
--- bas), qui doit correspondre a la vraie disposition 2 colonnes de Blizzard.
+-- 18 emplacements, ordre determinant la parite impair=GAUCHE/pair=DROITE (cf. GEAR_DIRECTION)
 local GEAR_LIST = {
     "HeadSlot", "HandsSlot", "NeckSlot", "WaistSlot", "ShoulderSlot", "LegsSlot",
     "BackSlot", "FeetSlot", "ChestSlot", "Finger0Slot", "ShirtSlot", "Finger1Slot",
@@ -48,9 +42,7 @@ local GRADIENT_TEXTURE = "Interface\\AddOns\\AishCore\\Media\\UI\\Armory\\Gradat
 local BG_TEXTURE_PATH = "Interface\\AddOns\\AishCore\\Media\\UI\\Armory\\"
 local BG_ARENA_TEXTURE = [[Interface\PVPFrame\PvpBg-NagrandArena-ToastBG]]
 
-------------------------------------------------------------------------
 -- LOOK : agrandissement (largeurs separees) + fond derriere le modele 3D
-------------------------------------------------------------------------
 local layoutApplied = false
 local applyingLayout = false
 local DoApplyLayout, DoRestoreLayout
@@ -58,42 +50,20 @@ local defaultFrameW, defaultFrameH
 local defaultHandsPoints, defaultMainHandPoints, defaultSecondaryHandPoints, defaultModelScenePoints, defaultInsetRightPoints
 local bgTex
 
--- Boutons "Caracteristiques du personnage / Titres / Gestionnaire d'equipement"
--- (coin superieur droit) : confirmes en jeu via GetMouseFocus(). Leur conteneur
--- (PaperDollSidebarTabs) est etire TOPLEFT+BOTTOMRIGHT sur CharacterFrame en
--- entier -- ils suivent donc le bord BRUT de la fiche, pas le panneau de
--- stats. On les ancre nous-memes sur CharacterFrameInsetRight (dont la
--- position est verifiee correcte, cf. diagnostics precedents) pour qu'ils
--- restent fixes juste au-dessus, quel que soit zoneWidth.
+-- Boutons Caracteristiques/Titres/Gestionnaire (coin sup. droit) : ancres sur
+-- CharacterFrameInsetRight (pas leur conteneur natif) pour rester fixes quel que soit zoneWidth.
 local SIDEBAR_TAB_NAMES = { "PaperDollSidebarTab1", "PaperDollSidebarTab2", "PaperDollSidebarTab3" }
 local defaultTabOffsets = {}
 local defaultTabPoints = {}
 
--- CharacterStatsPane (texte des stats), et de la meme facon les panneaux
--- Titres / Gestionnaire d'equipement (PaperDollFrame.TitleManagerPane /
--- .EquipmentManagerPane -- CHAMPS de PaperDollFrame, pas des globales, cf.
--- /framestack) sont NATIVEMENT etires (TOPLEFT+BOTTOMRIGHT, tous deux
--- relatifs a CharacterFrameInsetRight) : ce n'est pas un decalage, c'est un
--- ETIREMENT -- confirme en jeu (/aisharmorydebug, numPoints=2) : le bord
--- GAUCHE d'InsetRight est FIXE (ne bouge jamais avec zoneWidth), seul son
--- bord droit suit CharacterHandsSlot -- donc ces panneaux s'ELARGISSENT au
--- lieu de se DECALER, restant visuellement sous le modele 3D. Pour un vrai
--- DECALAGE, on les ancre nous-memes sur CharacterFrame + on leur redonne
--- EXPLICITEMENT leur taille native (SetSize) puisqu'on leur retire le 2e
--- point qui la definissait -- sans ça, le retrait du point d'etirement
--- effondre la taille (constate : texte devenu invisible sans ce SetSize).
+-- CharacterStatsPane/TitleManagerPane/EquipmentManagerPane sont nativement etires (pas decales) --
+-- on les ancre nous-memes sur CharacterFrame + SetSize explicite (sinon taille effondree).
 local SIDEBAR_PANES = {
-    -- widthDelta retire de la largeur ; offsetXDelta compense en decalant
-    -- l'ancre TOPRIGHT d'autant vers la gauche -- ensemble, ca fait retrecir
-    -- le panneau par la DROITE (bord gauche fixe) plutot que par la gauche
-    -- (bord droit fixe, 1ere tentative -- avait empire le chevauchement).
+    -- widthDelta + offsetXDelta : retrecit le panneau par la droite (bord gauche fixe)
     { key = "stats", get = function() return CharacterStatsPane end, widthDelta = -40, offsetXDelta = -40 },
     { key = "title", get = function() return PaperDollFrame and PaperDollFrame.TitleManagerPane end },
     { key = "equip", get = function() return PaperDollFrame and PaperDollFrame.EquipmentManagerPane end },
-    -- La liste des sets d'equipement (ScrollBox, boutons Equiper/Enregistrer)
-    -- est un CHILD de EquipmentManagerPane mais avec sa PROPRE ancre native
-    -- independante (confirme /framestack) -- repositionner le pane parent ne
-    -- la deplace pas, meme remede.
+    -- Liste des sets d'equipement : CHILD avec sa propre ancre independante, meme remede
     { key = "equipScroll", get = function()
         local p = PaperDollFrame and PaperDollFrame.EquipmentManagerPane
         return p and p.ScrollBox
@@ -115,12 +85,7 @@ local function RestoreAllPoints(frame, pts)
     for _, p in ipairs(pts) do frame:SetPoint(unpack(p)) end
 end
 
--- Decale un point (deja restaure sur son ancre d'origine) de deltaX pixels en
--- X, sans presumer du type d'ancrage utilise par Blizzard -- evite de devoir
--- connaitre/deviner la logique d'ancrage interne. Une PREMIERE tentative avait
--- casse le panneau de stats en le REDIMENSIONNANT/re-ancrant avec des valeurs
--- en dur (a la SLE) ; le translater tel quel (meme technique que pour les
--- slots) est sans risque car sa taille/son contenu interne ne changent pas.
+-- Decale un point deja restaure de deltaX en X, sans presumer de l'ancrage Blizzard sous-jacent
 local function NudgePointsX(frame, deltaX)
     if not deltaX or deltaX == 0 then return end
     local pts = {}
@@ -138,12 +103,8 @@ local function EnsureBackground()
     return bgTex
 end
 
--- Branche sur background.selectedBG, mirroring CA:Update_BG de SLE (character.lua)
--- Recadre (crop) un atlas sur son ratio d'origine au lieu de l'etirer pour
--- remplir tex:GetSize() -- equivalent d'un CSS "background-size: cover".
--- zoneWidth rend le rectangle du fond arbitrairement large, et un simple
--- SetPoint TOPLEFT/BOTTOMRIGHT etire l'image de façon non-uniforme (deforme
--- visiblement l'atlas "dressingroom-background-*", jugee "tres laide" en jeu).
+-- Recadre un atlas sur son ratio d'origine (equivalent CSS "background-size: cover")
+-- au lieu de l'etirer, ce qui deformait visiblement "dressingroom-background-*"
 local function FitAtlasCover(tex, atlasName)
     local w, h = tex:GetSize()
     local ok, info = pcall(C_Texture.GetAtlasInfo, atlasName)
@@ -162,7 +123,7 @@ local function FitAtlasCover(tex, atlasName)
     end
 end
 
--- mais recadre sur la liste retenue (Covenant/Covenant2 exclus, cf. plan).
+-- Applique le fond choisi (config/classe/arene/personnalise), recadre sur la liste retenue (Covenant/Covenant2 exclus)
 local function ApplyBackgroundTexture(bg, c)
     local sel = c.background.selectedBG
     bg:SetVertexColor(1, 1, 1, 1)
@@ -203,14 +164,7 @@ local function SetDefaultCornersShown(shown)
     end
 end
 
--- Garde de reentrance : CharacterFrame:SetSize() plus bas semble declencher
--- CharacterFrame.UpdateSize en interne, ce qui re-declenche notre propre hook
--- sur UpdateSize (cf. Create()) -> CharacterArmory.ApplyLayout() -> SetSize()
--- -> UpdateSize... -> boucle infinie qui agrandit la fiche a l'infini jusqu'a
--- sortir de l'ecran (constate en jeu). Les points d'entree PUBLICS posent la
--- garde puis delegue a Do*Layout (logique reelle, non gardee) -- DoApplyLayout
--- appelle DoRestoreLayout directement (pas la version publique gardee) sinon
--- le chemin "desactive" ne restaurerait plus rien du tout.
+-- Garde de reentrance : SetSize declenche UpdateSize -> notre hook -> ApplyLayout -> boucle infinie sans elle
 function CharacterArmory.ApplyLayout()
     if applyingLayout then return end
     applyingLayout = true
@@ -246,25 +200,8 @@ function DoApplyLayout()
     end
     layoutApplied = true
 
-    -- Capture de l'offset bouton<->InsetRight EN BOUCLE (pas une seule fois) :
-    -- constate en jeu que GetRight()/GetTop() renvoyaient nil au tout premier
-    -- ApplyLayout (avant que la disposition ne soit resolue), donc la capture
-    -- one-shot echouait silencieusement et les boutons restaient sur leur
-    -- ancre native pour toujours. Sans danger de re-essayer tant que la
-    -- valeur n'est pas encore capturee : le bouton reste sur son ancre
-    -- native (donc suit CharacterFrame 1:1) jusqu'a la 1ere capture reussie,
-    -- et le nudge natif s'annule avec celui d'InsetRight (les deux montent
-    -- de +zoneWidth depuis leur propre baseline), donc l'offset mesure reste
-    -- correct meme capture tardivement, a zoneWidth non nul.
-    -- Meme logique de capture-en-boucle pour l'offset pane<->CharacterFrame
-    -- (bord droit de la fiche) : chaque pane reste sur sa chaine native
-    -- (InsetRight/CharacterFrameInset) jusqu'a la 1ere capture reussie --
-    -- cette chaine bouge deja de +zoneWidth (confirme en jeu), donc la
-    -- difference mesuree reste la vraie baseline meme capturee tard. Taille
-    -- native capturee EN MEME TEMPS (pas une valeur delta comme l'offset --
-    -- si zoneWidth n'est pas 0 a la 1ere capture reussie, la taille figee
-    -- sera legerement plus large que le strict necessaire, sans consequence
-    -- puisqu'on ne cherche plus a "fitter" pile, juste a positionner).
+    -- Capture des offsets en boucle (pas one-shot) : GetRight()/GetTop() peuvent
+    -- renvoyer nil au tout premier ApplyLayout, avant que la disposition soit resolue.
     local frameRight, frameTop = CharacterFrame:GetRight(), CharacterFrame:GetTop()
     if frameRight and frameTop then
         for _, pane in ipairs(SIDEBAR_PANES) do
@@ -294,34 +231,19 @@ function DoApplyLayout()
         end
     end
 
-    -- CharacterHandsSlot est ancre sur CharacterFrameInset:TOPRIGHT (frame
-    -- dont la largeur grandit elle-meme avec HandsSlot, cf. plus bas) -- on
-    -- le decale explicitement de zoneWidth.
+    -- CharacterHandsSlot est ancre sur CharacterFrameInset:TOPRIGHT, on le decale de zoneWidth
     RestoreAllPoints(CharacterHandsSlot, defaultHandsPoints)
     NudgePointsX(CharacterHandsSlot, c.zoneWidth)
     RestoreAllPoints(CharacterMainHandSlot, defaultMainHandPoints)
     NudgePointsX(CharacterMainHandSlot, c.zoneWidth)
-    -- SecondaryHandSlot (bouclier/off-hand, a cote de MainHandSlot en bas) :
-    -- constate en jeu que le decaler EN PLUS de MainHandSlot l'envoie beaucoup
-    -- trop loin -- son ancre par defaut doit deja etre relative a MainHandSlot
-    -- (chainage Blizzard), donc on se contente de la restaurer, SANS la
-    -- re-decaler, pour qu'elle suive MainHandSlot sans cumuler.
+    -- SecondaryHandSlot suit deja MainHandSlot (chainage Blizzard) : pas de re-decalage, sinon cumul
     RestoreAllPoints(CharacterSecondaryHandSlot, defaultSecondaryHandPoints)
     if CharacterFrameInsetRight then
-        -- NE PAS nudger InsetRight ici : mesure en jeu (/aisharmorydebug a 3
-        -- valeurs de zoneWidth) -- son bord droit RESOLU bougeait de 2x
-        -- zoneWidth au lieu de 1x. Cause : CharacterFrameInset (sa reference
-        -- d'ancrage) grandit DEJA tout seul de +zoneWidth (probablement lie a
-        -- CharacterHandsSlot, que l'on decale nous-memes) -- en plus de ca on
-        -- decalait EXPLICITEMENT InsetRight du meme delta, comptant zoneWidth
-        -- deux fois. Simple restauration : InsetRight herite automatiquement
-        -- du bon decalage via la croissance de CharacterFrameInset.
+        -- Ne pas nudger InsetRight : CharacterFrameInset grandit deja de +zoneWidth,
+        -- le decaler en plus comptait zoneWidth deux fois (confirme en jeu)
         RestoreAllPoints(CharacterFrameInsetRight, defaultInsetRightPoints)
 
-        -- Boutons Caracteristiques/Titres/Gestionnaire d'equipement : ancres
-        -- DIRECTEMENT sur InsetRight (offset fige capture au tout premier
-        -- calcul), pas laisses suivre le bord etire de CharacterFrame -- ils
-        -- restent donc juste au-dessus du panneau de stats, immobiles.
+        -- Boutons ancres directement sur InsetRight (offset fige) pour rester immobiles
         for _, name in ipairs(SIDEBAR_TAB_NAMES) do
             local btn = _G[name]
             local off = defaultTabOffsets[name]
@@ -332,16 +254,8 @@ function DoApplyLayout()
         end
     end
 
-    -- Confirme (/aisharmorydebug, numPoints=2) : les 3 panneaux (stats/titres/
-    -- gestionnaire) sont NATIVEMENT etires (TOPLEFT+BOTTOMRIGHT, tous deux
-    -- relatifs a InsetRight) -- leur bord gauche est FIXE, seul leur bord
-    -- droit suit HandsSlot, donc ils S'ELARGISSENT plutot que de se DECALER
-    -- (et restent visuellement sous le modele 3D pour Titres/Gestionnaire,
-    -- qui ne partagent pas la position d'InsetRight). Pour un vrai decalage,
-    -- on les ancre nous-memes sur le bord droit de CharacterFrame -- et comme
-    -- ca leur retire leur 2e point (qui definissait leur taille par
-    -- etirement), on leur redonne EXPLICITEMENT leur taille native via
-    -- SetSize (sinon : invisible, constate en jeu sans ce SetSize).
+    -- Panneaux nativement etires sur InsetRight (bord gauche fixe) : on les ancre sur
+    -- CharacterFrame a la place, avec SetSize explicite (sinon invisibles sans leur 2e point)
     for _, pane in ipairs(SIDEBAR_PANES) do
         local f = pane.get()
         local off, sz = defaultPaneOffset[pane.key], defaultPaneSize[pane.key]
@@ -354,36 +268,19 @@ function DoApplyLayout()
         end
     end
 
-    -- Elargit la fiche d'autant pour ne pas clipper le panneau de stats deplace.
-    -- Clamp defensif : une valeur de frameHeight sauvegardee AVANT le
-    -- resserrement du slider (420-480, cf. SettingsPanel.lua) resterait hors
-    -- bornes tant que l'utilisateur n'a pas retouche le curseur.
+    -- Elargit la fiche pour ne pas clipper le panneau de stats deplace
+    -- Clamp defensif : frameHeight sauvegarde avant le resserrement du slider (420-480)
     local frameH = math.max(420, math.min(480, c.frameHeight or 444))
-    -- NE PAS repositionner CharacterFrame lui-meme : CharacterFrameInset (dont
-    -- HandsSlot/InsetRight dependent tous les deux) est ancre relativement a
-    -- CharacterFrame -- le recentrer aurait fait heriter Inset du meme
-    -- decalage, annulant la moitie du nudge zoneWidth deja verifie correct
-    -- (cf. diagnostic en jeu).
-    -- +40 = marge fixe (PAS une mesure live -- une valeur constante est sans
-    -- risque de feedback loop, contrairement aux tentatives precedentes) :
-    -- une fois le double-comptage d'InsetRight corrige ci-dessus, la mesure
-    -- en jeu (/aisharmorydebug) montre un manque CONSTANT d'environ 16px
-    -- (ne grandit plus avec zoneWidth), donc une marge fixe suffit.
+    -- Ne pas repositionner CharacterFrame : CharacterFrameInset en depend, ca annulerait le nudge
+    -- +40 = marge fixe mesuree en jeu (le manque reste constant, ne grandit pas avec zoneWidth)
     CharacterFrame:SetSize(defaultFrameW + c.zoneWidth + 40, frameH)
-    -- Force le NineSlice (bordure/fond decoratif) a se re-etirer sur la
-    -- nouvelle taille : SetSize seul ne suffit pas toujours a re-tirer les
-    -- textures de bordure, ce qui laissait le panneau de stats deplace
-    -- deborder visuellement hors du fond noir de la fiche.
+    -- Force le NineSlice a se re-etirer (SetSize seul ne suffit pas toujours)
     if CharacterFrame.NineSlice and CharacterFrame.NineSlice.Layout then
         pcall(CharacterFrame.NineSlice.Layout, CharacterFrame.NineSlice)
     end
 
-    -- 3 points d'ancrage distincts, PAS un simple
-    -- TOPLEFT/BOTTOMRIGHT sur MainHandSlot : MainHandSlot est au bas-CENTRE
-    -- (a cote du bouclier), pas sur la colonne de droite -- son X est donc
-    -- bien plus a gauche que la vraie colonne (HandsSlot, en haut de cette
-    -- colonne). Utiliser MainHandSlot pour le bord DROIT du fond le faisait
-    -- s'arreter bien avant la colonne, meme a zoneWidth=0.
+    -- 3 points distincts (pas TOPLEFT/BOTTOMRIGHT sur MainHandSlot) : MainHandSlot est
+    -- au bas-centre, pas sur la colonne de droite -- son X est trop a gauche pour le bord droit
     local bg = EnsureBackground()
     bg:ClearAllPoints()
     bg:SetPoint("TOPLEFT", CharacterHeadSlot, -6, 6)
@@ -392,11 +289,7 @@ function DoApplyLayout()
     ApplyBackgroundTexture(bg, c)
     bg:Show()
 
-    -- Le modele occupe TOUT le rectangle du fond (et pas seulement sa hauteur,
-    -- comme avant) : sa largeur restait figee a sa taille d'origine (~231px)
-    -- meme quand zoneWidth agrandissait le fond, donc son centre calcule sur
-    -- le fond ne correspondait plus a son propre centre visuel -- d'ou un
-    -- perso non centre / partiellement sous la colonne gauche.
+    -- Le modele occupe tout le rectangle du fond (pas juste sa hauteur, sinon perso non centre)
     CharacterModelScene:ClearAllPoints()
     CharacterModelScene:SetAllPoints(bg)
     CharacterModelScene:SetScale(c.modelScale or 1.0)
@@ -440,21 +333,8 @@ function DoRestoreLayout()
     SetDefaultCornersShown(true)
 end
 
-------------------------------------------------------------------------
--- NIVEAU D'OBJET GLOBAL (natif Blizzard) : le texte agrege affiche par
--- CharacterStatsPane juste au-dessus de "Caracteristiques" -- distinct du
--- ilvl PAR OBJET affiche sur chaque icone d'equipement (cf. ApplyIlvlTextConfig
--- plus bas, un tout autre element). Desactive par defaut (enabled=false) :
--- ne touche rien tant que l'utilisateur ne l'active pas explicitement.
-------------------------------------------------------------------------
--- Confirme via /framestack (2026-08-29) : CharacterStatsPane.ItemLevelFrame
--- n'a PAS de champ nomme ".Value" -- le texte est une region ANONYME
--- (affichee "ItemLevelFrame.1ae423cb2a0" dans le framestack, a cote de
--- ".Background" et ".rightGrad" qui sont des textures). On la retrouve en
--- filtrant GetRegions() par type FontString ; au cas ou elle serait en fait
--- nichee dans un frame enfant plutot qu'une region directe, on descend aussi
--- recursivement dans GetChildren() (profondeur limitee, structure Blizzard
--- simple).
+-- NIVEAU D'OBJET GLOBAL (natif, CharacterStatsPane) : region FontString anonyme,
+-- trouvee via GetRegions()/GetChildren(). Desactive par defaut.
 local function FindFontStringDeep(frame, depth)
     if not frame or depth > 2 then return nil end
     for _, region in ipairs({ frame:GetRegions() }) do
@@ -469,15 +349,8 @@ local function FindFontStringDeep(frame, depth)
     return nil
 end
 
--- PAS de cache ici (contrairement a une 1ere version) : confirme en jeu qu'avec
--- certains addons de skin tiers actifs, ItemLevelFrame peut contenir DEUX
--- FontStrings simultanement : ".Value" natif (masque, shown=false, reecrit
--- par l'addon tiers) et une AUTRE region anonyme creee/geree par cet addon
--- (visible, shown=true, c'est CELLE-LA que le joueur voit reellement).
--- Prendre ".Value" en priorite visait donc la mauvaise region -- il faut
--- choisir la FontString reellement VISIBLE parmi toutes celles trouvees,
--- pas la premiere/la nommee. Pas de cache : cet etat peut changer selon
--- l'ordre de chargement des addons de skin.
+-- Pas de cache : avec des addons de skin tiers, plusieurs FontStrings peuvent coexister
+-- (natif masque + region tierce visible) -- on prend celle reellement IsShown(), pas la 1ere.
 local warnedGlobalIlvlMissing = false
 local function GetGlobalIlvlFontString()
     local host = CharacterStatsPane and CharacterStatsPane.ItemLevelFrame
@@ -509,9 +382,7 @@ local function ApplyGlobalIlvlConfig()
         local curFont, curSize, curFlags = fs:GetFont()
         fs:SetFont(g.font or curFont, g.fontSize or curSize, g.fontStyle or curFlags)
     end)
-    -- "Couleur de specialisation" : force la couleur configuree dans
-    -- Couleurs > Cercle de Puissance (Colors.Get, meme source que le cercle
-    -- de ressource) au lieu du color picker propre a cette section.
+    -- useSpecColor : couleur de Couleurs > Cercle de Puissance au lieu du color picker local
     if g.useSpecColor then
         local Colors = ns.Modules.Colors
         local color = Colors and Colors.Get and Colors.Get("powercircle")
@@ -523,11 +394,7 @@ local function ApplyGlobalIlvlConfig()
     end
 end
 
-------------------------------------------------------------------------
--- TEXTES/GEOMETRIE : police + taille + contour + offsets X/Y, appliques
--- globalement (pas a chaque scan de slot), mirroring Update_ItemLevel /
--- Update_Enchant / Update_Durability / Update_Gems de SLE (character.lua).
-------------------------------------------------------------------------
+-- TEXTES/GEOMETRIE : police + taille + contour + offsets X/Y, appliques globalement
 local function ApplyIlvlTextConfig()
     local c = cfg()
     local font = c.ilvl.font or ns.Media.fontGui
@@ -602,19 +469,8 @@ local function ApplyGemConfig()
     end
 end
 
-------------------------------------------------------------------------
--- ENCHANT "REEL" (avec icone de qualite pro) : Blizzard n'expose pas ce texte
--- via le hook PaperDollItemSlotButton_Update (il ne donne que le texte court
--- deja raccourci). Deux techniques combinees, la plus fiable en premier :
---   1) C_TooltipInfo.GetInventoryItem : donnees structurees par TYPE de
---      ligne (Enum.TooltipDataLineType.ItemEnchantment), insensible a la
---      langue/formulation -- plus robuste que le pattern-matching.
---   2) Repli : scan d'un tooltip cache + pattern ENCHANTED_TOOLTIP_LINE --
---      au cas ou l'API structuree ne renverrait pas cette ligne pour une
---      raison quelconque.
--- Ne rescanne que sur changement d'equipement/enchant (pas a chaque appel du
--- hook, cf. cout d'un scan de tooltip).
-------------------------------------------------------------------------
+-- ENCHANT "REEL" (icone qualite pro) : C_TooltipInfo.GetInventoryItem en priorite,
+-- repli sur pattern ENCHANTED_TOOLTIP_LINE. Rescan seulement au changement d'equipement.
 local scanTT = CreateFrame("GameTooltip", "AishCharArmoryScanTT", nil, "GameTooltipTemplate")
 scanTT:SetOwner(WorldFrame, "ANCHOR_NONE")
 
@@ -649,8 +505,7 @@ local function ScanRealEnchantText(slotID)
     return nil
 end
 
--- Extrait uniquement l'icone de qualite (markup |A...|a ou |T...|t) d'un
--- texte d'enchant "reel", pour l'option "icone seulement".
+-- Extrait l'icone de qualite (markup |A...|a ou |T...|t) pour l'option "icone seulement"
 local function ExtractQualityIcon(enchantText)
     if not enchantText then return nil end
     return enchantText:match("(|A.-|a)") or enchantText:match("(|T.-|t)")
@@ -667,10 +522,7 @@ local function RescanEnchants()
     end
 end
 
-------------------------------------------------------------------------
--- EMPLACEMENTS : recoloration ilvl, gemmes (tooltip), durabilite, alerte
--- (barre laterale/basse) + quad "degrade" derriere l'icone.
-------------------------------------------------------------------------
+-- EMPLACEMENTS : recoloration ilvl, gemmes (tooltip), durabilite, alerte (barre) + quad degrade
 local function GetSlotNameFromButton(button)
     local name = button.GetName and button:GetName()
     if not name or name:sub(1, 9) ~= "Character" then return nil end
@@ -717,9 +569,7 @@ local function EnsureGemHitboxes(button)
     end
 end
 
--- Cree la barre d'alerte (cote/bas selon le type de slot) + le quad "degrade" --
--- geometrie statique par slot (calculee une fois), seules couleur/visibilite
--- varient ensuite a chaque mise a jour.
+-- Barre d'alerte + quad degrade : geometrie statique par slot, seules couleur/visibilite changent
 local function EnsureOverlayWidgets(button, slotName)
     if button.AISH_Overlay then return end
     button.AISH_Overlay = true
@@ -727,23 +577,15 @@ local function EnsureOverlayWidgets(button, slotName)
     local dir = GEAR_DIRECTION[slotName]
     local oppDir = (dir == "LEFT") and "RIGHT" or "LEFT"
 
-    -- SetFont immediat obligatoire : la 1ere ouverture de la fiche declenche
-    -- PaperDollItemSlotButton_Update (donc UpdateSlotOverlay -> SetText) AVANT
-    -- qu'ApplyDurabilityTextConfig ait pu tourner -- un FontString sans police
-    -- jamais definie plante au premier SetText ("Font not set").
+    -- SetFont immediat obligatoire : sans police definie, le 1er SetText plante ("Font not set")
     local dur = button:CreateFontString(nil, "OVERLAY")
     dur:SetFont(ns.Media.fontGui, 10, "OUTLINE")
     button.AISH_DurabilityText = dur
 
-    -- Barre d'alerte : pleine largeur en bas pour les armes, pleine hauteur
-    -- sur le cote oppose a la colonne pour le reste (mirroring
-    -- character.lua:75-93 de SLE -- WarningTexture y est deja une simple
-    -- texture blanche recoloree, donc SetColorTexture est fidele, pas une
-    -- simplification).
+    -- Barre d'alerte : pleine largeur en bas pour les armes, pleine hauteur cote oppose sinon
     local warn = button:CreateTexture(nil, "OVERLAY")
     warn:SetColorTexture(1, 1, 1, 1)
     warn:ClearAllPoints()
-    -- -2 largeur / -4 hauteur (demande) : les barres depassaient legerement.
     if slotName == "MainHandSlot" or slotName == "SecondaryHandSlot" then
         warn:SetSize(39, 4)
         warn:SetPoint("TOP", button, "BOTTOM", 0, 0)
@@ -766,7 +608,7 @@ local function EnsureOverlayWidgets(button, slotName)
     end)
     warnHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Quad "Degrade" derriere l'icone (mirroring character.lua:55-69 de SLE)
+    -- Quad "degrade" derriere l'icone
     local grad = button:CreateTexture(nil, "BACKGROUND")
     grad:SetTexture(GRADIENT_TEXTURE)
     grad:ClearAllPoints()
@@ -902,9 +744,7 @@ local function UpdateSlotOverlay(button, slotName)
     end
 end
 
-------------------------------------------------------------------------
 -- TRANSMOGRIFICATION : icone + glow quand l'apparence differe de l'item de base
-------------------------------------------------------------------------
 local function EnsureTransmogButton(button)
     if button.AISH_Transmog then return button.AISH_Transmog end
     local btn = CreateFrame("Button", nil, button)
@@ -975,9 +815,7 @@ local function UpdateTransmogIndicator(button, slotName)
     end
 end
 
-------------------------------------------------------------------------
 -- HOOK COMMUN + INITIALISATION
-------------------------------------------------------------------------
 local function OnPaperDollSlotUpdate(button)
     local slotName = button and GetSlotNameFromButton(button)
     if not slotName or not GEAR_LIST_SET[slotName] then return end
@@ -986,11 +824,7 @@ local function OnPaperDollSlotUpdate(button)
 end
 
 function CharacterArmory.Update()
-    -- Reassert la disposition a chaque rafraichissement (pas seulement au
-    -- premier OnShow) : certains changements d'equipement (ex: passage
-    -- 1H+bouclier <-> 2M) declenchent une re-disposition interne de Blizzard
-    -- sur les slots d'arme qui peut annuler notre decalage -- idempotent et
-    -- peu couteux (juste des SetPoint), donc sans risque a rejouer souvent.
+    -- Reassert a chaque refresh (pas juste OnShow) : un changement d'arme peut annuler le decalage
     CharacterArmory.ApplyLayout()
     for _, slotName in ipairs(GEAR_LIST) do
         local button = _G["Character" .. slotName]
@@ -1015,26 +849,15 @@ function CharacterArmory.Create()
 
     CharacterFrame:HookScript("OnShow", function()
         CharacterArmory.ApplyLayout()
-        -- Reassert une frame plus tard : au cas ou une routine Blizzard
-        -- asynchrone (C_Timer/RunNextFrame) touche la disposition des slots
-        -- APRES notre hook OnShow synchrone.
-        C_Timer.After(0, CharacterArmory.ApplyLayout)
-        -- Filet de securite supplementaire pour le "reskin" (couleurs ilvl/
-        -- degrade) : les evenements GET_ITEM_INFO_RECEIVED / PLAYER_AVG_ITEM_
-        -- LEVEL_UPDATE couvrent la plupart des cas, mais un refresh differe
-        -- direct sur l'ouverture evite de dependre uniquement du bon
-        -- declenchement/timing de ces evenements.
+        C_Timer.After(0, CharacterArmory.ApplyLayout) -- au cas ou une routine Blizzard async touche apres
+        -- Filet de securite : refresh differe du reskin sans dependre des seuls events GET_ITEM_INFO_RECEIVED/PLAYER_AVG_ITEM_LEVEL_UPDATE
         if CharacterArmory.Update then
             C_Timer.After(0.5, function()
                 if CharacterFrame:IsShown() then CharacterArmory.Update() end
             end)
         end
     end)
-    -- Hook egalement CharacterFrame.UpdateSize pour reappliquer notre taille
-    -- APRES que Blizzard ait fait tourner sa propre logique de
-    -- redimensionnement interne (bordure/NineSlice) -- filet de securite
-    -- ici : si UpdateSize tourne (equipement, changement de
-    -- sous-panneau...) apres notre propre ApplyLayout, on se re-applique.
+    -- Hook UpdateSize : re-applique notre taille si Blizzard redimensionne apres notre ApplyLayout
     if CharacterFrame.UpdateSize then
         hooksecurefunc(CharacterFrame, "UpdateSize", function()
             if CharacterFrame:IsShown() then CharacterArmory.ApplyLayout() end
@@ -1047,22 +870,11 @@ function CharacterArmory.Create()
     eventFrame:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
     eventFrame:RegisterEvent("SOCKET_INFO_UPDATE")
     eventFrame:RegisterEvent("ENCHANT_SPELL_COMPLETED")
-    -- Un item tout juste equipe n'a pas forcement encore ses donnees en
-    -- cache cote client : C_Item.GetItemInfo(itemLink) renvoie alors ilvl=nil
-    -- (GetItemLevelColor -> return nil, colorType="GRADIENT" n'applique donc
-    -- AUCUNE couleur), laissant apparaitre la couleur de RARETE native de
-    -- Blizzard en dessous jusqu'au prochain refresh -- constate en jeu : le
-    -- degrade "vs niveau moyen" ne s'appliquait pas tout de suite a
-    -- l'equipement d'un objet. GET_ITEM_INFO_RECEIVED se declenche des que
-    -- ces donnees arrivent, on re-applique alors.
+    -- GET_ITEM_INFO_RECEIVED : un item tout juste equipe peut avoir ilvl=nil un instant (cache client pas encore prêt)
     eventFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
-    -- Meme souci pour GetAverageItemLevel() lui-meme : peut renvoyer 0 quelques
-    -- instants apres un /reload/connexion, independamment du cache des objets
-    -- -- PLAYER_AVG_ITEM_LEVEL_UPDATE se declenche quand Blizzard le recalcule.
+    -- PLAYER_AVG_ITEM_LEVEL_UPDATE : GetAverageItemLevel() peut renvoyer 0 juste apres /reload
     eventFrame:RegisterEvent("PLAYER_AVG_ITEM_LEVEL_UPDATE")
-    -- Rafraichissement de secours best-effort : le nom de cet evenement n'est
-    -- pas garanti selon la version client, la mise a jour principale repose
-    -- deja sur le hook PaperDollItemSlotButton_Update + PLAYER_EQUIPMENT_CHANGED.
+    -- Best-effort, nom non garanti selon version client
     pcall(eventFrame.RegisterEvent, eventFrame, "TRANSMOG_COLLECTION_UPDATED")
     eventFrame:SetScript("OnEvent", function(_, event)
         if event == "PLAYER_EQUIPMENT_CHANGED" or event == "ENCHANT_SPELL_COMPLETED" then
@@ -1079,18 +891,11 @@ end
 function CharacterArmory.ApplySettings()
     if not hooksInstalled then CharacterArmory.Create() end
     if CharacterFrame and CharacterFrame:IsShown() then
-        -- Update() reapplique deja la disposition en premiere etape.
-        CharacterArmory.Update()
+        CharacterArmory.Update() -- reapplique deja la disposition en premiere etape
     end
 end
 
-------------------------------------------------------------------------
--- DEBUG TEMPORAIRE : /aisharmorydebug -- dump l'etat interne (variables
--- locales a ce fichier, donc invisibles depuis un simple /run exterieur) +
--- la position REELLE en jeu des boutons/InsetRight/CharacterFrame, pour
--- diagnostiquer pourquoi texte/boutons restent mal places malgre le nudge.
--- A retirer une fois le probleme resolu.
-------------------------------------------------------------------------
+-- DEBUG TEMPORAIRE : /aisharmorydebug -- dump l'etat interne + positions reelles en jeu
 SLASH_AISHARMORYDEBUG1 = "/aisharmorydebug"
 SlashCmdList["AISHARMORYDEBUG"] = function()
     local c = cfg()
@@ -1134,9 +939,7 @@ SlashCmdList["AISHARMORYDEBUG"] = function()
         end
     end
 
-    -- Niveau d'objet global : dump de toutes les regions/enfants trouves sous
-    -- CharacterStatsPane.ItemLevelFrame (type, texte, police) pour diagnostiquer
-    -- pourquoi le reglage reste sans effet visible malgre une region trouvee.
+    -- Dump des regions/enfants sous CharacterStatsPane.ItemLevelFrame
     print("  --- Niveau d'objet global ---")
     print("  CharacterFrame shown=" .. tostring(CharacterFrame and CharacterFrame:IsShown()))
     local g = c.globalIlvl

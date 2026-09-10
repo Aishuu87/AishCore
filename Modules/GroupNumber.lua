@@ -1,47 +1,23 @@
--- Modules/GroupNumber.lua : affiche le numero de sous-groupe de raid en
--- overlay -- RAID uniquement, jamais en groupe simple ni solo.
---
--- Deux modes, selon ce qui est detecte a l'ecran :
---   1) ElvUI en layout raid "par groupe" detecte (conteneurs nommes
---      ElvUF_Raid<N>Group<M>, confirme en jeu via /framestack) -> UNE
---      vignette PAR SOUS-GROUPE ACTUELLEMENT AFFICHE, ancree sur son
---      conteneur ElvUI. 6 groupes crees = 6 vignettes numerotees 1-6.
---   2) Sinon (pas ElvUI, ou ElvUI pas dans ce layout) -> repli sur le
---      comportement d'origine : UNE vignette flottante a position fixe
---      (UIParent + decalage) montrant le sous-groupe DU JOUEUR uniquement.
---
--- Meme pattern visuel que le badge de niveau de XPBar.lua
--- (CreateXPBar_Badge) : une vignette (texture) + un texte centre par-dessus,
--- tous deux positionnables independamment (memes reglages cfg.badgeX/Y et
--- cfg.textOffsetX/Y reutilises pour les DEUX modes -- en mode ElvUI, ils
--- deviennent un decalage relatif au conteneur au lieu d'une position ecran
--- absolue).
---
--- Module autonome (pas de dependance a UnitBars.lua), sur le modele de
--- Visibility.lua : pas de fonction Init() centrale, s'auto-enregistre a son
--- propre chargement, scan defensif de _G pour les frames tierces (meme
--- approche que Visibility.lua pour ses candidats ElvUI).
+-- Modules/GroupNumber.lua : numero de sous-groupe de raid en overlay (raid uniquement).
+-- Mode ElvUI (conteneurs ElvUF_Raid<N>Group<M>) : une vignette par sous-groupe affiche.
+-- Sinon : repli sur une vignette flottante unique pour le sous-groupe du joueur.
+-- Module autonome, s'auto-enregistre au chargement (pas d'Init central, cf. Visibility.lua).
 local addonName, ns = ...
 
 ns.Modules = ns.Modules or {}
 local GroupNumber = {}
 ns.Modules.GroupNumber = GroupNumber
 
-local TEX_GRUNGE = "Interface\\AddOns\\AishuuMedia\\grunge_spot1.png"
+local TEX_GRUNGE = "Interface\\AddOns\\AishCore\\Media\\XPBar\\grunge_spot1.png"
 
 -- Badge "solo" (mode repli, position ecran fixe)
 local soloBadge, soloBadgeTex, soloNumText, soloNumTextSlug
 
--- Pool de badges "par groupe" (mode ElvUI), indexe par NOM du conteneur --
--- pas par numero de sous-groupe : au cas (rare) ou plusieurs conteneurs
--- ElvUF_RaidN existeraient en parallele (layout par role par ex.), chacun
--- garde son propre badge meme si deux conteneurs partagent le meme numero
--- de sous-groupe.
+-- Pool de badges "par groupe", indexe par NOM du conteneur (pas par numero de sous-groupe,
+-- au cas ou plusieurs conteneurs partageraient le meme numero)
 local groupBadges = {}  -- [containerName] = { badge=, badgeTex=, numText= }
 
--- Iteration + UnitIsUnit plutot que UnitInRaid(unit) directement : evite
--- toute ambiguite sur l'indexation (0-based vs 1-based selon les sources/
--- versions client) -- on matche l'unite raidN qui EST le joueur, point.
+-- UnitIsUnit plutot que UnitInRaid(unit) : evite l'ambiguite d'indexation 0/1-based
 local function GetPlayerSubgroup()
     if not IsInRaid() then return nil end
     for i = 1, GetNumGroupMembers() do
@@ -53,11 +29,7 @@ local function GetPlayerSubgroup()
     return nil
 end
 
--- Un conteneur de sous-groupe ElvUI peut rester "shown" structurellement
--- (element de layout toujours present) meme hors raid ou pour un sous-groupe
--- vide -- seuls ses boutons-membres enfants refletent la vraie composition.
--- Confirme en jeu : sans ce filtre, les vignettes restaient affichees hors
--- raid alors qu'aucune frame de raid n'etait visible.
+-- Un conteneur ElvUI peut rester "shown" hors raid : seuls ses boutons-membres reflètent la vraie composition
 local function ContainerHasVisibleMember(containerFrame)
     for _, child in ipairs({ containerFrame:GetChildren() }) do
         if child.IsVisible and child:IsVisible() then
@@ -67,29 +39,17 @@ local function ContainerHasVisibleMember(containerFrame)
     return false
 end
 
--- Scanne _G pour les conteneurs de sous-groupe ElvUI actuellement affiches
--- ET reellement peuples. Motif confirme en jeu via /framestack :
--- "ElvUF_Raid<N>Group<M>" (le conteneur du sous-groupe M dans le
--- raid-conteneur N d'ElvUI), PAS le suffixe "...UnitButtonK" (les boutons
--- individuels, un cran plus bas).
+-- Scanne _G pour les conteneurs ElvUF_Raid<N>Group<M> affiches et reellement peuples
 local function ScanElvUIGroupContainers()
     local groups = {}
-    -- Jamais de vignette hors raid, quoi qu'en disent les conteneurs ElvUI
-    -- (garde-fou principal -- cf. ContainerHasVisibleMember pour le filtre
-    -- plus fin par sous-groupe DANS un raid actif).
-    if not IsInRaid() then return groups end
+    if not IsInRaid() then return groups end -- jamais de vignette hors raid
     for name in pairs(_G) do
         if type(name) == "string" then
             local subgroup = name:match("^ElvUF_Raid%d+Group(%d+)$")
             if subgroup then
                 local frame = _G[name]
-                -- IsVisible() (pas IsShown()) : IsShown() ne reflete que
-                -- l'etat local du conteneur -- il peut rester "shown" meme
-                -- si tout un parent (le profil de taille de raid non actif)
-                -- est cache. IsVisible() verifie toute la chaine de parents,
-                -- donc ignore les conteneurs "fantomes" des presets ElvUI
-                -- non utilises (confirme via /aishgroupdebug : 3 conteneurs
-                -- au meme rect exact pour chaque sous-groupe).
+                -- IsVisible() (pas IsShown()) : verifie toute la chaine de parents,
+                -- ignore les conteneurs fantomes des presets ElvUI non utilises
                 if frame and frame.IsVisible and frame:IsVisible() and ContainerHasVisibleMember(frame) then
                     groups[#groups + 1] = { name = name, frame = frame, subgroup = tonumber(subgroup) }
                 end
@@ -99,9 +59,7 @@ local function ScanElvUIGroupContainers()
     return groups
 end
 
--- Debug : /aishgroupdebug liste tous les conteneurs actuellement detectes
--- (nom, sous-groupe, rect ecran) -- pour diagnostiquer le bug de vignettes
--- "1" empilees sans deviner a l'aveugle.
+-- Debug : /aishgroupdebug liste tous les conteneurs detectes (nom, sous-groupe, rect)
 SLASH_AISHGROUPDEBUG1 = "/aishgroupdebug"
 SlashCmdList["AISHGROUPDEBUG"] = function()
     local groups = ScanElvUIGroupContainers()
@@ -116,8 +74,7 @@ SlashCmdList["AISHGROUPDEBUG"] = function()
     end
 end
 
--- Factory vignette+texte, reutilisee pour le badge solo ET chaque badge du
--- pool -- meme structure, juste construite a la demande plutot qu'en singleton.
+-- Factory vignette+texte, reutilisee pour le badge solo et chaque badge du pool
 local function CreateBadge(name)
     local badge = CreateFrame("Frame", name, UIParent)
     badge:SetFrameStrata("MEDIUM")
@@ -125,10 +82,7 @@ local function CreateBadge(name)
     local badgeTex = badge:CreateTexture(nil, "BACKGROUND")
     badgeTex:SetAllPoints()
     badgeTex:SetTexture(TEX_GRUNGE)
-    -- Rotation aleatoire figee a la creation (purement esthetique) : evite
-    -- que toutes les vignettes (plusieurs a la fois en mode ElvUI) aient
-    -- exactement le meme rendu -- appliquee UNE fois, pas a chaque refresh.
-    badgeTex:SetRotation(math.rad(math.random(0, 359)))
+    badgeTex:SetRotation(math.rad(math.random(0, 359))) -- rotation esthetique figee, evite le rendu identique
 
     local numText = badge:CreateFontString(nil, "OVERLAY")
     numText:SetJustifyH("CENTER")

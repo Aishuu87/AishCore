@@ -1,6 +1,4 @@
--- AishUIAura/Features/Auras/Cooldowns.lua
--- Layouts Vanguard + Sparte + Banner (barres latérales)
-------------------------------------------------------------------------
+-- Cooldowns.lua : layouts Vanguard + Sparte + Banner (barres latérales)
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 local Cooldowns = {}
@@ -8,8 +6,7 @@ ns.RegisterRender("circlebars", Cooldowns)
 local CreateFrame, math, pcall = CreateFrame, math, pcall
 local DARK, TEXCOORD = 14/255, 0.07
 
--- Forward declaration : HideRowModels est defini plus bas mais reference par
--- les CreateXxxRow pour le callback _aishHideCleanup.
+-- Forward declaration : reference par les CreateXxxRow pour _aishHideCleanup
 local HideRowModels
 
 local function Dims()
@@ -21,17 +18,12 @@ end
 
 local function MakeIcon(parent, w, h, cfg)
     local ib = CreateFrame("Button", nil, parent); ib:SetSize(w, h)
-    -- Insets négatifs : élargit légèrement la zone de survol au-delà du cadre
-    -- visuel pour absorber les écarts d'arrondi pixel entre ib et le Cooldown
-    -- superposé (cd), qui pouvaient laisser une fine bande (1-2px) sur un bord
-    -- comme seule zone réellement réactive au tooltip.
+    -- Insets négatifs : élargit la zone de survol pour éviter une fine bande morte au tooltip
     ib:SetHitRectInsets(-1, -1, -1, -1)
     ib:SetScript("OnEnter", ns.AuraIconOnEnter)
     ib:SetScript("OnLeave", ns.AuraIconOnLeave)
     local icon = ib:CreateTexture(nil, "ARTWORK"); icon:SetAllPoints()
-    -- Crop centré : recadre verticalement si le frame est plus large que haut
-    -- (ex. 28×19 par défaut) pour ne pas étirer l'icône carrée.
-    -- Inverse pour un frame plus haut que large. Carré = trim standard.
+    -- Crop centré selon le ratio du frame pour ne pas étirer l'icône carrée
     do
         local usable = 1 - 2 * TEXCOORD
         if w > h then
@@ -84,11 +76,7 @@ local function CreateSpark(bar, cfg)
     if not cfg.sparkEnabled then return nil end
     local s = bar:CreateTexture(nil, "OVERLAY", nil, 6)
     local st = cfg.sparkTexture
-    -- Atlas support (même pattern que Renders/Debuffs.lua) : si la clé commence par
-    -- "atlas:", on appelle SetAtlas avec le nom de l'atlas. C'est indispensable pour
-    -- le spark "honorsystem-bar-spark" qui est une atlas Blizzard, pas une texture LSM.
-    -- Sans ça, ResolveBarTexFromKey retombe sur la texture par défaut (bar générique)
-    -- agrandie à la taille du spark → rendu dégueulasse.
+    -- Prefixe "atlas:" = atlas Blizzard (ex. honorsystem-bar-spark), pas une texture LSM
     if st and st:find("^atlas:") then
         pcall(function() s:SetAtlas(st:sub(7)) end)
     elseif st and st ~= "" then
@@ -101,9 +89,7 @@ local function CreateSpark(bar, cfg)
     local r, g, b = ns.sparkColor[1], ns.sparkColor[2], ns.sparkColor[3]
     local userOverride = cfg.sparkColorR ~= nil
     if userOverride then r, g, b = cfg.sparkColorR, cfg.sparkColorG or 0.5, cfg.sparkColorB or 0.5 end
-    -- CRITICAL : SetVertexColor sur atlas coloré = multiplication des canaux avec
-    -- la teinte native (le honor-spark est jaune-doré nativement). Il faut désaturer
-    -- l'atlas avant pour que la couleur demandée soit fidèle.
+    -- Désature l'atlas avant teinte, sinon SetVertexColor se multiplie avec sa couleur native
     if userOverride or cfg.sparkGradient then
         pcall(function() s:SetDesaturated(true) end)
     end
@@ -138,14 +124,12 @@ end
 
 local function CreateVanguardRow(cont, i, cfg)
     local bw, bh, iw, ih, gp = Dims()
-    local iconR = (cfg.iconPos or "RIGHT") == "RIGHT"; local rev = cfg.reverse or false
+    -- Le sens de remplissage suit toujours le cote de l'icone (cfg.iconPos), jamais cfg.reverse
+    local iconR = (cfg.iconPos or "RIGHT") == "RIGHT"; local rev = iconR
     local row = CreateFrame("Frame", "AishFVR"..i, cont); row:SetSize(iw + gp + bw, ih)
     local ib, icon, cd = MakeIcon(row, iw, ih, cfg)
     local wr, bar, spark = MakeBarWrap(row, bw, bh, rev, cfg)
-    -- ANCRAGE adapte pour l'animation pop : le wrap est ancre cote icone, ce qui
-    -- permet a SetWidth(0→barW) de deployer la barre depuis l'icone vers l'exterieur.
-    --   - Icone a droite : ib ancre RIGHT du row, wrap ancre RIGHT a gauche de l'icone
-    --   - Icone a gauche : ib ancre LEFT du row, wrap ancre LEFT a droite de l'icone
+    -- Wrap ancre cote icone pour que l'anim pop deploie la barre depuis l'icone vers l'exterieur
     if iconR then
         ib:SetPoint("RIGHT")
         wr:SetPoint("RIGHT", ib, "LEFT", -gp, 0)
@@ -154,9 +138,7 @@ local function CreateVanguardRow(cont, i, cfg)
         wr:SetPoint("LEFT", ib, "RIGHT", gp, 0)
     end
     row:Hide(); row.iconBtn=ib; row.icon=icon; row.iconCD=cd; row.bar=bar; row.wrap=wr; row.spark=spark; row._reverse=rev
-    -- Callback de cleanup FX3D appele par DeferHideRow juste avant row:Hide().
-    -- Cache les PlayerModels qui ne suivent pas toujours Hide() de leur parent
-    -- (quirk Blizzard). Necessaire au decochage d'un sort en cours de tracking.
+    -- Cleanup FX3D avant row:Hide() : les PlayerModels ne suivent pas toujours le Hide() du parent
     row._aishHideCleanup = function() HideRowModels(row) end
     return row
 end
@@ -176,9 +158,7 @@ end
 
 local function CreateBannerRow(cont, i, cfg)
     local bw, bh, iw, ih, gp = Dims()
-    -- Banner reutilise normalement iw comme largeur de barre (barre = largeur
-    -- icone) : si l'icone est masquee (hideIcon, iw=0), retombe sur bw pour
-    -- ne pas ecraser la barre a largeur nulle.
+    -- Banner reutilise iw comme largeur de barre ; retombe sur bw si icone masquee (iw=0)
     local barW = cfg.hideIcon and bw or iw
     local row = CreateFrame("Frame", "AishFBR"..i, cont); row:SetSize(barW, ih + gp + bh)
     local ib, icon, cd = MakeIcon(row, iw, ih, cfg); ib:SetPoint("TOP")
@@ -189,9 +169,6 @@ local function CreateBannerRow(cont, i, cfg)
     return row
 end
 
-------------------------------------------------------------------------
--- 3D MODELS
-------------------------------------------------------------------------
 -- Scratch tables réutilisées pour ShowXxxModel (évite alloc par aura par scan si fx3d on)
 local _iconModelCfg = {}
 local _barModelCfg = {}
@@ -199,11 +176,7 @@ local _sparkModelCfg = {}
 local _fill2DCfg = {}
 local _overlayCfg = {}
 
--- Helpers hoist pour HideRowModels (évitent 3 closures pcall par row par scan)
--- Note : on NE cache PAS les Fill 2D ici. ApplyBarModels gere Show/Hide
--- des Fill 2D selon le mode du sort. Si on les cachait ici, on aurait une
--- fenetre Hide -> Show entre 2 scans pendant laquelle UpdateFill2DPart ne
--- tourne pas, et la texture peut etre figee a une largeur incorrecte.
+-- Helpers hoist pour HideRowModels. Ne cache pas les Fill 2D : ApplyBarModels gere leur Show/Hide
 local function _HideBarSpark(fx, wrap)
     fx:Hide(wrap, "bar")
     fx:Hide(wrap, "spark")
@@ -297,9 +270,6 @@ HideRowModels = function(row)
     if row.wrapR then pcall(_HideBarSpark, ns.SpellFX, row.wrapR) end
 end
 
-------------------------------------------------------------------------
--- INIT
-------------------------------------------------------------------------
 function Cooldowns:Init()
     local cfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
     if not ns.db or (not ns.db.circlebarsEnabled) then return end
@@ -312,9 +282,7 @@ function Cooldowns:Init()
     local bw, bh, iw, ih, gp, rg = Dims()
     local rowW, rowH
     if layout == "side_compact" then rowW = bw*2+iw+gp*2; rowH = ih
-    -- side_banner reutilise iw comme largeur de barre (barre = largeur icone,
-    -- cf. CreateBannerRow) : si l'icone est masquee (hideIcon, iw=0), retombe
-    -- sur bw pour ne pas ecraser le container a largeur nulle.
+    -- side_banner reutilise iw comme largeur (cf. CreateBannerRow), retombe sur bw si icone masquee
     elseif layout == "side_banner" then rowW = (cfg.hideIcon and bw or iw); rowH = ih + gp + bh
     else rowW = iw + gp + bw; rowH = ih end
     local growth = cfg.growth or "DOWN"
@@ -324,14 +292,7 @@ function Cooldowns:Init()
     if isH then cont:SetSize(maxBars * (rowW + rg), rowH)
     else cont:SetSize(rowW, maxBars * (rowH + rg)) end
     cont:SetFrameStrata("MEDIUM"); cont:SetMovable(true); cont:SetClampedToScreen(true); _addon.EnableMouseOnlyOnAlt(cont)
-    -- SetPropagateMouseClicks est PROTEGE en combat -- pcall() catche
-    -- l'erreur mais NE PREVIENT PAS le taint (l'addon reste marque "tainted"
-    -- meme si l'erreur est catchee, ce qui bloque ensuite toute lecture de
-    -- donnee secrete -- dont les auras -- pour le reste de la session,
-    -- confirme en jeu). Il faut donc EVITER l'appel entierement en combat,
-    -- pas juste catcher son echec. Si ce Init() tombe pile en combat
-    -- (reload en plein pull), on saute l'appel : le comportement par defaut
-    -- (clic non transparent) est un compromis mineur face au risque de taint.
+    -- SetPropagateMouseClicks est protege en combat : pcall n'evite pas le taint, on saute l'appel
     if not InCombatLockdown() then
       cont:SetPropagateMouseClicks(true)  -- click-through par défaut (caméra, sélection, etc.)
     end
@@ -380,21 +341,7 @@ function Cooldowns:Init()
     ns.UpdateRenderFade("circlebars")
 end
 
-------------------------------------------------------------------------
--- UPDATE : rendu REEL supprime (2026-08-16, meme methodologie que
--- Procs.lua/"icons" et Buffs.lua/"Circle Bars") -- remplace par le systeme
--- AddAuraGroup natif partage (AuraTrackerContainer.lua,
--- ns.EnsureFreeBarsNativeGrid/RepositionFreeBarsNativeGrid) : icone/
--- cooldown/stacks/glow/barre(s) de duree combat-safe pilotes directement
--- par Blizzard, sans jamais dependre du pin CDM, pour les auras du JOUEUR.
---
--- PREVIEW CONSERVE (2026-08-16, bug rapporte : l'apercu en direct dans le
--- menu "Auras & Procs" ne marchait plus) -- cf. commentaire equivalent dans
--- Buffs.lua pour le detail complet du pourquoi. Logique ORIGINALE restauree
--- telle quelle (geometrie/icone/barre/glow, inchangee), gardee UNIQUEMENT
--- pour un apercu actif de cette destination -- le rendu reel est 100%
--- natif. Cooldowns:Init() reste inchangee.
-------------------------------------------------------------------------
+-- Rendu reel remplace par le systeme AddAuraGroup natif ; cette fonction sert juste au preview du menu
 function Cooldowns:Update(auras)
     local previewActive = ns._previewBars and (ns._previewMode == "all" or ns._previewMode == "circlebars")
     if not previewActive then
@@ -452,7 +399,7 @@ function Cooldowns:Update(auras)
         if a.durObj then
             pcall(ns._SetCDFromDurObj, row.iconCD, a.durObj)
         elseif a._isPreview then
-            -- BUG CORRIGE (2026-08-16) : cf. Procs.lua, meme repli synthetique.
+            -- Repli synthetique pour le preview (cf. Procs.lua)
             pcall(row.iconCD.SetCooldown, row.iconCD, GetTime(), 12)
         end
         row.iconCD:SetDrawSwipe(cfg.swipeEnabled == true); row.iconCD:SetDrawEdge(cfg.swipeEnabled == true)
@@ -521,10 +468,7 @@ function Cooldowns:Update(auras)
         end
     end
 
-    -- SetAlpha(1) explicite (pas ns.UpdateRenderFade) : cette fonction route
-    -- desormais "circlebars" vers le conteneur NATIF (rendu reel), pas vers
-    -- ce conteneur Lua de preview -- l'appeler ici ne touchait donc jamais
-    -- l'alpha de CE conteneur, qui restait bloque a 0 (cf. lecon Buffs.lua).
+    -- SetAlpha(1) explicite : ns.UpdateRenderFade route vers le conteneur natif, pas celui-ci
     gfx.container:Show()
     gfx.container:SetAlpha(1)
 end

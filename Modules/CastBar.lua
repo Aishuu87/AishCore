@@ -6,9 +6,7 @@ ns.Modules = ns.Modules or {}
 local CastBar = {}
 ns.Modules.CastBar = CastBar
 
----------------------------------------------------------------------------
--- Constantes visuelles 
----------------------------------------------------------------------------
+-- Constantes visuelles
 local BAR_TEXTURE   = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga"
 local BEBAS_FONT    = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\BebasNeue-Regular.ttf"
 local DARK          = 14/255
@@ -37,9 +35,7 @@ local DEFAULTS = {
     timerOutlineStyle = "OUTLINE",
 }
 
----------------------------------------------------------------------------
 -- État courant du cast
----------------------------------------------------------------------------
 local frame = nil
 
 -- Déplacement autorisé uniquement quand le mode déplacer est activé
@@ -62,9 +58,7 @@ local state = {
     castGUID   = nil,     -- GUID du cast actif (anti race-condition STOP après START)
 }
 
----------------------------------------------------------------------------
 -- Helpers
----------------------------------------------------------------------------
 local function Cfg()
     local db = ns.GetCfg("castBar")
     return db or DEFAULTS
@@ -80,9 +74,7 @@ local function FormatTime(t)
     end
 end
 
----------------------------------------------------------------------------
 -- Couleurs par école de magie (Libs/SpellSchools — spellId → gradient hex)
----------------------------------------------------------------------------
 local function ParseGradient(gradient)
     if not gradient then return nil end
     local lhex, rhex = strsplit(":", gradient)
@@ -125,9 +117,7 @@ local SCHOOL_GRADIENTS = {
 local function ApplyBarColor(spellId, spellName, spellIcon)
     if not frame then return end
     local cfg = Cfg()
-    -- cf. Core.lua:ns.HasHeroicFeatures -- reglage reserve, ignore meme si
-    -- colorBySchool=true est deja present dans la config (config importee,
-    -- ancienne valeur...).
+    -- Reglage reserve (cf. ns.HasHeroicFeatures), ignore meme si colorBySchool est coche
     if cfg.colorBySchool and spellId and ns.HasHeroicFeatures and ns.HasHeroicFeatures() then
         -- Priorité 1 : gradient ZigiAuras (couleur custom pour le sort)
         local gradient = ns.SpellGradients and ns.SpellGradients[spellId]
@@ -170,10 +160,7 @@ local function ApplyBarColor(spellId, spellName, spellIcon)
     frame.bar:SetStatusBarColor(bc[1], bc[2], bc[3], bc[4] or 1)
 end
 
----------------------------------------------------------------------------
--- Ticks des sorts canalisés / étapes Evoker augmenté
----------------------------------------------------------------------------
--- Sources: ElvUI + compléments manuels
+-- Ticks des sorts canalisés / étapes Evoker augmenté (sources : ElvUI + compléments manuels)
 -- spellId → nombre de ticks (sorts canalisés)
 local CHANNEL_TICKS = {
     -- Racials
@@ -244,9 +231,7 @@ local function ShowTicks(numTicks)
     for i = numTicks, #frame.tickLines do frame.tickLines[i]:Hide() end
 end
 
--- Ticks positionnés par pourcentage (sorts Evoker augmentés via UnitEmpoweredStagePercentages)
--- stages = table de fractions par section (ex: {0.25, 0.25, 0.25, 0.25} pour 4 étapes égales)
--- → on accumule pour obtenir la position absolue, comme oUF/UpdatePips
+-- Ticks positionnés par pourcentage (Evoker augmenté) : stages = fractions par section, cumulées
 local function ShowTicksByPercent(stages)
     if not frame or not stages then HideTicks(); return end
     local cfg = Cfg()
@@ -274,9 +259,7 @@ local function ShowTicksByPercent(stages)
     for i = n + 1, #frame.tickLines do frame.tickLines[i]:Hide() end
 end
 
----------------------------------------------------------------------------
 -- Mise à jour du progrès (appelée chaque frame via OnUpdate)
----------------------------------------------------------------------------
 local function UpdateProgress()
     if not frame then return end
     local now = GetTime()
@@ -324,9 +307,7 @@ local function UpdateProgress()
     end
 end
 
----------------------------------------------------------------------------
 -- Démarrage / arrêt
----------------------------------------------------------------------------
 local function StartCast(name, startTimeMS, endTimeMS, spellId, spellIcon, castGUID)
     if not frame then return end
     local cfg = Cfg()
@@ -443,11 +424,8 @@ local function InterruptCast()
     end)
 end
 
----------------------------------------------------------------------------
 -- Création de la barre
----------------------------------------------------------------------------
--- Retourne les ancres self/relative correspondant au justify du texte,
--- pour que LEFT/CENTER/RIGHT soit visuellement aligné sur la barre.
+-- Ancres self/relative selon le justify, pour un alignement visuel cohérent sur la barre
 local function TextAnchor(justify)
     if justify == "LEFT"  then return "BOTTOMLEFT",  "TOPLEFT"  end
     if justify == "RIGHT" then return "BOTTOMRIGHT", "TOPRIGHT" end
@@ -482,21 +460,13 @@ function CastBar.Create(parent)
         self:StopMovingOrSizing()
         if not ns.DB         then ns.DB = {} end
         if not ns.DB.castBar then ns.DB.castBar = {} end
-        -- IMPORTANT : StartMoving()/StopMovingOrSizing() peut re-ancrer la
-        -- frame sur un point/relativePoint DIFFERENT de celui d'origine (pas
-        -- garanti de rester "BOTTOM"/"CENTER") -- sauvegarder SEULEMENT ox/oy
-        -- et les rejouer plus tard via un ancrage fixe "BOTTOM"/"CENTER"
-        -- (comme le faisait ApplySettings/Create) teleportait la barre a un
-        -- endroit incoherent des qu'on relockait -- confirme en jeu. Il faut
-        -- sauvegarder ET rejouer le meme point/relativePoint que celui reellement
-        -- obtenu apres le drag.
+        -- Sauvegarde point/relativePoint reels (le drag peut changer l'ancrage d'origine)
         local point, _, relativePoint, ox, oy = self:GetPoint(1)
         ns.DB.castBar.point         = point
         ns.DB.castBar.relativePoint = relativePoint
         ns.DB.castBar.x = ox
         ns.DB.castBar.y = oy
-        -- dragUnlocked reste true : l'utilisateur peut replacer plusieurs fois
-        -- avant de cliquer "Terminer". C'est le bouton (ou OnHide) qui verrouille.
+        -- dragUnlocked reste true jusqu'au bouton "Terminer" (replacement multiple)
     end)
     frame:SetPoint(pt, UIParent, rpt, x, y)
     frame:Hide()
@@ -693,9 +663,7 @@ function CastBar.SetDragUnlocked(val)
     dragUnlocked = val and true or false
 end
 
----------------------------------------------------------------------------
 -- ApplySettings : remet à jour dimensions/position/couleurs
----------------------------------------------------------------------------
 function CastBar.ApplySettings()
     if not frame then return end
 
@@ -746,14 +714,8 @@ function CastBar.ApplySettings()
     frame:ClearAllPoints()
     frame:SetPoint(pt, UIParent, rpt, x, y)
 
-    -- Rafraîchir le preview si actif -- SAUF si le module est desactive (ex:
-    -- decocher "Activer" pendant que la preview tourne declenche ApplySettings
-    -- via LiveApply, qui sans ce garde reforçait frame:Show() malgre
-    -- cfg.enabled=false -- confirme en jeu). On NE remet PAS state.preview a
-    -- false ici : la page de reglages est toujours ouverte sur cette
-    -- categorie, donc re-cocher "Activer" doit refaire apparaitre la preview
-    -- tout de suite (sinon elle restait cachee jusqu'a quitter/rerentrer la
-    -- categorie -- confirme en jeu aussi).
+    -- Rafraîchir le preview si actif, sauf module desactive (ne pas forcer Show)
+    -- state.preview n'est pas remis a false : re-cocher "Activer" doit la refaire apparaitre
     if state.preview then
         if cfg.enabled == false then
             frame:Hide()
@@ -766,14 +728,10 @@ function CastBar.ApplySettings()
     end
 end
 
----------------------------------------------------------------------------
 -- Preview : affiche la barre avec des données fictives (GUI ouvert)
----------------------------------------------------------------------------
 function CastBar.SetPreview(on)
     if not frame then return end
-    -- Le module desactive ne doit jamais afficher de preview (confirme en
-    -- jeu : la barre apparaissait quand meme dans les reglages meme cfg.enabled=false).
-    if on and ns.GetCfg("castBar").enabled == false then return end
+    if on and ns.GetCfg("castBar").enabled == false then return end -- jamais de preview si desactive
     state.preview = on
     if on then
         state.active     = true

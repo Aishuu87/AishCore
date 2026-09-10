@@ -1,19 +1,6 @@
 -- AishUIAura/UI/ScrollBar.lua
--- ============================================================================
--- Scrollbar custom minimaliste.
---
--- Usage :
---   local bar = ns.ScrollBar.Create(parent, scrollFrame)
---   bar:SetPoint("TOPRIGHT", ...); bar:SetPoint("BOTTOMRIGHT", ...)
---
--- Apparence :
---   • Rail : ligne verticale fine (3px) gris très sombre, toujours visible
---   • Thumb : petit rectangle or, 3px au repos → 7px au hover (anim douce)
---   • Pas de flèches haut/bas (épuré)
---   • Se cache auto si aucun scroll nécessaire
---   • Fait le lien avec un ScrollFrame Blizzard standard : écoute OnVerticalScroll
---     + OnScrollRangeChanged, et peut dragger pour faire scroller le parent.
--- ============================================================================
+-- Scrollbar custom minimaliste : rail fin + thumb or qui s'elargit au hover, se cache si pas de
+-- scroll necessaire. Usage : local bar = ns.ScrollBar.Create(parent, scrollFrame)
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
@@ -27,9 +14,6 @@ local THUMB_WIDTH = 3
 local THUMB_WIDTH_HOVER = 7
 local ANIM_SPEED  = 10    -- vitesse lerp du thumb (plus haut = plus rapide)
 
--- ============================================================================
--- Création d'une scrollbar pour un ScrollFrame Blizzard
--- ============================================================================
 -- @param parent       Frame parente (typiquement la zone qui contient le ScrollFrame)
 -- @param scrollFrame  Le ScrollFrame Blizzard à piloter
 -- @return frame       La frame scrollbar (à positionner avec SetPoint)
@@ -65,9 +49,7 @@ function ns.ScrollBar.Create(parent, scrollFrame)
     bar._targetWidth = THUMB_WIDTH
     bar._dragging = false
 
-    -- ------------------------------------------------------------------------
     -- Positionnement & dimensionnement du thumb en fonction du scroll
-    -- ------------------------------------------------------------------------
     local function UpdateThumb()
         if not scrollFrame then return end
 
@@ -78,11 +60,8 @@ function ns.ScrollBar.Create(parent, scrollFrame)
         local maxScroll = 0
         pcall(function() maxScroll = scrollFrame:GetVerticalScrollRange() or 0 end)
 
-        -- Détection fine : le scrollChild a une hauteur "fictive" large (3000 souvent)
-        -- pour garantir que les widgets ne soient jamais coupés. Du coup maxScroll > 0
-        -- systématiquement. On regarde si le parent visible (cf) est PLUS PETIT que
-        -- le contenu réel (= scrollFrame:GetHeight), sinon on considère qu'il n'y a
-        -- rien à scroller et on cache la bar.
+        -- Le scrollChild a une hauteur fictive large, donc maxScroll > 0 meme sans scroll reel :
+        -- on compare la hauteur visible au contenu reel pour savoir s'il faut cacher la barre.
         local scrollChild = scrollFrame:GetScrollChild()
         local viewH   = scrollFrame:GetHeight() or 1
         local childH  = (scrollChild and scrollChild:GetHeight()) or viewH
@@ -110,9 +89,7 @@ function ns.ScrollBar.Create(parent, scrollFrame)
     end
     bar.UpdateThumb = UpdateThumb
 
-    -- ------------------------------------------------------------------------
     -- Hooks sur le ScrollFrame : refresh auto quand scroll ou range change
-    -- ------------------------------------------------------------------------
     if scrollFrame:HasScript("OnVerticalScroll") then
         scrollFrame:HookScript("OnVerticalScroll", function() UpdateThumb() end)
     end
@@ -125,9 +102,7 @@ function ns.ScrollBar.Create(parent, scrollFrame)
     bar:SetScript("OnSizeChanged", UpdateThumb)
     bar:SetScript("OnShow", UpdateThumb)
 
-    -- ------------------------------------------------------------------------
     -- Hover : élargit le thumb
-    -- ------------------------------------------------------------------------
     local function OnHoverEnter() bar._targetWidth = THUMB_WIDTH_HOVER end
     local function OnHoverLeave() if not bar._dragging then bar._targetWidth = THUMB_WIDTH end end
     bar:SetScript("OnEnter",   OnHoverEnter)
@@ -135,9 +110,7 @@ function ns.ScrollBar.Create(parent, scrollFrame)
     thumb:SetScript("OnEnter", OnHoverEnter)
     thumb:SetScript("OnLeave", OnHoverLeave)
 
-    -- ------------------------------------------------------------------------
     -- Drag du thumb : convertit le mouvement Y en scroll
-    -- ------------------------------------------------------------------------
     thumb:SetScript("OnMouseDown", function(self, button)
         if button ~= "LeftButton" then return end
         bar._dragging = true
@@ -151,9 +124,7 @@ function ns.ScrollBar.Create(parent, scrollFrame)
         end
     end)
 
-    -- ------------------------------------------------------------------------
     -- OnUpdate : gère l'animation de largeur + drag
-    -- ------------------------------------------------------------------------
     bar:SetScript("OnUpdate", function(self, elapsed)
         -- Animation de largeur (lerp doux)
         if math.abs(self._curWidth - self._targetWidth) > 0.05 then

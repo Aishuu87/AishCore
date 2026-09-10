@@ -53,6 +53,7 @@ Modules\Auras\Core\Config.lua
 Modules\Auras\Core\Categories.lua
 Modules\Auras\Core\ClassColors.lua
 Modules\Auras\Core\Defaults.lua
+Modules\Auras\Core\SpellClassificationOverrides.lua
 Modules\Auras\Data\Presets.lua
 Modules\Auras\Data\FillTextures.lua
 Modules\Auras\Data\AishUITemplates.lua
@@ -62,6 +63,7 @@ Modules\Auras\Core\Whitelist.lua
 Modules\Auras\Core\MissingBuffsData.lua
 Modules\Auras\Core\MissingBuffs.lua
 Modules\Auras\Core\CDMHooks.lua
+Modules\Auras\Core\Totems.lua
 Modules\Auras\Core\AuraTextRelay.lua
 Modules\Auras\Core\AuraTrackerContainer.lua
 Modules\Auras\Core\Animation.lua

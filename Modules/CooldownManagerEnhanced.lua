@@ -1,19 +1,12 @@
--- Modules/CooldownManagerEnhanced.lua : personnalisation des viewers natifs
--- Blizzard "Essentiels" et "Utilitaires" (EssentialCooldownViewer /
--- UtilityCooldownViewer) -- ajoute masques d'icone, bordures, grille de layout,
--- fondu et affichage des charges par-dessus le Cooldown Manager natif, via
--- ns.GetCfg. Scope volontairement limite aux 2 viewers d'icones (pas
--- BuffIconCooldownViewer/BuffBarCooldownViewer, pas de "Custom Frame") et
--- aux textures/atlas Blizzard natifs (aucun asset ni dependance tierce).
+-- Modules/CooldownManagerEnhanced.lua : personnalisation des viewers natifs Essentiels/Utilitaires
+-- (masques, bordures, grille, fondu, charges), limite a ces 2 viewers, textures/atlas Blizzard uniquement.
 local addonName, ns = ...
 local L = ns.L
 
 local CDME = {}
 ns.Modules.CooldownManagerEnhanced = CDME
 
----------------------------------------------------------------------------
 -- Viewers geres + mapping frameName -> cle de config
----------------------------------------------------------------------------
 local VIEWER_CFGKEY = {
   EssentialCooldownViewer = "cdmEssential",
   UtilityCooldownViewer   = "cdmUtility",
@@ -25,9 +18,7 @@ local function GetCfgFor(frameName)
   return key and ns.GetCfg(key)
 end
 
----------------------------------------------------------------------------
--- Masques d'icone : UNIQUEMENT des atlas Blizzard natifs (aucun asset tiers)
----------------------------------------------------------------------------
+-- Masques d'icone : uniquement des atlas Blizzard natifs (aucun asset tiers)
 local ICON_MASK_OPTIONS = {
   { value = 1, text = L["SETTINGS_CDM_MASK_DEFAULT"], atlas = "common-iconmask" },
   { value = 2, text = L["SETTINGS_CDM_MASK_CDM"],      atlas = "UI-HUD-CoolDownManager-Mask" },
@@ -48,9 +39,7 @@ ns.CDM_HIDE_INACTIVE_OPTIONS = {
   { value = 3, text = L["SETTINGS_CDM_HIDE_UNLESS_ACTIVE"] },
 }
 
----------------------------------------------------------------------------
 -- Texture ou atlas
----------------------------------------------------------------------------
 local function SetTextureOrAtlas(region, texture, useAtlasSize)
   if not region then return end
   if not texture or texture == "" then region:SetTexture(nil); return end
@@ -61,9 +50,7 @@ local function SetTextureOrAtlas(region, texture, useAtlasSize)
   end
 end
 
----------------------------------------------------------------------------
 -- Bordure (icone/backdrop)
----------------------------------------------------------------------------
 local function SetBackdropBorderSize(frame, borderSize)
   local parent = frame:GetParent()
   frame:ClearAllPoints()
@@ -95,10 +82,7 @@ local function SetBorderColor(button, color)
   end
 end
 
----------------------------------------------------------------------------
--- Grille de layout -- API Blizzard pure (GridLayoutUtil / AnchorUtil),
--- avec growUp/growRight lus comme des booleens Lua directs.
----------------------------------------------------------------------------
+-- Grille de layout via GridLayoutUtil/AnchorUtil (growUp/growRight lus comme booleens Lua)
 local function HideInactiveChildren(layoutChildren, keepEmpty)
   if #layoutChildren == 0 then return end
   local visible = {}
@@ -246,11 +230,7 @@ local function ResizeLayoutGrid(frame, visibleChildren, strideOverride)
   end
 end
 
----------------------------------------------------------------------------
--- Detection couleur native Blizzard (OOR/OOM/Inutilisable) -- Blizzard teinte
--- deja l'icone avec ces valeurs precises ; on les detecte en comparant la
--- couleur courante pour savoir QUEL etat appliquer notre propre couleur.
----------------------------------------------------------------------------
+-- Detection couleur native Blizzard (OOR/OOM/Inutilisable) par comparaison de teinte, pour savoir quel etat appliquer
 local NATIVE_OOR   = { 0.64, 0.15, 0.15 }
 local NATIVE_OOM   = { 0.5, 0.5, 1.0 }
 local NATIVE_NOUSE = { 0.4, 0.4, 0.4 }
@@ -332,9 +312,7 @@ local function OnButtonRefreshIconColor(self)
   RefreshDesaturation(self)
 end
 
----------------------------------------------------------------------------
 -- Etat de cooldown (CD / GCD / aura / pandemie)
----------------------------------------------------------------------------
 local function CheckCooldownState(button)
   if not button.cooldownUseAuraDisplayTime or button.__removeAura then
     if button.isOnGCD and not button.isOnActualCooldown then
@@ -447,9 +425,7 @@ local function OnRefreshCooldownInfo(button)
   end
 end
 
----------------------------------------------------------------------------
 -- Pandemie (flash de renouvellement de buff/debuff)
----------------------------------------------------------------------------
 local function IterateAllAnimationGroups(frame, func)
   local animGroups = { frame:GetAnimationGroups() }
   for _, animGroup in ipairs(animGroups) do func(animGroup) end
@@ -495,9 +471,7 @@ local function Hook_HidePandemic(self, frame)
   end
 end
 
----------------------------------------------------------------------------
 -- Personnalisation par bouton : taille, masque, police cooldown/stacks, swipe
----------------------------------------------------------------------------
 function CDME.RefreshItemSize(child, cfg)
   local size = cfg.itemSize
   child:SetSize(size, size)
@@ -529,12 +503,7 @@ function CDME.RefreshCooldownFrame(child, frameName, cfg)
   end
 end
 
--- IMPORTANT : le texte de decompte (Cooldown:GetCountdownFontString()) est
--- gere par le widget Cooldown natif Blizzard (C++), qui peut re-ancrer cette
--- fontstring a chaque redemarrage de cooldown/GCD -- contrairement a
--- Applications/ChargeCount (simples FontStrings XML jamais retouchees par
--- Blizzard). D'ou le rappel de cette fonction depuis OnCooldownSet (voir plus
--- bas) en plus du hook Layout, pour reasserter la position a chaque fois.
+-- Le widget Cooldown natif peut re-ancrer sa fontstring de decompte a chaque cooldown/GCD, d'ou le rappel depuis OnCooldownSet
 function CDME.RefreshCooldownFont(child, cfg)
   local color = cfg.useCooldownFontColor and cfg.cooldownFontColor or { 1, 1, 1, 1 }
   local fontSize = (cfg.useCooldownFontSize and cfg.cooldownFontSize) or 17
@@ -598,13 +567,7 @@ function CDME.RefreshChargesFont(child, cfg)
   chargesString:SetPoint(point, chargesString:GetParent(), point, cfg.chargesOffsetX or 0, cfg.chargesOffsetY or 0)
 end
 
----------------------------------------------------------------------------
--- Fondu (fading) : opacite du viewer entier selon l'etat du joueur (combat,
--- cible, incantation) et le survol de la souris. Anime via un OnUpdate
--- generique pilote par ns.GetCfg, limite aux 2 viewers.
--- SetAlpha (contrairement a Show/Hide) n'est jamais bloque par le lockdown
--- combat -- meme principe que Modules/Visibility.lua.
----------------------------------------------------------------------------
+-- Fondu (fading) : opacite du viewer selon combat/cible/incantation/survol souris (SetAlpha, jamais bloque en combat)
 local FADE_DURATION = 0.25
 
 local Fader = CreateFrame("Frame")
@@ -716,9 +679,7 @@ fadeEventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
 fadeEventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
 fadeEventFrame:SetScript("OnEvent", RefreshFadeAll)
 
----------------------------------------------------------------------------
 -- Layout principal (hook sur Layout du viewer)
----------------------------------------------------------------------------
 local _forced = nil
 
 local function CheckItemVisibility(child)
@@ -841,10 +802,7 @@ local function Hook_Layout(self)
   if not self.RefreshLayoutGrid then
     self.RefreshLayoutGrid = function(frame)
       local children = frame:GetLayoutChildren()
-      -- Ne JAMAIS ecrire sur frame.stride (champ natif Blizzard) : ca taint
-      -- le frame et casse CheckAuraAddedAlertTriggers cote Blizzard. On lit
-      -- juste le cfg a chaque appel pour calculer un stride local a utiliser
-      -- uniquement dans NOTRE math (jamais reassigne sur l'objet natif).
+      -- Ne jamais ecrire sur frame.stride (champ natif) : ca taint le frame et casse CheckAuraAddedAlertTriggers
       local fcfg = GetCfgFor(frame:GetName())
       local strideOverride = fcfg and fcfg.strideOverride and fcfg.strideOverride > 0 and fcfg.strideOverride or nil
       local stride = strideOverride or frame.stride
@@ -864,9 +822,7 @@ local function Hook_Layout(self)
   _forced = nil
 end
 
----------------------------------------------------------------------------
 -- Setup (hooks une seule fois, hors combat)
----------------------------------------------------------------------------
 local _hooksSet = {}
 
 local function SetHooksFor(frameName)
@@ -907,9 +863,7 @@ function CDME.ApplySettings()
   end
 end
 
----------------------------------------------------------------------------
 -- Init
----------------------------------------------------------------------------
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 initFrame:SetScript("OnEvent", function()
@@ -918,9 +872,7 @@ initFrame:SetScript("OnEvent", function()
   end
 end)
 
----------------------------------------------------------------------------
 -- /cdmdbg : diagnostic -- etat du viewer (visibilite, alpha, fading, enfants)
----------------------------------------------------------------------------
 SLASH_CDMDBG1 = "/cdmdbg"
 SlashCmdList["CDMDBG"] = function()
   local P = "|cff00ffcc[CDM-DBG]|r "

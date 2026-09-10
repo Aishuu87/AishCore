@@ -1,7 +1,4 @@
--- Modules/BigCursor.lua : agrandit le curseur de la souris en combat.
--- Bascule le CVar cursorSizePreferred entre 0 (normal) et 2 (agrandi) selon
--- InCombatLockdown, remis a 0 en entrant dans le monde au cas ou un
--- logout/reload aurait fige la valeur agrandie.
+-- Modules/BigCursor.lua : agrandit le curseur en combat via le CVar cursorSizePreferred.
 local addonName, ns = ...
 
 ns.Modules = ns.Modules or {}
@@ -14,10 +11,8 @@ end
 
 local function ApplyCursorSize(inCombat)
   local cfg = Cfg()
-  if not cfg.enabled then
-    C_CVar.SetCVar("cursorSizePreferred", 0)
-    return
-  end
+  -- Desactive : ne touche plus au CVar, laisse le reglage jeu de l'utilisateur intact
+  if not cfg.enabled then return end
   C_CVar.SetCVar("cursorSizePreferred", inCombat and (cfg.cursorSize or 2) or 0)
 end
 

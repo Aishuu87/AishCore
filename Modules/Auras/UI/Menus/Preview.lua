@@ -1,6 +1,5 @@
 -- AishUIAura/UI/Menus/Preview.lua
 -- Preview controls for renders + frames externes
-------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}

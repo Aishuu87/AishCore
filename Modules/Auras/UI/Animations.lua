@@ -1,22 +1,5 @@
 -- AishUIAura/UI/Animations.lua
--- ============================================================================
--- Utilitaires d'animations réutilisables.
---
--- Fournit des helpers pour :
---   • Lerp (interpolation linéaire) entre deux valeurs
---   • Easing (courbes douces : smooth, bounce)
---   • Fade in sur une frame
---   • Hover color transition (texte qui change de couleur progressivement)
---   • Scale click feedback (bouton qui se rétrécit au clic)
---
--- Tous les helpers s'appuient sur OnUpdate (~60fps). Les timers s'arrêtent
--- automatiquement quand l'anim est terminée pour économiser du CPU.
---
--- Usage :
---   ns.Anim.FadeIn(frame, 0.25)           -- fade 0 → 1 en 0.25s
---   ns.Anim.HoverColor(fs, {1,1,1}, 0.15) -- couleur target en 0.15s
---   ns.Anim.ClickFeedback(button, 0.95)   -- scale 1 → 0.95 puis → 1
--- ============================================================================
+-- Helpers d'animation réutilisables (lerp, easing, fade, hover color, click feedback), sur OnUpdate.
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
@@ -25,9 +8,6 @@ ns.Anim = ns.Anim or {}
 local CreateFrame = CreateFrame
 local math_min = math.min
 
--- ============================================================================
--- HELPERS DE BASE : lerp, easing
--- ============================================================================
 -- Interpolation linéaire. t ∈ [0, 1]
 function ns.Anim.Lerp(a, b, t)
     return a + (b - a) * t
@@ -38,9 +18,6 @@ function ns.Anim.EaseOut(t)
     return 1 - (1 - t) * (1 - t)
 end
 
--- ============================================================================
--- FADE IN / FADE OUT
--- ============================================================================
 -- Frame cachée/affichée avec fade progressif.
 -- onComplete est appelé quand le fade est fini.
 local function RunFade(frame, fromAlpha, toAlpha, duration, onComplete)
@@ -74,12 +51,7 @@ function ns.Anim.FadeIn(frame, duration, onComplete)
     RunFade(frame, 0, 1, duration, onComplete)
 end
 
--- ============================================================================
--- HOVER COLOR : transition douce de couleur de texte
--- ============================================================================
--- @param fs        FontString cible
--- @param targetRGB table {r, g, b} ou {r, g, b, a}
--- @param duration  en secondes (défaut 0.15)
+-- Transition douce de couleur de texte. targetRGB = {r, g, b[, a]}
 function ns.Anim.HoverColor(fs, targetRGB, duration)
     if not fs or not fs.GetTextColor then return end
     duration = duration or 0.15
@@ -110,13 +82,7 @@ function ns.Anim.HoverColor(fs, targetRGB, duration)
     end)
 end
 
--- ============================================================================
--- CLICK FEEDBACK : bouton qui se rétrécit au clic puis revient
--- ============================================================================
--- Usage : dans OnMouseDown -> ns.Anim.ClickFeedback(self, 0.95, 0.08)
--- @param frame    La frame à scaler (button, icon, etc.)
--- @param minScale Scale minimal pendant le click (défaut 0.94)
--- @param duration Durée aller + retour en secondes (défaut 0.12)
+-- Bouton qui se rétrécit au clic puis revient. Usage: OnMouseDown -> ns.Anim.ClickFeedback(self, 0.95, 0.08)
 function ns.Anim.ClickFeedback(frame, minScale, duration)
     if not frame or not frame.SetScale then return end
     minScale = minScale or 0.94
@@ -150,23 +116,8 @@ function ns.Anim.ClickFeedback(frame, minScale, duration)
     end)
 end
 
--- ============================================================================
--- ANIMATIONS D'ICÔNES — Apparition et disparition animées
---
--- 4 styles disponibles :
---   "standard"  → fade + glisse depuis le bas légèrement
---   "surge"     → fade + scale + montée depuis le bas (style DOTs Feral)
---   "slide"     → glisse depuis la droite + fade
---   "pop"       → scale 0.5→1 + fade (style proc rapide)
---   "none"      → aucune animation
---
--- Usage :
---   ns.Anim.IconPopIn(iconBtn, cfg, targetAlpha)
---
--- Paramètres lus dans cfg (ns.db[renderKey]) :
---   iconAnimStyle    : "standard"|"surge"|"slide"|"pop"|"none"
---   iconAnimDuration : durée en secondes (défaut 0.4)
--- ============================================================================
+-- Apparition animée d'icônes. Styles : standard, surge (DOTs Feral), slide, pop, none.
+-- cfg.iconAnimStyle / cfg.iconAnimDuration (défaut 0.4s).
 
 local _EaseOut = function(t, s) s = s or 3; return 1 - (1 - t) ^ s end
 local _EaseOutIn = function(t, s)

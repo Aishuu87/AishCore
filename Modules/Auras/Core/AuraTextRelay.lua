@@ -1,27 +1,7 @@
--- AishUIAura/Core/AuraTextRelay.lua
---
--- Relais de STACKS via le systeme AuraContainer/AuraButton natif Blizzard
--- (patch 12.1.0+) : fonctionne EN COMBAT pour des auras a duree/stacks
--- secrets, contrairement a TOUTE API C_UnitAuras directe
--- (GetAuraApplicationDisplayCount, GetAuraDuration, GetPlayerAuraBySpellID,
--- GetAuraDataByIndex -- toutes bloquees en combat).
---
--- PRINCIPE : un groupe (AddAuraGroup) filtre a un SEUL spellID via
--- candidateFilters = { spellIds = {...} } -> un bouton dedie dont on connait
--- l'identite avec certitude. Dans initializeFrame (le seul moment ou le
--- bouton n'est pas "forbidden"), on masque son contenu visuel natif
--- (icone -- notre propre rendu CDM s'en charge deja) et on cree une
--- FontString reliee via SetApplicationCount -- Blizzard la tient a jour en
--- interne indefiniment, meme apres que le bouton devienne "forbidden".
---
--- La duree n'a PAS besoin de ce relais : le canal cdmAuraSwipe (CDMHooks.lua,
--- SetCooldown/Clear) pilote deja notre propre widget Cooldown avec le vrai
--- start/duration, et son decompte texte natif (SetHideCountdownNumbers(false))
--- suffit -- pas besoin d'un 2e canal pour ca.
---
--- SECURITE : creer un AuraContainer EN COMBAT plante le jeu -- les containers
--- sont crees UNE SEULE FOIS, hors combat (PLAYER_LOGIN/PLAYER_ENTERING_WORLD).
-------------------------------------------------------------------------
+-- AishUIAura/Core/AuraTextRelay.lua : relais de stacks via AuraContainer natif Blizzard
+-- (12.1.0+), fonctionne en combat même pour stacks/durée secrets (API C_UnitAuras bloquée).
+-- Groupe filtré sur 1 spellID -> FontString reliée via SetApplicationCount, tenue à jour
+-- par Blizzard même une fois le bouton "forbidden". Containers créés hors combat uniquement.
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 
 local containers = {}  -- [unit] = AuraContainer
@@ -35,9 +15,7 @@ local function CreateContainer(unit)
     local ok, c = pcall(function()
         local cc = CreateFrame("AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
         cc:SetSize(1, 1)
-        -- Hors ecran : les FontStrings de stacks sont reparentees sur nos
-        -- propres icones a chaque scan (cf. ns.ApplyAuraTextOverlay), la
-        -- position du container/bouton d'origine n'a pas d'importance.
+        -- Hors écran : les FontStrings sont reparentées sur nos icônes à chaque scan
         cc:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -2000, -2000)
         cc:SetUnit(unit)
         cc:Show()
@@ -57,9 +35,7 @@ local function EnsureContainer(unit)
     return c
 end
 
--- A appeler pour chaque spellID tracke (idempotent). Doit reussir hors
--- combat au moins une fois pour que le relais existe -- reessaie
--- automatiquement (via ns.FlushPendingAuraTextOverlays) des que possible.
+-- Idempotent. Doit réussir hors combat au moins une fois (retry via FlushPendingAuraTextOverlays)
 function ns.EnsureAuraTextOverlay(unit, spellID)
     if not unit or not spellID then return end
     local key = unit .. "#" .. spellID
@@ -97,9 +73,8 @@ function ns.EnsureAuraTextOverlay(unit, spellID)
     end
 end
 
--- Reessaie les demandes qui avaient echoue (typiquement : appelees pendant
--- que le container n'existait pas encore, ou en combat). A appeler apres
--- PLAYER_REGEN_ENABLED (sortie de combat) et PLAYER_ENTERING_WORLD.
+-- Rejoue les demandes échouées (container pas prêt / combat). Appelé après
+-- PLAYER_REGEN_ENABLED et PLAYER_ENTERING_WORLD.
 function ns.FlushPendingAuraTextOverlays()
     if InCombatLockdown and InCombatLockdown() then return end
     for key, req in pairs(pendingSpells) do
@@ -108,17 +83,9 @@ function ns.FlushPendingAuraTextOverlays()
     end
 end
 
--- Variante NUMERIQUE : au lieu de repositionner la FontString sur notre UI,
--- on LIT le texte que Blizzard y a deja ecrit (via SetApplicationCount) et
--- on le convertit en nombre. Reprend le pattern "Secret Value
--- Zero-Detection" deja utilise ailleurs dans ce codebase : on ne lit jamais
--- la valeur secrete elle-meme, seulement le TEXTE que Blizzard a deja choisi
--- d'afficher sur une FontString normale (pas une propriete de l'AuraButton
--- "forbidden") -- cette FontString est bien peuplee meme en combat. Utile
--- pour CenterArc.lua/ResourceCircle.lua qui ont besoin
--- d'un NOMBRE (fraction de remplissage d'arc) plutot que d'un texte a
--- afficher tel quel. Renvoie nil si le relais n'existe pas encore ou si le
--- texte n'est pas un nombre exploitable (aura absente, "" etc).
+-- Variante numérique : lit le texte déjà écrit par Blizzard (SetApplicationCount) et le
+-- convertit en nombre, sans jamais lire la valeur secrète. Pour CenterArc/ResourceCircle.
+-- Renvoie nil si le relais n'existe pas encore ou si le texte n'est pas un nombre.
 function ns.GetAuraTextOverlayStackCount(unit, spellID)
     if not unit or not spellID then return nil end
     local key = unit .. "#" .. spellID
@@ -132,10 +99,8 @@ function ns.GetAuraTextOverlayStackCount(unit, spellID)
     return tonumber(text)
 end
 
--- A appeler a chaque render (Debuffs/Cooldowns/Procs) pour rattacher
--- visuellement la FontString de stack Blizzard sur NOTRE propre widget
--- (stackParent = ib._stackText actuel, deja positionne/style selon la
--- config utilisateur). Renvoie true si un relais existe et a ete applique.
+-- Rattache visuellement la FontString de stack Blizzard sur notre widget (stackParent).
+-- Appelé à chaque render. Renvoie true si un relais existe et a été appliqué.
 function ns.ApplyAuraTextOverlay(unit, spellID, stackParent)
     if not unit or not spellID or not stackParent then return false end
     local key = unit .. "#" .. spellID
@@ -145,13 +110,8 @@ function ns.ApplyAuraTextOverlay(unit, spellID, stackParent)
         return false
     end
     local ok = pcall(function()
-        -- IMPORTANT : parenter au PARENT de stackParent, pas a stackParent
-        -- lui-meme -- l'appelant cache generalement stackParent (notre propre
-        -- FontString, remplacee visuellement par ce relais), et un enfant
-        -- herite de la visibilite cachee de son parent. SetAllPoints peut en
-        -- revanche ancrer sur N'IMPORTE QUELLE region visible, donc la
-        -- position reste identique a stackParent sans en dependre pour la
-        -- visibilite.
+        -- Parente au PARENT de stackParent (pas stackParent lui-même, souvent caché
+        -- par l'appelant) ; SetAllPoints garde la même position sans hériter du Hide.
         local hostFrame = stackParent.GetParent and stackParent:GetParent() or stackParent
         fs:SetParent(hostFrame)
         fs:ClearAllPoints()
@@ -165,8 +125,7 @@ function ns.ApplyAuraTextOverlay(unit, spellID, stackParent)
     return ok
 end
 
--- Diagnostic : /aatr [spellID] -- etat interne du relais (combien de
--- groupes/overlays/attentes, et le detail pour un spellID precis).
+-- Diagnostic /aatr [spellID] : état interne du relais
 SLASH_AATR1 = "/aatr"
 SlashCmdList["AATR"] = function(msg)
     local P = "|cff33aaff[AATR]|r "

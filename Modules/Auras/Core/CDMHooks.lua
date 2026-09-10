@@ -1,72 +1,37 @@
 -- AishUIAura/Core/CDMHooks.lua
--- Hooks du Cooldown Manager de Blizzard : parse les spell IDs, hooke les frames
--- BuffIcon/BuffBar, applique le masking (SetAlpha(0) uniquement — JAMAIS
--- SetScale, ce qui tue le CDM au 2ème combat)
-------------------------------------------------------------------------
+-- Hooks du Cooldown Manager Blizzard : parse les spell IDs, hooke BuffIcon/BuffBar, masking
+-- via SetAlpha(0) uniquement (jamais SetScale, qui tue le CDM au 2e combat).
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 
 local tinsert = table.insert
 local pcall, hooksecurefunc = pcall, hooksecurefunc
 
--- API : C_Spell.GetSpellName en Midnight 12.0+, GetSpellInfo en fallback
--- (le bug v265 etait que cette variable n'etait pas declaree localement,
--- donc GetSpellName etait nil et le name retombait toujours sur tostring(spellID))
 local GetSpellName = (C_Spell and C_Spell.GetSpellName) or GetSpellInfo
 
-------------------------------------------------------------------------
--- HOOKS CDM (pattern motor, namespace ns, masking : SetAlpha(0) UNIQUEMENT)
-------------------------------------------------------------------------
+-- Hooks CDM (pattern motor, namespace ns, masking SetAlpha(0) uniquement)
 local cdmData = { player = {}, target = {} }
 ns.cdmData = cdmData
 local cdmHooked = false
 
--- PRESENCE PURE : [unit][spellID] = true/false, alimentee EXCLUSIVEMENT par
--- le hook SetAuraInstanceInfo ci-dessous (jamais purgee comme cdmData, jamais
--- dependante d'un mecanisme de stacks ou d'un swipe de duree comme
--- cdmAuraSwipePresence/cdmData). Necessaire pour Rapidite de la nature/378081 :
--- un buff sans VRAIE duree (dure "jusqu'au prochain cast") ni stacks, pour
--- lequel la chaine de detection habituelle echoue simultanement en combat
--- (GetAuraApplicationDisplayCount->nil, GetPlayerAuraBySpellID->nil,
--- enumeration HELPFUL -> d.spellId secret des qu'en combat) -- et pour lequel
--- Cooldown:SetCooldown n'est jamais appele (rien a animer sans duree), donc
--- cdmAuraSwipePresence (CDMHooks.lua tiers 4/5) ne se peuple jamais non plus.
--- SetAuraInstanceInfo, lui, se declenche des que Blizzard lie/delie une VRAIE
--- instance d'aura a l'icone -- avec ou sans duree/stacks, c'est le seul
--- signal de ce type qui existe pour ce cas.
+-- Presence pure [unit][spellID], alimentee uniquement par le hook SetAuraInstanceInfo, jamais purgee.
+-- Necessaire pour les buffs sans vraie duree/stacks (ex. Rapidite de la nature/378081) ou toute la chaine
+-- de detection habituelle (stacks, swipe de cooldown) echoue en combat : SetAuraInstanceInfo reste le
+-- seul signal fiable de liaison/deliaison d'une instance d'aura a l'icone dans ce cas.
 local cdmAuraInstancePresence = { player = {}, target = {} }
 ns.cdmAuraInstancePresence = cdmAuraInstancePresence
 
--- true/false = presence confirmee par SetAuraInstanceInfo ; nil = jamais
--- observe pour ce spellID sur cet unit (spell jamais assigne a une icone
--- CDM Essentiel/Utilitaire, ou pas encore).
---
--- Ce tier ne s'efface jamais tout seul : seul un demarrage de CD le fait, et
--- uniquement pour les sorts sans swipe (cf. plus bas). Le rendre autoritaire
--- pour un sort qui a par ailleurs un vrai swipe de duree (cdmAuraSwipePresence
--- non-nil) le bloquerait a "true" pour toujours des la 1ere activation,
--- court-circuitant l'ancienne chaine cdmData/swipe qui gere deja correctement
--- la fin de ces sorts. Restreint donc aux sorts qui n'ont aucun autre signal
--- de duree -- exactement le meme garde que celui applique cote effacement
--- (HookCDMCooldownChild, plus bas dans ce fichier).
--- La valeur est un nombre (GetTime() du dernier "vu" reel) ou `false` (jamais
--- vu de VRAIE presence sur ce canal -- nil au depart, ou false pose par un
--- Clear() qui n'a jamais ete precede d'un vrai signal). Un simple `~= nil`
--- sur cdmAuraSwipePresence/cdmAuraBarPresence traiterait ce `false` de depart
--- comme "canal fiable ici" et bloquerait ce tier a tort.
+-- true/false = presence confirmee par SetAuraInstanceInfo ; nil = jamais observe pour ce spellID/unit.
+-- Ne s'efface jamais seul (sauf demarrage de CD, uniquement pour les sorts sans swipe de duree, meme
+-- garde que HookCDMCooldownChild plus bas) pour ne pas court-circuiter la chaine cdmData/swipe existante.
+-- Valeur = nombre (GetTime() du dernier "vu") ou false (jamais vu, a distinguer de nil pour un `~= nil` fiable).
 local function HasEverConfirmedPresence(t, spellID)
     return type(t[spellID]) == "number"
 end
 
--- Meme avec le garde double-canal ci-dessus, ce tier n'a aucune expiration
--- propre -- pour un sort qui n'est PAS "banked" (le CD demarre normalement au
--- cast, pas a la perte du buff), une simple course au demarrage
--- (SetAuraInstanceInfo arrive avant le tout premier SetValue du canal barre,
--- sur un /reload frais) suffit a le rendre autoritaire, et rien ne le repasse
--- jamais a false ensuite si ce sort n'a pas la mecanique "CD demarre a la
--- consommation du buff". Restreint donc a une liste explicite de sorts
--- "banked" confirmes (dure "jusqu'au prochain cast", CD demarre a la
--- consommation, jamais au cast).
+-- Ce tier n'a aucune expiration propre, donc restreint a une liste explicite de sorts "banked" confirmes
+-- (dure jusqu'au prochain cast, CD demarre a la consommation du buff, jamais au cast) pour eviter qu'une
+-- simple course au demarrage le rende autoritaire a tort sur un sort normal.
 local BANKED_BUFF_SPELLS = { [378081] = true }  -- Rapidite de la nature
 
 function ns.IsCDMAuraInstancePresent(unit, spellID)
@@ -81,34 +46,20 @@ function ns.IsCDMAuraInstancePresent(unit, spellID)
 end
 local hookedFrames, maskableFrames, frameSource, buffFrameAlwaysMask = {}, {}, {}, {}
 
--- Données CD event-driven : alimentées par les hooks SetCooldown/Clear sur les
--- Cooldown-enfants des frames CDM. Plus fiable que le polling IsShown() de
--- ScanCooldownViewer (PriorityBar) : mis à jour exactement quand Blizzard
--- démarre ou arrête un CD, sans lag de polling et sans faux-négatifs dus aux
--- animations de transition.
--- Structure : cdmCDData[spellID] = { cdStart, cdDuration, onCD }
--- cdStart/cdDuration : valeurs brutes passées à SetCooldown (secondes propres)
--- onCD : true dès SetCooldown, false dès Clear()
+-- Donnees CD event-driven, alimentees par les hooks SetCooldown/Clear (plus fiable que le polling IsShown
+-- de PriorityBar.ScanCooldownViewer). cdmCDData[spellID] = { cdStart, cdDuration, onCD } : onCD passe a
+-- true a SetCooldown, false a Clear().
 local cdmCDData = {}
 ns.cdmCDData = cdmCDData
 
--- Données de CHARGES event-driven : alimentées par un hook SetText
--- sur itemFrame.ChargeCount.Current (FontString), le même widget que
--- PriorityBar.ScanCooldownViewer lit déjà par polling toutes les 0.15s via
--- GetText(). Ici on capture la même valeur (via GetText() dans le hook, PAS
--- en lisant l'argument SetText -- même prudence que le reste du fichier) mais
--- au moment exact où Blizzard l'écrit, sans lag de poll ni trou si l'itemFrame
--- n'était pas actif au tick de scan. Structure : cdmChargeData[spellID] = "2"
--- (texte brut du FontString Blizzard, jamais un nombre -- comparaison sûre
--- uniquement via tonumber/pcall côté consommateur).
--- Additif uniquement : ne remplace aucun mécanisme existant, PriorityBar garde
--- son fallback poll+estimation intact (kill-switch CDM_CHARGE_HOOK_ENABLED).
+-- Donnees de charges event-driven, via un hook SetText sur itemFrame.ChargeCount.Current (meme widget que
+-- PriorityBar lit par polling, mais capture via GetText() au moment exact de l'ecriture, sans lag).
+-- cdmChargeData[spellID] = texte brut FontString (jamais un nombre, comparer via tonumber/pcall).
+-- Additif uniquement : PriorityBar garde son fallback poll+estimation (kill-switch CDM_CHARGE_HOOK_ENABLED).
 local cdmChargeData = {}
 ns.cdmChargeData = cdmChargeData
 
--- GetCDMFrameSpellID doit être défini AVANT HookCDMCooldownChild : c'est une
--- variable locale, donc doit être en scope au moment où HookCDMCooldownChild
--- est compilé (sinon Lua la traite comme un global = nil au moment de l'appel).
+-- Doit etre defini avant HookCDMCooldownChild (variable locale, doit etre en scope a la compilation).
 local function GetCDMFrameSpellID(frame)
     if not frame.cooldownInfo or not frame.cooldownID then return nil end
     local info = frame.cooldownInfo
@@ -117,12 +68,9 @@ local function GetCDMFrameSpellID(frame)
     return ret
 end
 
--- Variante scan-only : priorité complète (overrideTooltipSpellID > linkedSpellID >
--- linkedSpellIDs[1] > overrideSpellID > spellID). Pas de garde cooldownID car
--- certains viewers initialisent cooldownInfo avant cooldownID.
--- 2e valeur de retour (lids) : la table linkedSpellIDs brute, si presente --
--- utilisee par AutoDiscoverSpell pour regrouper les variantes de rang/stacks
--- d'un meme buff (ex: Precurseur du Vide 1256301/1256302, cf. Whitelist.lua).
+-- Variante scan-only : priorite overrideTooltipSpellID > linkedSpellID > linkedSpellIDs[1] > overrideSpellID
+-- > spellID, sans garde cooldownID. 2e retour (lids) : linkedSpellIDs brute, pour regrouper les variantes
+-- de rang/stacks d'un meme buff (AutoDiscoverSpell, Whitelist.lua).
 local function GetScanSpellID(frame)
     if not frame then return nil end
     local info = frame.cooldownInfo
@@ -136,36 +84,20 @@ local function GetScanSpellID(frame)
 end
 
 local hookedCooldownChildren  = {}
--- [cdFrame] = { spellID, cdStart, cdDuration } : tracking par frame pour le
--- matching dans Clear(). Permet de distinguer la frame GCD (duration≤1.5)
--- de la frame du vrai CD (duration>1.5) qui ont le même spellID.
+-- [cdFrame] = { spellID, cdStart, cdDuration }, pour distinguer la frame GCD (duration<=1.5) du vrai CD
+-- (duration>1.5) qui partagent le meme spellID lors du matching dans Clear().
 local hookedCooldownFrameData = {}
 
--- Hooke le frame Cooldown enfant d'une frame CDM pour capturer les données CD
--- de façon event-driven. Appelé depuis HookCDMFrame si frame.Cooldown existe.
---
--- Trois garde-fous par rapport à la version naïve :
---  1) Filtre GCD : seuls les CDs > 1.5s sont stockés dans cdmCDData.
---     Le GCD (≤1.5s) est tracké par frame mais n'écrase jamais un vrai CD.
---  2) Tracking par frame : hookedCooldownFrameData[cdFrame] mémorise les
---     paramètres du dernier SetCooldown de CETTE frame.
---  3) Clear avec matching : Clear() ne vide cdmCDData[spellID].onCD que si
---     le version counter correspond — évite qu'un Clear() de la frame GCD
---     vide l'entrée du vrai CD stockée pour le même spellID.
--- start/duration passés à SetCooldown sont des "secret numbers" TWW : toute
--- comparaison (>, ==, <) depuis du code tainté échoue, même après tonumber().
--- Solution : utiliser parentFrame.isOnGCD (booléen, lisible depuis du code
--- tainté) pour filtrer le GCD, et un compteur de version (entier Lua pur)
--- pour le matching dans Clear() — aucune comparaison de secret numbers.
+-- Hooke le Cooldown enfant d'une frame CDM pour capturer les donnees CD event-driven. Filtre le GCD
+-- (seuls les CDs > 1.5s vont dans cdmCDData) et matche Clear() par version pour ne pas vider le vrai CD
+-- via un Clear() du GCD. start/duration sont des secret numbers (comparaison impossible meme via tonumber),
+-- donc on utilise parentFrame.isOnGCD (booleen lisible) pour le filtre GCD et un compteur de version
+-- (entier Lua pur) pour le matching, sans jamais comparer de secret numbers.
 local cdFrameVersion = {}  -- [cdFrame] = dernier numéro de version SetCooldown
 
--- Abonnements "clone swipe" : quand le CDM appelle SetCooldown/Clear sur une
--- frame pour le spellID X, on passe-forward les arguments (secret numbers inclus)
--- directement à chaque frame abonnée, sans jamais les lire ni les comparer.
--- Structure : cdmCooldownSubscribers[spellID][key] = { cooldown=frame, slot=frame }
--- • key     : table servant d'identifiant unique (généralement la slot-frame PB).
--- • cooldown: le Cooldown widget cible (slot.cooldown du PriorityBar).
--- • slot    : la slot-frame PriorityBar, pour mettre à jour _onCooldown/_swipeSpellName.
+-- Abonnements "clone swipe" : quand le CDM appelle SetCooldown/Clear pour le spellID X, on retransmet les
+-- arguments (secret numbers inclus) a chaque frame abonnee, sans jamais les lire/comparer.
+-- cdmCooldownSubscribers[spellID][key] = { cooldown=frame Cooldown cible, slot=slot-frame PriorityBar }.
 local cdmCooldownSubscribers = {}
 
 -- S'abonner au clone du CDM swipe pour un spellID.
@@ -194,69 +126,20 @@ function ns.UnsubscribeCDMCooldown(spellID, key)
     end
 end
 
-------------------------------------------------------------------------
--- ABONNEMENTS "CLONE SWIPE" GÉNÉRIQUES POUR LA DURÉE DES AURAS
---
--- Distinct de cdmCooldownSubscribers ci-dessus (réservé aux cooldowns de
--- sort, wasSetFromCooldown=true+!isOnGCD, utilisé par PriorityBar.lua).
--- Confirmé en jeu (patch 12.1) : C_UnitAuras (GetPlayerAuraBySpellID,
--- GetAuraDataByIndex, GetAuraDuration, GetAuraApplicationDisplayCount...)
--- refuse systématiquement l'accès aux auras à durée limitée pendant le
--- combat, quelle que soit la méthode utilisée -- AUCUNE de ces API ne peut
--- donc alimenter notre pipeline en combat. Mais le CDM (code Blizzard non
--- tainté) continue d'appeler Cooldown:SetCooldown(start, duration) sur ses
--- propres frames pour AFFICHER ces mêmes auras -- avec wasSetFromCooldown=
--- false pour les mises à jour de durée de buff (confirmé en jeu : les mêmes
--- spellID que nos auras trackées apparaissent dans ce flux). En hooksecurefunc,
--- on REÇOIT ces arguments (secrets ou non, peu importe) et on peut les
--- RETRANSMETTRE tels quels à un widget Cooldown à nous -- jamais les lire,
--- jamais les comparer, donc jamais soumis à la restriction "secret". C'est
--- le même mécanisme "show but don't know" déjà éprouvé par
--- cdmCooldownSubscribers, juste sans le filtre wasSetFromCooldown/isOnGCD
--- (qui exclurait justement les buffs qu'on veut capter ici).
---
--- Ce canal sert AUSSI de source de vivacité : Blizzard n'affiche un item
--- CDM que si l'aura est réellement active, donc un SetCooldown reçu ici
--- signifie "cette aura est présente MAINTENANT" et un Clear() signifie
--- "elle vient de disparaître" -- sans jamais interroger C_UnitAuras.
---
--- ns.cdmAuraSwipePresence[spellID] stocke un TIMESTAMP (GetTime()), pas un
--- simple booléen : les frames CDM sont recyclées/pooled par Blizzard, et
--- rien ne garantit qu'un Clear() explicite soit toujours appelé sur
--- l'ancien spellID avant que la frame ne soit réaffectée à un autre buff
--- (confirmé en jeu : un flag booléen restait bloqué à "présent" pour une
--- aura déjà expirée -- bug observé sur le mode Barres Libres). En exposant
--- un timestamp, ns.IsCDMAuraSwipePresent() ci-dessous peut considérer une
--- entrée comme périmée si elle n'a pas été rafraîchie récemment, sans
--- dépendre uniquement du Clear() -- auto-réparateur.
---
--- ATTENTION (confirmé en jeu) : Blizzard n'appelle PAS SetCooldown en
--- continu pour une aura toujours active -- un seul appel au démarrage/
--- refresh suffit, le widget anime le swipe ensuite tout seul côté C++. Un
--- seuil de péremption trop court (essayé : 3s) fait donc disparaître à
--- tort des auras encore actives depuis plus longtemps que ce seuil, qui
--- réapparaissent seulement au refresh suivant -- clignotement aléatoire
--- observé en jeu. Le seuil ne doit servir QUE de filet de sécurité contre
--- une frame orpheline (jamais Clear()-ée), pas comme mécanisme normal de
--- détection de fin de vie -- d'où une valeur large.
-------------------------------------------------------------------------
+-- Abonnements "clone swipe" generiques pour la duree des auras (distinct de cdmCooldownSubscribers,
+-- reserve aux cooldowns de sort). C_UnitAuras refuse l'acces aux auras a duree limitee en combat, mais le
+-- CDM (code Blizzard non tainte) continue d'appeler Cooldown:SetCooldown sur ses propres frames -- on
+-- retransmet ces valeurs (secretes ou pas) sans jamais les lire/comparer ("show but don't know").
+-- Sert aussi de source de vivacite : un SetCooldown recu = aura presente, un Clear() = aura disparue.
+-- ns.cdmAuraSwipePresence stocke un timestamp (pas un bool) car les frames CDM sont recyclees par Blizzard
+-- sans garantie de Clear() explicite ; IsCDMAuraSwipePresent traite donc une entree trop vieille comme perimee.
+-- Le seuil de peremption doit rester large : Blizzard n'appelle SetCooldown qu'au demarrage/refresh (le
+-- widget anime le swipe seul ensuite), un seuil court ferait disparaitre a tort des auras encore actives.
 local cdmAuraSwipeSubscribers = {}  -- [spellID][key] = cdFrame (widget Cooldown abonné)
 ns.cdmAuraSwipePresence = ns.cdmAuraSwipePresence or {}  -- [spellID] = GetTime() du dernier SetCooldown vu, ou false apres un Clear()
 local CDM_AURA_SWIPE_STALE_AFTER = 900  -- 15 min : filet de securite uniquement, pas une detection normale
--- Seuil beaucoup plus court pour le canal BAR (BuffBarCooldownViewer) :
--- contrairement au Cooldown/swipe (un seul SetCooldown au demarrage, anime
--- ensuite cote C++ SANS rappel Lua -- d'ou le seuil large ci-dessus, deja
--- ajuste apres un essai a 3s qui masquait a tort des auras encore actives),
--- Blizzard rappelle SetMinMaxValues/SetValue sur la StatusBar toutes les
--- 1-2s pour une aura reellement active (confirme en jeu, /aacbar). Le bar
--- n'a pas d'equivalent Clear() -- son seul signal d'expiration est hi=0
--- (non-secret a cet instant, cf. HookCDMBarChild), qui n'est apparemment pas
--- systematiquement envoye pour tous les types de buffs (confirme en jeu :
--- Mur Protecteur restait "present" -- via ce canal -- bien apres sa vraie
--- fin, capacite associee a wasSetFromCooldown=true donc filtree du canal
--- swipe). Un seuil court ici est sur : une aura active recoit des rappels
--- frequents, un delai de peremption de quelques secondes ne peut donc pas la
--- faire disparaitre a tort (contrairement au Cooldown/swipe).
+-- Seuil bien plus court pour le canal bar (BuffBarCooldownViewer) : Blizzard rappelle SetMinMaxValues/SetValue
+-- toutes les 1-2s pour une aura active (pas d'equivalent Clear(), signal d'expiration hi=0 pas systematique).
 local CDM_AURA_BAR_STALE_AFTER = 5
 
 -- true si le CDM a confirmé cette aura active récemment (ni explicitement
@@ -287,33 +170,11 @@ function ns.UnsubscribeCDMAuraSwipe(spellID, key)
     end
 end
 
-------------------------------------------------------------------------
--- ABONNEMENTS "CLONE BAR" POUR LA DURÉE (StatusBar, PAS Cooldown)
---
--- Cooldown:SetCooldown() rejette
--- catégoriquement toute valeur secrète venant de code addon ("Secret values
--- are only allowed during untainted execution for this argument") -- le
--- canal clone-swipe ci-dessus ne peut donc JAMAIS relayer une vraie durée en
--- combat, quelle que soit la méthode (voir commentaire détaillé plus bas sur
--- HookCDMCooldownChild). MAIS StatusBar:SetValue()/SetMinMaxValues()
--- ACCEPTENT un forward secret venant d'un addon (confirmé par la doc
--- officielle ET empiriquement : pcall ok=true en combat) -- c'est exactement
--- le sink déjà utilisé avec succès par ResourceCircle.SetCenterArcFill/
--- UpdateSecondaryResource pour l'absorb de Dur Au Mal.
---
--- BuffBarCooldownViewer (viewer "Barres" de l'Edit Mode, distinct de
--- BuffIconCooldownViewer) construit son remplissage avec une VRAIE StatusBar
--- (frame.Bar) -- alors que TOUS les autres viewers (Essential/Utility/
--- BuffIcon) utilisent un Cooldown (frame.Cooldown). On clone donc les appels
--- SetMinMaxValues(lo, hi)/SetValue(value) que Blizzard fait sur frame.Bar
--- vers un widget StatusBar à nous, exactement comme le clone-swipe le fait
--- pour un Cooldown -- sauf que celui-ci, lui, fonctionne réellement en
--- combat.
---
--- CONTRAINTE : ne fonctionne que pour un sort épinglé sur le viewer "Barres"
--- du Cooldown Manager Blizzard (Edit Mode) -- BuffBarCooldownViewer ne
--- construit une frame.Bar que pour les items qu'il affiche réellement.
-------------------------------------------------------------------------
+-- Abonnements "clone bar" pour la duree (StatusBar, pas Cooldown) : Cooldown:SetCooldown() rejette toute
+-- valeur secrete venant de code addon, mais StatusBar:SetValue()/SetMinMaxValues() l'acceptent (meme sink
+-- que ResourceCircle pour l'absorb). BuffBarCooldownViewer (viewer "Barres") construit son remplissage avec
+-- une vraie StatusBar (frame.Bar) contrairement aux autres viewers (Cooldown) : on clone ses appels
+-- SetMinMaxValues/SetValue vers un widget a nous. Ne fonctionne que pour un sort epingle sur ce viewer.
 local cdmAuraBarSubscribers = {}  -- [spellID][key] = statusBarLike (SetMinMaxValues/SetValue/Show)
 ns.cdmAuraBarPresence = ns.cdmAuraBarPresence or {}  -- [spellID] = GetTime() du dernier SetValue vu
 
@@ -340,65 +201,20 @@ function ns.UnsubscribeCDMAuraBar(spellID, key)
     end
 end
 
-------------------------------------------------------------------------
--- ABONNEMENTS "CLONE STACK" POUR LES COMPTEURS D'APPLICATIONS (STACKS)
---
--- Meme principe que cdmAuraSwipeSubscribers ci-dessus, applique aux stacks
--- plutot qu'a la duree. SetAuraInstanceInfo(self, cdmAura) recoit cdmAura
--- (l'AuraData que Blizzard vient d'assigner a cette frame CDM), potentiellement
--- secrete en combat. cdmAura.applications est le champ standard AuraData pour
--- le compteur de stacks. On le RETRANSMET tel quel a un FontString a nous via
--- SetText -- jamais lu, jamais compare -- exactement le meme mecanisme "show
--- but don't know" que le clone swipe de duree. SetText accepte une valeur
--- secrete brute sans la reveler a notre code (meme sink que SetCooldown).
---
--- Pour les auras du JOUEUR, Debuffs.lua/ApplyStackCharges utilise desormais
--- ResourceCircle.ApplyStacksTo (CDM + GetPlayerAuraBySpellID + enumeration,
--- avec IsConfirmedZero) plutot que ce canal -- capable de confirmer un 0/1
--- et de cacher franchement, ce que ce forward brut ne peut jamais faire
--- (voir plus bas : la comparaison, meme sur tostring(applications), plante
--- systematiquement en combat). Ce canal reste la SEULE source pour les
--- auras de la CIBLE (pas d'equivalent GetPlayerAuraBySpellID cote cible).
-------------------------------------------------------------------------
+-- Abonnements "clone stack" pour les compteurs d'applications : meme principe show-but-don't-know que le
+-- clone swipe, applique a cdmAura.applications (retransmis a un FontString via SetText, jamais lu/compare).
+-- Pour les auras du joueur, Debuffs.lua utilise plutot ResourceCircle.ApplyStacksTo (peut confirmer un 0
+-- franc) ; ce canal reste la seule source pour les auras de la cible (pas d'equivalent cote cible).
 local cdmAuraStackSubscribers = {}  -- [spellID][key] = FontString abonne
--- Derniere valeur vue par spellID (VALEUR de table, secrete ou non -- jamais
--- comparee ni lue, juste retransmise). Alimentee sur CHAQUE SetAuraInstanceInfo,
--- avec ou sans abonne : permet de rattraper un abonnement qui arrive juste
--- APRES le SetAuraInstanceInfo qui a declenche le scan (cas frequent : ce
--- meme SetAuraInstanceInfo est ce qui a fait apparaitre l'aura et declenche
--- ApplyCDMStackSwipe/ApplyAura -- sans ce cache, le tout premier abonnement
--- raterait le forward et resterait vide jusqu'au refresh CDM suivant).
+-- Derniere valeur vue par spellID, alimentee a chaque SetAuraInstanceInfo (avec ou sans abonne) pour
+-- rattraper un abonnement qui arrive juste apres le scan qui a fait apparaitre l'aura.
 local cdmAuraLastApplications = {}  -- [spellID] = derniere valeur applications vue
 
--- applications est TOUJOURS secrete en combat
--- (meme quand la valeur reelle est 0) -- une comparaison numerique directe
--- (applications <= 1) echoue systematiquement ("attempt to compare a secret
--- number value"). tostring(applications) REUSSIT et permet d'afficher "0" en
--- clair via print/SetText (sink de lecture/affichage legal) -- MAIS la chaine
--- resultante RESTE ELLE-MEME secrete : la comparer avec == (meme "str == '0'")
--- plante EXACTEMENT pareil ("attempt to compare a secret string value") si ce
--- n'est pas protege par un pcall SEPARE. Comparer `str == "0"` en dehors d'un
--- pcall plante silencieusement (erreur Lua masquee, WoW ne l'affiche pas par
--- defaut) sur CHAQUE appel, empechant meme la branche SetText/Show (plus bas)
--- de s'executer. Il faut pcall la CONVERSION *et* la COMPARAISON separement.
--- AUTO-APPRENTISSAGE : contrairement a la duree, aucune comparaison sur
--- "applications" (brut OU sa representation texte) ne peut JAMAIS confirmer
--- un 0 en combat. Pour les sorts SANS vrai mecanisme de stacks (Mur
--- Protecteur, Rage du Berserker...), ce canal affichait donc parfois un "0"
--- faute de pouvoir savoir.
--- Approche retenue (fail-open + apprentissage negatif) : affiche par defaut
--- des la 1ere aura vue (comme le clone swipe de duree), et ne cache
--- durablement QUE les spellID explicitement confirmes "jamais > 1" HORS
--- COMBAT (ns.MarkStackNotCapable, cf. ApplyStackCharges dans Debuffs.lua) --
--- une confirmation hors combat reflete un etat stabilise (pas "pas encore
--- monte en stacks"), contrairement a une lecture propre en plein combat qui
--- pourrait juste tomber pile au moment de l'application initiale. Toute
--- confirmation ulterieure > 1 (ns.MarkStackCapable) leve immediatement ce
--- verdict negatif, donc une aura mal classee se corrige d'elle-meme des
--- qu'elle stack reellement. Une approche fail-closed (n'afficher que les
--- spellID deja confirmes >1) a ete ecartee : une vraie aura a stacks qui
--- n'existe QU'en combat (debuff de boss, proc de tank...) n'a alors jamais
--- l'occasion d'etre confirmee, et son badge reste cache pour toujours.
+-- applications est toujours secrete en combat : comparer meme tostring(applications) plante si non pcall
+-- separement de la conversion. Comme aucune comparaison ne peut confirmer un 0 en combat, on affiche par
+-- defaut des la 1ere aura vue et on ne cache durablement que les spellID confirmes "jamais > 1" hors combat
+-- (ns.MarkStackNotCapable), leve des qu'une confirmation > 1 arrive (ns.MarkStackCapable) -- fail-open, pour
+-- ne pas bloquer indefiniment le badge d'une aura qui n'existe qu'en combat (debuff de boss, proc de tank).
 ns.stackCapableSpells    = ns.stackCapableSpells    or {}  -- [spellID] = true, confirme >1 au moins une fois
 ns.stackNotCapableSpells = ns.stackNotCapableSpells or {}  -- [spellID] = true, confirme jamais >1 hors combat
 
@@ -454,31 +270,18 @@ function ns.UnsubscribeCDMAuraStack(spellID, key)
     end
 end
 
--- NOTE : un canal "clone durObj" (SetCooldownFromDurationObject ->
--- StatusBar:SetTimerDuration) a ete tente ici pour animer les barres de
--- duree en combat, puis abandonne : Blizzard n'appelle JAMAIS
--- SetCooldownFromDurationObject sur les Cooldown-enfants CDM pour la duree
--- des buffs (uniquement SetCooldown avec deux nombres). Voir Animation.lua
--- pour la piste retenue a la place (lecture du texte de decompte natif,
--- lisible meme secret, cf. /aishdebug cdmbuff).
+-- Canal "clone durObj" (SetCooldownFromDurationObject) tente pour animer les barres en combat, abandonne :
+-- Blizzard n'appelle jamais cette fonction sur les Cooldown-enfants CDM pour la duree des buffs (uniquement
+-- SetCooldown a deux nombres). Voir Animation.lua pour la piste retenue (lecture du texte de decompte natif).
 
--- DIAGNOSTIC TEMPORAIRE : journal des N derniers SetCooldown vus sur les
--- Cooldown-enfants CDM, AVANT le filtre wasSetFromCooldown/isOnGCD -- pour
--- verifier si ce hook capture AUSSI les swipes de duree de buff (pas
--- seulement les cooldowns de sort), condition necessaire pour etendre
--- SubscribeCDMCooldown au pipeline d'auras generique. Consultable via /aacdm.
+-- Journal diagnostique des N derniers SetCooldown vus, avant le filtre wasSetFromCooldown/isOnGCD, consultable via /aacdm.
 local cdmSetCooldownLog = {}
 ns._cdmSetCooldownLog = cdmSetCooldownLog
 local CDM_LOG_MAX = 30
 
--- Journal PAR SPELLID, opt-in via ns._cdmWatchSpells[spellID]=true,
--- non partage avec cdmSetCooldownLog ci-dessus -- en combat, ce log global de
--- 30 entrees (TOUS sorts confondus) se fait vider en 1-2s par le bruit des
--- autres sorts trackes, ce qui evince l'evenement qui nous interesse avant
--- qu'on ait pu le lire via /aacdm ou /aatotemtest debug. Un journal dedie par
--- spellID watche (plus long, 200 entrees) survit au bruit des autres sorts.
--- Capture aussi Clear() et les changements de texte de charges (pas juste
--- SetCooldown) pour reconstituer la sequence complete d'un sort a charges.
+-- Journal opt-in par spellID (ns._cdmWatchSpells[spellID]=true), plus long (200 entrees) pour survivre au
+-- bruit des autres sorts en combat qui viderait sinon le journal global avant lecture. Capture aussi
+-- Clear() et les charges pour reconstituer la sequence complete d'un sort.
 ns._cdmWatchSpells = ns._cdmWatchSpells or {}
 ns._cdmWatchLog = ns._cdmWatchLog or {}
 local CDM_WATCH_LOG_MAX = 200
@@ -490,14 +293,10 @@ local function HookCDMCooldownChild(cdFrame, parentFrame)
         hooksecurefunc(cdFrame, "SetCooldown", function(self, start, duration)
             local spellID = GetCDMFrameSpellID(parentFrame)
             if not spellID then return end
-            -- Diagnostic additif : dernier duration BRUT vu par spellID,
-            -- stocke comme VALEUR (jamais compare/utilise en cle) -- toujours sûr,
-            -- secret ou non. Sert uniquement a /aatotemtest debug et outils similaires
-            -- pour verifier via tostring() si le filtre forwardSwipe (duration>1.5,
-            -- plus bas) est la raison d'un swipe qui ne se declenche jamais.
+            -- Dernier duration brut vu par spellID (valeur jamais comparee), pour diagnostiquer via
+            -- tostring() si le filtre forwardSwipe (duration>1.5, plus bas) bloque un swipe attendu.
             ns._cdmLastDuration = ns._cdmLastDuration or {}
             ns._cdmLastDuration[spellID] = duration
-            -- Log diagnostique (avant tout filtre) -- voir commentaire au-dessus.
             local okDurLog, isLongLog = pcall(function() return type(duration) == "number" and duration > 1.5 end)
             tinsert(cdmSetCooldownLog, 1, {
                 spellID = spellID,
@@ -527,33 +326,15 @@ local function HookCDMCooldownChild(cdFrame, parentFrame)
             -- Tracker par frame pour le matching dans Clear().
             hookedCooldownFrameData[cdFrame] = { spellID=spellID, version=ver, wasSetFromCooldown=parentFrame.wasSetFromCooldown }
 
-            -- Canal générique aura-swipe (voir bloc de commentaires plus haut) :
-            -- AUCUN filtre wasSetFromCooldown/isOnGCD ici -- c'est justement ce
-            -- filtre qui excluait les mises à jour de durée de buff
-            -- (wasSetFromCooldown=false pour ces cas). Présence + swipe
-            -- forwardés tels quels, jamais lus.
-            -- Cooldown:SetCooldown(start, duration) REJETTE une valeur secrete des qu'elle
-            -- transite par du code addon (tainted), meme en pur "sink" sans jamais
-            -- la lire -- erreur "Secret values are only allowed during untainted
-            -- execution for this argument." Seul le CODE BLIZZARD LUI-MEME
-            -- (untainted) peut passer une valeur secrete a SetCooldown -- ce canal
-            -- ne peut donc JAMAIS forwarder une duree reellement secrete (en
-            -- combat) vers un widget Cooldown a nous, quelle que soit la methode.
-            -- Reste utile hors combat / pour les valeurs non-secretes uniquement.
-            -- Seule voie restante pour une duree combat-safe : le binding natif
-            -- AuraButton:SetDurationCooldown (Blizzard appelle SetCooldown
-            -- lui-meme, en code non-tainted) -- cf. AuraTrackerContainer.lua.
-            --
-            -- La presence ne doit se rafraichir QUE sur une vraie mise a jour de
-            -- DUREE D'AURA (wasSetFromCooldown=false), PAS sur une recharge de
-            -- CAPACITE (wasSetFromCooldown=true) -- meme spellID, meme hook,
-            -- mais deux concepts differents chez Blizzard (l'aptitude ET le
-            -- buff qu'elle accorde partagent le spellID). Sans ce filtre, une
-            -- capacite dont le cooldown dure plus longtemps que son buff (ex:
-            -- Rage du Berserker, Mur Protecteur) garde l'icone/la ligne
-            -- "presente" pendant TOUTE la recharge -- bien apres la fin reelle
-            -- du buff (icone ET barre de duree restant affichees, barre figee
-            -- au minimum).
+            -- Canal generique aura-swipe : aucun filtre wasSetFromCooldown/isOnGCD ici, il exclurait les mises a jour
+            -- de duree de buff (wasSetFromCooldown=false). Cooldown:SetCooldown rejette toute valeur secrete
+            -- venant de code addon meme en pur sink, donc ce canal ne peut jamais forwarder une duree
+            -- reellement secrete en combat (seule voie combat-safe restante : AuraButton:SetDurationCooldown,
+            -- appele par Blizzard lui-meme, cf. AuraTrackerContainer.lua). Reste utile hors combat seulement.
+            -- La presence ne se rafraichit que sur une vraie mise a jour de duree d'aura (wasSetFromCooldown=
+            -- false), pas sur une recharge de capacite (meme spellID, deux concepts differents) : sinon une
+            -- capacite dont le CD dure plus longtemps que son buff (Rage du Berserker, Mur Protecteur) reste
+            -- affichee "presente" bien apres la fin reelle du buff.
             if not parentFrame.wasSetFromCooldown then
                 ns.cdmAuraSwipePresence[spellID] = GetTime()
             end
@@ -564,29 +345,16 @@ local function HookCDMCooldownChild(cdFrame, parentFrame)
                     pcall(cd.SetCooldown, cd, start, duration)
                 end
             end
-            -- Filtrer le GCD : wasSetFromCooldown + not isOnGCD.
-            -- isOnGCD est le booléen natif CDM prévu pour ce filtre (lisible en tainté).
-            -- wasSetFromCooldown seul était insuffisant (vrai sur certaines frames GCD).
+            -- Filtre GCD via isOnGCD (booleen natif lisible en tainte) : wasSetFromCooldown seul est
+            -- insuffisant, vrai sur certaines frames GCD aussi.
             if parentFrame.wasSetFromCooldown and not parentFrame.isOnGCD then
                 cdmCDData[spellID] = { version=ver, onCD=true }
-                -- SIGNAL DE FIN pour un buff "banked" (cf. Rapidite de la
-                -- nature/378081, ns.IsCDMAuraInstancePresent) : ce spellID n'a
-                -- JAMAIS eu de swipe de DUREE D'AURA observe
-                -- (ns.cdmAuraSwipePresence reste nil, jamais alimente par le
-                -- filtre wasSetFromCooldown=false ci-dessus) -- dans ce cas
-                -- PRECIS uniquement, le demarrage du CD de la capacite est la
-                -- preuve que le buff banked vient d'etre consomme (le CD de ce
-                -- type de sort ne demarre qu'a la perte du buff). Restreint a
-                -- ce cas pour ne jamais couper prematurement l'anim d'un sort
-                -- dont le CD demarre au cast alors que son buff a une vraie
-                -- duree restante (les deux concepts redeviendraient alors
-                -- independants, cf. commentaire wasSetFromCooldown plus haut).
-                -- Meme garde double canal que ns.IsCDMAuraInstancePresent
-                -- (swipe ET barre) -- un sort suivi via le canal BARRE
-                -- (Vague de lave/Totem de flux tempetueux) n'a jamais de
-                -- swipe mais gere deja correctement sa fin via ce canal-la ;
-                -- le forcer a false ici serait une seconde source d'ecriture
-                -- concurrente et inutile.
+                -- Signal de fin pour un buff "banked" (378081, cf. ns.IsCDMAuraInstancePresent) : si ce
+                -- spellID n'a jamais eu de swipe de duree observe, le demarrage du CD de la capacite prouve
+                -- que le buff vient d'etre consomme (son CD ne demarre qu'a la perte du buff). Restreint a
+                -- ce cas pour ne pas couper l'anim d'un sort dont le CD demarre au cast normalement.
+                -- Meme garde double canal (swipe+barre) que ns.IsCDMAuraInstancePresent : un sort suivi via
+                -- le canal barre gere deja sa fin correctement, pas besoin de le forcer ici.
                 if BANKED_BUFF_SPELLS[spellID]
                     and (not HasEverConfirmedPresence(ns.cdmAuraSwipePresence, spellID))
                     and (not HasEverConfirmedPresence(ns.cdmAuraBarPresence, spellID))
@@ -595,13 +363,8 @@ local function HookCDMCooldownChild(cdFrame, parentFrame)
                 end
                     local subs = cdmCooldownSubscribers[spellID]
                     if subs then
-                        -- Filtrer les GCDs : ne forwarder QUE si on peut confirmer
-                        -- duration > 1.5s (vrai CD). Si la comparaison échoue (secret
-                        -- number en TWW, pcall=false) ou si duration ≤ 1.5s → ne pas
-                        -- forwarder. UpdateSlotExtras prend le relais via polling
-                        -- (SetCooldownFromDurationObject, ~150ms de délai, imperceptible
-                        -- sur des CDs de 8s+). Évite les swipes GCD pour les sorts à
-                        -- charges dont les frames ont parfois isOnGCD=false en TWW.
+                        -- Ne forwarder que si duration > 1.5s confirme (vrai CD) : evite les swipes GCD pour
+                        -- les sorts a charges dont isOnGCD est parfois faux ; UpdateSlotExtras prend le relais.
                         local okDur, isLong = pcall(function() return duration > 1.5 end)
                         local forwardSwipe  = okDur and isLong
                         for _, sub in pairs(subs) do
@@ -619,10 +382,7 @@ local function HookCDMCooldownChild(cdFrame, parentFrame)
             end
         end)
     end)
-    -- SetCooldownFromDurationObject : 2e methode que Blizzard peut utiliser sur
-    -- un widget Cooldown. Log diagnostique uniquement (verifiable via /aacdm) --
-    -- elle n'est JAMAIS appelee pour la duree des buffs sur ces frames (voir
-    -- note plus haut) : on ne construit plus de mecanisme de forward dessus.
+    -- SetCooldownFromDurationObject : log diagnostique uniquement (/aacdm), jamais appelee pour les buffs sur ces frames.
     pcall(function()
         if cdFrame.SetCooldownFromDurationObject then
             hooksecurefunc(cdFrame, "SetCooldownFromDurationObject", function(self, durObj)
@@ -652,13 +412,9 @@ local function HookCDMCooldownChild(cdFrame, parentFrame)
                 })
                 for i = #wl, CDM_WATCH_LOG_MAX + 1, -1 do wl[i] = nil end
             end
-            -- Canal générique aura-swipe : Clear() = l'aura vient de disparaître.
-            -- Meme filtre que le SetCooldown ci-dessus : n'efface
-            -- la presence QUE si cette frame trackait une duree d'aura
-            -- (wasSetFromCooldown=false), pas une recharge de capacite -- sinon
-            -- une capacite qui revient de cooldown AVANT que son buff (traque
-            -- via une autre frame/viewer) ne finisse effacerait a tort la
-            -- presence de ce buff encore actif.
+            -- Canal generique aura-swipe : Clear() = aura disparue. Meme filtre que SetCooldown : n'efface
+            -- que si cette frame trackait une duree d'aura, sinon une capacite revenue de CD avant la fin
+            -- de son buff (traque via une autre frame) effacerait a tort la presence de ce buff actif.
             if not frameData.wasSetFromCooldown then
                 ns.cdmAuraSwipePresence[frameData.spellID] = false
             end
@@ -734,19 +490,11 @@ local function GetRandomSpecColor()
     return { bc[1], bc[2], bc[3] }
 end
 
--- Auto-découverte hoistée : appelée par chaque SetAuraInstanceInfo pour un sort
--- inconnu. Skip si déjà dans spells, skip si déjà War Gear (par spellID/itemID/nom).
--- Hoist pour éviter la closure pcall à chaque hit CDM (très fréquent en combat).
---
--- linkedSpellIDs (optionnel) : liste brute Blizzard des spellIDs
--- que le CDM regroupe sous UNE MEME identite (ex: Precurseur du Vide --
--- 1256301 a 1-2 stacks, 1256302 a 3+ -- meme "case" CDM, spellID different
--- selon le seuil). GetScanSpellID normalise TOUJOURS sid=linkedSpellIDs[1]
--- avant d'appeler cette fonction -- la variante "haute" n'est donc JAMAIS
--- decouverte comme entree separee si on ne fait rien de plus : on stocke
--- ici la liste complete sur l'entree (memes destinations/priorite), pour
--- que Whitelist.lua puisse inclure toutes les variantes dans la whitelist
--- native des qu'UNE seule (l'identite/l'ancre) est cochee.
+-- Auto-decouverte hoistee : appelee par chaque SetAuraInstanceInfo pour un sort inconnu (skip si deja
+-- dans spells ou deja War Gear). Hoist pour eviter la closure pcall a chaque hit CDM.
+-- linkedSpellIDs (optionnel) : sid est toujours normalise a linkedSpellIDs[1] avant l'appel (ex: Precurseur
+-- du Vide 1256301/1256302, meme case CDM selon le seuil de stacks) ; on stocke la liste complete sur
+-- l'entree pour que Whitelist.lua inclue toutes les variantes des qu'une seule est cochee.
 local function AutoDiscoverSpell(spellID, name, unit, frame, linkedSpellIDs)
     local spells = ns.GetSpecSpells()
     if not spells then
@@ -786,22 +534,13 @@ local function AutoDiscoverSpell(spellID, name, unit, frame, linkedSpellIDs)
     defaults.source = src
     if hasLinks then defaults.linkedSpellIDs = linkedSpellIDs end
     -- Destinations : toutes inactives à la découverte.
-    -- L'utilisateur choisit librement la position (L/C/I/B) depuis Auras à tracker.
-    defaults.destinations = { iconlist=false, circlebars=false, icons=false, freebars=false }
+    -- L'utilisateur choisit librement la position (L/C/I/B/T) depuis Auras à tracker.
+    defaults.destinations = { iconlist=false, circlebars=false, icons=false, freebars=false, totems=false }
     spells[spellID] = defaults
 end
 
-------------------------------------------------------------------------
--- MIGRATION DES COULEURS PAR DÉFAUT
---
--- Parcourt les auras existantes et remplace leur couleur si elle n'a
--- jamais été définie manuellement.
---
--- Trois états du flag _colorDefault :
---   nil   → ancien sort (pré-flag) : on compare à ns.barColor pour décider
---   true  → explicitement marqué "à rouler" (cas théorique, non utilisé pour l'instant)
---   false → déjà roulé ou défini manuellement : on ne touche plus jamais
-------------------------------------------------------------------------
+-- Migration des couleurs par defaut : remplace la couleur des auras existantes si jamais definie manuellement.
+-- Flag _colorDefault : nil = ancien sort (compare a ns.barColor), true = a rouler, false = ne plus toucher.
 function ns.RollDefaultSpecColors()
     local spells = ns.GetSpecSpells()
     if not spells then return end
@@ -833,11 +572,8 @@ function ns.RollDefaultSpecColors()
     end
 end
 
--- Hooke le frame StatusBar enfant (frame.Bar) d'un item de BuffBarCooldownViewer
--- pour capturer/relayer sa durée de façon event-driven, comme HookCDMCooldownChild
--- le fait pour frame.Cooldown -- mais via un sink (StatusBar:SetValue) qui
--- accepte réellement les valeurs secrètes venant d'un addon (cf. bloc de
--- commentaires "ABONNEMENTS CLONE BAR" plus haut).
+-- Hooke le StatusBar enfant (frame.Bar) de BuffBarCooldownViewer, comme HookCDMCooldownChild pour
+-- frame.Cooldown mais via un sink (StatusBar:SetValue) qui accepte les valeurs secretes d'un addon.
 local hookedBarChildren = {}
 local function HookCDMBarChild(barFrame, parentFrame)
     if not barFrame or hookedBarChildren[barFrame] then return end
@@ -846,21 +582,11 @@ local function HookCDMBarChild(barFrame, parentFrame)
         hooksecurefunc(barFrame, "SetMinMaxValues", function(self, lo, hi)
             local spellID = GetCDMFrameSpellID(parentFrame)
             if not spellID then return end
-            -- Blizzard envoie hi=0 en CLAIR au moment precis ou le buff expire
-            -- (confirme en jeu) : EFFACER la presence dans ce cas, pas la
-            -- rafraichir -- sinon un buff expire restait "present" jusqu'a
-            -- 15 min (CDM_AURA_SWIPE_STALE_AFTER), empechant l'icone/la barre
-            -- de se cacher a la fin de son timer.
-            --
-            -- Gater ce hi=0 derriere "a deja eu une plage positive" (pour les
-            -- auras sans vrai signal hi>0, ex. Precurseur du Vide) casse le
-            -- masquage normal de la majorite des autres auras en Barres --
-            -- l'hypothese "hi>0 observe au moins une fois pour une aura
-            -- normale" est fausse en pratique. Le fix pour les auras dont ce
-            -- canal ne se declenche jamais fiablement vit cote Scan.lua
-            -- (ns._lastKnownAura, cache de derniere donnee connue par lecture
-            -- directe), isole par spellID, sans toucher a cette semantique
-            -- hi=0 partagee.
+            -- Blizzard envoie hi=0 en clair au moment precis ou le buff expire : effacer la presence dans
+            -- ce cas plutot que la rafraichir, sinon un buff expire reste "present" jusqu'a 15 min.
+            -- Gater ce hi=0 derriere "a deja eu une plage positive" casserait le masquage de la majorite
+            -- des auras en Barres (l'hypothese "hi>0 observe au moins une fois" est fausse en pratique) ;
+            -- le fix pour les auras sans signal hi>0 fiable vit cote Scan.lua (ns._lastKnownAura).
             local okZero, isZero = pcall(function() return hi == 0 end)
             if okZero and isZero then
                 ns.cdmAuraBarPresence[spellID] = false
@@ -890,11 +616,8 @@ local function HookCDMBarChild(barFrame, parentFrame)
     end)
 end
 
--- Hooke le FontString ChargeCount.Current d'un item Essential/Utility
--- CooldownViewer pour capturer le texte de charges de façon event-driven.
--- Même lecture (GetText, jamais l'argument SetText) que ScanCooldownViewer
--- fait déjà par polling -- ce hook ne fait qu'avancer le moment de la lecture
--- au lieu d'attendre le prochain tick à 0.15s.
+-- Hooke ChargeCount.Current pour capturer le texte de charges event-driven, meme lecture (GetText) que
+-- ScanCooldownViewer par polling, juste avancee au lieu d'attendre le prochain tick a 0.15s.
 local hookedChargeCountChildren = {}
 local function HookCDMChargeCountChild(fs, parentFrame)
     if not fs or hookedChargeCountChildren[fs] then return end
@@ -929,11 +652,8 @@ local function HookCDMFrame(frame, canMask, source, alwaysMask)
         if not spellID then return end
         local instID = cdmAura and cdmAura.auraInstanceID
         -- Presence pure (voir declaration ci-dessus) : enregistree AVANT tout
-        -- "return" precoce -- doit capter aussi bien la liaison (instID
-        -- present) que la deliaison (cdmAura/instID nil, si Blizzard rappelle
-        -- bien ce setter a la perte de l'aura -- hypothese testee en jeu).
-        -- self.auraDataUnit reste lisible meme quand cdmAura est nil (propriete
-        -- de la FRAME/du slot, pas de l'aura elle-meme).
+        -- doit capter aussi bien la liaison (instID present) que la deliaison (cdmAura/instID nil).
+        -- self.auraDataUnit reste lisible meme quand cdmAura est nil (propriete de la frame, pas de l'aura).
         do
             local puUnit = self.auraDataUnit
             if puUnit then
@@ -945,26 +665,14 @@ local function HookCDMFrame(frame, canMask, source, alwaysMask)
         local unit = self.auraDataUnit
         if not unit or not cdmData[unit] then return end
 
-        -- Cle = spellID, PAS instID (Secret Values, 12.0+) : un auraInstanceID
-        -- peut etre secret et ne peut alors plus servir de cle de table
-        -- ("cannot be indexed with secret keys"). spellID reste TOUJOURS
-        -- clean sur ce hook (donne en clair par Blizzard via cooldownInfo).
-        -- instID reste indispensable pour GetAuraDuration/
-        -- GetAuraApplicationDisplayCount ailleurs dans le pipeline, mais
-        -- stocke ici comme VALEUR de table -- toujours autorise, secret ou
-        -- non, contrairement a un usage en cle ou en comparaison (==).
-        -- Pas de dedup "meme aura, rien a faire" ici : comparer deux instID
-        -- potentiellement secrets planterait aussi ; AutoDiscoverSpell et
-        -- MaskCDMFrame sont deja idempotents, donc on peut se permettre de
-        -- toujours reecrire/reappliquer sans cout reel.
+        -- Cle = spellID, pas instID : un auraInstanceID peut etre secret (indexable seulement comme valeur,
+        -- pas comme cle de table). spellID reste toujours clean sur ce hook. Pas de dedup ici (comparer deux
+        -- instID secrets planterait aussi) ; AutoDiscoverSpell et MaskCDMFrame sont deja idempotents.
         local name = GetSpellName and GetSpellName(spellID) or tostring(spellID)
         cdmData[unit][spellID] = { spellId = spellID, name = name, instID = instID }
 
-        -- Clone stack (voir bloc de commentaires "ABONNEMENTS CLONE STACK"
-        -- plus haut) : retransmet cdmAura.applications tel quel aux
-        -- FontStrings abonnes pour ce spellID, sans jamais le lire nous-memes.
-        -- Cache mis a jour inconditionnellement (meme sans abonne actuel) pour
-        -- rattraper un abonnement qui arriverait juste apres cet appel.
+        -- Clone stack : retransmet cdmAura.applications tel quel aux FontStrings abonnees, jamais lu nous-memes.
+        -- Cache mis a jour inconditionnellement pour rattraper un abonnement qui arrive juste apres cet appel.
         if cdmAura then
             cdmAuraLastApplications[spellID] = cdmAura.applications
             local stackSubs = cdmAuraStackSubscribers[spellID]
@@ -975,23 +683,12 @@ local function HookCDMFrame(frame, canMask, source, alwaysMask)
             end
         end
 
-        -- TRACE : nouvelle aura CDM detectee
-
-        -- Auto-découverte : tous les viewers CDM.
-        -- SetAuraInstanceInfo est déclenché uniquement quand Blizzard affecte une
-        -- vraie aura (avec auraInstanceID) — c'est déjà le filtre correct.
+        -- Auto-decouverte : tous les viewers CDM, filtree par SetAuraInstanceInfo (vraie aura uniquement).
         if name then pcall(AutoDiscoverSpell, spellID, name, unit, self, self.cooldownInfo and self.cooldownInfo.linkedSpellIDs) end
 
-        -- AUTO-CORRECTION : InitCDMHooks etiquette TOUT sort decouvert via
-        -- Essentiel/Utilitaire comme source="debuff" (heuristique correcte
-        -- pour la majorite des capacites offensives/CC, mais fausse pour
-        -- celles qui s'octroient un buff a elles-memes -- Rapidite de la
-        -- nature, Furie sanguinaire...). Ce hook precis ne se declenche QUE
-        -- quand Blizzard lie l'icone CDM a
-        -- une VRAIE instance d'aura sur `unit` -- si cet unit est "player" pour
-        -- un sort deja marque "debuff", c'est la preuve directe que ce sort
-        -- s'applique bien au joueur (pas a une cible) : on corrige silencieusement,
-        -- sans liste figee de spellID a maintenir a la main.
+        -- Auto-correction : InitCDMHooks etiquette tout sort Essentiel/Utilitaire comme "debuff", faux pour
+        -- les sorts qui s'octroient un buff a eux-memes (Rapidite de la nature...). Ce hook ne se declenche
+        -- que sur une vraie instance d'aura : si unit=="player" pour un sort marque "debuff", on corrige.
         if unit == "player" then
             local spells = ns.GetSpecSpells()
             local info = spells and spells[spellID]
@@ -1005,16 +702,10 @@ local function HookCDMFrame(frame, canMask, source, alwaysMask)
             MaskCDMFrame(self, ShouldMaskFrame(self, spellID))
         end
 
-        -- SCAN IMMÉDIAT : Blizzard vient de nous signaler une nouvelle aura via
-        -- SetAuraInstanceInfo sur la CDM frame. C'est le moment LE PLUS tôt où les
-        -- données sont disponibles — AVANT même que UNIT_AURA soit dispatché au Lua.
-        --
-        -- COALESCE SANS TIMER : si plusieurs SetAuraInstanceInfo sont appelés dans
-        -- le même frame Blizzard (ex: 5 DOTs sur la cible qu'on vient de tab), on
-        -- coalesce via GetTime() qui est IDENTIQUE pour toutes les exécutions du
-        -- même frame. Au second appel, lastScanTime == GetTime() → skip.
-        -- Avantage sur C_Timer.After(0) : pas d'attente du frame suivant (~16ms),
-        -- scan exécuté SYNCHRONE dans le frame courant.
+        -- Scan immediat : SetAuraInstanceInfo est le moment le plus tot ou les donnees sont disponibles,
+        -- avant meme que UNIT_AURA soit dispatche. Coalesce sans timer via GetTime() (identique pour tous
+        -- les appels du meme frame Blizzard) : au 2e appel du meme frame, skip. Plus rapide qu'un
+        -- C_Timer.After(0) (pas d'attente du frame suivant), execute de facon synchrone.
         local now = GetTime()
         if now ~= ns._cdmLastScanTime then
             ns._cdmLastScanTime = now
@@ -1063,6 +754,56 @@ function ns.InitCDMHooks()
         end)
     end
     cdmHooked = true
+end
+
+--- Etat des hooks CDM, pour les diagnostics externes (Debug.lua) : le pin
+--- d'un sort ne sert a rien si le viewer qui doit l'afficher ne construit
+--- jamais d'itemFrame (viewer desactive en Edit Mode) -- aucun
+--- SetAuraInstanceInfo n'est alors emis et cdmData reste vide malgre un pin
+--- parfaitement valide.
+
+-- Presence par l'etat d'affichage des itemFrames "Buffs" du CDM : le seul canal combat-safe pour une
+-- aura sans duree ni stacks, une fois GetPlayerAuraBySpellID/swipe/bar/cdmAuraInstancePresence tous en echec
+-- (aucun d'eux ne redescend a la fin du buff). Les itemFrames BuffIcon/BuffBar, elles, ne s'affichent que
+-- tant que le buff est actif et leur IsShown() reste lisible en combat (ni protegees ni secretes).
+-- Restreint a BuffIcon/BuffBar via buffFrameAlwaysMask : sur Essentiel/Utilitaire l'icone reste affichee
+-- en permanence (sort juste en recharge), donc IsShown ne prouve rien. nil = sort non epingle sur ce viewer.
+-- Prerequis : sort epingle en TrackedBuff/TrackedBar ET viewer correspondant actif en Edit Mode.
+local cdmBuffPresenceMemo, cdmBuffPresenceAt = {}, {}
+-- TTL court car appele par combo a chaque scan (rafale d'UNIT_AURA en combat), balayage ~40 frames sinon trivial.
+local CDM_BUFF_PRESENCE_TTL = 0.05
+
+function ns.IsCDMBuffFramePresent(spellID)
+    local at = cdmBuffPresenceAt[spellID]
+    if at and (GetTime() - at) < CDM_BUFF_PRESENCE_TTL then
+        return cdmBuffPresenceMemo[spellID]
+    end
+    local result
+    for frame in pairs(hookedFrames) do
+        if buffFrameAlwaysMask[frame] then
+            local sid = GetCDMFrameSpellID(frame)
+            if not sid then
+                local okI, s = pcall(function()
+                    local ci = frame.cooldownInfo
+                    return ci and ci.spellID
+                end)
+                sid = okI and s or nil
+            end
+            if sid == spellID then
+                local okSh, sh = pcall(function()
+                    if frame:IsShown() then return true end
+                    return false
+                end)
+                if okSh then
+                    if sh then result = true; break end
+                    result = false
+                end
+            end
+        end
+    end
+    cdmBuffPresenceMemo[spellID] = result
+    cdmBuffPresenceAt[spellID] = GetTime()
+    return result
 end
 
 -- Diagnostic : /aacdm — dump l'etat complet de la chaine CDM -> cdmData ->
@@ -1286,14 +1027,9 @@ SlashCmdList["AACBAR"] = function(msg)
     end
 end
 
--- Seul BuffBarCooldownViewer
--- construit ses items avec une vraie StatusBar (frame.Bar) -- Essential,
--- Utility ET BuffIcon sont TOUS structurellement Cooldown-only (aucune
--- StatusBar nulle part, même caché, même avec un item réellement actif
--- dessus, ex: Dur Au Mal actif sur Utility = pur Cooldown). La contrainte
--- "épingler sur Barres" pour une durée combat-safe n'est donc pas
--- contournable : c'est Blizzard qui n'a bâti qu'UN SEUL de ses 4 viewers
--- avec le bon type de widget, pas une limite de notre côté.
+-- Seul BuffBarCooldownViewer construit ses items avec une vraie StatusBar ; Essential/Utility/BuffIcon sont
+-- tous structurellement Cooldown-only. La contrainte "epingler sur Barres" pour une duree combat-safe
+-- vient donc de Blizzard (un seul des 4 viewers a le bon widget), pas d'une limite de notre cote.
 
 -- Ré-applique le masking sur toutes les frames hookées (appelé après changement
 -- d'option ou reconstruction de whitelist)
@@ -1311,39 +1047,14 @@ function ns.RefreshCDMMask()
     end)
 end
 
-------------------------------------------------------------------------
--- SCAN PROACTIF DES VIEWERS CDM
---
--- Découvre immédiatement tous les sorts que le CDM est configuré à tracker
--- pour la spec courante, sans attendre qu'ils apparaissent en combat.
--- Appelé à PLAYER_ENTERING_WORLD, PLAYER_SPECIALIZATION_CHANGED, et
--- après InitCDMHooks (via les timers de retry dans Events.lua).
---
--- 3 méthodes complémentaires (ordre du plus précis au plus large) :
---
---  1) C_CooldownViewer.GetCooldownViewerCategorySet :
---     API officielle, retourne tous les cooldownIDs d'une catégorie (même
---     inactifs). Couvre TrackedBuff (BuffIconViewer) et TrackedBar
---     (BuffBarViewer). Source player/enhancement.
---
---  2) Itération directe des frames de chaque viewer :
---     GetChildren + layoutChildren + itemFramePool:EnumerateActive().
---     Couvre EssentialViewer / UtilityViewer (debuffs target) et les
---     frames actives des buff viewers. Source déduite du viewer.
---
---  3) CooldownViewerSettings DataProvider (cooldownInfoByID) :
---     Liste exhaustive de TOUS les sorts trackés par le CDM, même ceux
---     que les méthodes 1-2 n'ont pas vu (inactifs, hors catégorie API).
---     Source "player" par défaut — les debuffs seront reclassifiés via
---     SetAuraInstanceInfo dès qu'ils apparaissent en combat.
---     Skip si le sort a déjà été découvert par les méthodes 1-2.
-------------------------------------------------------------------------
--- Retourne true si instID indique une aura active sur le frame.
--- Logique TWW : les frames CD-only ont auraInstanceID = nil.
--- Les frames avec une vraie aura ont auraInstanceID soit clean (number > 0)
--- soit secret value (TWW protège les IDs en combat). Dans les deux cas
--- non-nil = aura présente. Une secret value NE doit PAS être rejetée —
--- c'est exactement l'inverse de ce qu'on voulait : secret = aura réelle.
+-- Scan proactif des viewers CDM : decouvre tous les sorts que le CDM tracke pour la spec courante sans
+-- attendre le combat (PLAYER_ENTERING_WORLD, PLAYER_SPECIALIZATION_CHANGED, apres InitCDMHooks).
+-- 3 methodes complementaires, du plus precis au plus large : (1) C_CooldownViewer.GetCooldownViewerCategorySet
+-- couvre TrackedBuff/TrackedBar meme inactifs ; (2) iteration directe des frames de chaque viewer couvre
+-- Essential/Utility (debuffs) et les frames actives des buff viewers ; (3) CooldownViewerSettings DataProvider
+-- liste exhaustivement tout le reste (source "player" par defaut, reclassifie a l'apparition en combat).
+-- Retourne true si instID indique une aura active : non-nil = presente, y compris une secret value
+-- (TWW protege les IDs en combat mais ne les met jamais a nil pour une frame CD-only).
 local function IsValidAuraInstanceID(instID)
     if instID == nil then return false end
     -- Secret value → aura réelle (les frames sans aura ont nil, pas une secret value)
@@ -1356,12 +1067,8 @@ local function IsValidAuraInstanceID(instID)
 end
 
 function ns.ScanCDMViewers()
-    -- SOURCE PRINCIPALE : liste statique CDM via GetCooldownViewerCategorySet.
-    -- Le CDM maintient une liste de toutes les auras trackées pour la spec courante.
-    -- TrackedBuff = onglet "Améliorations" icônes (BuffIconCooldownViewer)
-    -- TrackedBar  = onglet "Améliorations" barres (BuffBarCooldownViewer)
-    -- Cette liste existe hors combat, elle ne dépend pas d'auras actives.
-    -- Elle est la source faisant autorité pour la spec — c'est ce qu'on veut.
+    -- Source principale : liste statique CDM (existe hors combat, autoritaire pour la spec).
+    -- TrackedBuff = icones (BuffIconCooldownViewer), TrackedBar = barres (BuffBarCooldownViewer).
     if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
        and Enum and Enum.CooldownViewerCategory then
         local function ScanCategory(cat, unit)
@@ -1462,49 +1169,18 @@ end
 -- Stub : sera remplacé par une liste codée en dur par spec/classe.
 function ns.ReclassifyExistingSpells() end
 
-------------------------------------------------------------------------
--- AUTO-ÉPINGLAGE CDM (EXPÉRIMENTAL)
---
--- Contexte (le besoin est réel) : la quasi-totalité de ce pipeline (durée
--- combat-safe, stacks) dépend de Blizzard assignant réellement une frame CDM
--- au spellID -- ce qui n'arrive QUE si le sort a été épinglé manuellement
--- dans le Cooldown Manager natif (Edit Mode). Sans ça : aucune icône, aucune
--- barre, rien. Épingler manuellement 40 spés à la main n'est pas praticable.
---
--- Ceci appelle du code UI Blizzard NON-DOCUMENTÉ (pas le namespace public
--- C_CooldownViewer, qui est lecture seule -- cf. commentaire ScanCDMViewers
--- plus haut) : le mixin interne de CooldownViewerSettings.lua/
--- CooldownViewerSettingsDataProvider.lua/CooldownViewerSettingsLayoutManager.lua
--- -- risque de casse à un futur patch puisque non documenté officiellement.
---
--- SetCooldownToCategory (la mutation elle-même) tainte l'exécution partagée
--- de tout Blizzard_CooldownViewer, quelle que soit la variante d'appel --
--- même un write minimal sans RefreshLayout()/SaveCurrentLayout() finit par
--- provoquer un crash ADDON_ACTION_BLOCKED ailleurs dans notre propre code dès
--- que le joueur entre en combat. Il n'existe pas de variante "propre" de cet
--- appel.
---
--- Mitigation retenue : accepter que le taint est inévitable, mais le
--- confiner en forçant un ReloadUI() immédiatement après toute mutation
--- réussie -- avant que le joueur ait la moindre chance d'entrer en combat
--- dans CETTE session. Le taint vit dans la VM Lua courante ; un reload en
--- démarre une toute neuve, 100% propre (seul l'état SAUVEGARDÉ --
--- SavedVariables, via SaveLayouts -- traverse le reload, pas le taint
--- lui-même). Ne PAS retirer ce ReloadUI() sans reproduire un moyen
--- équivalent de garantir un retour à une VM propre avant tout combat.
---
--- Séquence d'appels (cf. SetSpellCDMCategory + SaveCDMLayoutMinimal) :
---   1) Trouver le cooldownID Blizzard du spellID (lecture pure, 100% API
---      publique déjà utilisée ailleurs dans ce fichier -- ScanCDMViewers) :
---      C_CooldownViewer.GetCooldownViewerCategorySet(cat, true) avec
---      includeDisabled=true retourne AUSSI les sorts pas encore épinglés
---      (catégorie "Hidden*" en interne), pas seulement les actifs.
---   2) CooldownViewerSettings:GetDataProvider():SetCooldownToCategory(id, cat)
---      -- la mutation elle-même.
---   3) dataProvider:GetLayoutManager():SaveLayouts() -- persistance minimale,
---      SANS passer par CooldownViewerSettings:RefreshLayout()/SaveCurrentLayout()
---      (le wrapper panneau de réglages, qui propage le taint plus largement).
-------------------------------------------------------------------------
+-- Auto-epinglage CDM (experimental) : ce pipeline exige qu'un sort soit epingle manuellement dans le
+-- Cooldown Manager natif (Edit Mode), sinon aucune frame/icone/barre. Epingler 40 specs a la main n'est pas
+-- praticable, donc on appelle le mixin interne NON documente de CooldownViewerSettings (pas l'API publique
+-- en lecture seule) -- risque de casse a un futur patch.
+-- SetCooldownToCategory tainte tout Blizzard_CooldownViewer quelle que soit la variante d'appel (crash
+-- ADDON_ACTION_BLOCKED au prochain combat). Mitigation : ReloadUI() immediatement apres toute mutation
+-- reussie, avant tout combat dans cette session, pour repartir d'une VM propre (seul SaveLayouts traverse
+-- le reload). NE PAS retirer ce ReloadUI() sans un moyen equivalent de garantir une VM propre avant combat.
+-- Sequence (cf. SetSpellCDMCategory + SaveCDMLayoutMinimal) : (1) trouver le cooldownID via
+-- GetCooldownViewerCategorySet(cat, includeDisabled=true) pour aussi voir les sorts pas encore epingles ;
+-- (2) SetCooldownToCategory(id, cat) ; (3) GetLayoutManager():SaveLayouts() sans passer par
+-- RefreshLayout()/SaveCurrentLayout() (le wrapper panneau qui propage le taint plus largement).
 -- Coupe-circuit : PinAuraToCDM/SyncCDMPins renvoient ceci et ne touchent
 -- JAMAIS SetCooldownToCategory tant que cette chaine n'est pas vide.
 local CDM_PIN_DISABLED_REASON = ""
@@ -1519,35 +1195,18 @@ local CDM_PIN_CATEGORIES = {
     Enum.CooldownViewerCategory and Enum.CooldownViewerCategory.TrackedBar,
 }
 
--- Lookup rapide "categorie autorisee" -- utilise comme VERROU cote info.category
--- (cf. FindCooldownIDForSpell) : le champ .category renvoye par
--- GetCooldownViewerCooldownInfo est la classification DEFAUT/statique cote
--- Blizzard (CheckBuildDisplayData la stocke elle-meme comme "default a ne pas
--- ecraser", cf. CooldownViewerSettingsDataProvider.lua) -- jamais affectee par
--- un SetCooldownToCategory anterieur (notre ou celui de l'utilisateur), donc
--- fiable comme signal "ce cooldownID est structurellement une AURA" meme si
--- quelqu'un l'a deja bascule ailleurs par erreur.
+-- Lookup rapide "categorie autorisee", utilise comme verrou sur info.category (classification statique
+-- de Blizzard, jamais affectee par un SetCooldownToCategory anterieur) pour confirmer qu'un cooldownID
+-- est structurellement une aura, meme si quelqu'un l'a deja bascule ailleurs par erreur.
 local AURA_CATEGORY_SET = {}
 for _, cat in ipairs(CDM_PIN_CATEGORIES) do
     if cat then AURA_CATEGORY_SET[cat] = true end
 end
 
--- Retrouve le cooldownID Blizzard correspondant a spellID, epingle ou non
--- (includeDisabled=true), en parcourant UNIQUEMENT les categories auras
--- (cf. CDM_PIN_CATEGORIES). Renvoie nil si Blizzard ne connait pas ce sort
--- en tant qu'AURA pour la spec active (sort non trackable comme aura --
--- p.ex. un pur cooldown de sort -- ou pas encore decouvert cote client).
---
--- VERROU (le taint peut se propager jusqu'a casser l'affichage des charges
--- d'un AUTRE sort, Utility viewer) : certaines auras partagent leur spellID
--- avec le SORT qui les applique (linkedSpellIDs peut grouper les deux sous
--- une identite commune).
--- Meme en ne scannant QUE TrackedBuff/TrackedBar, on verifie ICI en plus que
--- info.category (le VRAI classement par defaut de ce cooldownID precis, pas
--- juste "trouve en cherchant dans ces categories") est bien une categorie
--- aura -- jamais Essential/Utility/EquipSlot*/SpecAgnostic*. Un cooldownID
--- dont l'identite reelle est un cooldown de sort est ignore, meme s'il
--- apparait par ailleurs lie au meme spellID.
+-- Retrouve le cooldownID Blizzard pour spellID (epingle ou non), en parcourant uniquement les categories
+-- auras. Nil si Blizzard ne connait pas ce sort comme aura pour la spec active. Verifie aussi info.category
+-- (classement reel de ce cooldownID precis, jamais Essential/Utility) car certaines auras partagent leur
+-- spellID avec le sort qui les applique -- ignore un cooldownID qui est en realite un cooldown de sort.
 local function FindCooldownIDForSpell(spellID)
     if not (C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
             and C_CooldownViewer.GetCooldownViewerCooldownInfo) then
@@ -1571,9 +1230,8 @@ local function FindCooldownIDForSpell(spellID)
     return nil
 end
 
--- Coeur de la mutation, SANS RefreshLayout/SaveCurrentLayout (couteux --
--- appele isolement par PinAuraToCDM, mais UNE SEULE FOIS a la fin d'un
--- lot par SyncCDMPins plutot qu'a chaque sort). Retourne (success, message).
+-- Coeur de la mutation, sans RefreshLayout/SaveCurrentLayout (couteux, applique une seule fois a la fin
+-- d'un lot par SyncCDMPins plutot qu'a chaque sort). Retourne (success, message).
 local function SetSpellCDMCategory(spellID, asBar)
     if CDM_PIN_DISABLED_REASON ~= "" then return false, CDM_PIN_DISABLED_REASON end
     if not spellID then return false, "spellID manquant" end
@@ -1606,9 +1264,8 @@ local function SetSpellCDMCategory(spellID, asBar)
     return true, "epingle (cooldownID=" .. tostring(cooldownID) .. ")", dataProvider
 end
 
--- Persiste au plus bas niveau possible (layoutManager:SaveLayouts(), jamais
--- CooldownViewerSettings:RefreshLayout()/SaveCurrentLayout() -- inutile de
--- toute facon vu le ReloadUI() force juste apres par les appelants).
+-- Persiste au plus bas niveau (SaveLayouts, jamais RefreshLayout/SaveCurrentLayout, inutile vu le
+-- ReloadUI() force juste apres par les appelants).
 local function SaveCDMLayoutMinimal(dataProvider)
     local okLM, layoutManager = pcall(dataProvider.GetLayoutManager, dataProvider)
     if okLM and layoutManager then
@@ -1616,12 +1273,8 @@ local function SaveCDMLayoutMinimal(dataProvider)
     end
 end
 
--- Popup de confirmation (meme pattern que AISD_CONFIRM_DELETE_TAG dans
--- SettingsPanel.lua) -- PAS de ReloadUI() automatique : un reload force
--- surprend l'utilisateur en pleine action (ferme les fenetres ouvertes,
--- interrompt un raid loot etc.). On propose un reload, comme la plupart des
--- addons apres un changement qui en necessite un -- l'utilisateur choisit le
--- moment.
+-- Popup de confirmation : pas de ReloadUI() automatique (surprendrait l'utilisateur en pleine action),
+-- on propose un reload et l'utilisateur choisit le moment.
 StaticPopupDialogs["AISH_CDM_RELOAD"] = {
     text = L["CDM_RELOAD_PROMPT"],
     button1 = RELOADUI,
@@ -1632,15 +1285,11 @@ StaticPopupDialogs["AISH_CDM_RELOAD"] = {
     hideOnEscape = true,
 }
 
--- Compteur de sorts epingles depuis le dernier reload, pas encore "acquittes"
--- par une reponse au popup -- permet de re-proposer plus tard (fermeture du
--- GUI des auras trackees, cf. Init.lua) sans perdre le compte si l'utilisateur
--- a clique "Plus tard".
+-- Compteur de sorts epingles depuis le dernier reload, pas encore acquitte par une reponse au popup
+-- (permet de re-proposer plus tard sans perdre le compte si l'utilisateur a clique "Plus tard").
 local pendingCDMReloadCount = 0
 
--- Historique des appels a MarkCDMReloadPending (qui, quand, combien), pour
--- identifier la source exacte d'un popup de reload inattendu -- cf.
--- /aishdebug cdmreload (Debug.lua).
+-- Historique des appels a MarkCDMReloadPending, pour identifier la source d'un popup inattendu (/aishdebug cdmreload).
 ns._cdmReloadMarkLog = ns._cdmReloadMarkLog or {}
 
 function ns.MarkCDMReloadPending(count)
@@ -1654,22 +1303,13 @@ function ns.GetCDMReloadPendingCount()
     return pendingCDMReloadCount
 end
 
--- Nombre de sorts en attente la DERNIERE FOIS que le popup a ete montre
--- (accepte OU decline via "Plus tard"). pendingCDMReloadCount ne redescend
--- JAMAIS a zero tant qu'aucun reload effectif n'a eu lieu (par design, cf.
--- commentaire ci-dessus -- ne pas perdre le compte si l'utilisateur clique
--- "Plus tard"). Mais PromptCDMReloadIfPending est appelee a CHAQUE fermeture
--- du GUI (SettingsPanel.lua, MainFrame OnHide) -- sans ce garde, le popup
--- reviendrait a CHAQUE fermeture, meme sans le moindre nouveau sort epingle
--- depuis la derniere fois qu'il a ete montre. On ne re-affiche donc que si
--- le compte a REELLEMENT augmente depuis le dernier affichage.
+-- Compte au dernier affichage du popup. pendingCDMReloadCount ne redescend jamais a zero seul (design :
+-- ne pas perdre le compte si "Plus tard" est clique), donc sans ce garde le popup reviendrait a chaque
+-- fermeture du GUI meme sans nouveau sort epingle. On ne re-affiche que si le compte a reellement augmente.
 local lastPromptedCDMReloadCount = 0
 
--- Affiche le popup s'il y a quelque chose en attente ET qu'il n'est pas deja
--- visible (evite d'empiler plusieurs popups identiques). N'affecte PAS
--- pendingCDMReloadCount ici -- seul un ReloadUI() effectif (OnAccept) ou un
--- reload manuel de l'utilisateur remet le compteur a zero (au prochain login,
--- cf. redeclaration locale a chaque chargement de fichier).
+-- Affiche le popup si quelque chose est en attente et pas deja visible. Seul un ReloadUI() effectif
+-- (ou un reload manuel, cf. redeclaration au chargement du fichier) remet pendingCDMReloadCount a zero.
 function ns.PromptCDMReloadIfPending()
     if pendingCDMReloadCount <= 0 then return end
     if pendingCDMReloadCount <= lastPromptedCDMReloadCount then return end
@@ -1678,15 +1318,8 @@ function ns.PromptCDMReloadIfPending()
     StaticPopup_Show("AISH_CDM_RELOAD", pendingCDMReloadCount)
 end
 
--- Epingle spellID dans le viewer "Barres" (BuffBarCooldownViewer, category
--- TrackedBar) -- ou "Icones" (BuffIconCooldownViewer, TrackedBuff) si
--- asBar=false. Retourne (success, statusMessage) -- jamais d'erreur non
--- protegee : chaque appel Blizzard est en pcall, toute forme inattendue de
--- retour (API changee a un patch) echoue proprement sans planter l'addon.
--- Marque juste un reload comme necessaire (ns.MarkCDMReloadPending) en cas
--- de succes -- ne montre PAS le popup lui-meme : c'est a l'appelant de
--- decider QUAND le proposer (immediatement pour un usage debug isole, a la
--- fermeture du GUI pour l'auto-pin, cf. ns.PromptCDMReloadIfPending).
+-- Epingle spellID dans le viewer "Barres" (TrackedBar) ou "Icones" (TrackedBuff) si asBar=false.
+-- Marque juste un reload comme necessaire en cas de succes ; l'appelant decide quand proposer le popup.
 function ns.PinAuraToCDM(spellID, asBar)
     if CDM_PIN_DISABLED_REASON ~= "" then return false, CDM_PIN_DISABLED_REASON end
     if InCombatLockdown and InCombatLockdown() then
@@ -1700,16 +1333,9 @@ function ns.PinAuraToCDM(spellID, asBar)
     return ok, msg
 end
 
--- Ensemble des spellID deja suivis EN BARRES (TrackedBar precisement,
--- includeDisabled=false -- donc actifs seulement). Sert a ne pas retoucher
--- un sort deja au bon endroit -- mais PAS a epargner un sort suivi en
--- Icones/Essentiel/Utilitaire (TrackedBuff/Essential/Utility) : seul
--- TrackedBar utilise une vraie StatusBar cote Blizzard (accepte le forward
--- de valeurs secretes en combat, cf. commentaire "ABONNEMENTS CLONE BAR"
--- plus haut) -- un sort suivi ailleurs reste donc tout aussi inutilisable
--- pour AishCore qu'un sort pas suivi du tout, et doit etre bascule en
--- Barres lui aussi (Fragments d'ame restait par exemple coince en
--- "Ameliorations suivies" tant que ce garde-fou incluait TrackedBuff).
+-- Ensemble des spellID deja suivis en Barres (TrackedBar, actifs seulement), pour ne pas retoucher un sort
+-- deja au bon endroit. N'epargne pas un sort suivi en Icones/Essentiel/Utilitaire : seul TrackedBar accepte
+-- le forward de valeurs secretes en combat, un sort suivi ailleurs doit donc etre bascule en Barres aussi.
 local function GetAlreadyBarTrackedSpellSet()
     local set = {}
     if not (C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
@@ -1732,35 +1358,15 @@ local function GetAlreadyBarTrackedSpellSet()
     return set
 end
 
--- Sorts pour lesquels SetCooldownToCategory a REUSSI cette session (Barres
--- OU repli Icones). Necessaire car GetAlreadyBarTrackedSpellSet() interroge
--- l'etat LIVE du CDM (GetCooldownViewerCategorySet) -- qui ne reflete
--- l'assignation qu'APRES le /reload propose par le popup (cf. commentaire
--- CDM_PIN_DISABLED_REASON plus haut : la mutation est ecrite/sauvegardee
--- immediatement, mais le viewer en cours de session ne la voit pas tant
--- qu'une VM propre n'a pas redemarre). Sans ce cache, tant que l'utilisateur
--- n'a pas clique sur "Recharger", chaque rebuild de whitelist (ouverture du
--- menu Auras a tracker, changement de couleur/glow/destination -- pas
--- seulement l'activation d'un nouveau sort) retrouverait ces sorts "pas
--- encore en Barres" cote live, les repinnerait (idempotent cote Blizzard
--- mais quand meme "succes"), et remarquerait donc un reload comme
--- necessaire -- d'ou un popup qui reviendrait sans cesse meme sans aucun
--- changement utilisateur.
--- Session-only (pas persiste) : se re-decouvre au prochain /reload, moment
--- ou GetAlreadyBarTrackedSpellSet reflete enfin l'etat reel et prend le relai.
+-- Sorts pour lesquels SetCooldownToCategory a reussi cette session : GetAlreadyBarTrackedSpellSet()
+-- interroge l'etat live du CDM, qui ne reflete l'assignation qu'apres le /reload propose par le popup.
+-- Sans ce cache, chaque rebuild de whitelist avant ce reload repinnerait (idempotent mais "succes") et
+-- redeclencherait le popup sans cesse. Session-only : se re-decouvre au prochain reload.
 local pinnedThisSession = {}
 
--- Parcourt toute la whitelist AishCore de la spec active (ns.GetSpecSpells,
--- memes sorts que ceux affiches en jeu) et epingle en "Barres" (TrackedBar)
--- tout spellID active pas DEJA en Barres cote CDM natif -- y compris s'il
--- est deja suivi en Icones (TrackedBuff) : cf. GetAlreadyBarTrackedSpellSet,
--- seul TrackedBar convient vraiment pour AishCore. Ne touche JAMAIS
--- Essential/Utility (temps de recharge de sorts, pas des auras) :
--- FindCooldownIDForSpell ne les scanne meme pas, cf. CDM_PIN_CATEGORIES.
--- Marque un reload comme necessaire (ns.MarkCDMReloadPending) si au moins un
--- sort a ete epingle -- l'appelant decide quand proposer le popup (cf.
--- ns.PromptCDMReloadIfPending). Seule garantie contre le taint documente
--- plus haut (CDM_PIN_DISABLED_REASON).
+-- Parcourt la whitelist de la spec active et epingle en Barres tout spellID actif pas deja en Barres cote
+-- CDM natif (meme deja suivi en Icones, cf. GetAlreadyBarTrackedSpellSet). Ne touche jamais Essential/
+-- Utility. Marque un reload comme necessaire si au moins un sort a ete epingle.
 function ns.SyncCDMPins()
     if CDM_PIN_DISABLED_REASON ~= "" then return false, CDM_PIN_DISABLED_REASON end
     if InCombatLockdown and InCombatLockdown() then
@@ -1781,12 +1387,9 @@ function ns.SyncCDMPins()
         if info.enabled and not info._invalid and not alreadyBarTracked[id] and not pinnedThisSession[id] then
             local ok, msg, dataProvider = SetSpellCDMCategory(id, true)
             if not ok then
-                -- Repli Icones (TrackedBuff) : un refus Blizzard en Barres survient
-                -- typiquement pour un sort sans duree/minuteur (StatusBar Barres n'a
-                -- rien a animer) -- sans ce repli, ce sort ne serait JAMAIS assigne a
-                -- AUCUNE categorie CDM, et donc invisible du pipeline AishCore
-                -- (100% CDM-only, cf. Scan.lua) quel que soit le mode d'affichage
-                -- choisi cote AishCore (Liste/Cercle/Icones/Barres).
+                -- Repli Icones : un refus en Barres survient typiquement pour un sort sans duree/minuteur
+                -- (rien a animer sur une StatusBar) ; sans ce repli le sort serait invisible du pipeline
+                -- AishCore (100% CDM-only) quel que soit le mode d'affichage choisi.
                 local ok2, msg2, dataProvider2 = SetSpellCDMCategory(id, false)
                 if ok2 then
                     ok, msg, dataProvider = ok2, msg2, dataProvider2

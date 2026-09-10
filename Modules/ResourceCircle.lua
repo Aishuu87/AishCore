@@ -5,10 +5,7 @@ local L = ns.L
 local ResourceCircle = {}
 ns.Modules.ResourceCircle = ResourceCircle
 
--- Styles de décoration autour du texte de ressource secondaire ("- N -", "[ N ]"...).
--- key = valeur stockée via ns.GetSecResCfg("secResDecoStyle") (reglage par spec,
--- cf. Core.lua) ; left/right = texte littéral de chaque côté (jamais
--- concaténé au N lui-même, cf. SetSecResShown plus bas).
+-- Styles de déco autour du texte de ressource secondaire ("- N -", "[ N ]"...) ; left/right jamais concaténés à N (cf. SetSecResShown).
 ns.SEC_RES_DECO_STYLES = {
   { key = "none",         left = "",     right = ""    },
   { key = "dash",         left = "-",    right = "-"   },
@@ -42,6 +39,9 @@ local animationTicker = nil
 local moveTicker = nil
 local _rcAnimElems = {}   -- pré-alloué dans Create(), slots 11-12 mis à jour conditionnellement
 local lastVisibilityState = nil
+-- rcAnimBusy = animation show/hide en cours ; rcAnimDirty = demande arrivée pendant, jamais interrompue, relance UpdateVisibility() à la fin.
+local rcAnimBusy = false
+local rcAnimDirty = false
 local previewMode = false
 local lastResourceType = nil  -- dernier type de ressource detecte
 local secDots = {}   -- secondary dot frames (runes, combo points, etc.)
@@ -57,15 +57,7 @@ local SEC_SLIDE_SCALE = 1.55   -- facteur de départ (× plus loin du centre)
 local secDotAnims     = {}     -- [i] = { progress, target }
 local secAnimFrame    = nil    -- frame dédié à l'animation slide des sec dots
 
--- Affiche/masque le texte de ressource secondaire ET ses tirets décoratifs
--- ensemble ("- N -"). Les tirets sont des FontStrings séparées, statiques
--- (texte littéral "-", jamais touchées), ancrées aux bords GAUCHE/DROITE de
--- secResText — elles suivent donc automatiquement sa largeur, qui varie
--- selon le nombre affiché. On ne peut PAS construire "- N -" comme une seule
--- chaîne quand N vient d'une valeur secrète (concat/format interdits sur une
--- valeur secrète, cf. commentaire détaillé sur ApplyStacksToText plus bas) :
--- séparer visuellement le "N" (seul contenu de secResText) des tirets (texte
--- fixe, jamais secret) contourne le problème proprement.
+-- Affiche/masque texte + tirets décoratifs ensemble ; tirets séparés de N car concat/format interdits sur une valeur secrète.
 local function SetSecResShown(shown)
   if not bar then return end
   if bar.secResText  then bar.secResText:SetShown(shown)  end
@@ -73,12 +65,7 @@ local function SetSecResShown(shown)
   if bar.secResDashR then bar.secResDashR:SetShown(shown) end
 end
 
--- Applique le style de déco (secResDecoStyle) et l'espacement (secResDecoSpacing)
--- courants aux 2 FontStrings de déco -- valeurs par spec (ns.GetSecResCfg).
--- Appelé à la création ET depuis ApplySettings (changement live via le GUI).
--- specID optionnel : passé explicitement par RefreshSecResSpecGeometry (specID
--- fraîchement résolu, cf. DetectSecondaryResource) pour ne jamais dépendre du
--- global ns._specID au cas où il ne serait pas encore à jour à cet instant.
+-- Applique style/espacement déco (par spec, ns.GetSecResCfg) ; specID optionnel pour éviter de dépendre de ns._specID pas encore à jour.
 local function RefreshSecResDeco(specID)
   if not bar or not bar.secResDashL or not bar.secResDashR or not bar.secResText then return end
   local deco = GetSecResDeco(ns.GetSecResCfg("secResDecoStyle", specID))
@@ -91,56 +78,7 @@ local function RefreshSecResDeco(specID)
   bar.secResDashR:SetPoint("LEFT", bar.secResText, "RIGHT", spacing, 0)
 end
 
----------------------------------------------------------------------------
--- [CONTROLE ANIMATIONS] Durées/délais/courbes d'apparition-disparition du
--- cercle central (entrée/sortie de combat). Point d'entrée unique : tout
--- réglage de timing se fait ici, pas besoin d'aller fouiller dans
--- AnimateVisibility / AnimateArcOverlay plus bas.
---   show = IN  (entrée en combat, le cercle apparaît)
---   hide = OUT (sortie de combat, le cercle disparaît)
---   duration : temps (s) de l'animation propre à l'élément (fade + scale)
---   delay    : temps (s) avant que l'élément commence à s'animer, compté
---              depuis l'entrée/sortie de combat
---   ease     : famille de courbe — "Linear" | "Sine" | "Quad" | "Cubic" |
---              "Quart" | "Quint" | "Expo" | "Circ" (cf. ns.Easing dans Core.lua)
---   easeType : "In" | "Out" | "InOut"
---   slideX/slideY : décalage (px) duquel l'élément part (show) / vers lequel
---              il va (hide), EN PLUS de sa position actuelle. 0 = pas de slide.
---   scaleX/scaleY : échelle de départ (show) / d'arrivée (hide), ex: 0.5 =
---              l'élément part/arrive à 50% de sa taille normale. Les deux
---              valeurs peuvent différer (déformation X/Y indépendante) —
---              WoW n'a pas d'échelle X/Y native, donc si scaleX ~= scaleY
---              l'élément est animé via sa largeur/hauteur (SetSize) plutôt
---              que via SetScale (uniforme, plus rapide, utilisé quand
---              scaleX == scaleY).
---   opacity  : alpha de DÉPART pour show, alpha de FIN pour hide — 0 =
---              totalement transparent, 1 = totalement opaque (défaut 0).
---              L'AUTRE extrémité vaut toujours 1 (pleinement visible) :
---              show va de `opacity` à 1, hide va de 1 à `opacity`. Mettre
---              opacity=1 sur un show supprime son fondu d'entrée (déjà
---              opaque dès la 1ère frame) ; pareil pour opacity=1 sur un
---              hide (pas de fondu de sortie, reste opaque jusqu'au Hide()
---              final).
--- arc/arcOverlay sont un cas particulier : ils ont `scale` (un seul nombre,
--- pas scaleX/scaleY). Leur taille est un calcul pie-crop précis lié au
--- rayon du cercle (ratio largeur:hauteur figé) — une déformation X/Y
--- indépendante casserait ce ratio et donc le crop, donc seul un facteur
--- UNIFORME est exposé ici. Ce facteur est appliqué via SetSize (pas
--- SetScale — cf. commentaire détaillé dans AnimateArcOverlay), donc "arc"
--- grossit/rétrécit de façon garantie depuis SON PROPRE ancrage (BOTTOM, cf.
--- Create()/ApplySettings) : voulu, à l'entrée en combat le cercle doit
--- avoir l'air de pousser depuis le bas, pas depuis son centre visuel.
--- arcOverlay applique son scale/slide à la texture bar.overlay (ancrée
--- CENTER) plutôt qu'à sa frame bar.overlayFrame (ancrée via SetAllPoints,
--- sans pivot exploitable).
--- Ce sont par ailleurs deux éléments 100% indépendants l'un de l'autre
--- (chacun son duration/delay/ease/easeType/slide/scale) : par défaut
--- l'overlay reste juste réglé pour finir en dernier (masquer le trou) à
--- l'apparition et disparaître en dernier à la sortie, mais rien ne les
--- synchronise plus structurellement — change l'un sans toucher l'autre si
--- besoin (au risque de laisser le trou central transparaître pendant la
--- transition si mal réglé).
----------------------------------------------------------------------------
+-- Durées/courbes anim show/hide du cercle central ; opacity = alpha départ(show)/fin(hide) ; arc/arcOverlay animés indépendamment via `scale`.
 local CIRCLE_ANIM = {
   background = { -- bgGlow
     show = { duration = 0.3,  delay = 0.000, ease = "Quint", easeType = "Out", slideX = 0, slideY = 0, scaleX = 2.5, scaleY = 2.5, opacity = 1 },
@@ -192,23 +130,13 @@ local _RC_ANIM_GROUP = {
   [1] = "background", [2] = "backgroundSlow", [3] = "text",
   [6] = "dotCenter", [7] = "dotMid", [8] = "dotMid",
   [9] = "dotOuter", [10] = "dotOuter",
-  -- 11/12 (staggerArc/staggerOverlayFrame) : plus de groupe ici, cf. slots
-  -- 4/5 -- animés par AnimateArcOverlay avec EXACTEMENT la même spec
-  -- (CIRCLE_ANIM.arc/arcOverlay) que l'arc principal.
+  -- 11/12 (staggerArc/staggerOverlayFrame) : animés par AnimateArcOverlay avec la spec arc/arcOverlay.
   [13] = "textBackdrop",
   [14] = "secResText",
 }
 
--- Géométrie de repos ("home") des éléments animés, mémorisée au moment où
--- ON LA FIXE nous-mêmes (Create()/ApplySettings) via RecordHome(), plutôt
--- que relue plus tard depuis la frame via GetPoint/GetSize. Indispensable
--- pour un slide/scale fiable EN COMBAT : WoW peut renvoyer des "secret
--- values" sur GetPoint/GetSize selon le contexte, qui bloquent alors TOUTE
--- opération Lua dessus — y compris le détaintage (tonumber(tostring())
--- ne fonctionne que hors combat, cf. PriorityBar.lua:SecretToNumber). En
--- revanche les valeurs qu'on calcule et fixe nous-mêmes (à partir de
--- cfg.size etc., jamais des données de combat) ne sont jamais secrètes,
--- donc les mémoriser au lieu de les relire élimine le problème à la racine.
+-- Géométrie de repos ("home") mémorisée via RecordHome() plutôt que relue via GetPoint/GetSize,
+-- qui peut renvoyer des secret values en combat et bloquer les opérations Lua dessus.
 local _elemHome = {}
 local function RecordHome(element, point, relTo, relPoint, x, y, w, h)
   _elemHome[element] = { point = point, relTo = relTo, relPoint = relPoint, x = x, y = y, w = w, h = h }
@@ -217,9 +145,7 @@ end
 -- Ressource secondaire (texte sous le cercle : Bone Shield, Soul Fragments, etc.)
 local secResDef        = nil   -- définition active (ou nil)
 local secResUpdateTicker = nil -- ticker de mise à jour
--- spellID(s) actuellement abonnés au canal clone-stack (CDMHooks.lua,
--- ns.SubscribeCDMAuraStack) pour bar.secResText -- mémorisé pour pouvoir se
--- désabonner proprement au changement de spec (cf. _secResStackSubIDs plus bas).
+-- spellID(s) abonnés au canal clone-stack (CDMHooks) pour bar.secResText, mémorisés pour désabonnement propre au changement de spec.
 local _secResStackSubIDs = nil
 local FONT_BOLD_ITALIC = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat-BoldItalic.ttf"
 
@@ -229,10 +155,7 @@ local ESSENCE_BURST_SPELLS = { [364343]=true, [355913]=true, [356995]=true }  --
 local essenceBurstGlowing  = {}   -- [spellID] = true si overlay actif en ce moment
 local essenceBurstActive   = false -- dérivé de essenceBurstGlowing
 
--- Fire Mage : Heating Up (1) et Hot Streak (2)
--- Deux événements distincts :
---   SPELL_ACTIVATION_OVERLAY_SHOW/HIDE  -> overlay écran = Heating Up actif
---   SPELL_ACTIVATION_OVERLAY_GLOW_SHOW/HIDE sur Pyroblast/Flamestrike -> Hot Streak actif
+-- Fire Mage Heating Up (1) / Hot Streak (2) : overlay écran = Heating Up, glow Pyroblast/Flamestrike = Hot Streak.
 local FIRE_PYRO_SPELLS  = { [11366]=true, [2120]=true }  -- Pyroblast, Flamestrike
 local fireOverlayActive = false  -- overlay écran présent
 local firePyroGlowing   = false  -- glow Pyroblast/Flamestrike actif
@@ -264,37 +187,21 @@ local DURATION_ARC_OVL_RATIO = 0.76
 -- Crop constant for circle_piecrop.tga (texture pre-croppee, bas transparent supprime)
 local ARC_CROP_H = 0.88
 
--- [EXPERIMENTAL] Remplissage radial : jauge en arc de 280° (trou de 80° en
--- bas, centré sur 6h), 1 quartier (RadialWedge.tga) par %.
+-- Remplissage radial : jauge en arc de 280° (trou de 80° en bas, centré sur 6h), 1 quartier (RadialWedge.tga) par %
 local RADIAL_FRAG_COUNT = 100
 local RADIAL_ARC_SPAN_DEG  = 280   -- 360 - 80 (trou en bas)
 local RADIAL_ARC_START_DEG = 220   -- bearing (0=midi, horaire) où commence le 0%
 
--- [EXPERIMENTAL] Recalcule taille/position/rotation des 100 quartiers
--- radiaux à partir de la config courante (cfg.size, arcSizeRatio,
--- overlayRatio). Appelée à la création ET depuis ApplySettings (sinon les
--- quartiers restent figés à leur géométrie de création quand on modifie les
--- sliders du GUI, ce qui a été observé en jeu : l'overlay grandit mais les
--- quartiers ne suivent pas, jusqu'à parfois être entièrement recouverts).
+-- Recalcule taille/position/rotation des quartiers radiaux (rappelée depuis ApplySettings pour rester synchro avec le GUI)
 local function LayoutRadialFrags()
   if not bar or not bar.radialFrags then return end
   local cfg = ns.GetCfg("resourceCircle")
   local arcPx = cfg.size * (cfg.arcSizeRatio or 1.0)
-  -- Les quartiers sont TOUJOURS dessinés en taille max (quasi du centre
-  -- jusqu'au bord), exactement comme l'arc vertical à 100% de valeur.
-  -- C'est `bar.overlay` (cercle noir, cfg.overlayRatio, déjà réactif aux
-  -- sliders via ApplySettings) qui masque le centre par-dessus — pas une
-  -- variation de la taille des quartiers eux-mêmes. Ça évite aussi que les
-  -- quartiers rétrécissent (et deviennent plus "hachurés"/pixelisés) quand
-  -- l'anneau visible se réduit : ils restent toujours au rendu le plus net.
+  -- Quartiers toujours en taille max ; c'est bar.overlay qui masque le centre par-dessus.
   local fragInnerR = (arcPx / 2) * 0.05  -- quasi le centre (jamais 0 pile, évite une taille nulle)
   local fragOuterR = (arcPx / 2) * 0.98
   local fragMidR   = (fragInnerR + fragOuterR) / 2
-  -- Surdimensionnement (x1.2) pour un chevauchement généreux entre quartiers
-  -- voisins : chaque bord anti-aliasé est ainsi recouvert par la couleur
-  -- pleine du voisin plutôt que de laisser transparaître un micro-espace ou
-  -- un liseré de fond.
-  local fragSize = (fragOuterR - fragInnerR) * 1.2
+  local fragSize = (fragOuterR - fragInnerR) * 1.2  -- surdimensionné pour chevaucher les voisins (anti-aliasing)
   for k = 0, RADIAL_FRAG_COUNT - 1 do
     local frag = bar.radialFrags[k + 1]
     if frag then
@@ -305,12 +212,8 @@ local function LayoutRadialFrags()
       local fy = fragMidR * math.cos(angle)
       frag:ClearAllPoints()
       frag:SetPoint("CENTER", bar, "CENTER", fx, fy)
-      -- Pivote la texture (pas le frame) pour pointer radialement à l'angle
-      -- de départ de ce quartier. Signe négatif car SetRotation tourne en
-      -- anti-horaire pour un angle positif, alors que notre convention de
-      -- bearing est horaire.
       local tex = frag:GetStatusBarTexture()
-      if tex then tex:SetRotation(-angle) end
+      if tex then tex:SetRotation(-angle) end  -- signe négatif : SetRotation est anti-horaire, notre bearing est horaire
     end
   end
 end
@@ -321,9 +224,7 @@ function ResourceCircle.ShouldShow()
   if ns.skyridingActive and ns.GetCfg("skyriding").hideResourceCircle ~= false then return false end
   local cfg = ns.GetCfg("resourceCircle")
   if cfg.enabled == false then return false end
-  -- "Toujours actif en instance" : ignore les transitions combat tant qu'on
-  -- est en donjon/raid (ns.inInstance, cf. Core.lua) -- ne s'applique jamais
-  -- hors instance, ou le mode de visibilite normal reprend la main.
+  -- "Toujours actif en instance" : ignore les transitions combat en donjon/raid.
   if cfg.alwaysInInstance and ns.inInstance then return true end
   local vMode = cfg.visibilityMode or "combat"
   if vMode == "always" then return true end
@@ -342,6 +243,9 @@ function ResourceCircle.ApplySettings()
   if cfg.enabled == false then
     if animationTicker then animationTicker:Cancel(); animationTicker = nil end
     if moveTicker then moveTicker:Cancel(); moveTicker = nil end
+    -- Desactivation live : interruption immediate, on remet le verrou de file d'attente a plat.
+    rcAnimBusy = false
+    rcAnimDirty = false
     bar:Hide()
     lastVisibilityState = nil
     return
@@ -376,8 +280,7 @@ function ResourceCircle.ApplySettings()
   bar.arc:ClearAllPoints()
   bar.arc:SetPoint("BOTTOM", bar, "CENTER", 0, arcPx / 2 - arcPx * ARC_CROP_H)
   RecordHome(bar.arc, "BOTTOM", bar, "CENTER", 0, arcPx / 2 - arcPx * ARC_CROP_H, arcPx, arcPx * ARC_CROP_H)
-  -- radialFillFrame (mode radial [EXPERIMENTAL]) est ancré via SetAllPoints(bar),
-  -- pas d'ancrage exploitable pour slide/scale — non couvert ici (comme avant).
+  -- radialFillFrame (mode radial) est ancré via SetAllPoints(bar), pas d'ancrage exploitable pour slide/scale
   if bar.overlay then
     if overlayPx >= 2 then
       bar.overlay:SetSize(overlayPx, overlayPx)
@@ -390,14 +293,9 @@ function ResourceCircle.ApplySettings()
     bar.overlay:SetPoint("BOTTOM", bar, "CENTER", 0, -overlayPx / 2)
     RecordHome(bar.overlay, "BOTTOM", bar, "CENTER", 0, -overlayPx / 2, overlayPx, overlayPx)
   end
-  -- [EXPERIMENTAL] Recaler les 100 quartiers radiaux (taille/position
-  -- dépendent de arcPx et overlayRatio, comme l'overlay ci-dessus).
+  -- Recaler les quartiers radiaux (dépend de arcPx/overlayRatio)
   LayoutRadialFrags()
-  -- Ré-appliquer la valeur de démo (72%) après le recalage : redimensionner
-  -- une StatusBar ne réapplique pas automatiquement son crop, et
-  -- ResourceCircle.Update() s'auto-désactive pendant l'aperçu (previewMode)
-  -- pour ne pas écraser la valeur forcée par SetPreview — sans ce rappel,
-  -- les quartiers restent "vides" dès qu'un slider change dans le GUI.
+  -- Ré-appliquer la valeur de démo (72%) après le recalage, sinon les quartiers restent vides en aperçu.
   if previewMode and bar.radialFrags then
     for _, frag in ipairs(bar.radialFrags) do
       pcall(ns.SmoothSetValue, frag, 72)
@@ -416,22 +314,8 @@ function ResourceCircle.ApplySettings()
     end
   end
   bar.text:SetFont(cfg.font or ns.Media.font, cfg.fontSize)
-  -- Geometrie dependante de la spec (arc de duree + texte de ressource
-  -- secondaire) : extraite dans une fonction dediee (cf. plus bas) pour
-  -- pouvoir etre rappelee depuis DetectSecondaryResource SANS toucher au
-  -- reste d'ApplySettings (position/taille du cercle, glow, dots, stagger,
-  -- lastVisibilityState...).
-  -- specID résolu FRAÎCHEMENT ici (comme DetectSecondaryResource), plutôt que
-  -- de laisser RefreshSecResSpecGeometry retomber sur le global ns._specID :
-  -- au login, ApplySettings() est appelé juste après Create() dans la même
-  -- passe PLAYER_ENTERING_WORLD, AVANT que CachePlayerSpec() n'ait rempli
-  -- ns._specID (elle tourne plus tard dans la même fonction, cf. AishCore.lua).
-  -- Sans ce paramètre explicite, ce second appel relisait les réglages sous la
-  -- mauvaise clé (générique, pas "secRes_<specID>_...") et écrasait la bonne
-  -- géométrie que Create()->DetectSecondaryResource venait d'appliquer -- d'où
-  -- le bug CONFIRMÉ EN JEU : la personnalisation par spec restait invisible au
-  -- login/reload jusqu'à ce qu'on retouche un slider du GUI (qui ré-appelle
-  -- ApplySettings() une fois ns._specID enfin résolu).
+  -- Geometrie dependante de la spec : specID resolu fraichement ici (pas via ns._specID,
+  -- pas encore rempli au login a ce stade) pour eviter d'ecraser la geometrie par-spec au login/reload.
   local specID = nil
   if GetSpecialization and GetSpecializationInfo then
     local idx = GetSpecialization()
@@ -464,9 +348,7 @@ function ResourceCircle.ApplySettings()
   -- Repositionner les secondary dots (runes, combo points)
   ResourceCircle.LayoutSecDots()
 
-  -- [EXPERIMENTAL] Synchroniser l'affichage vertical/radial avec
-  -- cfg.radialFillTest (ex : la case à cocher du GUI ne fait que changer la
-  -- config — c'est cet appel qui bascule réellement l'élément visible).
+  -- Synchronise affichage vertical/radial avec cfg.radialFillTest (bascule réellement l'élément visible)
   ResourceCircle.ApplyRadialMode()
 
   -- Forcer la visibilite apres changement de settings
@@ -500,8 +382,7 @@ function ResourceCircle.UpdateResourceColors()
   end
   -- Arc
   if bar.arc then bar.arc:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1) end
-  -- [EXPERIMENTAL] Fragments radiaux : même couleur que l'arc vertical,
-  -- synchronisée pour que le toggle /rcradial ne montre jamais une couleur périmée.
+  -- Fragments radiaux : même couleur que l'arc vertical (synchronisée pour que /rcradial ne montre jamais une couleur périmée)
   if bar.radialFrags then
     for _, frag in ipairs(bar.radialFrags) do
       frag:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1)
@@ -569,8 +450,8 @@ function ResourceCircle.OnResourceChanged()
       end
     end
   end
-  -- Reset Demonic Core si on n'est plus Warlock Démonologie
-  if not (playerClass2 == "WARLOCK" and specID2 == 265) then
+  -- Reset Demonic Core si on n'est plus Warlock Démonologie (specID 266, pas 265=Affliction)
+  if not (playerClass2 == "WARLOCK" and specID2 == 266) then
     demonicCoreStacks        = 0
     demonicCoreOverlayActive = false
   end
@@ -625,9 +506,7 @@ function ResourceCircle.Create(parent)
   -- Overlay sombre : masque le centre pour simuler un arc en anneau
   local overlayPx = arcPx * (cfg.overlayRatio or 0.75)
   local overlayFrame = CreateFrame("Frame", nil, bar)
-  -- +101 (et non +1) : réserve un niveau distinct à chacun des 100 quartiers
-  -- radiaux (cf. plus bas) sans qu'aucun ne dépasse l'overlay, qui doit
-  -- toujours rester au-dessus pour masquer le trou central des deux modes.
+  -- +101 : réserve un niveau distinct à chacun des 100 quartiers radiaux sans dépasser l'overlay.
   overlayFrame:SetFrameLevel(arc:GetFrameLevel() + 101)
   overlayFrame:SetAllPoints(bar)
   local overlay = overlayFrame:CreateTexture(nil, "ARTWORK")
@@ -639,36 +518,14 @@ function ResourceCircle.Create(parent)
   bar.overlayFrame = overlayFrame
   RecordHome(overlay, "BOTTOM", bar, "CENTER", 0, -overlayPx / 2, overlayPx, overlayPx)
 
-  ---------------------------------------------------------------------------
-  -- [EXPERIMENTAL] Remplissage radial (comme avant Midnight) : jauge en arc
-  -- de 280° (trou de 80° en bas, centré sur 6h), remplie par 100 "quartiers"
-  -- (1 par %), chacun une StatusBar indépendante avec sa propre plage MinMax
-  -- (ex : quartier #5 = plage 5-6 sur 100). On pousse le MÊME pct
-  -- (potentiellement secret) dans TOUS les quartiers via ns.SmoothSetValue —
-  -- exactement le même sink déjà utilisé par `arc` (StatusBar:SetValue), qui
-  -- accepte les secret numbers nativement. Le moteur fait tout le clamping
-  -- par quartier en interne : AUCUNE arithmétique/comparaison Lua sur pct
-  -- n'est nécessaire. Les bornes MinMax sont calculées une seule fois à la
-  -- création à partir de l'index k (jamais secret) — donc 100% sûr même en
-  -- combat.
-  -- Forme : chaque quartier utilise Media/UI/RadialWedge.tga, une vraie part
-  -- de tarte (2.8° = 280°/100) dessinée par l'utilisateur — pointe en bas du
-  -- fichier, bord GAUCHE aligné sur la verticale médiane (donc le quartier
-  -- s'étend sur 2.8° vers la DROITE de cette référence, pas symétrique).
-  -- Taille/position/rotation sont calculées par LayoutRadialFrags() (pas ici
-  -- en dur) pour rester rafraîchissables depuis ApplySettings().
-  -- Activé/désactivé via cfg.radialFillTest (défaut false = comportement
-  -- actuel inchangé). Toggle live : /rcradial.
-  ---------------------------------------------------------------------------
+  -- Remplissage radial : 100 StatusBar quartiers, chacune sa plage MinMax, recevant le même pct via ns.SmoothSetValue (toggle : /rcradial)
   local radialFillFrame = CreateFrame("Frame", nil, bar)
   radialFillFrame:SetFrameLevel(arc:GetFrameLevel())
   radialFillFrame:SetAllPoints(bar)
   local radialFrags = {}
   for k = 0, RADIAL_FRAG_COUNT - 1 do
     local frag = CreateFrame("StatusBar", nil, radialFillFrame)
-    -- Niveau explicite et croissant : évite un ordre d'empilement instable
-    -- entre les 100 quartiers (frères de même niveau sinon), source probable
-    -- de l'aspect "texturé"/haché aux jointures observé en jeu.
+    -- Niveau explicite et croissant : évite un ordre d'empilement instable entre les quartiers.
     frag:SetFrameLevel(radialFillFrame:GetFrameLevel() + 1 + k)
     frag:SetStatusBarTexture("Interface\\AddOns\\AishCore\\Media\\UI\\RadialWedge.tga")
     frag:SetOrientation("VERTICAL")
@@ -790,10 +647,7 @@ function ResourceCircle.Create(parent)
   secResText:Hide()
   bar.secResText = secResText
 
-  -- Déco "- N -" (style/espacement configurables, cf. RefreshSecResDeco) :
-  -- FontStrings séparées (texte fixe, jamais secret), ancrées aux bords de
-  -- secResText pour suivre sa largeur variable. Voir SetSecResShown en tête
-  -- de fichier pour le pourquoi de cette séparation.
+  -- Déco "- N -" (style/espacement configurables, cf. RefreshSecResDeco) : FontStrings séparées ancrées aux bords de secResText.
   local secResDashL = secResFrame:CreateFontString(nil, "OVERLAY")
   secResDashL:SetFont(FONT_BOLD_ITALIC, 11, "")
   secResDashL:SetTextColor(1, 1, 1, 1)
@@ -906,23 +760,18 @@ function ResourceCircle.Create(parent)
     if isGlow and spellID == DEMONBOLT_SPELL_ID and wlClass == "WARLOCK" then
       local wlSpecIdx = GetSpecialization and GetSpecialization() or nil
       local wlSpecID  = wlSpecIdx and (GetSpecializationInfo and GetSpecializationInfo(wlSpecIdx)) or nil
-      if wlSpecID == 265 then
+      if wlSpecID == 266 then  -- Demonologie (265 = Affliction, cf. ns.SPEC_MAP)
         demonicCoreOverlayActive = isShow
       end
     end
   end)
 
   -- Pré-allouer la table d'éléments pour AnimateVisibility (11 slots fixes + 2 staggerArc conditionnels).
-  -- Les frame-refs sont stables après Create(). Les slots 11-12 ont element=nil par défaut.
-  -- delay/duration ne sont PAS fixés ici : AnimateVisibility() les recalcule
-  -- à chaque appel depuis CIRCLE_ANIM, selon la direction (show/hide, cf.
-  -- _RC_ANIM_GROUP tout en haut du fichier).
   do
     _rcAnimElems[1]  = { element = bar.bgGlow  }
     _rcAnimElems[2]  = { element = bar.bgLarge }
     _rcAnimElems[3]  = { element = bar.text    }
-    -- Slots 4 et 5 (arc, overlayFrame) : plus animés ici, cf. AnimateArcOverlay
-    -- (timing dédié, découplé du stagger générique, cf. CIRCLE_ANIM.arc/arcOverlay).
+    -- Slots 4/5 (arc, overlayFrame) et 11/12 (staggerArc, staggerOverlayFrame) : animés par AnimateArcOverlay.
     _rcAnimElems[4]  = { element = nil }
     _rcAnimElems[5]  = { element = nil }
     _rcAnimElems[6]  = { element = bar.dot3 }
@@ -930,9 +779,6 @@ function ResourceCircle.Create(parent)
     _rcAnimElems[8]  = { element = bar.dot4 }
     _rcAnimElems[9]  = { element = bar.dot1 }
     _rcAnimElems[10] = { element = bar.dot5 }
-    -- Slots 11 et 12 (staggerArc, staggerOverlayFrame) : plus animés ici non
-    -- plus, cf. slots 4/5 -- AnimateArcOverlay les anime désormais avec la
-    -- même spec que l'arc principal.
     _rcAnimElems[11] = { element = nil }
     _rcAnimElems[12] = { element = nil }
     _rcAnimElems[13] = { element = bar.textBackdrop }
@@ -944,22 +790,12 @@ function ResourceCircle.Create(parent)
   return bar
 end
 
----------------------------------------------------------------------------
--- [EXPERIMENTAL] Bascule entre le remplissage vertical (arc, actuel/défaut)
--- et le remplissage radial (chapelet de fragments dans radialFillFrame).
--- Les fragments sont enfants de radialFillFrame : Show/Hide du wrapper
--- suffit, pas besoin de boucler dessus (héritage de visibilité WoW standard).
--- Le reste (couleurs, overlay du trou central, dots, texte) est partagé et
--- inchangé. Appelé au Create() et par /rcradial pour un test à chaud.
+-- Bascule entre remplissage vertical (arc) et radial (fragments). Appelé au Create() et par /rcradial.
 function ResourceCircle.ApplyRadialMode()
   if not bar then return end
   local cfg = ns.GetCfg("resourceCircle")
   local radial = cfg.radialFillTest == true
-  -- SetAlpha(1)/SetScale(1) sur l'élément qui DEVIENT actif : sans ça, s'il
-  -- a été laissé au milieu d'une transition interrompue (ex: changement de
-  -- mode pendant une anim de combat), il resterait bloqué à cette
-  -- alpha/scale intermédiaire — invisible ou à moitié rétréci — au lieu de
-  -- repartir d'un état propre.
+  -- SetAlpha(1)/SetScale(1) sur l'élément actif : évite qu'il reste bloqué dans un état de transition interrompue.
   if bar.arc then
     if radial then bar.arc:Hide() else bar.arc:SetAlpha(1); bar.arc:SetScale(1); bar.arc:Show() end
   end
@@ -970,18 +806,7 @@ function ResourceCircle.ApplyRadialMode()
   pcall(ResourceCircle.Update)
 end
 
--- [EXPERIMENTAL] Applique pct (0-100) à l'arc actif (vertical ou radial).
--- Radial : on repousse le MÊME pct (potentiellement secret) dans chaque
--- quartier via le sink déjà éprouvé ns.SmoothSetValue (StatusBar:SetValue).
--- Chaque quartier a sa propre plage MinMax fixée à la création (cf. Create),
--- donc le moteur affiche automatiquement : quartiers avant pct → pleins,
--- quartier courant → partiellement rempli, quartiers après → vides. Aucune
--- arithmétique/comparaison Lua sur pct n'est nécessaire ici.
--- (Un essai de balayage étalé dans le temps a été tenté puis abandonné :
--- ApplyArcValue peut être appelé très fréquemment en combat, et chaque
--- appel annulait/relançait le balayage précédent — s'il arrive plus vite
--- que la durée du balayage, celui-ci n'atteint jamais les quartiers de fin
--- de plage, d'où un remplissage bloqué à une petite portion de l'arc.)
+-- Applique pct (0-100) à l'arc actif (vertical ou radial). Radial : même pct poussé dans chaque quartier via ns.SmoothSetValue.
 local function ApplyArcValue(pct)
   local cfg = ns.GetCfg("resourceCircle")
   if cfg.radialFillTest and bar.radialFrags then
@@ -993,70 +818,32 @@ local function ApplyArcValue(pct)
   end
 end
 
----------------------------------------------------------------------------
--- [EXPERIMENTAL] Anime l'arc actif (vertical ou radial) et l'overlay qui
--- masque son centre, INDÉPENDAMMENT du système de stagger générique
--- (_rcAnimElems) — ce couple a des exigences de timing différentes des
--- autres éléments (dots, texte, glow...) et se marchait dessus quand tout
--- passait par le même système.
---
--- Arc et overlay sont animés en parallèle mais 100% indépendamment l'un de
--- l'autre : chacun a son propre duration/delay/ease/easeType/slide/opacity
--- (cf. CIRCLE_ANIM.arc / CIRCLE_ANIM.arcOverlay tout en haut du fichier), et
--- chacun se termine (Hide, reset de position) sur SON PROPRE timing plutôt
--- que d'attendre l'autre. Par défaut ils restent réglés pour que l'overlay
--- finisse en dernier à l'apparition et disparaisse en dernier à la sortie
--- (pour ne jamais laisser transparaître le trou central de l'arc pendant
--- la transition), mais rien ne les synchronise plus structurellement —
--- change l'un sans toucher l'autre si besoin.
----------------------------------------------------------------------------
--- Un ticker par "paire" arc+overlay animée (main = bar.arc/bar.overlayFrame,
--- stagger = bar.staggerArc/bar.staggerOverlayFrame) : les deux peuvent tourner
--- en parallèle (entrée en combat d'un Brasseur), donc pas un seul ticker partagé.
+-- Anime l'arc actif et son overlay indépendamment (chacun son timing) ; l'overlay finit en dernier pour ne pas laisser transparaître le trou central.
 local _arcOverlayTickers = { main = nil, stagger = nil }
--- Anime UNE paire arc+overlay avec la spec CIRCLE_ANIM.arc/arcOverlay --
--- factorisé pour que l'arc de stagger (staggerArc/staggerOverlayFrame,
--- structurellement identique à bar.arc/bar.overlayFrame : même StatusBar
--- piecrop + même texture overlay) reçoive EXACTEMENT la même animation que
--- l'arc principal plutôt qu'une copie de réglages qui pourrait diverger.
+-- Anime une paire arc+overlay avec CIRCLE_ANIM.arc/arcOverlay ; factorisé pour que l'arc de
+-- stagger reçoive exactement la même animation que l'arc principal.
 local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayVisualEl)
   if not arcEl or not overlayEl then return end
+  -- /rcanimlog : trace chaque appel + si un cycle en cours est interrompu.
+  if ns._rcAnimDebug then
+    print(string.format("|cff88ffff[RCAnim]|r %.3f AnimateArcOverlayPair key=%s shouldShow=%s interrompt=%s",
+      GetTime(), tostring(key), tostring(shouldShow), tostring(_arcOverlayTickers[key] ~= nil)))
+  end
   if _arcOverlayTickers[key] then _arcOverlayTickers[key]:Cancel(); _arcOverlayTickers[key] = nil end
 
   local arcSpec     = shouldShow and CIRCLE_ANIM.arc.show        or CIRCLE_ANIM.arc.hide
   local overlaySpec = shouldShow and CIRCLE_ANIM.arcOverlay.show or CIRCLE_ANIM.arcOverlay.hide
 
-  -- opacity = alpha de DÉPART pour show / de FIN pour hide (l'autre bout
-  -- vaut toujours 1) — cf. doc de ns.AnimateStagger dans Core.lua, même
-  -- convention ici.
+  -- opacity = alpha de départ pour show / de fin pour hide (l'autre bout vaut toujours 1), même convention que ns.AnimateStagger.
   local arcOpacity, overlayOpacity = arcSpec.opacity or 0, overlaySpec.opacity or 0
   local arcStartAlpha, arcEndAlpha         = shouldShow and arcOpacity or 1,     shouldShow and 1 or arcOpacity
   local overlayStartAlpha, overlayEndAlpha = shouldShow and overlayOpacity or 1, shouldShow and 1 or overlayOpacity
+  -- Repart du dernier alpha réellement appliqué (_aishAnimAlpha) si connu, pas du point canonique,
+  -- pour éviter un décalage visible entre arc/overlay si une interruption survient à des instants différents.
+  if arcEl._aishAnimAlpha then arcStartAlpha = arcEl._aishAnimAlpha end
+  if overlayEl._aishAnimAlpha then overlayStartAlpha = overlayEl._aishAnimAlpha end
 
-  -- Capture la position/taille "home" sur l'ancrage RÉEL de l'élément (ex:
-  -- BOTTOM pour l'arc) — jamais mise en cache entre appels (même
-  -- raisonnement que dans ns.AnimateStagger).
-  --
-  -- Le scale ici passe par SetSize, PAS SetScale : SetScale grossit un
-  -- élément depuis un pivot qui s'est avéré (test en jeu) ne pas être le
-  -- point d'ancrage réel, ce qui rendait tout effet "grossit depuis le bas"
-  -- impossible à obtenir de façon fiable. SetSize, lui, grossit TOUJOURS
-  -- de façon garantie depuis le point d'ancrage (c'est la définition même
-  -- d'un ancrage : ce point ne bouge jamais, seuls les bords non-ancrés se
-  -- déplacent quand la taille change) — exactement le mécanisme qui fait
-  -- déjà fonctionner les dots (dont scaleX ≠ scaleY bascule ns.AnimateStagger
-  -- sur SetSize). Le facteur reste uniforme (même `scale` en X et Y), donc
-  -- le ratio largeur:hauteur du crop pie-crop de l'arc (ARC_CROP_H) est
-  -- préservé quel que soit le scale appliqué.
-  -- Position (slide) et taille (scale) sont capturées et guardées SÉPARÉMENT :
-  -- GetPoint/GetSize peuvent chacun renvoyer des "secret values" (protection
-  -- anti-taint TWW/11.x) INDÉPENDAMMENT l'un de l'autre selon le contexte,
-  -- et le scale (SetSize) n'a besoin d'AUCUNE donnée de position pour
-  -- fonctionner — coupler les deux ferait perdre le scale à chaque fois que
-  -- la position est secrète, même sans aucun slide demandé.
-  -- Utilise la géométrie pré-calculée (cf. RecordHome/_elemHome plus haut
-  -- dans le fichier) si disponible : fiable même en combat, contrairement à
-  -- GetPoint/GetSize qui peuvent renvoyer des "secret values" à ce moment-là.
+  -- Géométrie "home" via _elemHome (RecordHome), fiable même en combat contrairement à GetPoint/GetSize (secret values). Scale via SetSize, pas SetScale (pivot pas l'ancrage réel).
   local function captureHome(element)
     if not element then return nil end
     local cached = _elemHome[element]
@@ -1074,32 +861,15 @@ local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayV
     if not home.point and not home.w then return nil end
     return home
   end
-  -- Redimensionner une StatusBar (arc, staggerArc, durationArc...) NE
-  -- réapplique PAS automatiquement le crop de sa texture : le SetSize
-  -- change bien la frame (vérifié via GetSize), mais le rendu du
-  -- texture-crop reste figé jusqu'au prochain SetValue(). ET un simple
-  -- element:SetValue(element:GetValue()) direct ne suffit PAS : tout le
-  -- reste de l'addon pousse les valeurs via ns.SmoothSetValue, qui appelle
-  -- SetValue(value, StatusBarInterpolation.ExponentialEaseOut) — cette
-  -- StatusBar est donc en permanence sous interpolation NATIVE Blizzard, et
-  -- un SetValue "nu" (sans le paramètre d'interpolation) se fait
-  -- vraisemblablement ignorer/écraser par cette interpolation C++ en cours.
-  -- On réutilise donc directement ns.SmoothSetValue au lieu de réinventer
-  -- notre propre SetValue : passthrough sûr même si la valeur est secrète
-  -- en combat (ns.SmoothSetValue fait déjà tout en pcall côté C).
-  -- Textures (bar.overlay) n'ont pas ce problème : elles n'ont pas GetValue.
+  -- Redimensionner une StatusBar ne réapplique pas son crop : force via ns.SmoothSetValue (pas un
+  -- SetValue nu, écrasé par l'interpolation native déjà en cours). Textures (bar.overlay) : pas concernées.
   local function RefreshCrop(element)
     if element.GetValue and element.SetValue then
       ns.SmoothSetValue(element, element:GetValue())
     end
   end
-  -- useGlobalScale : StatusBar (arc) utilise SetScale (facteur unique,
-  -- transform purement visuelle, ne touche jamais au crop interne de la
-  -- StatusBar — contourne le souci de redraw) plutôt que SetSize (déforme
-  -- réellement la frame, ce qui marche bien pour une Texture comme
-  -- bar.overlay mais pas pour une StatusBar au crop personnalisé). Le
-  -- pivot de SetScale n'est PAS garanti être l'ancrage BOTTOM (contrairement
-  -- à SetSize) — accepté pour l'instant, l'essentiel est que ça s'anime.
+  -- useGlobalScale : StatusBar (arc) utilise SetScale (évite le souci de redraw du crop) plutôt que
+  -- SetSize (utilisé pour les Textures comme bar.overlay). Pivot de SetScale pas garanti = ancrage BOTTOM.
   local function applyTransform(element, home, slideX, slideY, p, scale, useGlobalScale)
     if not home then return end
     if home.point then
@@ -1117,10 +887,7 @@ local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayV
       element:SetSize(home.w * scale, home.h * scale)
       RefreshCrop(element)
     end
-    -- Memorise le DERNIER scale reellement applique (cf. commentaire sur
-    -- arcStartScale/overlayStartScale plus haut) : permet a une animation
-    -- interrompue de repartir d'ou elle en etait, pas d'un point de depart
-    -- fixe, meme si la precedente n'a jamais atteint resetTransform.
+    -- Mémorise le dernier scale réellement appliqué, pour qu'une animation interrompue reprenne d'où elle en était.
     element._aishAnimScale = scale
   end
   local function resetTransform(element, home, useGlobalScale)
@@ -1135,14 +902,7 @@ local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayV
       element:SetSize(home.w, home.h)
       RefreshCrop(element)
     end
-    -- nil (pas 1) : une animation qui va au bout de son cycle (show OU hide)
-    -- doit laisser le PROCHAIN cycle repartir du point de depart canonique
-    -- (petit pour un show, cf. arcStartScale/overlayStartScale) -- sinon
-    -- l'effet "pop in" depuis un petit scale serait perdu apres le tout
-    -- premier cycle complet (hide ramene le widget a scale=1 avant de le
-    -- Hide(), un show qui suivrait sans interruption partirait alors a tort
-    -- de 1 au lieu de arcScale/overlayScale). nil = "pas d'etat interrompu
-    -- a reprendre", le fallback canonique s'applique normalement.
+    -- nil (pas 1) : un cycle complet doit laisser le prochain repartir du point de départ canonique.
     element._aishAnimScale = nil
   end
 
@@ -1152,20 +912,8 @@ local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayV
   local overlayScale = overlaySpec.scale or 1
   local arcStartScale, arcEndScale         = shouldShow and arcScale or 1,     shouldShow and 1 or arcScale
   local overlayStartScale, overlayEndScale = shouldShow and overlayScale or 1, shouldShow and 1 or overlayScale
-  -- BUG CORRIGE (2026-08-20, "overlay trop petit apres montrer/cacher
-  -- rapide", ex: entrees/sorties de combat successives ou meme Skyriding
-  -- HUD qui appelle AnimateVisibility/AnimateArcOverlay) : le point de
-  -- depart etait TOUJOURS le point canonique (arcScale/overlayScale, ex:
-  -- 0.7) pour ce sens d'animation, jamais l'etat REEL de l'element. Si une
-  -- animation "show" est coupee avant d'atteindre son scale final (1) --
-  -- typique d'un nouveau show/hide qui arrive avant la fin -- la nouvelle
-  -- animation repartait quand meme du point canonique PETIT au lieu de la
-  -- ou l'element en etait vraiment : plusieurs interruptions rapprochees
-  -- empechent alors l'element d'atteindre 1 (grandeur normale), le
-  -- laissant visuellement bloque petit indefiniment. On repart maintenant
-  -- du dernier scale REELLEMENT applique (_aishAnimScale, memorise par
-  -- applyTransform/resetTransform ci-dessus) quand connu -- l'animation
-  -- continue naturellement d'ou elle en etait au lieu de sauter en arriere.
+  -- Repart du dernier scale réellement appliqué (_aishAnimScale) si connu, pas du point canonique,
+  -- sinon des interruptions rapprochées (entrée/sortie combat successives) laissent l'élément bloqué petit.
   if arcEl and arcEl._aishAnimScale then arcStartScale = arcEl._aishAnimScale end
   if overlayVisualEl and overlayVisualEl._aishAnimScale then overlayStartScale = overlayVisualEl._aishAnimScale end
 
@@ -1174,23 +922,13 @@ local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayV
   local arcHome     = needArcTransform and captureHome(arcEl) or nil
   local overlayHome = needOverlayTransform and captureHome(overlayVisualEl) or nil
 
-  arcEl:Show(); arcEl:SetAlpha(arcStartAlpha)
+  arcEl:Show(); arcEl:SetAlpha(arcStartAlpha); arcEl._aishAnimAlpha = arcStartAlpha
   if overlayVisualEl then overlayVisualEl:Show() end
   overlayEl:Show(); overlayEl:SetAlpha(overlayStartAlpha); overlayEl:SetScale(1)
+  overlayEl._aishAnimAlpha = overlayStartAlpha
 
-  -- BUG CORRIGE (2026-08-20, "overlay noir mal superpose apres un
-  -- entree/sortie de combat rapide") : contrairement a l'alpha (remis a
-  -- arcStartAlpha/overlayStartAlpha IMMEDIATEMENT ci-dessus), la position/
-  -- taille (applyTransform) n'etait appliquee que DANS le ticker, au
-  -- premier tick ou elapsed>=0 (donc apres arcSpec.delay/overlaySpec.delay).
-  -- Si cette animation est elle-meme interrompue (nouvel appel qui annule
-  -- le ticker, cf. debut de fonction) avant ce premier tick -- typique d'un
-  -- entree/sortie de combat rapproche qui redeclenche coup sur coup -- la
-  -- position/taille reste bloquee a l'etat laisse par l'animation
-  -- PRECEDENTE, jamais reinitialisee au point de depart correct de celle-
-  -- ci. Applique ici en p=0, tout de suite, comme pour l'alpha -- l'element
-  -- part TOUJOURS d'une geometrie connue et correcte, meme si cette
-  -- animation est elle-meme coupee avant son premier tick.
+  -- Applique la géométrie en p=0 immédiatement (comme l'alpha), pas seulement au 1er tick du ticker,
+  -- sinon une interruption avant ce tick laisse l'overlay à la géométrie de l'animation précédente.
   if arcHome then
     applyTransform(arcEl, arcHome, arcSlideX, arcSlideY, 0, arcStartScale, true)
   end
@@ -1209,12 +947,17 @@ local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayV
       local elapsed = tick - arcStart
       if elapsed >= 0 then
         local p = ns.Ease(arcSpec.ease, arcSpec.easeType, math.min(elapsed / arcSpec.duration, 1))
-        arcEl:SetAlpha(arcStartAlpha + (arcEndAlpha - arcStartAlpha) * p)
+        -- Valeur calculée, jamais relue via :GetAlpha() (peut renvoyer une valeur secrète en combat).
+        local curArcAlpha = arcStartAlpha + (arcEndAlpha - arcStartAlpha) * p
+        arcEl:SetAlpha(curArcAlpha)
+        arcEl._aishAnimAlpha = curArcAlpha
         if arcHome then
           applyTransform(arcEl, arcHome, arcSlideX, arcSlideY, p, arcStartScale + (arcEndScale - arcStartScale) * p, true)
         end
         if elapsed >= arcSpec.duration then
           arcEl:SetAlpha(arcEndAlpha)
+          -- nil (pas arcEndAlpha) : un cycle qui va au bout ne laisse rien à reprendre, le suivant repart du point canonique.
+          arcEl._aishAnimAlpha = nil
           resetTransform(arcEl, arcHome, true)
           if not shouldShow then arcEl:Hide() end
           arcDone = true
@@ -1226,12 +969,16 @@ local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayV
       local elapsed = tick - overlayStart
       if elapsed >= 0 then
         local p = ns.Ease(overlaySpec.ease, overlaySpec.easeType, math.min(elapsed / overlaySpec.duration, 1))
-        overlayEl:SetAlpha(overlayStartAlpha + (overlayEndAlpha - overlayStartAlpha) * p)
+        -- Valeur calculée, jamais relue via :GetAlpha() -- même raison que pour l'arc ci-dessus.
+        local curOverlayAlpha = overlayStartAlpha + (overlayEndAlpha - overlayStartAlpha) * p
+        overlayEl:SetAlpha(curOverlayAlpha)
+        overlayEl._aishAnimAlpha = curOverlayAlpha
         if overlayHome then
           applyTransform(overlayVisualEl, overlayHome, ovlSlideX, ovlSlideY, p, overlayStartScale + (overlayEndScale - overlayStartScale) * p)
         end
         if elapsed >= overlaySpec.duration then
           overlayEl:SetAlpha(overlayEndAlpha)
+          overlayEl._aishAnimAlpha = nil
           resetTransform(overlayVisualEl, overlayHome)
           if not shouldShow then
             overlayEl:Hide()
@@ -1249,9 +996,7 @@ local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayV
   end)
 end
 
--- Anime l'arc actif (vertical ou radial) + son overlay, ET -- si le stagger
--- Brasseur est actif -- l'arc de stagger avec la même spec (cf.
--- AnimateArcOverlayPair). Point d'entrée public inchangé.
+-- Anime l'arc actif + son overlay, et l'arc de stagger Brasseur avec la même spec si actif.
 local function AnimateArcOverlay(shouldShow)
   if not bar then return end
 
@@ -1261,14 +1006,10 @@ local function AnimateArcOverlay(shouldShow)
   local otherArcEl = radial and bar.arc or bar.radialFillFrame
   if otherArcEl then otherArcEl:Hide() end
 
-  -- Le slide (et le scale) de l'overlay principal s'appliquent à la TEXTURE
-  -- bar.overlay (le disque visible, ancré CENTER) plutôt qu'à bar.overlayFrame
-  -- (le wrapper, ancré via SetAllPoints -- pas de pivot exploitable).
+  -- Slide/scale de l'overlay principal appliqués à la texture bar.overlay (ancrée CENTER), pas à bar.overlayFrame (SetAllPoints, pas de pivot exploitable).
   AnimateArcOverlayPair("main", shouldShow, arcEl, bar.overlayFrame, bar.overlay)
 
-  -- Arc de stagger (Moine Brasseur) : structurellement identique à l'arc
-  -- principal (staggerArc ~ bar.arc, staggerOverlayFrame ~ bar.overlayFrame,
-  -- staggerOverlay ~ bar.overlay), donc EXACTEMENT la même animation.
+  -- Arc de stagger (Moine Brasseur) : structurellement identique à l'arc principal, donc exactement la même animation.
   if bar.staggerArc and bar.staggerOverlayFrame then
     if staggerActive then
       AnimateArcOverlayPair("stagger", shouldShow, bar.staggerArc, bar.staggerOverlayFrame, bar.staggerOverlay)
@@ -1299,9 +1040,7 @@ function ResourceCircle.AnimateVisibility(shouldShow)
   -- Les secondary dots ont leur propre animation slide (secAnimFrame) : exclus du stagger principal
   -- staggerArc/staggerOverlayFrame : exclus aussi, cf. AnimateArcOverlay
 
-  -- Recalculer le timing/la courbe/le mouvement de chaque slot depuis
-  -- CIRCLE_ANIM selon la direction (show = entrée en combat, hide =
-  -- sortie) : IN et OUT peuvent avoir des réglages complètement différents.
+  -- Recalcule timing/courbe/mouvement de chaque slot depuis CIRCLE_ANIM selon la direction (show/hide peuvent différer complètement).
   for i, group in pairs(_RC_ANIM_GROUP) do
     local spec = shouldShow and CIRCLE_ANIM[group].show or CIRCLE_ANIM[group].hide
     local slot = _rcAnimElems[i]
@@ -1314,9 +1053,7 @@ function ResourceCircle.AnimateVisibility(shouldShow)
     slot.scaleX   = spec.scaleX
     slot.scaleY   = spec.scaleY
     slot.opacity  = spec.opacity
-    -- Géométrie de repos pré-calculée (cf. RecordHome) plutôt que relue via
-    -- GetPoint/GetSize par ns.AnimateStagger : fiable même en combat (cf.
-    -- commentaire détaillé sur _elemHome plus haut dans le fichier).
+    -- Géométrie de repos pré-calculée (RecordHome) plutôt que relue via GetPoint/GetSize : fiable même en combat.
     local home = slot.element and _elemHome[slot.element]
     if home then
       slot.homePoint, slot.homeRelTo, slot.homeRelPoint = home.point, home.relTo, home.relPoint
@@ -1329,7 +1066,10 @@ function ResourceCircle.AnimateVisibility(shouldShow)
 
   -- Utiliser l'animation partagée
   animationTicker = ns.AnimateStagger(_rcAnimElems, shouldShow, duration, staggerInterval, function()
-    if previewMode then return end
+    if previewMode then
+      rcAnimBusy = false
+      return
+    end
     if not shouldShow then
       bar:Hide()
       -- (arc / radialFillFrame / overlay : masqués par AnimateArcOverlay,
@@ -1347,6 +1087,11 @@ function ResourceCircle.AnimateVisibility(shouldShow)
       -- Stopper toutes les animations 3D (Play en cours + soutenues + pool)
       local SE = ns.Modules and ns.Modules.SpellEffects
       if SE and SE.StopAll then SE.StopAll() end
+    end
+    rcAnimBusy = false
+    if rcAnimDirty then
+      rcAnimDirty = false
+      ResourceCircle.UpdateVisibility()
     end
   end)
 
@@ -1377,9 +1122,12 @@ function ResourceCircle.SetPreview(on)
   previewMode = on
   if not bar then return end
 
-  -- Annuler toute animation en cours
+  -- SetPreview est un override manuel : interruption immediate voulue (contrairement a UpdateVisibility).
+  -- Remet aussi rcAnimBusy a plat, sinon il resterait bloque a true (son onComplete vient d'etre annule).
   if animationTicker then animationTicker:Cancel(); animationTicker = nil end
   if moveTicker then moveTicker:Cancel(); moveTicker = nil end
+  rcAnimBusy = false
+  rcAnimDirty = false
 
   if on then
     lastVisibilityState = nil
@@ -1423,12 +1171,8 @@ function ResourceCircle.SetPreview(on)
     if bar.overlay then bar.overlay:Show(); bar.overlay:SetAlpha(1) end
     if bar.overlayFrame then bar.overlayFrame:Show(); bar.overlayFrame:SetAlpha(1); bar.overlayFrame:SetScale(1) end
     if bar.textBackdrop then bar.textBackdrop:Show(); bar.textBackdrop:SetAlpha(1) end
-    -- Texte de ressource secondaire : visible en preview (valeur factice) SEULEMENT
-    -- si la spé actuelle a une définition (DK Sang / DH Vengeance / DH Dévoreur…).
-    -- IMPORTANT : reset explicite d'alpha/position — si un pop-out (StartSecResPopOut,
-    -- transition combat 1+ -> 0 stack) a été interrompu (reload/combat qui se termine
-    -- pendant le fondu), secResFrame peut rester figé à alpha 0 : Show() seul ne suffit
-    -- pas à le rendre visible, d'où l'aperçu invisible malgré le texte bien défini.
+    -- Texte de ressource secondaire visible en preview seulement si la spé a une définition.
+    -- Reset explicite d'alpha/position : un pop-out interrompu peut laisser secResFrame à alpha 0.
     if bar.secResFrame and bar.secResText then
       if secResDef then
         bar.secResText:SetText("8")
@@ -1445,8 +1189,7 @@ function ResourceCircle.SetPreview(on)
         bar.secResFrame:Hide()
       end
     end
-    -- [EXPERIMENTAL] Respecter le mode radial en preview aussi : sinon l'arc
-    -- vertical réapparaîtrait par-dessus le disque radial pendant le test.
+    -- Respecter le mode radial en preview aussi, sinon l'arc vertical réapparaîtrait par-dessus le disque radial
     local cfgRadial = ns.GetCfg("resourceCircle")
     if cfgRadial.radialFillTest and bar.radialFillFrame then
       bar.arc:Hide()
@@ -1487,6 +1230,11 @@ function ResourceCircle.SetDraggable(on)
       -- Repositionner proprement
       self:ClearAllPoints()
       self:SetPoint("CENTER", UIParent, "CENTER", newX, newY)
+      -- Met à jour les sliders X/Y du panneau de réglages (même convention que Skyriding.lua).
+      local xSl = _G["AishCoreRCPosXSlider"]
+      local ySl = _G["AishCoreRCPosYSlider"]
+      if xSl then xSl:SetValue(newX) end
+      if ySl then ySl:SetValue(newY) end
     end)
     -- Bordure visuelle "deplacable"
     if not bar._dragBorder then
@@ -1520,14 +1268,26 @@ function ResourceCircle.UpdateVisibility()
   if not bar then return end
   if previewMode then return end
   local shouldShow = ResourceCircle.ShouldShow()
+  if ns._rcAnimDebug then
+    print(string.format("|cff88ffff[RCAnim]|r %.3f UpdateVisibility shouldShow=%s lastState=%s skyridingActive=%s inCombat=%s%s",
+      GetTime(), tostring(shouldShow), tostring(lastVisibilityState), tostring(ns.skyridingActive),
+      tostring(UnitAffectingCombat("player")),
+      (lastVisibilityState == shouldShow) and " (no-op)" or " (TRANSITION)"))
+  end
   if lastVisibilityState == shouldShow then return end
+
+  -- Ne jamais interrompre une transition en cours : note juste la demande (rcAnimDirty), rappelée
+  -- automatiquement une fois l'animation en cours terminée (cf. onComplete d'AnimateVisibility).
+  if rcAnimBusy then
+    rcAnimDirty = true
+    return
+  end
   lastVisibilityState = shouldShow
+  rcAnimBusy = true
 
   if shouldShow then
     bar:Show()
-    -- [EXPERIMENTAL] L'arc (vertical ou radial) et l'overlay ont leur propre
-    -- animation dédiée (timing/easing différents des autres éléments) :
-    -- voir AnimateArcOverlay.
+    -- L'arc et l'overlay ont leur propre animation dédiée (timing/easing différents), voir AnimateArcOverlay
     AnimateArcOverlay(true)
     bar.bgLarge:Show(); bar.bgLarge:SetAlpha(0)
     local cfg2 = ns.GetCfg("resourceCircle")
@@ -1547,9 +1307,7 @@ function ResourceCircle.UpdateVisibility()
     -- Montrer le frame de ressource secondaire s'il y a une définition active
     -- (SetAlpha(0) : laisse AnimateVisibility faire le fade+slide-in, cf. CIRCLE_ANIM.secResText)
     if bar.secResFrame and secResDef then bar.secResFrame:Show(); bar.secResFrame:SetAlpha(0) end
-    -- Arc de stagger : Show()/alpha déjà gérés par AnimateArcOverlay (ci-dessus,
-    -- même spec que l'arc principal) quand staggerActive -- juste rafraîchir
-    -- sa valeur/couleur ici.
+    -- Arc de stagger : Show()/alpha déjà gérés par AnimateArcOverlay ci-dessus, juste rafraîchir valeur/couleur.
     if staggerActive and bar.staggerArc then
       ResourceCircle.UpdateStagger()
     end
@@ -1581,28 +1339,16 @@ function ResourceCircle.UpdateVisibility()
     for i = 1, secDotCount do
       if secDotAnims[i] then secDotAnims[i].target = 0 end
     end
-    -- Le frame de ressource secondaire se cache via le fondu animé
-    -- (CIRCLE_ANIM.secResText + _rcAnimElems[14]), pas de Hide() immédiat ici :
-    -- ça laisserait AnimateVisibility(false) animer sa disparition, puis
-    -- bar:Hide() (fin d'anim) le cache de toute façon avec le reste.
-    -- Arc de stagger : pas de Hide() immédiat ici non plus, même raison que
-    -- pour le frame de ressource secondaire ci-dessus -- AnimateArcOverlay(false)
-    -- l'anime puis le cache sur SON PROPRE timing (même spec que l'arc principal).
-    -- Stopper les animations 3D soutenues immédiatement
+    -- Pas de Hide() immédiat pour secResFrame/staggerArc : leur fondu animé (AnimateVisibility /
+    -- AnimateArcOverlay) les cache déjà sur leur propre timing.
     local SE = ns.Modules and ns.Modules.SpellEffects
     if SE and SE.StopAllSustained then SE.StopAllSustained() end
-    -- [EXPERIMENTAL] cf. AnimateArcOverlay : timing dédié pour que l'overlay
-    -- reste plus opaque que l'arc pendant toute la disparition.
     AnimateArcOverlay(false)
     ResourceCircle.AnimateVisibility(false)
   end
 end
 
--- Forward-déclaré : la vraie définition vit plus bas (~ligne 2464, après ce
--- fichier définit ApplyStacksTo/ApplyStacksToText pour le texte de ressource
--- secondaire) -- Update() ci-dessous en a besoin pour Mage Givre (Frost),
--- donc on le rend visible ici sans dupliquer la logique combat-safe
--- (CDM -> fallback1 -> fallback2, cf. commentaire complet sur ApplyStacksTo).
+-- Forward-déclaré : vraie définition plus bas, requise par Update() ci-dessous pour Mage Givre.
 local ApplyStacksToText
 
 -- Met a jour la valeur et le texte selon la ressource primaire detectee
@@ -1676,24 +1422,14 @@ function ResourceCircle.Update()
     return
   end
 
-  -- Fire Mage (spec 63) : afficher directement 0/1/2 au lieu de la mana
-  -- Utilise le cache ns._playerClass / ns._specIndex (mis a jour au login + spec change)
+  -- Fire Mage (spec 63) : afficher directement 0/1/2 au lieu de la mana (cache ns._playerClass/ns._specIndex).
   if ns._playerClass == "MAGE" and ns._specIndex == 2 then  -- spec 2 = Fire
     displayText = tostring(fireProcLevel)
   end
 
   ApplyArcValue(pct)
 
-  -- Mage Givre (specID 64) : le texte principal affiche les stacks de Glaçons
-  -- (205473) au lieu de la mana -- l'arc reste sur pct (mana), inchangé
-  -- (ApplyArcValue(pct) juste au-dessus). Utilise directement ns.AuraText.ICICLES
-  -- (ResourceMap.lua/ScanAuraStacks, rafraîchi à CHAQUE UNIT_AURA avant que
-  -- RC.Update() ne s'exécute, cf. AishCore.lua) plutôt que ApplyStacksToText :
-  -- CONFIRMÉ EN JEU que ApplyStacksToText échouait pour 205473 alors que
-  -- ns.AuraText.ICICLES était déjà correctement à "5" au même instant --
-  -- son 1er repli (GetAuraApplicationDisplayCount sur l'auraInstanceID) rend
-  -- ok=true val=nil pour cette aura précise, contrairement à applications
-  -- (lu directement par GetPlayerAuraStackCount) qui, lui, fonctionne.
+  -- Mage Givre (specID 64) : texte affiche les stacks de Glaçons (205473), arc reste sur la mana. Lit ns.AuraText.ICICLES directement, ApplyStacksToText échoue pour ce spellID.
   if ns._playerClass == "MAGE" and ns._specID == 64 then
     local txt = ns.AuraText and ns.AuraText.ICICLES
     pcall(bar.text.SetText, bar.text, txt or "0")
@@ -1707,9 +1443,7 @@ function ResourceCircle.ResetVisibility()
   lastVisibilityState = nil
 end
 
----------------------------------------------------------------------------
 -- Secondary Dots : cercles secondaires (DK runes, Combo Points, etc.)
----------------------------------------------------------------------------
 
 -- Couleurs par type et spec
 local SEC_COLORS = {
@@ -1813,13 +1547,8 @@ function ResourceCircle.DetectSecondaryDots()
       newType = "ARCANE_CHARGES"
       newCount = 4
     end
-  elseif playerClass == "WARLOCK" then
-    local specIndex = GetSpecialization and GetSpecialization() or nil
-    local specID = specIndex and (GetSpecializationInfo and GetSpecializationInfo(specIndex)) or nil
-    if specID == 265 then  -- Demonology
-      newType  = "DEMONIC_CORE"
-      newCount = 4
-    end
+  -- Warlock Démonologie (Coeur démoniaque) : orbes désactivées, lecture des stacks via GetPlayerAuraBySpellID peu fiable en combat.
+  -- Stacks affichés via le texte de ressource secondaire (SecondaryResourceDefs[266]) qui passe par le canal clone-stack CDM à la place.
   end
 
   -- Si le type/count n'a pas change, ne rien faire
@@ -2199,24 +1928,16 @@ function ResourceCircle.UpdateRuneColors()
   ResourceCircle.UpdateSecDotColors()
 end
 
----------------------------------------------------------------------------
 -- Ressource secondaire : texte sous le cercle (Bone Shield, Soul Fragments…)
----------------------------------------------------------------------------
 
--- Couleurs par défaut de l'arc de durée central (cf. CENTER_ARC_SPELLS dans
--- CenterArc.lua et _arcSpec dans SettingsPanel.lua — dupliqué ici volontairement,
--- même convention que ces deux fichiers, pour éviter un couplage cross-module).
+-- Couleurs par défaut de l'arc de durée central (dupliqué de CenterArc.lua/SettingsPanel.lua pour éviter un couplage cross-module).
 local ARC_DEFAULT_COLORS = {
   [66]  = { 1.00, 0.88, 0.10 },  -- Paladin Prot : Consécration
   [73]  = { 0.78, 0.25, 0.25 },  -- Guerrier Prot : Dur au mal
   [250] = { 0.20, 0.78, 0.35 },  -- DK Sang : Death's Due (188290)
 }
 
--- Couleur courante de l'arc de durée pour une spec donnée : priorité à
--- l'override utilisateur (color picker, cf. SettingsPanel.lua), sinon couleur
--- par défaut de la spec. Utilisé pour aligner la couleur du texte de ressource
--- secondaire sur celle de l'arc quand les deux représentent la même ressource
--- (ex: Dur au mal, texte + arc).
+-- Couleur courante de l'arc de durée pour une spec : override utilisateur sinon couleur par défaut ; aligne le texte de ressource secondaire sur l'arc quand ils représentent la même ressource.
 local function GetDurationArcColor(specID)
   local r = ns.GetSecResCfg("durationArcColorR", specID)
   if r then
@@ -2225,24 +1946,7 @@ local function GetDurationArcColor(specID)
   return ARC_DEFAULT_COLORS[specID]
 end
 
--- Réapplique UNIQUEMENT la géométrie dépendante de la spec active (taille de
--- l'arc de durée, taille/police/déco/offset du texte de ressource secondaire
--- -- cf. ns.GetSecResCfg dans Core.lua) : volontairement séparée
--- d'ApplySettings() (qui touche bien plus : position/taille du cercle, glow,
--- dots, stagger, ET réinitialise lastVisibilityState) pour ne JAMAIS
--- interférer avec la visibilité combat/hors-combat du cercle. Appelée à la
--- fois par ApplySettings() (changement via un slider du panneau d'options) et
--- par DetectSecondaryResource (login + changement de spec) -- sans ce second
--- appel, la personnalisation d'une spec restait "collée" à la géométrie de la
--- toute première spec détectée (avant que ns._specID soit résolu) jusqu'à ce
--- qu'on retouche manuellement un slider (confirmé en jeu).
--- specID optionnel : si omis, retombe sur ns._specID (cf. ns.GetSecResCfg dans
--- Core.lua) -- mais DetectSecondaryResource passe TOUJOURS son specID
--- fraîchement résolu (via GetSpecializationInfo, pas le cache global) pour
--- garantir que la géométrie lue correspond bien à la spec dont le secResDef
--- vient d'être choisi, même si ns._specID n'a pas encore été mis à jour à cet
--- instant précis (CONFIRMÉ EN JEU : sans ce paramètre explicite, les réglages
--- perso restaient invisibles car lus sous la mauvaise clé de spec).
+-- Réapplique uniquement la géométrie dépendante de la spec (arc de durée, texte ressource secondaire), séparée d'ApplySettings pour ne pas interférer avec la visibilité combat.
 function ResourceCircle.RefreshSecResSpecGeometry(specID)
   if not bar then return end
   local cfg = ns.GetCfg("resourceCircle")
@@ -2266,6 +1970,17 @@ function ResourceCircle.RefreshSecResSpecGeometry(specID)
     local decoFont = ns.GetSecResCfg("secResDecoFont", specID) or ns.GetSecResCfg("secResFont", specID) or FONT_BOLD_ITALIC
     if bar.secResDashL then bar.secResDashL:SetFont(decoFont, secResTextSize, "") end
     if bar.secResDashR then bar.secResDashR:SetFont(decoFont, secResTextSize, "") end
+
+    -- Priorité : override utilisateur > couleur de l'arc de durée si même ressource > def.color > repli "powerdotsb". Ici (pas DetectSecondaryResource) pour rester live via BindColorButton.
+    local userR = ns.GetSecResCfg("secResColorR", specID)
+    local c
+    if userR then
+      c = { userR, ns.GetSecResCfg("secResColorG", specID) or 1, ns.GetSecResCfg("secResColorB", specID) or 1, 1 }
+    elseif secResDef then
+      local CLR = ns.Modules.Colors
+      c = (secResDef.useAbsorb and GetDurationArcColor(specID)) or secResDef.color or (CLR and CLR.Get("powerdotsb"))
+    end
+    if c then bar.secResText:SetTextColor(c[1], c[2], c[3], c[4] or 1) end
   end
   if bar.secResFrame and bar.text then
     local secResOffX = ns.GetSecResCfg("secResTextOffsetX", specID) or 0
@@ -2285,8 +2000,7 @@ function ResourceCircle.DetectSecondaryResource()
   if secResUpdateTicker then secResUpdateTicker:Cancel(); secResUpdateTicker = nil end
   secResDef = nil
 
-  -- Désabonner l'ancien canal clone-stack (spec précédente) avant d'en choisir
-  -- un nouveau -- sinon un vieux spellID resterait abonné indéfiniment.
+  -- Désabonner l'ancien canal clone-stack avant d'en choisir un nouveau, sinon un vieux spellID resterait abonné indéfiniment.
   if _secResStackSubIDs and ns.Auras and ns.Auras.UnsubscribeCDMAuraStack then
     for _, sid in ipairs(_secResStackSubIDs) do
       ns.Auras.UnsubscribeCDMAuraStack(sid, "resourceCircleSecRes")
@@ -2315,17 +2029,7 @@ function ResourceCircle.DetectSecondaryResource()
 
   secResDef = def
 
-  -- Abonner bar.secResText au canal clone-stack (CDMHooks.lua) pour les
-  -- ressources à stacks : même mécanisme event-driven/combat-safe que les
-  -- stacks d'icônes (Debuffs.lua/ApplyStackCharges), qui retransmet
-  -- cdmAura.applications tel quel dès que le CDM voit l'aura -- CONFIRMÉ EN
-  -- JEU (2026-08-16, /rcsecres) : Bouclier d'os (195181) a un instID CDM
-  -- valide, mais GetAuraApplicationDisplayCount dessus lève "tainted by
-  -- AishCore", ET GetPlayerAuraBySpellID renvoie hasAura=false -- les 3 tiers
-  -- de ApplyStacksToText échouent tous en combat, alors que le canal clone
-  -- swipe/stack (déjà éprouvé pour Dur Au Mal) reste alimenté. On abonne à la
-  -- fois spellID et altSpellID (si défini) : le texte reçu est appliqué tel
-  -- quel par PushStackApplications, sans jamais transiter par notre code.
+  -- Abonner bar.secResText au canal clone-stack (CDMHooks) : ApplyStacksToText échoue en combat pour certains sorts, ce canal reste fiable.
   if def.useStacks and def.spellID and ns.Auras and ns.Auras.SubscribeCDMAuraStack then
     _secResStackSubIDs = { def.spellID }
     ns.Auras.SubscribeCDMAuraStack(def.spellID, "resourceCircleSecRes", bar.secResText)
@@ -2333,38 +2037,10 @@ function ResourceCircle.DetectSecondaryResource()
       _secResStackSubIDs[#_secResStackSubIDs + 1] = def.altSpellID
       ns.Auras.SubscribeCDMAuraStack(def.altSpellID, "resourceCircleSecRes", bar.secResText)
     end
-    -- Empeche le blacklistage croise par le tracker d'auras generique
-    -- (Modules/Auras/Features/Auras/Debuffs.lua, ApplyStackCharges) : SI ce
-    -- meme spellID est AUSSI dans la liste des auras trackees par l'utilisateur
-    -- (ex: Fragments d'ame/de vide ajoutes a une liste d'icones), son scan
-    -- normal hors combat trouve TOUJOURS stacks=0 pour ces spellID (leur vrai
-    -- effet est "Set Action Button Spell Count", pas une aura lisible via
-    -- GetPlayerAuraBySpellID/enumeration -- cf. commentaire ResourceMap.lua) et
-    -- appelle ns.MarkStackNotCapable(spellID), qui bloque ensuite
-    -- PushStackApplications EN PERMANENCE (CDMHooks.lua) -- meme canal que
-    -- celui utilise ici pour bar.secResText. Correspond au bug rapporte :
-    -- Fragments d'ame (Vengeance) et Fragments de vide (Devoreur) ne
-    -- s'affichaient plus du tout (mais l'arc, CenterArc.lua, canal
-    -- independant, restait fonctionnel) -- symptome exactement coherent avec
-    -- ce blacklistage croise si ces sorts sont aussi trackes comme icones. On
-    -- marque donc ces spellID "stack capable" nous-memes des l'init :
-    -- ns.MarkStackCapable efface aussi tout blacklistage deja pose.
+    -- Marque ces spellID "stack capable" dès l'init pour éviter le blacklistage croisé par le tracker d'auras générique.
     if ns.Auras.MarkStackCapable then
       ns.Auras.MarkStackCapable(def.spellID)
       if def.altSpellID then ns.Auras.MarkStackCapable(def.altSpellID) end
-    end
-  end
-
-  -- Appliquer la couleur du texte secondaire :
-  -- si la ressource est celle trackée par l'arc de durée central (ex: absorb de
-  -- Dur au mal), on aligne sur la couleur de cet arc plutôt que def.color, pour
-  -- que texte et arc restent visuellement cohérents (même donnée affichée deux
-  -- fois). Sinon : def.color (ex: Soul Fragments), sinon couleur powerdotsb.
-  if bar.secResText then
-    local CLR = ns.Modules.Colors
-    local c = (def.useAbsorb and GetDurationArcColor(specID)) or def.color or (CLR and CLR.Get("powerdotsb"))
-    if c then
-      bar.secResText:SetTextColor(c[1], c[2], c[3], c[4] or 1)
     end
   end
 
@@ -2373,64 +2049,12 @@ function ResourceCircle.DetectSecondaryResource()
     ResourceCircle.UpdateSecondaryResource()
   end)
 
-  -- Réapplique la géométrie dépendante de la spec (cf. RefreshSecResSpecGeometry
-  -- plus haut) SANS passer par ApplySettings() au complet : celle-ci
-  -- réinitialiserait lastVisibilityState et perturberait la visibilité
-  -- combat/hors-combat du cercle (confirmé en jeu). specID (fraîchement résolu
-  -- ci-dessus, PAS ns._specID) passé explicitement : garantit qu'on lit la
-  -- config de la MÊME spec que celle dont on vient de choisir secResDef.
+  -- Réapplique la géométrie de spec sans passer par ApplySettings() complet (perturberait lastVisibilityState).
   ResourceCircle.RefreshSecResSpecGeometry(specID)
 end
 
--- GetPlayerAuraBySpellID() s'est avéré peu fiable pour certaines auras (renvoie
--- nil par intermittence alors que l'aura est bien active — cf. rapport en jeu).
--- Le système de tracking d'auras de l'addon a déjà résolu exactement ce problème
--- en passant en CDM-only (cf. le gros commentaire en tête de
--- Modules/Auras/Core/Scan.lua) : ns.Auras.cdmData est la SOURCE UNIQUE DE VÉRITÉ,
--- alimentée directement par les hooks Blizzard SetAuraInstanceInfo — combat-safe
--- et toujours à jour. On réutilise cette même source plutôt que de réinventer
--- une détection.
--- La signature réelle est GetAuraApplicationDisplayCount(instID, min, max) --
--- SANS paramètre "unit" (confirmé en jeu, patch 12.1 : un appel avec "unit"
--- en argument #1 lève "bad argument #1", masqué avant par l'erreur de taint
--- dès que instID est lui-même secret). ns.Auras.SafeStacks et tous les sites
--- de ce fichier ont été corrigés en conséquence.
---
--- IMPORTANT (confirmé en jeu) : la valeur renvoyée par GetAuraApplicationDisplayCount
--- peut elle-même être secrète en combat pour un sort CDM (SafeStacks le vérifie
--- déjà via issecretvalue). tostring()/le débogueur Blizzard peuvent l'afficher
--- ("4"), mais tonumber() dessus renvoie nil silencieusement, et même
--- FontString:SetFormattedText("- %d -", valeur_secrète) échoue (testé en jeu) :
--- ce n'est donc PAS un sink reconnu par Blizzard pour ce type de valeur.
---
--- Correction : même la comparaison (candidat par candidat, technique
--- CleanInt/SecretToNumber de PriorityBar.lua) ne permet PAS de "deviner" une
--- valeur secrète — cette technique sert seulement à DÉTECTER qu'une valeur
--- est secrète (la comparaison plante alors pour CHAQUE candidat) et à
--- abandonner proprement, jamais à en extraire le nombre réel.
---
--- La bonne approche est celle déjà utilisée — avec succès — par le badge de
--- stack sur l'icône (_SetStackText dans Debuffs.lua) : passer la valeur
--- BRUTE, telle quelle, en SEUL argument de FontString:SetText, sans aucune
--- opération dessus (pas de concat, pas de format, pas de comparaison) — le
--- vrai pattern "show but don't know". On perd juste la décoration "- N -"
--- (impossible à construire sur une valeur secrète), le nombre s'affiche seul.
--- IMPORTANT (confirmé en jeu) : cdmData n'est JAMAIS nettoyé (aucune suppression
--- d'entrée nulle part dans CDMHooks.lua) — les instanceID d'auras disparues
--- restent indéfiniment. Après un 2e combat, il existe donc PLUSIEURS entrées
--- pour le même spellID (l'ancienne instance, invalide, + la nouvelle). Il ne
--- faut donc jamais s'arrêter sur la première correspondance trouvée : on
--- continue d'essayer les autres tant qu'aucune n'a réellement fonctionné.
--- Pop (fade + slide) sur bar.secResFrame quand on passe de 0 à 1+ stack EN
--- COMBAT (pas seulement à l'entrée en combat, cf. CIRCLE_ANIM.secResText plus
--- haut qui gère déjà l'entrée/sortie de combat elle-même). Détecté via
--- `applied` (un simple booléen : "ApplyStacksToText a trouvé une valeur
--- affichable"), jamais via la vraie valeur des stacks — donc aucun souci de
--- valeur secrète ici, juste un changement d'état plain Lua.
--- Durée dédiée (indépendante de CIRCLE_ANIM.secResText.show.duration, qui reste
--- utilisée telle quelle pour l'animation d'entrée/sortie de combat) : ce pop
--- se déclenche bien plus souvent (à chaque transition 0->1+ stack en combat),
--- donc réglable séparément sans toucher à l'entrée en combat.
+-- GetPlayerAuraBySpellID() peu fiable pour certaines auras ; ns.Auras.cdmData fait référence. Valeur possiblement secrète en combat : jamais de concat/format dessus, juste SetText brut.
+-- Pop (fade+slide) sur bar.secResFrame au passage 0 -> 1+ stack en combat, détecté via le booléen `applied` (jamais la valeur réelle). Durée dédiée, séparée de CIRCLE_ANIM.secResText.
 local SEC_RES_POP_DURATION = 0.3
 local _secResWasApplied = false
 local _secResPopTicker  = nil
@@ -2456,10 +2080,8 @@ local function StartSecResPop()
   end)
 end
 
--- Symétrique de StartSecResPop : transition 1+ -> 0 stack en combat. Fade+slide
--- vers l'état "hide" (cf. CIRCLE_ANIM.secResText.hide), puis cache réellement
--- le texte/déco (SetSecResShown(false)) une fois le fondu terminé — pas avant,
--- sinon il n'y aurait rien à voir disparaître.
+-- Symétrique de StartSecResPop : transition 1+ -> 0 stack en combat, cache le texte/déco
+-- une fois le fondu terminé (pas avant, sinon rien à voir disparaître).
 local function StartSecResPopOut()
   if not bar or not bar.secResFrame then return end
   if _secResPopTicker then _secResPopTicker:Cancel(); _secResPopTicker = nil end
@@ -2488,53 +2110,15 @@ local function StartSecResPopOut()
   end)
 end
 
--- Teste val == 0 sans jamais planter si val est une secret value (comparaison
--- directe interdite en combat sur ce type de valeur). Si la comparaison
--- échoue (secret), on ne peut pas savoir -> on considère "pas confirmé zéro"
--- et on affiche quand même (comportement sûr par défaut). Même helper que
--- ApplyStackToText dans PriorityBar.lua.
+-- Teste val == 0 sans planter si val est une secret value ; si la comparaison échoue, considère "pas confirmé zéro" et affiche quand même. Même helper que dans PriorityBar.lua.
 local function IsConfirmedZero(val)
   if val == nil then return false end
   local ok, isZero = pcall(function() return val == 0 end)
   return ok and isZero == true
 end
 
--- IMPORTANT : certaines "ressources secondaires" ne sont PAS de vraies auras
--- stackables, ou ne sont pas trouvables par tous les moyens Blizzard. Quatre
--- chemins possibles, essayés dans l'ordre :
---   1) Vraie aura stackable, vue par le CDM Blizzard (Bone Shield/Soul
---      Fragments) -> ns.Auras.cdmData (combat-safe).
---   2) GetPlayerAuraBySpellID -- rapide, mais CONFIRMÉ EN JEU peu fiable pour
---      certaines auras (renvoie nil alors que l'aura est bien active avec des
---      stacks > 0 -- cas vérifié pour Thé de Mana/115867). On tente quand
---      même en premier (coût nul), l'énumération ci-dessous rattrape l'échec.
---   3) Énumération complète des auras HELPFUL du joueur via
---      C_UnitAuras.GetAuraDataByIndex -- CONFIRMÉ EN JEU comme étant la seule
---      méthode qui trouve effectivement Thé de Mana avec son vrai compte de
---      stacks (2), là où cdmData et GetPlayerAuraBySpellID échouaient tous
---      les deux. Plus coûteux (boucle), donc uniquement en dernier recours
---      après l'échec des deux méthodes ci-dessus.
---   4) AUCUNE aura du tout : un simple compteur natif Blizzard affiché sur le
---      bouton d'action (C_Spell.GetSpellCastCount), sans buff associé —
---      confirmé en jeu pour une autre mécanique Mistweaver (Don de Sheilun,
---      cf. STACK_SPELLS/ApplyStackToText dans PriorityBar.lua).
--- Dans tous les cas, la valeur est transmise TELLE QUELLE à SetText (jamais
--- de tonumber/format/comparaison dessus, potentiellement secrète en combat).
--- dbg (optionnel) : table de diagnostic remplie en direct par /rcsecres pour
--- savoir EXACTEMENT quel chemin a repondu quoi, sans avoir a deviner. N'a
--- aucun effet sur le comportement normal (nil partout ailleurs).
--- sink(value) : callback qui tente de "consommer" value (secret-safe : jamais
--- de retour/comparaison dessus a l'interieur, juste transmise BRUTE) et
--- renvoie true/false selon si l'appel a reussi. Factorise pour etre reutilise
--- par 2 consommateurs differents : FontString:SetText (texte de ressource
--- secondaire, ApplyStacksToText ci-dessous) ET StatusBar:SetValue (arc
--- secondaire, ApplyStacksToCenterArc plus bas, utilise par CenterArc.lua) --
--- CONFIRME EN JEU : l'arc du DH Devoreur restait vide alors que le texte
--- s'affichait correctement pour le MEME spellID, parce que CenterArc.lua
--- avait sa propre version dupliquee qui ne cherchait QUE dans cdmData (tier 1),
--- jamais dans les fallbacks 1/2 ci-dessous -- exactement le tier qui trouve
--- effectivement cette aura dans ce cas. Une seule implementation partagee
--- élimine ce genre de divergence silencieuse a l'avenir.
+-- Cherche les stacks d'une ressource secondaire via CDM puis fallbacks (GetPlayerAuraBySpellID, énumération HELPFUL, GetSpellCastCount) ;
+-- valeur transmise brute à sink (jamais de tonumber/comparaison, potentiellement secrète en combat), partagé entre SetText et SetValue.
 local function ApplyStacksTo(sink, spellID, dbg)
   local A = ns.Auras
   local cdmPlayer = A and A.cdmData and A.cdmData.player
@@ -2552,14 +2136,8 @@ local function ApplyStacksTo(sink, spellID, dbg)
   local okAura, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
   if dbg then dbg.f1 = { okAura = okAura, hasAura = (aura ~= nil), instID = aura and aura.auraInstanceID } end
   if okAura and aura then
-    -- aura.applications d'ABORD (donnée directe, pas de 2e appel API) --
-    -- CONFIRMÉ EN JEU (Glaçons/205473) : GetAuraApplicationDisplayCount sur
-    -- l'auraInstanceID peut renvoyer ok=true val=nil pour une aura pourtant
-    -- bien présente avec un vrai compte de stacks lisible via applications
-    -- (5 confirmé). Ne jamais sauter applications pour aller direct à
-    -- l'instanceID : c'était l'inverse ici, contrairement à
-    -- GetPlayerAuraStackCount (ResourceMap.lua), qui, lui, essayait déjà
-    -- applications en premier -- divergence silencieuse entre les 2 chemins.
+    -- aura.applications d'abord : GetAuraApplicationDisplayCount peut renvoyer nil pour une aura
+    -- pourtant présente avec un vrai compte lisible via applications (ex: Glaçons/205473).
     local okApp, app = pcall(function() return aura.applications end)
     if dbg then dbg.f1.okApp = okApp; dbg.f1.app = app end
     if okApp and app ~= nil and not IsConfirmedZero(app) then
@@ -2574,23 +2152,11 @@ local function ApplyStacksTo(sink, spellID, dbg)
     end
   end
 
-  -- Fallback 2 : énumération des auras HELPFUL (rattrape l'échec de
-  -- GetPlayerAuraBySpellID). CONFIRMÉ EN JEU (erreur reproduite) : d.spellId
-  -- sur l'AuraData renvoyée par GetAuraDataByIndex devient un SECRET NUMBER
-  -- dès qu'on est en combat -- le comparer directement (d.spellId == spellID)
-  -- PLANTE alors l'exécution ("attempt to compare... a secret number value"),
-  -- contrairement à cdmEntry.spellId (copie mise en cache par l'addon, jamais
-  -- secrète). Cette comparaison est donc protégée par pcall : en combat elle
-  -- échoue proprement (okMatch=false, on passe à l'entrée suivante) plutôt que
-  -- de planter toute la fonction (et empêcher SetSecResShown avec) -- mais ça
-  -- veut aussi dire que ce fallback ne peut identifier l'aura QUE hors combat.
-  -- d.applications est protégé de la même façon (même famille de champs).
+  -- Fallback 2 : énumération des auras HELPFUL ; comparaison spellId protégée par pcall (secret en combat).
   if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
     for i = 1, 60 do
       local ok3, d = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
-      -- ok3=false = CETTE position est secrète, pas "fin de liste" -- ne pas
-      -- break, continuer vers la position suivante (confirmé en jeu : une
-      -- énumération qui break au 1er échec ratait tout ce qui suivait).
+      -- ok3=false = cette position est secrète, pas "fin de liste" -- continuer, pas de break.
       if ok3 and not d then break end
       if ok3 and d then
       local okMatch, isMatch = pcall(function() return d.spellId == spellID end)
@@ -2616,40 +2182,19 @@ local function ApplyStacksTo(sink, spellID, dbg)
     end
   end
 
-  -- PAS de fallback GetSpellCastCount ici, contrairement à ApplyStackToText
-  -- dans PriorityBar.lua : CONFIRMÉ EN JEU que cette API répond ok=true
-  -- count=0 quand on l'appelle avec le spellID d'un BUFF (ex: 115867, Thé de
-  -- Mana) -- elle ne concerne que le sort ACTIVABLE (bouton d'action), un ID
-  -- différent. Voir ApplyCastCountToText ci-dessous : appelée explicitement
-  -- avec le bon spellID via secResDef.castCountSpellID, jamais devinée ici.
+  -- Pas de fallback GetSpellCastCount ici : répond count=0 pour le spellID d'un buff. Voir ApplyCastCountToText (secResDef.castCountSpellID).
   return false
 end
 
--- Pas de "local" ici : assigne l'upvalue forward-déclarée avant Update()
--- (cf. commentaire juste au-dessus de ResourceCircle.Update plus haut).
+-- Pas de "local" ici : assigne l'upvalue forward-déclarée avant Update().
 function ApplyStacksToText(fontString, spellID, dbg)
   return ApplyStacksTo(function(v) return pcall(fontString.SetText, fontString, v) end, spellID, dbg)
 end
 
--- Expose la chaine complete (CDM + GetPlayerAuraBySpellID + enumeration,
--- chacune protegee par IsConfirmedZero) pour reutilisation hors de ce fichier
--- -- notamment les stacks d'icones (Debuffs.lua/Cooldowns.lua/Procs.lua),
--- qui n'avaient qu'un sous-ensemble de ces chemins (GetPlayerAuraBySpellID
--- seul) et ne pouvaient jamais confirmer un "0" en combat pour le cacher.
+-- Exposé pour réutilisation par les stacks d'icônes (Debuffs.lua/Cooldowns.lua/Procs.lua).
 ResourceCircle.ApplyStacksTo = ApplyStacksTo
 
--- Équivalent de ApplyStacksTo mais pour un debuff de la CIBLE (pas une aura du
--- joueur). Pas d'équivalent target de GetPlayerAuraBySpellID -- donc seulement
--- 2 tiers ici (CDM, puis énumération HARMFUL), contrairement aux 3 tiers de
--- ApplyStacksTo ci-dessus. Utilisé par Mage Givre (specID 64, debuff 1246769,
--- cf. ns.SecondaryResourceDefs[64] dans Config/ResourceMap.lua).
--- ATTENTION : GetAuraDataByAuraInstanceID (AuraData complète) est REFUSÉ par
--- Blizzard dès que l'instID est secret (confirmé en jeu, patch 12.1 :
--- "Auras cannot be accessed when secret while tainted by 'AishCore'"), ce qui
--- est désormais quasi systématique pour un instID CDM. On utilise donc
--- GetAuraApplicationDisplayCount (API "blessed", ne lève pas cette exception)
--- comme confirmation de présence + valeur affichable, sans jamais tenter de
--- relire l'AuraData brute.
+-- Équivalent de ApplyStacksTo pour un debuff de la cible (CDM puis énumération HARMFUL). Utilisé par Mage Givre (specID 64, debuff 1246769).
 local function ApplyTargetStacksTo(sink, spellID, dbg)
   if not UnitExists("target") then return false end
   local A = ns.Auras
@@ -2659,22 +2204,15 @@ local function ApplyTargetStacksTo(sink, spellID, dbg)
     local ok, disp = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, cdmEntry.instID, 1, 999)
     if dbg then dbg.cdm = { ok = ok, disp = disp } end
     if ok and disp ~= nil then
-      -- Instance confirmée vivante : si le compte n'est pas exploitable (debuff
-      -- à application unique, sans vrai compteur de stacks -- CONFIRMÉ EN
-      -- JEU sur d'autres debuffs cible via TargetAuras.lua, `aura.applications
-      -- or 0`), on affiche quand même "1" plutôt que d'échouer -- la présence
-      -- seule reste une info utile, contrairement à ApplyStacksTo (joueur)
-      -- qui suppose toujours une vraie aura stackable.
+      -- Instance confirmée vivante : si le compte n'est pas exploitable (debuff à application
+      -- unique), affiche "1" plutôt que d'échouer -- la présence seule reste une info utile.
       local value = (not IsConfirmedZero(disp)) and disp or 1
       if sink(value) then if dbg then dbg.path = "cdm" end; return true end
     end
-    -- Instance périmée (cdmData n'est jamais purgé, cf. commentaire plus
-    -- haut) : on tombe dans le fallback ci-dessous.
+    -- Instance périmée (cdmData jamais purgé) : tombe dans le fallback ci-dessous.
   end
 
-  -- Fallback : énumération des auras HARMFUL de la cible (même limite qu'en
-  -- combat pour le fallback 2 joueur : la comparaison spellId doit être
-  -- protégée par pcall, cf. commentaire détaillé sur ApplyStacksTo plus haut).
+  -- Fallback : énumération des auras HARMFUL de la cible (comparaison spellId protégée par pcall).
   if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
     for i = 1, 40 do
       local ok3, d = pcall(C_UnitAuras.GetAuraDataByIndex, "target", i, "HARMFUL")
@@ -2698,49 +2236,8 @@ local function ApplyTargetStacksToText(fontString, spellID, dbg)
   return ApplyTargetStacksTo(function(v) return pcall(fontString.SetText, fontString, v) end, spellID, dbg)
 end
 
--- Compteur natif Blizzard affiché sur un bouton d'action (mécanisme distinct
--- d'une aura stackable OU d'un vrai système de charges de sort) : certains
--- sorts Mistweaver l'utilisent pour afficher un nombre de "stacks" sans aucun
--- buff associé (CONFIRMÉ EN JEU pour Don de Sheilun, cf. STACK_SPELLS/
--- ApplyStackToText dans PriorityBar.lua, et pour Thé de Mana : le buff
--- 115867 n'a pas ce compteur, mais le sort ACTIVABLE 115294 si). Appelé
--- uniquement quand secResDef.castCountSpellID est explicitement défini (cf.
--- ResourceMap.lua) -- jamais deviné automatiquement à partir de spellID
--- (ApplyStacksToText l'a confirmé trompeur pour un mauvais spellID : répond
--- toujours 0 au lieu de ne rien trouver).
---
--- LIMITE CONNUE (confirmée en jeu, plusieurs tentatives) : impossible de
--- masquer de façon fiable un "0" réel pendant le combat. Essayé et rejeté :
---   1) Comparer count==0 directement -> plante (secret number).
---   2) Comparer le texte déjà affiché (GetText après SetText) -> plante
---      aussi, la valeur reste secrète même une fois rendue à l'écran.
---   3) hooksecurefunc sur button.Count:SetText pour intercepter la valeur
---      AVANT notre propre lecture -> plante ENCORE : l'appel natif Blizzard
---      UpdateCount devient lui-même "tainted by AishCore" dès que notre
---      addon est chargé, donc même le texte que BLIZZARD passe à SetText
---      est déjà une secret string de son point de vue.
--- [CONFIRMÉ EN JEU via /rcsecres, count=0 en combat, Thé de Mana/115294] :
---   IsShown  ok=true val=true   <- toujours true, Blizzard ne Hide() JAMAIS le
---                                  FontString, il vide juste le texte -> piste
---                                  invalidée (contrairement à l'hypothèse de
---                                  départ), retirée.
---   GetText  ok=true val=nil    <- lecture qui NE PLANTE PAS et renvoie un nil
---                                  littéral (pas une valeur secrète maquillée en
---                                  "0") quand le bouton n'affiche rien.
---   GetStringWidth ok=true val=0 <- idem, nombre propre (largeur de rendu 0).
--- Différence avec la tentative #2 rejetée plus haut ("comparer le texte déjà
--- affiché -> plante") : celle-ci COMPARAIT le texte affiché à une valeur (donc
--- déclenchait la protection secret-value dès qu'un vrai nombre était présent).
--- Ici on se contente de LIRE (GetText/GetStringWidth), et on ne compare QUE
--- dans un pcall dédié -- si Blizzard renvoie un texte secret pour un compte >
--- 0, cette comparaison plante proprement (ok=false) et on ne gate simplement
--- pas, sans jamais casser l'affichage normal.
--- Bouton retrouvé via le cache de PriorityBar.lua (cachedSpellToButton,
--- reconstruit hors combat et préservé pendant le combat -- cf.
--- RebuildSpellButtonCache) plutôt que de dupliquer ce scan ici ; si
--- PriorityBar n'est pas chargé ou que le sort n'est sur aucune barre suivie,
--- on retombe silencieusement sur l'ancien comportement (affiche la valeur
--- réelle, cf. commentaire ci-dessus).
+-- Compteur natif Blizzard sur un bouton d'action (certains sorts Mistweaver sans buff associé, ex Don de Sheilun/Thé de Mana), appelé seulement si secResDef.castCountSpellID est défini explicitement.
+-- GetText/GetStringWidth sur button.Count restent lisibles sans planter (count==0 lui-même plante en combat) et permettent de détecter un bouton vide. Bouton retrouvé via le cache de PriorityBar.lua.
 local function IsActionCountConfirmedHidden(spellID)
   local PB = ns.Modules and ns.Modules.PriorityBar
   local btn = PB and PB._GetCachedBtn and PB._GetCachedBtn(spellID)
@@ -2757,12 +2254,7 @@ local function IsActionCountConfirmedHidden(spellID)
   return false
 end
 
--- Il n'existe donc aujourd'hui aucun signal exploitable en Lua pour
--- distinguer "0" de "3" sur cette valeur pendant le combat. On affiche donc
--- la valeur réelle (fonctionne, cf. IsConfirmedZero qui filtre au moins les
--- cas où la comparaison réussit, typiquement hors combat) en acceptant qu'un
--- vrai "0" en combat puisse s'afficher brièvement -- SAUF si
--- IsActionCountConfirmedHidden ci-dessus a pu trancher via le bouton natif.
+-- Aucun signal fiable pour distinguer "0" de "3" en combat : affiche la valeur réelle (IsConfirmedZero filtre hors combat), sauf si IsActionCountConfirmedHidden a tranché via le bouton natif.
 local function ApplyCastCountToText(fontString, spellID)
   if not (C_Spell and C_Spell.GetSpellCastCount) then return false end
   if IsActionCountConfirmedHidden(spellID) then return false end
@@ -2771,36 +2263,7 @@ local function ApplyCastCountToText(fontString, spellID)
   return pcall(fontString.SetText, fontString, count)
 end
 
--- Montant d'absorption restant pour une aura d'absorb (ex: Dur Au Mal / Ignore
--- Pain). IMPORTANT (confirmé en jeu) : AuraData.points est une SECRET TABLE
--- entière en combat (pas juste ses valeurs) — indexer aura.points[1] plante
--- ("attempt to index field 'points' (a secret table value)"), contrairement
--- aux stacks où seule la valeur (un number) est secrète et où
--- GetAuraApplicationDisplayCount sert de sink reconnu. Il n'existe pas
--- d'équivalent scalaire pour les points d'une aura précise. On utilise donc
--- UnitGetTotalAbsorbs("player") (déjà utilisé pour l'absorb bar dans
--- UnitBars.lua) qui renvoie directement un number (secret en combat, mais pas
--- une table) — sink reconnu de la même façon que 'disp' dans
--- ApplyStacksToText : passé BRUT en seul argument de FontString:SetText, sans
--- aucune opération dessus. La valeur affichée est donc le total des absorbs du
--- joueur, pas isolée à cette seule aura (Blizzard n'expose pas ce chiffre par
--- aura sans passer par une table secrète), mais pour Dur Au Mal cette aura est
--- presque toujours l'unique source de shield sur un Guerrier Protection.
---
--- IMPORTANT (confirmé en jeu) : la PRÉSENCE ne peut PAS se déterminer en
--- matchant juste cdmEntry.spellId — cdmData n'est JAMAIS nettoyé (aucune
--- suppression d'entrée nulle part dans CDMHooks.lua), donc une entrée Dur Au
--- Mal reste indéfiniment après la toute première utilisation, même une fois
--- le buff expiré (=> "0" affiché en permanence).
---
--- BUG CORRIGÉ : la validation utilisait GetAuraApplicationDisplayCount sur
--- cdmEntry.instID (l'instID du hook CDM), inutilisable pour TOUT lookup --
--- cette vérification échouait donc systématiquement en combat, empêchant l'affichage du
--- montant. On utilise à la place IsCDMAuraSwipePresent (CDMHooks.lua) :
--- canal event-driven déjà combat-safe, alimenté par le même swipe CDM que
--- la durée (donc déjà éprouvé pour ce spellID). GetPlayerAuraBySpellID en
--- repli pour les cas hors combat / juste après l'application du buff (avant
--- que le premier swipe CDM n'ait eu le temps de se déclencher).
+-- Absorb restant via UnitGetTotalAbsorbs (AuraData.points est une secret table en combat, indexer plante) ; présence via IsCDMAuraSwipePresent, repli GetPlayerAuraBySpellID
 local function ApplyAbsorbToText(fontString, spellID)
   local A = ns.Auras
   local present = A and A.IsCDMAuraSwipePresent and A.IsCDMAuraSwipePresent(spellID)
@@ -2815,10 +2278,7 @@ local function ApplyAbsorbToText(fontString, spellID)
   local ok, absorb = pcall(fn, "player")
   if not ok or absorb == nil then return false end
 
-  -- Option "grand nombre" (10000 -> "10k") : AbbreviateNumbers est C-side et
-  -- accepte les secret numbers en argument (même sink que ShortenHP dans
-  -- TopTargetBar.lua / SetHPText dans UnitBars.lua). Le résultat (une string,
-  -- potentiellement secrète elle aussi) est ensuite passé BRUT à SetText.
+  -- Option "grand nombre" (10000 -> "10k") : AbbreviateNumbers accepte les secret numbers, résultat passé brut à SetText (même pattern que ShortenHP/SetHPText).
   if ns.GetSecResCfg("secResAbsorbAbbreviate") and AbbreviateNumbers then
     local okAbbr, str = pcall(AbbreviateNumbers, absorb)
     if okAbbr and str then
@@ -2832,14 +2292,7 @@ end
 function ResourceCircle.UpdateSecondaryResource()
   if not bar or not bar.secResText then return end
   if previewMode then return end  -- ne pas écraser la valeur factice affichée par SetPreview
-  -- Le texte secondaire doit partager la visibilité du cercle central : ne
-  -- jamais l'afficher/l'animer quand celui-ci est masqué (hors combat par
-  -- défaut, cf. ShouldShow). BUG CORRIGÉ : secResFrame est parenté à UIParent
-  -- (pas à bar, pour ses propres animations de pop indépendantes des
-  -- combat-transitions) -- il ne suit donc PAS automatiquement bar:Hide(), et
-  -- ce ticker (0.1s, indépendant de UpdateVisibility) le réaffichait dès que
-  -- l'aura restait présente (ex: bouclier de Dur Au Mal encore actif en
-  -- sortant du combat), même cercle central caché.
+  -- Le texte secondaire doit partager la visibilité du cercle central : secResFrame est parenté à UIParent (pas à bar, pour ses animations de pop indépendantes), donc ne suit pas bar:Hide() automatiquement.
   if not bar:IsShown() then
     if _secResWasApplied or bar.secResText:IsShown() then
       SetSecResShown(false)
@@ -2864,40 +2317,25 @@ function ResourceCircle.UpdateSecondaryResource()
     if not applied then
       applied = ApplyStacksToText(bar.secResText, secResDef.spellID)
     end
-    -- Repli compteur bouton d'action (ex: Thé de Mana 115294) : uniquement si
-    -- explicitement défini pour ce spec (cf. ApplyCastCountToText plus haut) --
-    -- seule méthode qui survit au combat quand l'aura elle-même n'est ni
-    -- suivie par le CDM Blizzard ni trouvable via GetPlayerAuraBySpellID.
+    -- Repli compteur bouton d'action (ex: Thé de Mana 115294), uniquement si explicitement défini pour ce spec (cf. ApplyCastCountToText).
     if not applied and secResDef.castCountSpellID then
       applied = ApplyCastCountToText(bar.secResText, secResDef.castCountSpellID)
     end
-    -- Repli présence via le canal clone swipe (IsCDMAuraSwipePresent, même
-    -- signal event-driven que ApplyAbsorbToText pour Dur Au Mal) : quand les 3
-    -- tiers de ApplyStacksToText échouent tous (CONFIRMÉ EN JEU pour Bouclier
-    -- d'os/195181 -- CDM lève "tainted", GetPlayerAuraBySpellID renvoie
-    -- hasAura=false), on se contente de confirmer que l'aura est bien présente
-    -- ; le TEXTE lui-même est déjà à jour, poussé indépendamment par
-    -- PushStackApplications via l'abonnement clone-stack (cf.
-    -- DetectSecondaryResource plus haut) -- on ne le réécrit jamais ici.
+    -- Repli présence via IsCDMAuraSwipePresent (même signal que ApplyAbsorbToText) quand les 3 tiers de ApplyStacksToText échouent (ex Bouclier d'os/195181) ; le texte est déjà poussé par le clone-stack.
     local A = ns.Auras
     if not applied and A and A.IsCDMAuraSwipePresent
        and (A.IsCDMAuraSwipePresent(secResDef.spellID)
             or (secResDef.altSpellID and A.IsCDMAuraSwipePresent(secResDef.altSpellID))) then
       applied = true
     end
-    -- Transitions 0 <-> 1+ stack EN COMBAT (pas seulement à l'entrée/sortie de
-    -- combat) : petit pop fade+slide dans les deux sens, cf. StartSecResPop /
-    -- StartSecResPopOut. `applied` est un simple booléen, jamais la valeur
-    -- secrète elle-même.
+    -- Transitions 0 <-> 1+ stack en combat : petit pop fade+slide, cf. StartSecResPop/StartSecResPopOut. `applied` est un simple booléen, jamais la valeur secrète.
     if applied and not _secResWasApplied then
       StartSecResPop()
     elseif not applied and _secResWasApplied then
       StartSecResPopOut()
     end
     _secResWasApplied = applied
-    -- Le pop-out cache lui-même le texte/déco une fois le fondu terminé (sinon
-    -- rien ne serait visible en train de disparaître) ; SetSecResShown(false)
-    -- immédiat ne s'applique donc que si aucun pop-out n'est en cours.
+    -- Le pop-out cache lui-même texte/déco une fois le fondu terminé ; SetSecResShown(false) immédiat ne s'applique que si aucun pop-out n'est en cours.
     if applied then
       SetSecResShown(true)
     elseif not _secResPopTicker then
@@ -2905,9 +2343,7 @@ function ResourceCircle.UpdateSecondaryResource()
     end
     return
   elseif secResDef.useTargetDebuff and secResDef.spellID then
-    -- Debuff de la CIBLE (pas une aura du joueur, cf. Mage Givre/specID 64
-    -- dans Config/ResourceMap.lua) -- même logique de pop-in/pop-out que
-    -- useStacks ci-dessus, juste via ApplyTargetStacksToText (unit "target").
+    -- Debuff de la cible (Mage Givre/specID 64, Config/ResourceMap.lua) -- même logique de pop-in/pop-out que useStacks, via ApplyTargetStacksToText.
     local applied = ApplyTargetStacksToText(bar.secResText, secResDef.spellID)
     if applied and not _secResWasApplied then
       StartSecResPop()
@@ -2959,9 +2395,7 @@ function ResourceCircle.UpdateSecondaryResource()
   SetSecResShown(false)
 end
 
----------------------------------------------------------------------------
 -- Arc de stagger (Moine Brasseur specID 268)
----------------------------------------------------------------------------
 function ResourceCircle.DetectStagger()
   if not bar then return end
   staggerActive = false
@@ -2989,10 +2423,7 @@ end
 
 function ResourceCircle.UpdateStagger()
   if not bar or not staggerActive then return end
-  -- Cercle central caché (hors combat, section Auras&Procs, etc.) : masquer
-  -- le texte de stagger EN MEME TEMPS -- CONFIRMÉ EN JEU (avant ce fix) :
-  -- il restait bloqué affiché à "0%" hors combat au lieu de disparaître
-  -- avec le reste du cercle.
+  -- Cercle central caché : masquer le texte de stagger en même temps, sinon il restait bloqué affiché à "0%" hors combat.
   if not bar:IsShown() then
     if bar.secResFrame and bar.secResFrame:IsShown() then
       SetSecResShown(false)
@@ -3005,12 +2436,7 @@ function ResourceCircle.UpdateStagger()
   local ok2, maxHP   = pcall(UnitHealthMax, "player")
   if not ok1 or not ok2 or not maxHP or maxHP <= 0 then return end
 
-  -- L'arithmétique elle-même doit être protégée SÉPARÉMENT de l'appel API :
-  -- stagAmt peut être une valeur secrète en combat (même piège qu'ailleurs
-  -- dans ce module) -- une division/comparaison non protégée plante silencieusement TOUTE la
-  -- fonction (le ticker avale l'erreur) : l'arc restait figé sur sa dernière
-  -- valeur connue et le texte ne se mettait plus jamais à jour, exactement le
-  -- symptôme rapporté ("seul l'arc s'affiche, plus le texte").
+  -- Arithmétique protégée séparément de l'appel API : stagAmt peut être secret en combat, une division non protégée plante silencieusement toute la fonction (le ticker avale l'erreur).
   local okPct, pct = pcall(function() return ((stagAmt or 0) / maxHP) * 100 end)
   if not okPct or pct == nil then return end
 
@@ -3042,11 +2468,7 @@ function ResourceCircle.UpdateStagger()
   end
 end
 
----------------------------------------------------------------------------
--- Arc de durée dans le cercle central : même pattern que les autres renders
--- SetCenterArcEntry(entry) : appelé par CenterArc.lua avec l'entrée de scan
--- (entry.durObj + entry.spellColor). SetTimerDuration : Blizzard anime à 60fps.
----------------------------------------------------------------------------
+-- Arc de durée dans le cercle central. SetCenterArcEntry(entry) : appelé par CenterArc.lua avec entry.durObj/entry.spellColor. SetTimerDuration anime à 60fps côté Blizzard.
 local INTERP_IMMED = Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.Immediate
 local TIMER_DRAIN  = Enum and Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime
 local _lastArcDurRef = nil  -- tostring(durObj) : change à chaque cast/refresh
@@ -3054,8 +2476,7 @@ local _lastArcDurRef = nil  -- tostring(durObj) : change à chaque cast/refresh
 function ResourceCircle.SetCenterArcEntry(entry)
   if not bar or not bar.durationArc then return end
   if entry and entry.durObj then
-    -- Le durObj est recréé à chaque cast (même refresh) → tostring() change toujours.
-    -- SetTimerDuration ne tourne que quand c'est un nouveau durObj.
+    -- Le durObj est recréé à chaque cast (même refresh) → tostring() change toujours ; SetTimerDuration ne tourne que pour un nouveau durObj.
     local durRef = tostring(entry.durObj)
     if durRef == _lastArcDurRef then return end
     _lastArcDurRef = durRef
@@ -3068,9 +2489,7 @@ function ResourceCircle.SetCenterArcEntry(entry)
     bar.durationArc:SetAlpha(1); bar.durationArc:Show()
     if bar.durationOvlFrame then bar.durationOvlFrame:SetAlpha(1); bar.durationOvlFrame:Show() end
   else
-    -- Chemin CDM : SetTimerDuration(nil) uniquement si on avait un durObj actif.
-    -- Si _lastArcDurRef est nil (chemin totem ou pas d'arc CDM), ne pas appeler
-    -- SetTimerDuration(nil) — ça peut corrompre l'état de la StatusBar.
+    -- Chemin CDM : SetTimerDuration(nil) uniquement si on avait un durObj actif, sinon ça peut corrompre l'état de la StatusBar.
     if _lastArcDurRef then
       _lastArcDurRef = nil
       if bar.durationArc.SetTimerDuration then
@@ -3098,13 +2517,7 @@ function ResourceCircle.SetCenterArcValue(fraction, color)
   if bar.durationOvlFrame then bar.durationOvlFrame:SetAlpha(1); bar.durationOvlFrame:Show() end
 end
 
--- Mode "absorb" de l'arc de durée (ex: Dur Au Mal, cfg.ignorePainArcAbsorb) :
--- remplissage proportionnel à une valeur/max génériques (montant d'absorption
--- restant, cf. CenterArc.lua) plutôt qu'au temps restant. `value` peut être un
--- secret number en combat : AUCUNE arithmétique dessus — on fixe juste les
--- bornes (maxValue, une constante/valeur Lua normale) et on passe value BRUT à
--- SetValue, qui calcule le remplissage côté C (même pattern que UpdateAbsorb
--- dans UnitBars.lua).
+-- Mode "absorb" de l'arc de durée (Dur Au Mal, cfg.ignorePainArcAbsorb) : remplissage proportionnel à une valeur/max génériques plutôt qu'au temps restant. `value` peut être secret : aucune arithmétique, passé brut à SetValue (même pattern que UpdateAbsorb dans UnitBars.lua).
 function ResourceCircle.SetCenterArcFill(value, maxValue, color)
   if not bar or not bar.durationArc then return end
   if not maxValue or maxValue <= 0 then return end
@@ -3115,13 +2528,7 @@ function ResourceCircle.SetCenterArcFill(value, maxValue, color)
   if bar.durationOvlFrame then bar.durationOvlFrame:SetAlpha(1); bar.durationOvlFrame:Show() end
 end
 
--- Mode "cdmbar" (durée réellement combat-safe, cf. CDMHooks.lua "ABONNEMENTS
--- CLONE BAR") : relais BRUT vers bar.durationArc, SANS AUCUNE comparaison sur
--- lo/hi/value -- contrairement à SetCenterArcFill ci-dessus (qui compare
--- maxValue <= 0), invalide ici car hi peut être une valeur secrète en combat.
--- Exception : Blizzard envoie hi=0 en CLAIR au moment précis où le buff
--- expire (confirmé en jeu, /aacbar) -- seule comparaison sûre, utilisée pour
--- cacher proprement l'arc à ce moment-là.
+-- Mode "cdmbar" (durée combat-safe, CDMHooks.lua) : relais brut vers bar.durationArc, sans comparaison sur lo/hi/value (hi peut être secret en combat), sauf hi==0 (envoyé en clair à l'expiration du buff).
 function ResourceCircle.SetCenterArcBarMinMax(lo, hi)
   if not bar or not bar.durationArc then return end
   local okZero, isZero = pcall(function() return hi == 0 end)
@@ -3140,24 +2547,14 @@ function ResourceCircle.SetCenterArcBarValue(value)
   pcall(bar.durationArc.SetValue, bar.durationArc, value)
 end
 
--- Proxy "clone-bar" : expose l'interface StatusBar (SetMinMaxValues/SetValue/
--- Show) attendue par ns.SubscribeCDMAuraBar, sans être une vraie StatusBar --
--- redirige vers bar.durationArc via les 2 sinks ci-dessus. CenterArc.lua
--- s'abonne à ce proxy plutôt qu'à bar.durationArc directement (ResourceCircle
--- garde la main sur son propre widget).
+-- Proxy "clone-bar" : expose l'interface StatusBar attendue par ns.SubscribeCDMAuraBar sans être une vraie StatusBar, redirige vers bar.durationArc (ResourceCircle garde la main sur son widget).
 ResourceCircle.centerArcBarProxy = {
   SetMinMaxValues = function(_, lo, hi) ResourceCircle.SetCenterArcBarMinMax(lo, hi) end,
   SetValue        = function(_, value) ResourceCircle.SetCenterArcBarValue(value) end,
   Show            = function() end,
 }
 
--- Remplit l'arc secondaire central directement depuis une aura stackable, en
--- reutilisant EXACTEMENT la meme chaine CDM + fallbacks que le texte de
--- ressource secondaire (ApplyStacksTo/ApplyStacksToText plus haut) -- pour
--- les specs a arc "stacks" lues via une aura (ex: DH Devoreur, cf.
--- CenterArc.lua/StackModeTick, qui n'a PAS de castCountSpellID contrairement
--- au The de Mana). Retourne true si une valeur a ete appliquee (arc affiche),
--- false sinon (l'appelant doit alors le cacher, cf. SetCenterArcEntry(nil)).
+-- Remplit l'arc secondaire central depuis une aura stackable, en réutilisant la même chaîne CDM + fallbacks que le texte de ressource secondaire (specs à arc "stacks" lues via une aura, ex DH Dévoreur).
 function ResourceCircle.ApplyStacksToCenterArc(spellID, maxValue, color, dbg)
   if not bar or not bar.durationArc then return false end
   if not maxValue or maxValue <= 0 then return false end
@@ -3173,15 +2570,12 @@ function ResourceCircle.ApplyStacksToCenterArc(spellID, maxValue, color, dbg)
   return applied
 end
 
--- Accesseur debug (cf. /rcarc dans CenterArc.lua) : bar.durationArc/durationArcFrame
--- sont locaux a ce fichier, jamais exposes ailleurs.
+-- Accesseur debug (/rcarc dans CenterArc.lua) : bar.durationArc/durationArcFrame sont locaux à ce fichier.
 function ResourceCircle._debug_GetDurationArc()
   return bar and bar.durationArc, bar and bar.durationArcFrame
 end
 
----------------------------------------------------------------------------
 -- Frame d'animation slide pour les secondary dots (même logique que Skyriding)
----------------------------------------------------------------------------
 function ResourceCircle.CreateSecAnimFrame()
   if secAnimFrame then return end
   secAnimFrame = CreateFrame("Frame")
@@ -3216,9 +2610,7 @@ function ResourceCircle.CreateSecAnimFrame()
     end
   end)
 end
----------------------------------------------------------------------------
--- Debug : /rcoverlay  — log tous les spell overlay events en temps réel
----------------------------------------------------------------------------
+-- Debug : /rcoverlay — log tous les spell overlay events en temps réel
 do
   local logging = false
   local logFrame = CreateFrame("Frame")
@@ -3236,27 +2628,26 @@ do
   end
 end
 
----------------------------------------------------------------------------
--- [EXPERIMENTAL] /rcradial — bascule à chaud entre remplissage vertical
--- (actuel/défaut) et remplissage radial, pour tester sans passer par le
--- panneau de settings. Persiste dans le profil (cfg.radialFillTest).
----------------------------------------------------------------------------
+-- /rcanimlog -- trace en direct UpdateVisibility et AnimateArcOverlayPair pour recouper avec /aishdebug sky (Skyriding.lua, mêmes horodatages GetTime()).
+SLASH_RCANIMLOG1 = "/rcanimlog"
+SlashCmdList["RCANIMLOG"] = function()
+  ns._rcAnimDebug = not ns._rcAnimDebug
+  DEFAULT_CHAT_FRAME:AddMessage("|cff88ffff[RCAnim]|r logging " .. (ns._rcAnimDebug and "|cff00ff00ON|r" or "|cffff4444OFF|r")
+    .. " -- reproduire (atterrir + combat), puis /aishdebug sky pour la sequence Skyriding correspondante.")
+end
+
+-- /rcradial — bascule à chaud entre remplissage vertical et radial, persiste dans le profil (cfg.radialFillTest)
 SLASH_RCRADIAL1 = "/rcradial"
 SlashCmdList["RCRADIAL"] = function()
   local cfg = ns.GetCfg("resourceCircle")
   cfg.radialFillTest = not cfg.radialFillTest
-  -- ApplySettings() (pas juste ApplyRadialMode()) : re-synchronise aussi
-  -- SetSize/SetPoint de bar.arc à sa taille/position correcte. Sans ça, si
-  -- bar.arc avait été laissé à une taille périmée par une anim interrompue,
-  -- ApplyRadialMode() seule ne le corrige pas (elle ne touche que
-  -- Show/Hide/alpha/scale, jamais SetSize/SetPoint).
+  -- ApplySettings() (pas juste ApplyRadialMode()) : re-synchronise aussi SetSize/SetPoint de bar.arc, qu'ApplyRadialMode seule ne corrige pas (Show/Hide/alpha/scale uniquement).
   ResourceCircle.ApplySettings()
   local state = cfg.radialFillTest and "|cff00ff00RADIAL|r" or "|cff88ccffVERTICAL (défaut)|r"
   DEFAULT_CHAT_FRAME:AddMessage("|cff88ffff[ResourceCircle]|r Remplissage : " .. state)
 end
 
--- DEBUG TEMPORAIRE : dump complet de l'état de bar.arc, appelable à tout
--- moment (pas besoin d'attendre une transition de combat).
+-- Debug : dump complet de l'état de bar.arc, appelable à tout moment.
 SLASH_RCARCDBG1 = "/rcarcdbg"
 SlashCmdList["RCARCDBG"] = function()
   if not bar then print("[AishDbg] bar est nil"); return end
@@ -3309,9 +2700,7 @@ SlashCmdList["RCARCDBG"] = function()
   end
 end
 
----------------------------------------------------------------------------
--- Debug : /rcaura  — dump toutes les auras HELPFUL du joueur
----------------------------------------------------------------------------
+-- Debug : /rcaura — dump toutes les auras HELPFUL du joueur
 SLASH_RCAURA1 = "/rcaura"
 SlashCmdList["RCAURA"] = function()
   local function p(msg) DEFAULT_CHAT_FRAME:AddMessage("|cff00ff88[RCAura]|r " .. tostring(msg)) end
@@ -3329,9 +2718,7 @@ SlashCmdList["RCAURA"] = function()
   if found == 0 then p("  (aucune aura HELPFUL)") end
 end
 
----------------------------------------------------------------------------
 -- Debug : /rcsecres — état complet du texte de ressource secondaire
----------------------------------------------------------------------------
 SLASH_RCSECRES1 = "/rcsecres"
 SlashCmdList["RCSECRES"] = function()
   local function p(msg) DEFAULT_CHAT_FRAME:AddMessage("|cff00ff88[RCSecRes]|r " .. tostring(msg)) end
@@ -3375,17 +2762,12 @@ SlashCmdList["RCSECRES"] = function()
       local ok, aura = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", foundInstID)
       p(string.format("GetAuraDataByAuraInstanceID ok=%s aura=%s", tostring(ok), tostring(aura ~= nil)))
       if ok and aura then
-        -- Pas de lecture de aura.applications/aura.points ici : indexer un champ
-        -- secret jette une erreur qui "tainted" tout le reste de CETTE fonction
-        -- (donc fausse StacksFromCDM plus bas). On reste sur le seul sink sûr.
+        -- Pas de lecture de aura.applications/aura.points ici : indexer un champ secret jette une erreur qui tainte le reste de la fonction.
         local okD1, dispD1 = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, foundInstID, 1, 999)
         p(string.format("GetAuraApplicationDisplayCount(1,999) ok=%s value=%s type=%s", tostring(okD1), tostring(dispD1), type(dispD1)))
       end
     end
-    -- altSpellID (ex: Fragments de vide 1227702 sous Metamorphose du vide, DH
-    -- Devoreur) : teste EXACTEMENT comme UpdateSecondaryResource, essaye en
-    -- premier, avant le spellID normal -- absent des diagnostics precedents,
-    -- donc invisible dans /rcsecres jusqu'ici malgre son role prioritaire.
+    -- altSpellID (ex Fragments de vide 1227702, DH Dévoreur) : teste comme UpdateSecondaryResource, en priorité avant le spellID normal.
     if secResDef.altSpellID then
       local altDbg = {}
       local altApplied = ApplyStacksToText(bar.secResText, secResDef.altSpellID, altDbg)
@@ -3421,8 +2803,7 @@ SlashCmdList["RCSECRES"] = function()
       local ccSid = secResDef.castCountSpellID
       local okCC, count = pcall(C_Spell.GetSpellCastCount, ccSid)
       p(string.format("castCountSpellID=%d GetSpellCastCount ok=%s count=%s", ccSid, tostring(okCC), tostring(count)))
-      -- Diagnostic du bouton natif (IsActionCountConfirmedHidden) : à collecter
-      -- EN COMBAT pour savoir pourquoi le gate IsShown() ne masque pas le "0".
+      -- Diagnostic du bouton natif (IsActionCountConfirmedHidden), à collecter en combat pour savoir pourquoi le gate IsShown() ne masque pas le "0".
       local PBdbg = ns.Modules and ns.Modules.PriorityBar
       local btnDbg = PBdbg and PBdbg._GetCachedBtn and PBdbg._GetCachedBtn(ccSid)
       p(string.format("  [btn] PriorityBar present=%s _GetCachedBtn=%s btn trouve=%s",
@@ -3444,9 +2825,7 @@ SlashCmdList["RCSECRES"] = function()
     end
     if applied then SetSecResShown(true) end
   elseif secResDef and secResDef.spellID and secResDef.useTargetDebuff then
-    -- Chemin cible (Mage Givre, cf. Config/ResourceMap.lua) : diagnostic
-    -- séparé du bloc joueur ci-dessus, qui serait trompeur ici (le debuff
-    -- n'est jamais sur "player").
+    -- Chemin cible (Mage Givre, Config/ResourceMap.lua) : diagnostic séparé du bloc joueur, trompeur ici puisque le debuff n'est jamais sur "player".
     p(string.format("UnitExists(target)=%s", tostring(UnitExists("target"))))
     local A = ns.Auras
     p(string.format("ns.Auras présent=%s  cdmData.target présent=%s",
@@ -3459,10 +2838,7 @@ SlashCmdList["RCSECRES"] = function()
       local okAura, aura = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "target", foundInstID)
       p(string.format("GetAuraDataByAuraInstanceID(target) ok=%s aura=%s", tostring(okAura), tostring(aura ~= nil)))
     end
-    -- Enumeration HARMFUL brute de la cible : liste TOUT ce qui est vu dessus
-    -- (spellId + applications), pour confirmer si le spellID attendu y figure
-    -- vraiment -- seulement hors combat, la comparaison spellId plantant en
-    -- combat (cf. commentaire détaillé sur ApplyStacksTo plus haut).
+    -- Énumération HARMFUL brute de la cible, seulement hors combat (la comparaison spellId plante en combat, cf. ApplyStacksTo).
     if not (InCombatLockdown and InCombatLockdown()) and C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
       local any = false
       for i = 1, 40 do

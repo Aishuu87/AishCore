@@ -2,25 +2,16 @@
 -- Moteur "Buffs manquants" : detecte les buffs/stances/enchants attendus qui
 -- sont absents et affiche une alerte pour le sort correspondant.
 --
--- LIMITE CONNUE : la lecture des auras d'une unite AUTRE que le joueur
--- (party/raid) via AuraUtil.ForEachAura est protegee par pcall mais a de
--- fortes chances d'echouer silencieusement en pratique -- cf.
--- Modules/TargetAuras.lua:3-15 (meme mecanisme casse sur "target") : les
--- payloads d'aura sont systematiquement secrets depuis le patch 12.1, plus
--- seulement en combat. La detection SUR SOI (stances/auras/attunements,
--- familiers, poisons, buff de classe manquant sur soi, enchants d'arme) est
--- fiable (C_UnitAuras.GetPlayerAuraBySpellID, deja utilise partout ailleurs
--- dans l'addon). Aucune erreur ne remonte si la detection sur les allies
--- echoue -- elle degrade juste vers "rien detecte" pour cette cible.
-------------------------------------------------------------------------
+-- LIMITE CONNUE : la lecture des auras d'un allie (party/raid) via AuraUtil.ForEachAura echoue
+-- souvent en silence -- payloads d'aura secrets depuis le patch 12.1, plus seulement en combat
+-- (cf. Modules/TargetAuras.lua:3-15). La detection SUR SOI reste fiable (GetPlayerAuraBySpellID).
+-- Aucune erreur ne remonte si la detection sur les allies echoue, ca degrade vers "rien detecte".
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 
 local MissingBuffs = {}
 ns.MissingBuffs = MissingBuffs
 
-------------------------------------------------------------------------
 -- UPVALUES
-------------------------------------------------------------------------
 local pcall, pairs, ipairs, select = pcall, pairs, ipairs, select
 local GetTime, UnitClass = GetTime, UnitClass
 local UnitExists, UnitIsUnit, UnitIsConnected, UnitIsDeadOrGhost, UnitIsDead = UnitExists, UnitIsUnit, UnitIsConnected, UnitIsDeadOrGhost, UnitIsDead
@@ -32,14 +23,9 @@ local _issecretvalue = issecretvalue
 
 local function IsSecret(v) return _issecretvalue and _issecretvalue(v) or false end
 
--- Rappel "bientot expire" : malgre le fait que le payload d'aura soit
--- generalement secret depuis le patch 12.1, une lecture d'expirationTime
--- reste possible par moments. La bonne approche n'est donc PAS de supposer
--- "toujours secret"/"safe hors combat", mais de verifier ETAT PAR ETAT via
--- C_Secrets.ShouldAurasBeSecret() + issecretvalue() sur chaque champ lu, et
--- de degrader silencieusement (return nil, pas d'erreur) des que ce n'est
--- pas lisible a cet instant -- le rappel n'apparait alors que quand la
--- lecture est reellement possible.
+-- Rappel "bientot expire" : le payload d'aura est generalement secret depuis le 12.1 mais pas
+-- toujours -- on verifie ETAT PAR ETAT via C_Secrets.ShouldAurasBeSecret()/issecretvalue() sur
+-- chaque champ lu et on degrade silencieusement (nil) si illisible a cet instant.
 local C_Secrets = C_Secrets
 local function AurasAreSecret()
     return C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret() or false
@@ -55,17 +41,13 @@ local function SafeAuraExpiration(aura)
     return v
 end
 
-------------------------------------------------------------------------
 -- Config
-------------------------------------------------------------------------
 local function Cfg()
     return (ns.db and ns.db.missingBuffs) or {}
 end
 MissingBuffs.Cfg = Cfg
 
-------------------------------------------------------------------------
 -- Apprentissage
-------------------------------------------------------------------------
 local function IsEntryLearned(entry)
     local checkId = entry.spellbookId or entry.spellId
     if not (C_SpellBook and C_SpellBook.IsSpellKnown) then
@@ -82,10 +64,8 @@ local function IsEntryLearned(entry)
     return known == true
 end
 
-------------------------------------------------------------------------
--- Lecture d'aura SUR SOI (fiable -- contrairement a un instanceID capture via
--- un hook CDM, GetPlayerAuraBySpellID reste utilisable ici)
-------------------------------------------------------------------------
+-- Lecture d'aura SUR SOI (fiable -- contrairement a un instanceID capture via un hook CDM,
+-- GetPlayerAuraBySpellID reste utilisable ici)
 local function GetSelfAura(spellId)
     if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return nil end
     local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellId)
@@ -109,11 +89,9 @@ local function SelfHasBuff(entry)
     return false
 end
 
--- true = ce buff est present sur SOI mais expire dans <= threshold secondes ;
--- false = present avec assez de marge (ou sans vraie duree/illisible) ;
--- l'appelant ne doit consulter cette fonction QUE si le buff est deja
--- confirme present par ailleurs (SelfHasBuff/AnyoneMissingBuff) -- ici on ne
--- reverifie que la duree, jamais la presence elle-meme.
+-- true = present sur SOI mais expire dans <= threshold secondes ; false = marge suffisante (ou
+-- sans vraie duree/illisible). A n'appeler que si le buff est deja confirme present par ailleurs
+-- (SelfHasBuff/AnyoneMissingBuff) -- ici on ne reverifie que la duree, jamais la presence.
 local function GetSelfBuffExpiringSoon(entry, threshold)
     if entry.ignoreDuration then return false end
     if type(threshold) ~= "number" or threshold <= 0 then return false end
@@ -170,12 +148,9 @@ local function SelfHasWeaponEnchant(entry)
     return true
 end
 
-------------------------------------------------------------------------
--- Lecture d'aura sur un ALLIE -- best-effort, cf. bandeau de tete de fichier.
--- Repli "spell activation overlay" natif Blizzard en priorite quand
--- l'entree le supporte (Beacon of Light/Faith) : glow deja calcule cote C++,
--- immunise au taint (meme principe que le rendu natif AddAuraGroup).
-------------------------------------------------------------------------
+-- Lecture d'aura sur un ALLIE -- best-effort, cf. bandeau de tete de fichier. Repli "spell
+-- activation overlay" natif Blizzard en priorite quand l'entree le supporte (Beacon of
+-- Light/Faith) : glow deja calcule cote C++, immunise au taint (meme principe que AddAuraGroup).
 local function CheckSpellOverlayMissing(entry)
     if not entry.spellOverlayCompatible then return nil end
     if not (C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed) then return nil end
@@ -185,41 +160,31 @@ local function CheckSpellOverlayMissing(entry)
 end
 
 local function UnitHasBuffRaw(unit, entry)
-    -- Les payloads d'aura d'un ALLIE sont secrets en quasi-permanence depuis
-    -- le patch 12.1 (pas seulement en combat, cf. AurasAreSecret et le
-    -- bandeau de tete de fichier) : ForEachAura ne peut alors JAMAIS lire un
-    -- spellId, meme si l'allie a reellement le buff -- la boucle ci-dessous
-    -- retournerait TOUJOURS "found=false". Sans ce garde-fou, ca faisait
-    -- croire "manquant" en PERMANENCE en donjon/raid (confirme en jeu :
-    -- alerte "1/5" qui boucle en M+ alors que tout le groupe est buffe).
-    -- Repli cote sur : etat illisible -> on suppose le buff present plutot
-    -- que de spammer un faux "manquant" pour toujours -- ne concerne QUE la
-    -- detection sur les allies (SelfHasBuff, sur soi, reste fiable via
-    -- C_UnitAuras.GetPlayerAuraBySpellID, cf. bandeau de tete de fichier).
+    -- Payloads d'aura d'un ALLIE quasi-toujours secrets depuis le 12.1 : ForEachAura ne peut
+    -- alors jamais lire de spellId, donc on suppose le buff present plutot que de spammer un
+    -- faux "manquant" (confirme en jeu : alerte "1/5" en boucle en M+ avec tout le groupe buffe).
     if AurasAreSecret() then return true end
     if not (AuraUtil and AuraUtil.ForEachAura) then return false end
     local lookup = { [entry.spellId] = true }
     if entry.extraBuffSpellIds then for _, id in ipairs(entry.extraBuffSpellIds) do lookup[id] = true end end
     if entry.mutuallyExclusiveWith then for _, id in ipairs(entry.mutuallyExclusiveWith) do lookup[id] = true end end
     local found = false
+    -- BUG CORRIGE (alerte "1/2" en Delve avec un allie PNJ visiblement buffe alors que
+    -- AurasAreSecret() valait false) : la secrecy des payloads d'aura peut rester GRANULAIRE
+    -- (certains champs/auras illisibles) meme quand le flag global dit "lisible". Si on croise
+    -- au moins une aura au spellId secret pendant le scan, on ne peut pas garantir que le buff
+    -- cherche n'est pas derriere -- on degrade vers "suppose present" plutot que "manquant".
+    local sawSecretAura = false
     pcall(AuraUtil.ForEachAura, unit, "HELPFUL", nil, function(aura)
         if not aura then return false end
         local sid = aura.spellId
-        -- issecretvalue() DOIT etre le tout premier test, avant TOUTE
-        -- comparaison (meme `== nil`) -- une comparaison sur une valeur
-        -- secrete peut planter/propager le taint, ce qui a fini par bloquer
-        -- un appel protege plus loin (Hide() sur le frame d'alerte, en
-        -- combat -- confirme en jeu, ADDON_ACTION_BLOCKED).
-        if IsSecret(sid) then return false end
+        -- issecretvalue() doit etre le tout premier test, avant toute comparaison : comparer une
+        -- valeur secrete peut propager le taint (a deja bloque un Hide() protege en combat, ADDON_ACTION_BLOCKED).
+        if IsSecret(sid) then sawSecretAura = true; return false end
         if sid == nil then return false end
         if not lookup[sid] then return false end
-        -- requireOwnCast : ne compte que NOTRE instance du buff, pas celle
-        -- d'un autre joueur de meme classe/role (ex. Bouclier de terre --
-        -- plusieurs chamans peuvent chacun placer le leur sur une cible
-        -- differente, ce n'est pas un buff "un seul par raid" malgre
-        -- onlyOnePerGroup ici cote UI). sourceUnit absent/secret -> on ne
-        -- suppose PAS que c'est le notre (repli "toujours manquant" plutot
-        -- que de cacher a tort le rappel).
+        -- requireOwnCast : ne compte que NOTRE instance (ex. Bouclier de terre, chaque chaman
+        -- pose le sien sur une cible differente). sourceUnit absent/secret -> pas suppose "le notre".
         if entry.requireOwnCast then
             local src = aura.sourceUnit
             if IsSecret(src) then return false end
@@ -228,7 +193,9 @@ local function UnitHasBuffRaw(unit, entry)
         found = true
         return true
     end, true)
-    return found
+    if found then return true end
+    if sawSecretAura then return true end
+    return false
 end
 
 local function UnitHasBuff(unit, entry)
@@ -238,9 +205,7 @@ local function UnitHasBuff(unit, entry)
     return UnitHasBuffRaw(unit, entry)
 end
 
-------------------------------------------------------------------------
 -- Unites du groupe
-------------------------------------------------------------------------
 local function GetGroupUnits()
     local units = {}
     if IsInRaid() then
@@ -274,13 +239,9 @@ end
 local function PassesRangeCheck(unit, entry)
     if entry.ignoreRangeCheck then return true end
 
-    -- spellbookId (quand present) est LE sort reellement castable/connu --
-    -- cf. IsEntryLearned ci-dessus, meme repli. entry.spellId n'est parfois
-    -- que l'ID de l'aura trackee (rang different/non connu directement) :
-    -- interroger IsSpellInRange dessus peut echouer silencieusement et faire
-    -- tomber en repli ferme (jamais "a portee") meme quand l'allie l'est
-    -- reellement (confirme en jeu : Bouclier de terre 2/2 jamais propose
-    -- malgre des allies a portee et non-buffes).
+    -- spellbookId (quand present) est LE sort reellement castable/connu (cf. IsEntryLearned) --
+    -- entry.spellId n'est parfois que l'ID de l'aura trackee, et interroger IsSpellInRange dessus
+    -- peut echouer silencieusement et faire tomber en repli ferme meme quand l'allie est a portee.
     local checkId = entry.spellbookId or entry.spellId
 
     if C_Spell and C_Spell.IsSpellInRange then
@@ -306,14 +267,9 @@ local function PassesRangeCheck(unit, entry)
     return false
 end
 
--- Compte combien d'unites A PORTEE ont deja le buff, sur le total d'unites
--- A PORTEE qui devraient l'avoir (soi + allies valides passant le meme
--- filtre que la detection normale) -- pour l'affichage "10/14" a la
--- Clickable Raid Buff, uniquement sur les entrees marquees showRaidCount
--- (les "vrais" buffs de raid un-par-personne : Cri de guerre, Benediction
--- du Bronze, Marque de la nature sauvage, Intellect sublime, Fortitude,
--- Fureur des cieux -- pas les buffs a instance unique type Benediction/
--- Bouclier de terre, ou le compte n'aurait pas de sens).
+-- Compte combien d'unites a portee ont deja le buff sur le total qui devrait l'avoir (soi +
+-- allies valides), pour l'affichage "10/14" -- uniquement sur les entrees showRaidCount (les
+-- "vrais" buffs de raid un-par-personne, pas les buffs a instance unique type Benediction).
 local function CountBuffCoverage(entry)
     local have, total = 0, 0
     total = total + 1
@@ -327,10 +283,7 @@ local function CountBuffCoverage(entry)
     return have, total
 end
 
-------------------------------------------------------------------------
--- Buff de classe manquant (soi puis allies), variantes onlyOnePerGroup /
--- requiresHealerInGroup / weaponEnchantSlot
-------------------------------------------------------------------------
+-- Buff de classe manquant (soi puis allies), variantes onlyOnePerGroup / requiresHealerInGroup / weaponEnchantSlot
 local function AnyoneMissingBuff(entry)
     if entry.weaponEnchantSlot then
         if SelfHasWeaponEnchant(entry) then return false end
@@ -340,22 +293,14 @@ local function AnyoneMissingBuff(entry)
     if entry.onlyOnePerGroup then
         if not entry.ignoreSelf and UnitHasBuff("player", entry) then return false end
         local units = GetGroupUnits()
-        -- ignoreSelf = ce buff ne peut jamais compter sur soi (ex: "buffer un
-        -- allie") : seul en groupe/raid, il n'y a personne a buffer -> pas
-        -- "manquant". Sans ce garde-fou, la boucle vide ci-dessous tombait
-        -- toujours sur `return true` (confirme en jeu, Chaman "Buffer un allie"
-        -- affiche hors groupe).
+        -- ignoreSelf = ce buff ne compte jamais sur soi (ex. "buffer un allie") : seul en
+        -- groupe/raid, personne a buffer -> pas "manquant" (evite la boucle vide -> true toujours).
         if entry.ignoreSelf and #units == 0 then return false end
         local anyoneInRange = false
         for _, unit in ipairs(units) do
-            -- PAS de PassesRangeCheck ici : on verifie si le buff est DEJA
-            -- applique quelque part dans le groupe, pas si on peut agir
-            -- maintenant -- le buff reste actif meme si la cible s'eloigne
-            -- ensuite. Avec le fail-closed de PassesRangeCheck (portee
-            -- indeterminee -> false), l'exiger ici faisait croire "encore
-            -- manquant" alors que tout le monde etait deja couvert (confirme
-            -- en jeu : Bouclier de terre 2/2 mais "Buffer un allie" restait
-            -- affiche).
+            -- Pas de PassesRangeCheck ici : on verifie si le buff est DEJA applique quelque part,
+            -- pas si on peut agir maintenant -- sinon le fail-closed de PassesRangeCheck faisait
+            -- croire "encore manquant" alors que tout le monde etait deja couvert.
             if IsValidAllyUnit(unit) and UnitHasBuff(unit, entry) then
                 return false
             end
@@ -363,10 +308,8 @@ local function AnyoneMissingBuff(entry)
                 anyoneInRange = true
             end
         end
-        -- ignoreSelf : le rappel cible forcement un allie (clic -> cible) --
-        -- si personne n'est a portee pour le recevoir, rien n'est actionnable
-        -- maintenant, donc pas d'icone "Buffer un allie" plutot que l'afficher
-        -- en permanence des qu'on est seul dans son coin (confirme en jeu).
+        -- ignoreSelf cible forcement un allie (clic -> cible) : si personne n'est a portee, rien
+        -- n'est actionnable -> pas d'icone plutot que l'afficher en permanence seul dans son coin.
         if entry.ignoreSelf and not anyoneInRange then return false end
         return true, "player"
     end
@@ -397,9 +340,7 @@ local function HealerMissingBuff(entry)
     return false
 end
 
-------------------------------------------------------------------------
 -- Groupe mutuellement exclusif (stances/auras/attunements/poisons/pets)
-------------------------------------------------------------------------
 local function PickDefaultOption(list, overrideSpellId)
     if overrideSpellId then
         for _, opt in ipairs(list) do if opt.spellId == overrideSpellId then return opt end end
@@ -435,8 +376,20 @@ local function HasSacrificedPetForGrimoire()
     return GetSelfAura(GRIMOIRE_OF_SACRIFICE_BUFF) ~= nil
 end
 
+-- Loup solitaire (466867, Chasseur Precision) : talent qui permet de jouer
+-- DELIBEREMENT sans familier -- ne jamais rappeler "familier manquant" si actif.
+local HUNTER_LONE_WOLF_TALENT = 466867
+local function HasHunterLoneWolfTalent()
+    if not (C_SpellBook and C_SpellBook.IsSpellKnown) then return false end
+    local ok, known = pcall(C_SpellBook.IsSpellKnown, HUNTER_LONE_WOLF_TALENT)
+    return ok and known == true
+end
+
 local function CheckPetMissing(class)
     local cfg = Cfg()
+    if class == "HUNTER" and HasHunterLoneWolfTalent() then
+        return false
+    end
     if UnitExists("pet") then
         if class == "HUNTER" and UnitIsDead("pet") then
             return true, { spellId = ns.MISSING_HUNTER_PET_DEAD }, "REVIVE_PET"
@@ -451,9 +404,7 @@ local function CheckPetMissing(class)
     return true, PickDefaultOption(list, overrideId), "SUMMON_PET"
 end
 
-------------------------------------------------------------------------
 -- Applicabilite d'une entree (spe / combat / ignoree par l'utilisateur)
-------------------------------------------------------------------------
 local function EntryApplies(entry)
     if entry.specIds then
         local specID = _addon._specID
@@ -467,13 +418,9 @@ local function EntryApplies(entry)
         return false
     end
     if InCombatLockdown() then
-        -- Les buffs de raid "10/14" scannent TOUT le groupe/raid (souvent
-        -- reparti en plusieurs sous-groupes) -- ce scan devient peu fiable en
-        -- combat (visibilite des auras entre sous-groupes, valeurs secretes),
-        -- pouvant figer une alerte en boucle tout un combat alors que tout le
-        -- monde est deja buffe. Verrouillage absolu, ignore meme le reglage
-        -- "Afficher en combat" -- ces buffs ne s'appliquent de toute façon
-        -- plus une fois le combat lance.
+        -- Les buffs de raid "10/14" scannent tout le groupe/raid, peu fiable en combat
+        -- (visibilite des auras entre sous-groupes, valeurs secretes) -- verrouillage absolu,
+        -- ignore meme "Afficher en combat".
         if entry.showRaidCount then return false end
         if not (entry.showInCombat or (entry.whitelist and cfg.showBuffsInCombat)) then
             return false
@@ -482,9 +429,7 @@ local function EntryApplies(entry)
     return true
 end
 
-------------------------------------------------------------------------
 -- Affichage : icone + texte, deplacable, bouton securise cliquable
-------------------------------------------------------------------------
 local ICON_SIZE = 64
 local NO_MASK_TEXTURE = "Interface\\Buttons\\WHITE8x8" -- blanc opaque = pas de decoupe visible
 local frame, iconTex, textFS, borderTex, maskTex
@@ -495,19 +440,11 @@ local appearAnimGroup -- glissement + fondu joue au Show(), cf. BuildAppearAnimG
 local slugFS -- 8 FontStrings d'ombre "SLUG" en anneau derriere textFS, cf. BuildSlugShadow
 local currentAlertSpell
 
--- IMPORTANT : un AnimationGroup cree DIRECTEMENT sur une region (FontString)
--- n'anime QUE cette region precise -- ça ne se propage PAS a une autre
--- region simplement ancree dessus via SetPoint (contrairement a un FRAME,
--- ou la transformation descend sur tout ce qu'il contient : c'est pour ça
--- que icone+texte suivent bien ensemble pendant vanish/appear, animes sur
--- `frame`). Confirme en jeu : l'ombre SLUG ne suivait pas le rebond du texte
--- tant qu'elle etait juste ancree sur textFS. D'ou `textContainer` : un
--- frame qui porte textFS ET son anneau SLUG comme ses PROPRES regions --
--- les animations pulse/bounce/blink jouent sur CE frame, donc cascadent
--- automatiquement a tout ce qu'il contient. L'anneau lui-meme (creation,
--- style, texte) est gere par les helpers partages ns.CreateSlugRing /
--- ns.ApplyTextOutlineStyle / ns.SetSlugRingText (Core.lua) -- memes qui
--- servent maintenant a tous les autres textes personnalisables de l'addon.
+-- IMPORTANT : un AnimationGroup cree directement sur une region (FontString) n'anime que cette
+-- region -- ça ne se propage pas a une region juste ancree dessus via SetPoint (contrairement a
+-- un FRAME, ou la transformation descend sur tout son contenu). D'ou `textContainer` : un frame
+-- qui porte textFS ET son anneau SLUG comme ses propres regions, pour que pulse/bounce/blink
+-- cascadent aux deux. Anneau gere par les helpers partages ns.CreateSlugRing / ns.ApplyTextOutlineStyle / ns.SetSlugRingText (Core.lua).
 
 local function BuildClickInfo(entry, targetUnit)
     local clickId = entry.clickableId or entry.spellId
@@ -531,16 +468,10 @@ local function BuildCastLine(entry, targetUnit)
     return "/cast " .. info.spellName
 end
 
---- Construit les 3 groupes d'animation du texte (pulse/bounce/blink), une
---- seule fois. Un groupe SEPARE par style (plutot que 3 animations dans un
---- seul groupe, qui joueraient toutes en meme temps) : chacun ne contient
---- QUE les animations qui lui correspondent.
---- IMPORTANT : chaque style utilise 2 segments explicites (aller puis
---- retour, SetOrder 1/2) avec SetLooping("REPEAT"), PAS une seule animation
---- avec SetLooping("BOUNCE") -- ce dernier a un bug connu du moteur
---- (un "snap"/saut visible a chaque limite de boucle, confirme en jeu sur le
---- rebond). Le pattern aller-retour explicite est la technique standard pour
---- eviter ce souci.
+--- Construit les 3 groupes d'animation du texte (pulse/bounce/blink), une seule fois -- un groupe
+--- separe par style pour qu'ils ne jouent pas tous ensemble. Chaque style utilise 2 segments
+--- explicites (aller/retour, SetOrder 1/2) + SetLooping("REPEAT") plutot que SetLooping("BOUNCE"),
+--- qui a un bug moteur connu (snap visible a chaque limite de boucle).
 local function BuildTextAnimGroups()
     local pulseGroup = textContainer:CreateAnimationGroup()
     local pulseOut = pulseGroup:CreateAnimation("Scale")
@@ -586,25 +517,15 @@ local function BuildTextAnimGroups()
     textAnimGroups = { pulse = pulseGroup, bounce = bounceGroup, blink = blinkGroup }
 end
 
---- Demarre/arrete chaque groupe independamment selon son propre toggle --
---- combinables (ex: rebond + clignotement en meme temps), chaque style vit
---- sur son propre groupe d'animation depuis BuildTextAnimGroups.
---- Definie ICI (avant BuildVanishAnimGroup/BuildAppearAnimGroup) car ces
---- dernieres l'appellent depuis leur OnFinished -- une locale n'est visible
---- qu'apres sa propre definition en Lua.
---- Garde-fou centralise : jamais de (re)demarrage pendant qu'une anim
---- d'entree/sortie tourne (2 Translation simultanees parent+enfant se
---- perturbent, cf. BuildAppearAnimGroup) -- couvre TOUS les appelants, y
---- compris RefreshAppearance() qui tourne des le tout premier EnsureFrame(),
---- donc AVANT que l'anim d'apparition n'ait demarre (confirme en jeu : au
---- /reload avec un buff deja manquant, le texte derivait des le 1er affichage).
+--- Demarre/arrete chaque groupe independamment selon son propre toggle (combinables, ex. rebond
+--- + clignotement en meme temps). Definie ici (avant BuildVanishAnimGroup/BuildAppearAnimGroup)
+--- car ces dernieres l'appellent depuis leur OnFinished. Garde-fou centralise : jamais de
+--- (re)demarrage pendant qu'une anim d'entree/sortie tourne (2 Translation simultanees
+--- parent+enfant se perturbent) -- couvre aussi RefreshAppearance() au tout premier EnsureFrame().
 local function ApplyTextAnimations(cfg)
     if not textAnimGroups then return end
-    -- Si le frame n'est meme pas affiche (ex: tout premier RefreshAppearance()
-    -- depuis EnsureFrame(), appele AVANT que ShowAlert() ne joue le slide-in
-    -- d'entree) : rien a demarrer, ShowAlert/appearAnimGroup s'en chargera au
-    -- bon moment. Sans ce garde-fou, le bounce demarrait au tout premier
-    -- /reload avec un buff deja manquant, EN MEME TEMPS que l'anim d'entree.
+    -- Frame pas encore affiche (1er RefreshAppearance() avant que ShowAlert() ne joue le
+    -- slide-in) : rien a demarrer, ShowAlert/appearAnimGroup s'en chargera au bon moment.
     if not frame:IsShown() then return end
     if (vanishAnimGroup and vanishAnimGroup:IsPlaying()) or (appearAnimGroup and appearAnimGroup:IsPlaying()) then
         return
@@ -618,33 +539,23 @@ local function ApplyTextAnimations(cfg)
         if wanted[k] then
             if not g:IsPlaying() then g:Play() end
         else
-            -- Finish() (pas Stop()) : chaque boucle est authoree en 2 segments
-            -- qui s'annulent (net zero -- aller +6/+1.3x/alpha-bas, puis retour
-            -- exact). Stop() fige le rendu EN PLEIN MILIEU d'un segment (ex:
-            -- a mi-course du rebond vers le haut) et CE point devient la base
-            -- du prochain Play() -- d'ou une derive qui ne s'arretait jamais
-            -- (confirme en jeu : le texte "manquant" montait en continu).
-            -- Finish() saute directement a l'etat final defini (net zero).
+            -- Finish() (pas Stop()) : chaque boucle est authoree en 2 segments qui s'annulent
+            -- (net zero). Stop() fige le rendu en plein milieu d'un segment, qui devient la base
+            -- du prochain Play() -- d'ou une derive qui ne s'arretait jamais. Finish() saute
+            -- directement a l'etat final (net zero).
             g:Finish()
         end
     end
 end
 
---- Reancre `frame` sur son point reel (celui pose par SetPoint, jamais
---- modifie par les Translation) -- une Translation ne laisse PAS le rendu
---- revenir tout seul au point d'ancrage une fois l'anim terminee, elle garde
---- le dernier delta applique comme nouvelle base pour la PROCHAINE anim.
---- Sans ce recalage, vanish+appear enchaines a chaque cycle accumulaient le
---- delta d'un cycle sur l'autre (confirme en jeu : le texte "manquant"
---- montait de plus en plus a chaque disparition/reapparition).
+--- Reancre `frame` sur son point reel (pose par SetPoint) -- une Translation ne revient pas
+--- toute seule au point d'ancrage a la fin, elle garde le dernier delta comme base pour la
+--- prochaine anim. Sans ce recalage, vanish+appear enchaines accumulaient le delta d'un cycle
+--- sur l'autre (le texte "manquant" montait de plus en plus a chaque cycle).
 local function ResetFramePosition()
-    -- ClearAllPoints/SetPoint sur `frame` (SecureActionButtonTemplate) est une
-    -- action PROTEGEE en combat -- l'appeler declenchait ADDON_ACTION_BLOCKED
-    -- a chaque HideAlert() en plein combat, plantant la fonction en cours de
-    -- route (confirme en jeu : l'alerte restait bloquee/rejouait en boucle
-    -- tout le combat). Sans danger de sauter ce recalage purement cosmetique
-    -- en combat : la position ne derive de toute façon que si une anim est
-    -- interrompue en plein vol, un cas rarissime.
+    -- ClearAllPoints/SetPoint sur `frame` (SecureActionButtonTemplate) est protege en combat --
+    -- declenchait ADDON_ACTION_BLOCKED a chaque HideAlert() en combat. Sans danger de sauter ce
+    -- recalage cosmetique en combat : la position ne derive que si une anim est interrompue en plein vol.
     if InCombatLockdown() then return end
     local point, relTo, relPoint, x, y = frame:GetPoint(1)
     if point then
@@ -653,14 +564,10 @@ local function ResetFramePosition()
     end
 end
 
---- Anime la disparition de l'icone+texte (glissement vers le bas + fondu)
---- quand l'alerte se resout (buff applique/conditions changees), au lieu
---- d'un Hide() sec -- joue sur `frame` entier (icone+texte suivent ensemble,
---- puisque textFS est ancre sur iconTex qui est enfant de frame). Meme
---- pattern 2-segments que les animations de texte : ici un seul segment
---- suffit puisqu'on ne boucle pas (SetLooping par defaut = "NONE"), le
---- OnFinished fait le vrai Hide() + reinitialise l'alpha pour le prochain
---- affichage.
+--- Anime la disparition de l'icone+texte (glissement vers le bas + fondu) quand l'alerte se
+--- resout, au lieu d'un Hide() sec -- joue sur `frame` entier (icone+texte suivent ensemble,
+--- textFS etant ancre sur iconTex, enfant de frame). Un seul segment suffit (pas de loop),
+--- OnFinished fait le vrai Hide() + reinitialise l'alpha pour le prochain affichage.
 local function BuildVanishAnimGroup()
     local group = frame:CreateAnimationGroup()
     local slide = group:CreateAnimation("Translation")
@@ -674,14 +581,9 @@ local function BuildVanishAnimGroup()
     fade:SetSmoothing("IN")
     group:SetScript("OnPlay", ResetFramePosition)
     group:SetScript("OnFinished", function()
-        -- frame:Hide() sur ce frame securise (SecureActionButtonTemplate) est
-        -- une action PROTEGEE en combat -- confirme en jeu (ADDON_ACTION_BLOCKED
-        -- a chaque fin de vanish tombant pendant un combat, ex. buff qui
-        -- revient juste apres HideAlert()). On saute Hide()/SetAlpha/reposition
-        -- si on est encore en combat : le frame reste affiche mais invisible
-        -- (alpha deja a 0 par le fade qui vient de jouer, donc sans impact
-        -- visuel) -- le nettoyage differe se fait au PLAYER_REGEN_ENABLED
-        -- suivant (cf. eventFrame:OnEvent plus bas).
+        -- frame:Hide() sur ce frame securise (SecureActionButtonTemplate) est protege en combat
+        -- (ADDON_ACTION_BLOCKED). On saute Hide()/SetAlpha/reposition en combat : le frame reste
+        -- affiche mais invisible (alpha deja a 0) -- le nettoyage differe au PLAYER_REGEN_ENABLED suivant.
         if InCombatLockdown() then return end
         frame:Hide()
         frame:SetAlpha(1)
@@ -690,14 +592,10 @@ local function BuildVanishAnimGroup()
     return group
 end
 
---- Anime l'apparition de l'icone+texte (glissement depuis le bas + fondu),
---- symetrique de BuildVanishAnimGroup. Un Translation ne peut animer QUE
---- depuis le delta courant (0) vers le delta vise -- donc pour un slide-in
---- "depuis en dessous vers le point de repos", le 1er segment (duree quasi
---- nulle) decale d'abord le rendu de -24 (invisible, instantane), puis le
---- 2e segment (visible, 0.3s) ramene ce delta a 0 -- le vrai point d'ancrage
---- du frame n'est jamais touche, seul le rendu est deplace le temps de
---- l'anim (meme logique non destructive que le vanish).
+--- Anime l'apparition (glissement depuis le bas + fondu), symetrique de BuildVanishAnimGroup. Un
+--- Translation ne peut animer que depuis le delta courant (0) vers le delta vise -- donc le 1er
+--- segment (duree quasi nulle) decale d'abord le rendu de -24 (invisible), puis le 2e (0.3s)
+--- ramene ce delta a 0 : le point d'ancrage reel n'est jamais touche.
 local function BuildAppearAnimGroup()
     local group = frame:CreateAnimationGroup()
     local preShift = group:CreateAnimation("Translation")
@@ -718,10 +616,8 @@ local function BuildAppearAnimGroup()
     group:SetScript("OnPlay", ResetFramePosition)
     group:SetScript("OnFinished", function()
         ResetFramePosition()
-        -- Ne relance le rebond/pulse/clignotement du texte qu'UNE FOIS le
-        -- slide-in fini, jamais en meme temps que lui (cf. commentaire dans
-        -- ShowAlert) -- sinon 2 Translation simultanees (parent+enfant) se
-        -- perturbent et le texte derive en continu.
+        -- Ne relance le rebond/pulse/clignotement qu'une fois le slide-in fini, jamais en meme
+        -- temps -- sinon 2 Translation simultanees (parent+enfant) se perturbent et le texte derive.
         ApplyTextAnimations(Cfg())
     end)
     return group
@@ -775,11 +671,9 @@ end
 
 local function EnsureFrame()
     if frame then return frame end
-    -- Le frame EST le bouton securise (SecureActionButtonTemplate) : drag et clic
-    -- doivent vivre sur le MEME frame, jamais sur deux frames superposes (l'ancien
-    -- design avec un frame de drag EnableMouse(true) par-dessus un bouton enfant
-    -- se battait pour le hit-test au clic -- cf. PriorityBar.lua:CreateSlotFrame,
-    -- seul pattern drag+clic confirme fonctionnel dans cet addon).
+    -- Le frame EST le bouton securise (SecureActionButtonTemplate) : drag et clic doivent vivre
+    -- sur le MEME frame (un frame de drag separe par-dessus se bat pour le hit-test au clic --
+    -- cf. PriorityBar.lua:CreateSlotFrame, seul pattern drag+clic confirme fonctionnel ici).
     frame = CreateFrame("Button", "AishCoreMissingBuffFrame", UIParent, "SecureActionButtonTemplate")
     frame:SetSize(ICON_SIZE, ICON_SIZE + 20)
     frame:SetFrameStrata("HIGH")
@@ -816,12 +710,10 @@ local function EnsureFrame()
     borderTex:SetPoint("BOTTOMRIGHT", iconTex, 2, -2)
     borderTex:SetColorTexture(1, 0.15, 0.15, 0.9)
 
-    -- Conteneur du texte : porte textFS + les 8 slugFS comme SES PROPRES
-    -- regions (pas celles de `frame` directement) -- necessaire pour que les
-    -- animations pulse/bounce/blink (jouees sur CE frame, cf. BuildTextAnimGroups)
-    -- cascadent a toutes ces regions. Position (offsets utilisateur) geree
-    -- via ce frame dans RefreshAppearance ; textFS/slugFS gardent des ancrages
-    -- FIXES en son centre, jamais retouches ensuite.
+    -- Conteneur du texte : porte textFS + les 8 slugFS comme ses propres regions (pas celles de
+    -- `frame` directement), pour que pulse/bounce/blink (BuildTextAnimGroups) cascadent a tout.
+    -- Position (offsets utilisateur) geree via ce frame dans RefreshAppearance ; textFS/slugFS
+    -- gardent des ancrages fixes en son centre.
     textContainer = CreateFrame("Frame", nil, frame)
     textContainer:SetPoint("TOP", iconTex, "BOTTOM", 0, -2)
     textContainer:SetSize(1, 1)
@@ -844,14 +736,125 @@ local function EnsureFrame()
     return frame
 end
 
--- Notifie immediatement Modules/SpellEffects.lua (combos "Buffs manquants",
--- ancres sur AishCoreMissingBuffFrame) du changement d'etat de l'icone --
--- sans ça, l'animation attendait jusqu'a 2s (ticker de secours cote
--- SpellEffects) avant de demarrer/s'arreter, meme quand l'icone changeait
--- instantanement. pcall : SpellEffects peut etre absent/pas encore charge.
+-- Positionne le frame une seule fois (cf. frame._positioned) -- extrait de ShowAlert pour etre
+-- reutilisable par SyncBurningRush, qui ne passe jamais par ShowAlert mais a quand meme besoin
+-- d'un frame ancre a une position valide (sinon son combo retombe sur UIParent 0,0).
+-- ClearAllPoints/SetPoint est protege en combat : si le tout premier appel tombe en combat
+-- (reload/login pendant un pull), on saute sans marquer _positioned, on retente au prochain appel.
+local function PositionFrameIfNeeded()
+    if not frame or frame._positioned or InCombatLockdown() then return end
+    local cfg = Cfg()
+    local p = cfg.framePoint
+    if p then
+        frame:ClearAllPoints()
+        frame:SetPoint(p[1] or "CENTER", UIParent, p[2] or p[1] or "CENTER", p[3] or 0, p[4] or 250)
+    else
+        frame:SetPoint("CENTER", UIParent, "CENTER", 0, 250)
+    end
+    frame._positioned = true
+end
+
+-- Notifie immediatement Modules/SpellEffects.lua (combos "Buffs manquants") du changement d'etat
+-- de l'icone -- sans ça, l'animation attendait jusqu'a 2s (ticker de secours). pcall : SpellEffects
+-- peut etre absent/pas encore charge.
 local function NotifySpellEffects()
     local SE = _addon.Modules and _addon.Modules.SpellEffects
     if SE and SE.ScanMissingBuffCombos then pcall(SE.ScanMissingBuffCombos) end
+end
+
+-- "Ruee Ardente" (Demoniste) : cas "buff manquant" INVERSE -- contrairement a ns.MISSING_CLASS_BUFFS
+-- (alerte tant qu'absent), celui-ci alerte tant que le buff EST present (facile d'oublier de le
+-- retirer). Jamais d'icone/texte, seul le combo configure se declenche, et volontairement jamais
+-- gate par InCombatLockdown/cible/zone de repos -- demande utilisateur explicite, d'ou un event frame dedie.
+-- Presence : meme chaine que les combos "Auras a tracker" (IsAuraActiveViaCDM pris tel quel). Repli
+-- GetSelfAura uniquement pour "no-cdm-entry" : peut seulement AJOUTER une presence, jamais la maintenir.
+function MissingBuffs.IsBurningRushActive()
+    local cfg = Cfg()
+    if not cfg.enabled or not cfg.burningRushAlert then return false end
+    local class = _addon._playerClass or select(2, UnitClass("player"))
+    if class ~= "WARLOCK" then return false end
+
+    local SE = _addon.Modules and _addon.Modules.SpellEffects
+    if SE and SE.IsAuraActiveViaCDM then
+        local dbg = {}
+        local ok, active = pcall(SE.IsAuraActiveViaCDM, "player", ns.MISSING_WARLOCK_BURNING_RUSH, dbg)
+        if ok and dbg.tier and dbg.tier ~= "no-cdm-entry" then
+            return active and true or false
+        end
+    end
+
+    -- Le CDM ne connait pas encore ce sort (jamais lie a une icone cette
+    -- session) : lecture directe, fiable hors combat, nil en combat -- et un
+    -- nil vaut ici "absent", pas "on garde l'ancienne valeur".
+    local aura = GetSelfAura(ns.MISSING_WARLOCK_BURNING_RUSH)
+    return aura ~= nil
+end
+
+local burningRushWasActive = false
+--- Recalcule l'etat et notifie SpellEffects uniquement sur transition (evite un rescan combo a
+--- chaque UNIT_AURA sans rapport). Expose pour que le toggle du panneau de reglages force une
+--- resync immediate au lieu d'attendre le prochain UNIT_AURA.
+function MissingBuffs.SyncBurningRush()
+    local active = MissingBuffs.IsBurningRushActive()
+    if active ~= burningRushWasActive then
+        burningRushWasActive = active
+        -- Le combo s'ancre sur AishCoreMissingBuffFrame, qui n'existe/n'est positionne qu'apres
+        -- un premier ShowAlert() classique -- or ce sort ne passe jamais par ShowAlert. Sans
+        -- forcer sa creation+position ici, StartMissingBuffSustained retomberait sur UIParent
+        -- (mauvaise position/echelle) faute de frame pret. Le frame reste cache dans les deux cas.
+        if active then EnsureFrame(); PositionFrameIfNeeded() end
+        NotifySpellEffects()
+    end
+end
+
+-- UNIT_AURA (self) + PLAYER_ENTERING_WORLD : redeclenche SyncBurningRush a chaque changement
+-- d'aura sur soi, en plus du ticker de secours 2s cote SpellEffects.lua. UNIT_SPELLCAST_SUCCEEDED :
+-- resync supplementaire au moment ou le buff est applique (l'UNIT_AURA peut arriver avant que le
+-- CDM ait lie l'icone). PLAYER_REGEN_ENABLED/DISABLED : la source autoritaire change a chaque
+-- bascule de combat (canal CDM en combat, lecture directe hors combat), donc resync immediate.
+do
+    local burningRushFrame = CreateFrame("Frame")
+    burningRushFrame:RegisterEvent("UNIT_AURA")
+    burningRushFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    burningRushFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    burningRushFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    pcall(burningRushFrame.RegisterUnitEvent, burningRushFrame, "UNIT_SPELLCAST_SUCCEEDED", "player")
+    -- Re-sync DIFFERE apres chaque event : rien ne garantit que le CDM ait deja propage le
+    -- changement (SetAuraInstanceInfo) au moment ou UNIT_AURA nous parvient. Un seul timer en
+    -- vol a la fois (brPending) : UNIT_AURA peut arriver en rafale.
+    --
+    -- Preparation de l'ancre, hors combat et sans attendre le buff : le combo s'ancre sur un
+    -- SecureActionButtonTemplate dont le positionnement est protege, impossible en combat. Sans
+    -- preparation prealable, un /reload suivi d'un combat laisse ce frame sans SetPoint. Prepare
+    -- a chaque occasion hors combat, independamment de la presence du buff ; le frame reste cache.
+    local function PrepareAnchorIfPossible()
+        if InCombatLockdown() then return end
+        local cfg = Cfg()
+        if not cfg.enabled or not cfg.burningRushAlert then return end
+        local class = _addon._playerClass or select(2, UnitClass("player"))
+        if class ~= "WARLOCK" then return end
+        EnsureFrame()
+        PositionFrameIfNeeded()
+    end
+    -- Expose pour le panneau de reglages : cocher l'option puis entrer en combat avant le
+    -- prochain PLAYER_ENTERING_WORLD/REGEN_ENABLED laisserait sinon l'ancre non preparee.
+    MissingBuffs.PrepareBurningRushAnchor = PrepareAnchorIfPossible
+
+    local brPending = false
+    burningRushFrame:SetScript("OnEvent", function(_, event, unit)
+        if event == "UNIT_AURA" and unit ~= "player" then return end
+        if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_REGEN_ENABLED" then
+            PrepareAnchorIfPossible()
+        end
+        MissingBuffs.SyncBurningRush()
+        if not brPending then
+            brPending = true
+            C_Timer.After(0.5, function()
+                brPending = false
+                MissingBuffs.SyncBurningRush()
+            end)
+        end
+    end)
 end
 
 function MissingBuffs.HideAlert()
@@ -860,18 +863,11 @@ function MissingBuffs.HideAlert()
     if not frame:IsShown() then NotifySpellEffects(); return end
 
     if InCombatLockdown() then
-        -- Coupure NETTE, sans animation, des qu'on sait qu'on est en combat --
-        -- pas de vanishAnimGroup:Play() ici. Si ShowAlert() vient de tourner
-        -- juste avant que le combat ne demarre (appearAnimGroup encore en
-        -- cours, slide-in/fade-in de 0.3s), lancer vanishAnimGroup EN PLUS
-        -- fait tourner 2 AnimationGroups en meme temps sur le MEME frame
-        -- (l'un pousse l'alpha vers 1, l'autre vers 0) -- et comme le vrai
-        -- Hide() final est de toute facon differe en combat (action protegee
-        -- sur ce SecureActionButtonTemplate), rien ne vient jamais trancher :
-        -- le frame reste coince visible tout le combat (confirme en jeu,
-        -- alerte "manquant"/"X/Y" figee des l'entree en combat quand un buff
-        -- manquait juste avant le pull). Stop les deux anims et force alpha=0
-        -- directement, sans course possible.
+        -- Coupure nette, sans animation. Si ShowAlert() vient de tourner juste avant le combat
+        -- (appearAnimGroup encore en cours), lancer vanishAnimGroup EN PLUS ferait tourner 2
+        -- AnimationGroups sur le meme frame (l'un pousse alpha vers 1, l'autre vers 0), et comme
+        -- le vrai Hide() est differe en combat, rien ne tranche : le frame reste coince visible
+        -- tout le combat. Stop les deux anims et force alpha=0 directement.
         if appearAnimGroup and appearAnimGroup:IsPlaying() then appearAnimGroup:Stop() end
         if vanishAnimGroup and vanishAnimGroup:IsPlaying() then vanishAnimGroup:Stop() end
         if textAnimGroups then
@@ -882,17 +878,12 @@ function MissingBuffs.HideAlert()
         return
     end
 
-    -- frame:GetAlpha() > 0.01 : si un HideAlert() precedent (pendant un combat
-    -- desormais termine) a deja coupe l'alpha a 0 ci-dessus sans passer par
-    -- vanishAnimGroup, on ne veut pas rejouer l'anim de disparition depuis
-    -- SetFromAlpha(1) -- ca provoquerait un flash 0->1->0 inutile.
+    -- GetAlpha() > 0.01 : si un HideAlert() precedent (combat desormais termine) a deja coupe
+    -- l'alpha a 0 sans passer par vanishAnimGroup, on evite de rejouer l'anim depuis
+    -- SetFromAlpha(1), ce qui provoquerait un flash 0->1->0.
     if vanishAnimGroup and not vanishAnimGroup:IsPlaying() and frame:GetAlpha() > 0.01 then
-        -- Stoppe les boucles pulse/bounce/blink du texte AVANT de jouer la
-        -- disparition : sinon leur propre Translation/Alpha en cours se
-        -- combine avec celle du vanish (et se fait couper en plein cycle par
-        -- le Hide() final), ce qui produisait un saut/saccade visible au
-        -- 2e passage (confirme en jeu : le texte partait vers le haut au lieu
-        -- de suivre le glissement vers le bas).
+        -- Stoppe les boucles pulse/bounce/blink AVANT la disparition : sinon leur propre
+        -- Translation/Alpha en cours se combine avec le vanish et produit un saut visible.
         if textAnimGroups then
             for _, g in pairs(textAnimGroups) do g:Finish() end
         end
@@ -901,19 +892,13 @@ function MissingBuffs.HideAlert()
     NotifySpellEffects()
 end
 
--- Debug : n'imprime qu'UNE fois par combat si ShowAlert() est quand meme
--- appele en combat malgre les gardefous en amont (CheckForMissings,
--- RequestCheck, SetPreview) -- ne devrait normalement jamais se produire ;
--- si ca s'affiche, c'est la preuve d'un appelant non repertorie a traquer.
+-- Debug : n'imprime qu'une fois par combat si ShowAlert() est quand meme appele en combat malgre
+-- les gardefous en amont (CheckForMissings, RequestCheck, SetPreview) -- ne devrait jamais arriver.
 local warnedShowAlertInCombat = false
 
 function MissingBuffs.ShowAlert(spellId, text, clickInfo)
-    -- Dernier rempart : quel que soit le chemin d'appel, aucun affichage
-    -- reel en combat. Les gardefous en amont devraient deja avoir coupe
-    -- court avant d'arriver ici -- celui-ci ferme la porte a tout appelant
-    -- non repertorie qui court-circuiterait CheckForMissings/RequestCheck/
-    -- SetPreview (confirme en jeu : "manquant" fige en plein combat malgre
-    -- ces gardefous, cause exacte non identifiee).
+    -- Dernier rempart : aucun affichage reel en combat, quel que soit le chemin d'appel -- ferme
+    -- la porte a tout appelant non repertorie qui court-circuiterait les gardefous en amont.
     if InCombatLockdown() then
         if not warnedShowAlertInCombat then
             warnedShowAlertInCombat = true
@@ -926,9 +911,8 @@ function MissingBuffs.ShowAlert(spellId, text, clickInfo)
     end
     local cfg = Cfg()
     EnsureFrame()
-    -- Ne joue le slide-in que pour une VRAIE reapparition (frame cache) --
-    -- pas a chaque simple rafraichissement d'icone/texte pendant qu'elle est
-    -- deja affichee (ce qui rejouerait le glissement en boucle inutilement).
+    -- Ne joue le slide-in que pour une VRAIE reapparition (frame cache), pas a chaque simple
+    -- rafraichissement pendant qu'elle est deja affichee.
     local wasHidden = not frame:IsShown()
     local resumedFromVanish = false
     if vanishAnimGroup and vanishAnimGroup:IsPlaying() then
@@ -936,40 +920,15 @@ function MissingBuffs.ShowAlert(spellId, text, clickInfo)
         frame:SetAlpha(1)
         resumedFromVanish = true
     end
-    -- Uniquement sur une vraie transition (frame cachee, ou vanish annule en
-    -- cours de route) -- ShowAlert() est appelee tres frequemment tant que le
-    -- buff reste manquant (chaque scan), et rappeler ApplyTextAnimations a
-    -- CHAQUE appel forcait un Finish() repete sur les styles desactives
-    -- (pulse/blink) sur la MEME region (textFS) que le bounce actif, ce qui
-    -- perturbait son etat en cours.
-    -- Si le vanish a ete annule en cours de route (le buff est revenu manquant
-    -- avant la fin de l'anim de sortie) : aucune anim d'entree ne va jouer
-    -- (le frame etait deja affiche), donc on relance tout de suite.
-    -- Si en revanche c'est une VRAIE reapparition (frame cache -> le slide-in
-    -- va jouer), on NE relance PAS ici : le bounce tournerait EN MEME TEMPS
-    -- que le glissement d'entree (2 Translation simultanees, parent+enfant)
-    -- et se derangeaient mutuellement -- confirme en jeu (retire le bounce
-    -- pendant l'anim d'entree/sortie = plus de derive). Cf. appearAnimGroup
-    -- OnFinished (BuildAppearAnimGroup) qui relance le texte une fois le
-    -- slide-in termine.
+    -- Relance ApplyTextAnimations uniquement sur une vraie transition (ShowAlert tourne a chaque
+    -- scan, rappeler ici a chaque fois perturberait l'etat du bounce en cours). Si le vanish a
+    -- ete annule en route, le frame etait deja affiche donc on relance tout de suite ; si c'est
+    -- une vraie reapparition (slide-in a venir), on NE relance PAS ici -- le bounce se
+    -- derangerait avec le glissement d'entree (cf. appearAnimGroup OnFinished, qui relance apres le slide-in).
     if resumedFromVanish then
         ApplyTextAnimations(cfg)
     end
-    -- ClearAllPoints/SetPoint sur ce frame securise = action protegee en
-    -- combat -- si le tout premier ShowAlert() de la session tombe pile en
-    -- combat (reload/login pendant un pull), on saute le positionnement
-    -- sans marquer _positioned : retente au prochain appel hors combat au
-    -- lieu de planter.
-    if not frame._positioned and not InCombatLockdown() then
-        local p = cfg.framePoint
-        if p then
-            frame:ClearAllPoints()
-            frame:SetPoint(p[1] or "CENTER", UIParent, p[2] or p[1] or "CENTER", p[3] or 0, p[4] or 250)
-        else
-            frame:SetPoint("CENTER", UIParent, "CENTER", 0, 250)
-        end
-        frame._positioned = true
-    end
+    PositionFrameIfNeeded()
 
     local tex
     if C_Spell and C_Spell.GetSpellTexture then
@@ -985,17 +944,13 @@ function MissingBuffs.ShowAlert(spellId, text, clickInfo)
     end
 
     -- Attributs securises (type/spell/macrotext) : modifiables seulement hors combat
-    -- (SetAttribute sur un SecureActionButtonTemplate est bloque en combat). Si on
-    -- est en combat, on laisse simplement les attributs deja poses -- exactement
-    -- comme une barre d'action classique, le clic reste actif sur le dernier sort connu.
+    -- (SetAttribute bloque en combat sur un SecureActionButtonTemplate) -- en combat on laisse
+    -- les attributs deja poses, le clic reste actif sur le dernier sort connu.
     if not InCombatLockdown() then
         if cfg.makeIconClickable and clickInfo and clickInfo.castMacro then
-            -- Macro combinee (plusieurs lignes /cast, une par buff de classe
-            -- actuellement manquant) : la plupart de ces sorts (enchants d'arme,
-            -- Bouclier de foudre, Skyfury...) ne partagent pas le GCD entre eux,
-            -- donc un seul clic les applique tous a la suite. Celles qui
-            -- partagent le GCD attendront simplement le prochain clic, sans
-            -- erreur ni effet de bord.
+            -- Macro combinee (une ligne /cast par buff de classe actuellement manquant) : la
+            -- plupart de ces sorts ne partagent pas le GCD, un seul clic les applique tous a la
+            -- suite ; ceux qui le partagent attendront simplement le prochain clic.
             pcall(function()
                 frame:SetAttribute("type", "macro")
                 frame:SetAttribute("macrotext", clickInfo.castMacro)
@@ -1030,28 +985,18 @@ function MissingBuffs.GetCurrentAlertSpell()
     return currentAlertSpell
 end
 
-------------------------------------------------------------------------
--- Preview (menu de reglages) : force l'affichage d'un spell representatif
--- de la classe, en ignorant les vraies conditions -- meme principe que
--- CastBar.SetPreview. previewMode bloque CheckForMissings() tant qu'actif
--- pour que les vrais events (UNIT_AURA...) n'ecrasent pas l'aperçu.
-------------------------------------------------------------------------
+-- Preview (menu de reglages) : force l'affichage d'un spell representatif de la classe, en
+-- ignorant les vraies conditions -- meme principe que CastBar.SetPreview. previewMode bloque
+-- CheckForMissings() tant qu'actif pour que les vrais events n'ecrasent pas l'apercu.
 local previewMode = false
 
---- `spellId` (optionnel) : force l'apercu sur CE sort precis plutot que le
---- premier de la classe -- utilise par le picker "Animations 3D > Buffs
---- manquants" (UI/SettingsPanel.lua) pour que l'icone+texte affiches
---- correspondent REELLEMENT au sort selectionne pour configurer son combo
---- (avant ce fix, l'apercu montrait toujours le meme sort peu importe la
---- selection, rendant le reglage des animations pour les autres sorts
---- impossible : ScanMissingBuffCombos ne demarre un combo QUE si
+--- `spellId` (optionnel) : force l'apercu sur CE sort precis plutot que le premier de la classe --
+--- utilise par le picker "Animations 3D > Buffs manquants" pour que l'icone+texte affiches
+--- correspondent au sort selectionne (ScanMissingBuffCombos ne demarre un combo que si
 --- GetCurrentAlertSpell() correspond exactement au spellID configure).
 function MissingBuffs.SetPreview(on, spellId)
-    -- Jamais d'apercu force en combat : ShowAlert() ci-dessous ignorerait
-    -- sinon le gardefou combat de CheckForMissings (previewMode=true bloque
-    -- toute reevaluation), figeant potentiellement l'alerte pour le reste
-    -- du combat si le panneau de reglages a ete quitte sans desactiver
-    -- l'apercu.
+    -- Jamais d'apercu force en combat : sinon previewMode=true bloque toute reevaluation dans
+    -- CheckForMissings, figeant potentiellement l'alerte pour le reste du combat.
     if on and InCombatLockdown() then return end
     previewMode = on and true or false
     if on then
@@ -1071,46 +1016,39 @@ function MissingBuffs.SetPreview(on, spellId)
     end
 end
 
-------------------------------------------------------------------------
--- Orchestration principale : ordre de priorite fixe
--- (stance/aura/attunement de soi -> poisons -> familier -> buff de classe)
-------------------------------------------------------------------------
+-- Orchestration principale : ordre de priorite fixe (stance/aura/attunement de soi -> poisons ->
+-- familier -> buff de classe)
 function MissingBuffs.CheckForMissings()
-    -- Gardefou dur : rien n'est evalue ni affiche en combat, point final --
-    -- PASSE AVANT MEME previewMode. Un apercu (Animations 3D, Settings
-    -- Panel) laisse a tort actif (previewMode coince a true, cf. le
-    -- "/aishbuffdebug reset" plus bas prevu pour ce cas precis) bloquait
-    -- TOUTE reevaluation, y compris ce garde-fou combat lui-meme s'il
-    -- passait apres -- l'alerte figee restait alors affichee indefiniment,
-    -- combat ou pas, avec un texte/sort qui n'a plus rien a voir avec l'etat
-    -- reel (confirme en jeu : "manquant" sur un buff pourtant deja pose).
-    -- On force donc aussi la sortie du mode apercu ici : le combat gagne
-    -- toujours, quoi qu'il arrive.
+    -- Gardefou dur : rien n'est evalue ni affiche en combat, passe avant meme previewMode -- un
+    -- apercu laisse a tort actif (previewMode coince a true) bloquerait toute reevaluation, y
+    -- compris ce garde-fou s'il passait apres, figeant l'alerte indefiniment. On force donc aussi
+    -- la sortie du mode apercu ici.
     if InCombatLockdown() then
         if previewMode then previewMode = false end
         MissingBuffs.HideAlert()
         return
     end
     if previewMode then return end
-    -- Les flags fins showInCombat/showBuffsInCombat plus bas dans cette
-    -- fonction ne concernent que la boucle whitelist -- ils ne protegent pas
-    -- tout le reste (stance/aura, poisons, familier, buff de classe...) qui
-    -- peut continuer a tourner et parfois deconner en combat (lecture
-    -- d'aura allie secrete, taint, etc.) pour un affichage qui de toute
-    -- facon ne sert a rien en plein combat -- deja coupe court ci-dessus.
+    -- Cle Mythique+ active : payloads d'aura secrets (anti-triche), meme la lecture sur soi peut
+    -- rater un buff pourtant actif. Plutot que fiabiliser la lecture secrete (fragile), on coupe
+    -- simplement le module pendant la cle -- on est cense arriver deja buffe avant le compte a rebours.
+    if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive() then
+        MissingBuffs.HideAlert(); return
+    end
+    -- Les flags showInCombat/showBuffsInCombat plus bas ne concernent que la boucle whitelist --
+    -- deja coupe court ci-dessus pour tout le reste, qui ne sert de toute facon a rien en combat.
     local cfg = Cfg()
     if not cfg.enabled then MissingBuffs.HideAlert(); return end
     if UnitIsDeadOrGhost("player") then MissingBuffs.HideAlert(); return end
-    if cfg.ignoreBuffsWhileMounted and IsMounted and IsMounted() then MissingBuffs.HideAlert(); return end
+    -- Forme de voyage Druide (783) : IsMounted() renvoie false dessus alors qu'elle sert au meme
+    -- usage (deplacement rapide) -- traitee comme une monture pour ce toggle.
+    if cfg.ignoreBuffsWhileMounted and ((IsMounted and IsMounted()) or GetSelfAura(783)) then
+        MissingBuffs.HideAlert(); return
+    end
     if cfg.ignoreWhileResting and IsResting and IsResting() then
-        -- Exception : une cible attaquable selectionnee en zone
-        -- de repos (mannequin d'entrainement, ennemi egare en ville...) reste
-        -- un signal utile de "je vais bientot me battre" -- ne pas cacher le
-        -- rappel dans ce cas precis. Verifie EXPLICITEMENT hors combat (pas
-        -- suppose implicite par IsResting) : si jamais les deux flags se
-        -- chevauchent brievement (transition), on prefere le comportement
-        -- normal "manquant" plutot qu'un affichage en plein combat en zone
-        -- de repos, cas non prevu par le reste du module.
+        -- Exception : une cible attaquable selectionnee en zone de repos reste un signal utile
+        -- de "je vais bientot me battre". Verifie explicitement hors combat, pas suppose
+        -- implicite par IsResting.
         local targetingAttackable = (not InCombatLockdown())
             and UnitExists("target")
             and not UnitIsDeadOrGhost("target")
@@ -1139,7 +1077,7 @@ function MissingBuffs.CheckForMissings()
         if missing then
             MissingBuffs.ShowAlert(opt.spellId, ns.MISSING_TEXT.USE_ATTUNEMENT, BuildClickInfo(opt, "player")); return
         end
-    elseif class == "DRUID" and _addon._specID == ns.MISSING_BALANCE_DRUID_SPEC then
+    elseif class == "DRUID" and _addon._specID == ns.MISSING_BALANCE_DRUID_SPEC and not cfg.ignoreDruidForms then
         local e = ns.MISSING_BALANCE_MOONKIN
         if IsEntryLearned(e) and not GetSelfAura(e.spellId) then
             MissingBuffs.ShowAlert(e.spellId, ns.MISSING_TEXT.USE_STANCE, BuildClickInfo(e, "player")); return
@@ -1173,25 +1111,17 @@ function MissingBuffs.CheckForMissings()
     end
 
     -- 4) Buff de classe manquant (soi puis allies -- cf. limite en tete de fichier)
-    -- On affiche le PREMIER trouve (icone/texte, priorite inchangee) mais on
-    -- CHAINE tous les autres actuellement manquants dans la meme macro : la
-    -- plupart de ces sorts (enchants d'arme, Bouclier de foudre, Skyfury...)
-    -- ne partagent pas le GCD entre eux, donc un seul clic les applique tous
-    -- a la suite (meme reflexe que le rebuff manuel classique). Ceux qui
-    -- partagent le GCD attendront simplement le clic suivant -- une ligne
-    -- /cast qui n'aboutit pas ne casse rien.
+    -- On affiche le PREMIER trouve (icone/texte, priorite inchangee) mais on CHAINE tous les
+    -- autres actuellement manquants dans la meme macro : la plupart de ces sorts ne partagent
+    -- pas le GCD, un seul clic les applique tous a la suite ; ceux qui le partagent attendront le clic suivant.
     local list = ns.MISSING_CLASS_BUFFS[class]
     if list then
         local primaryEntry, primaryText
         local castLines = {}
-        -- Rappel "bientot expire" : priorite STRICTEMENT plus
-        -- basse qu'un vrai manquant -- un buff totalement absent reste plus
-        -- urgent qu'un buff encore actif mais bientot fini. On retient le
-        -- PREMIER candidat expirant trouve pendant la meme boucle, utilise
-        -- seulement si aucun primaryEntry (manquant) n'a ete trouve.
+        -- Rappel "bientot expire" : priorite strictement plus basse qu'un vrai manquant. On
+        -- retient le premier candidat expirant trouve, utilise seulement si aucun primaryEntry.
         local expiringEntry
-        -- cfg.expiringSoonThreshold est en MINUTES (reglage GUI) -- converti
-        -- en secondes ici, seule unite comprise par GetSelfBuffExpiringSoon.
+        -- cfg.expiringSoonThreshold est en minutes (reglage GUI), converti ici en secondes.
         local expiringThreshold = cfg.expiringSoonEnabled and cfg.expiringSoonThreshold and (cfg.expiringSoonThreshold * 60)
         for _, entry in ipairs(list) do
             if IsEntryLearned(entry) and EntryApplies(entry) then
@@ -1205,10 +1135,8 @@ function MissingBuffs.CheckForMissings()
                     if not primaryEntry then
                         primaryEntry = entry
                         if entry.showRaidCount and (IsInRaid() or IsInGroup()) then
-                            -- Affichage "10/14" (a la Clickable Raid Buff) : combien
-                            -- de monde a deja le buff, sur le total applicable a
-                            -- portee -- plus parlant qu'un simple "Manquant" pour
-                            -- un vrai buff de raid un-par-personne.
+                            -- Affichage "10/14" : combien de monde a deja le buff sur le total
+                            -- applicable a portee -- plus parlant qu'un simple "Manquant".
                             local have, total = CountBuffCoverage(entry)
                             primaryText = string.format("%d/%d", have, total)
                         else
@@ -1239,22 +1167,15 @@ function MissingBuffs.CheckForMissings()
     MissingBuffs.HideAlert()
 end
 
-------------------------------------------------------------------------
--- Debounce + evenements (meme principe que MCB.CHECK_THROTTLE : un seul
--- rescan differe si des evenements arrivent en rafale)
-------------------------------------------------------------------------
+-- Debounce + evenements (meme principe que MCB.CHECK_THROTTLE : un seul rescan differe si des
+-- evenements arrivent en rafale)
 local lastCheckTime = 0
 local scanScheduled = false
 
--- Periode de grace apres PLAYER_ENTERING_WORLD : au teleport d'entree en M+
--- (pas d'ecran de chargement classique, juste une coupure courte), le cache
--- d'auras du joueur n'est pas garanti repeuple des le premier UNIT_AURA/
--- GROUP_ROSTER_UPDATE qui suit -- ces evenements arrivent en rafale et
--- chacun redeclenche RequestCheck. Sans ce garde-fou, un des rescans de la
--- rafale tombe pile pendant la fenetre ou GetPlayerAuraBySpellID ne voit pas
--- encore un buff pourtant bien present -> fausse alerte "manquant" qui
--- clignote/spam le temps que l'etat se stabilise (confirme en jeu : lancement
--- de cle M+ alors que tous les buffs etaient deja poses).
+-- Periode de grace apres PLAYER_ENTERING_WORLD : au teleport d'entree en M+, le cache d'auras
+-- n'est pas garanti repeuple des le premier UNIT_AURA/GROUP_ROSTER_UPDATE qui suit (rafale
+-- d'evenements) -- sans ce garde-fou, un rescan tombe pendant la fenetre ou GetPlayerAuraBySpellID
+-- ne voit pas encore un buff pourtant present, d'ou une fausse alerte qui clignote/spam.
 local ENTER_WORLD_GRACE = 1.5
 local enterWorldGraceUntil = 0
 
@@ -1267,10 +1188,8 @@ end
 function MissingBuffs.RequestCheck()
     local cfg = Cfg()
     if not cfg.enabled then MissingBuffs.HideAlert(); return end
-    -- Meme gardefou qu'en tete de CheckForMissings, mais ici AVANT toute
-    -- planification : coupe le flot d'evenements combat (UNIT_AURA en
-    -- rafale, etc.) qui redeclencherait un DoCheck differe pour rien tant
-    -- qu'on est en combat -- plus de "boucle dans le vide".
+    -- Meme gardefou qu'en tete de CheckForMissings, mais ici avant toute planification : coupe
+    -- le flot d'evenements combat qui redeclencherait un DoCheck differe pour rien.
     if InCombatLockdown() then scanScheduled = false; MissingBuffs.HideAlert(); return end
     local now = GetTime()
     if now < enterWorldGraceUntil then
@@ -1296,18 +1215,20 @@ local GROUP_EVENTS = {
     "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "PLAYER_ALIVE", "PLAYER_UNGHOST",
     "UNIT_CONNECTION", "UPDATE_SHAPESHIFT_FORM", "SPELLS_CHANGED", "TRAIT_CONFIG_UPDATED",
     "UNIT_PET", "UNIT_INVENTORY_CHANGED", "PLAYER_SPECIALIZATION_CHANGED",
-    -- Necessaire pour l'exception "cible attaquable en zone de
-    -- repos" (cf. CheckForMissings) : sans cet evenement, cibler/decibler un
-    -- mannequin d'entrainement en ville ne redeclenchait aucun rescan.
+    -- Necessaire pour l'exception "cible attaquable en zone de repos" (cf. CheckForMissings) :
+    -- sans cet evenement, cibler/decibler un mannequin d'entrainement ne redeclenchait aucun rescan.
     "PLAYER_TARGET_CHANGED",
+    -- Coupure/reprise du module pendant une cle M+ : le DEBUT passe par PLAYER_ENTERING_WORLD,
+    -- mais la FIN n'a pas d'ecran de chargement -- sans cet evenement le module restait coupe
+    -- jusqu'au prochain UNIT_AURA/GROUP_ROSTER_UPDATE fortuit.
+    "CHALLENGE_MODE_START", "CHALLENGE_MODE_COMPLETED",
 }
 
 eventFrame:SetScript("OnEvent", function(_, event, unit)
     if event == "PLAYER_REGEN_ENABLED" and frame and frame:IsShown()
        and vanishAnimGroup and not vanishAnimGroup:IsPlaying() and frame:GetAlpha() <= 0.01 then
-        -- Rattrape un vanish dont le Hide() final a ete saute pendant le
-        -- combat (cf. BuildVanishAnimGroup:OnFinished) : le frame etait reste
-        -- affiche-mais-invisible (alpha 0) en attendant la fin du combat.
+        -- Rattrape un vanish dont le Hide() final a ete saute en combat (cf.
+        -- BuildVanishAnimGroup:OnFinished) : le frame restait affiche-mais-invisible.
         frame:Hide()
         frame:SetAlpha(1)
         ResetFramePosition()
@@ -1334,12 +1255,8 @@ function MissingBuffs.Init()
     pcall(eventFrame.RegisterUnitEvent, eventFrame, "UNIT_SPELLCAST_SUCCEEDED", "player")
     MissingBuffs.RequestCheck()
 
-    -- Rappel "bientot expire" : contrairement au reste du
-    -- module, purement event-driven (UNIT_AURA...), le franchissement du
-    -- seuil de duree n'est PAS un evenement -- rien ne re-declenche
-    -- naturellement un scan pile au bon moment. Ticker leger (2s), inoffensif
-    -- quand la fonctionnalite est desactivee (RequestCheck/CheckForMissings
-    -- sortent immediatement dans ce cas).
+    -- Rappel "bientot expire" : contrairement au reste du module (event-driven), le franchissement
+    -- du seuil de duree n'est pas un evenement -- ticker leger (2s), inoffensif si desactive.
     C_Timer.NewTicker(2, function()
         local cfg = Cfg()
         if cfg.enabled and cfg.expiringSoonEnabled then
@@ -1348,9 +1265,7 @@ function MissingBuffs.Init()
     end)
 end
 
-------------------------------------------------------------------------
 -- Helper reglages : (des)ignorer une entree par settingsId
-------------------------------------------------------------------------
 function MissingBuffs.SetIgnored(settingsId, ignored)
     local cfg = Cfg()
     if not (cfg and settingsId) then return end
@@ -1364,12 +1279,9 @@ function MissingBuffs.IsIgnored(settingsId)
     return cfg and cfg.ignoredSettingsIds and cfg.ignoredSettingsIds[settingsId] == true
 end
 
-------------------------------------------------------------------------
--- Liste plate des spellIds que ce module peut effectivement afficher pour
--- la classe courante (buffs de classe + postures/auras/accords + familiers
--- + poisons selon la classe) -- utilisee par Animations 3D pour restreindre
--- le picker de sorts d'un combo au perimetre reel du module (cf. UI/SettingsPanel.lua).
-------------------------------------------------------------------------
+-- Liste plate des spellIds que ce module peut effectivement afficher pour la classe courante
+-- (buffs de classe + postures/auras/accords + familiers + poisons) -- utilisee par Animations 3D
+-- pour restreindre le picker de sorts d'un combo au perimetre reel du module.
 function MissingBuffs.GetTriggerSpells()
     local class = _addon._playerClass or select(2, UnitClass("player"))
     if not class then return {} end
@@ -1396,6 +1308,9 @@ function MissingBuffs.GetTriggerSpells()
         for _, o in ipairs(ns.MISSING_HUNTER_ALL_PETS) do add(o.spellId) end
     elseif class == "WARLOCK" then
         for _, o in ipairs(ns.MISSING_WARLOCK_ALL_PETS) do add(o.spellId) end
+        -- Presence dans le picker de combo uniquement -- cf. IsBurningRushActive,
+        -- jamais ajoute a ns.MISSING_CLASS_BUFFS (pas de detection "absent").
+        add(ns.MISSING_WARLOCK_BURNING_RUSH)
     elseif class == "ROGUE" then
         for _, o in ipairs(ns.MISSING_ROGUE_POISONS.nonlethal) do add(o.spellId) end
         for _, o in ipairs(ns.MISSING_ROGUE_POISONS.lethal) do add(o.spellId) end
@@ -1404,19 +1319,13 @@ function MissingBuffs.GetTriggerSpells()
     return out
 end
 
-------------------------------------------------------------------------
--- Debug : /aishbuffdebug [spellId] liste chaque unite du groupe avec le
--- detail du check de portee (UnitInRange vs C_Spell.IsSpellInRange) et la
--- presence du buff -- pour diagnostiquer pourquoi un allie manquant
--- n'apparait pas (suspicion : UnitInRange peu fiable en PARTY, contrairement
--- au RAID).
-------------------------------------------------------------------------
+-- Debug : /aishbuffdebug [spellId] liste chaque unite du groupe avec le detail du check de portee
+-- (UnitInRange vs C_Spell.IsSpellInRange) et la presence du buff -- pour diagnostiquer pourquoi un
+-- allie manquant n'apparait pas (suspicion : UnitInRange peu fiable en PARTY, contrairement au RAID).
 SLASH_AISHBUFFDEBUG1 = "/aishbuffdebug"
 SlashCmdList["AISHBUFFDEBUG"] = function(msg)
-    -- "/aishbuffdebug reset" : force previewMode a false + relance un vrai
-    -- scan -- au cas ou l'apercu force (Animations 3D) serait reste bloque
-    -- actif (previewMode true empeche TOUTE detection reelle, meme le
-    -- self-check le plus basique).
+    -- "/aishbuffdebug reset" : force previewMode a false + relance un vrai scan, au cas ou
+    -- l'apercu force (Animations 3D) serait reste bloque actif.
     if msg == "reset" then
         MissingBuffs.SetPreview(false)
         MissingBuffs.RequestCheck()
@@ -1427,7 +1336,26 @@ SlashCmdList["AISHBUFFDEBUG"] = function(msg)
     local spellId = tonumber(msg) or 462854 -- Fureur des cieux par defaut
     local entry = { spellId = spellId }
     print(string.format("|cff00ff00[AishCore]|r Debug buff manquant spellId=%d", spellId))
-    print(string.format("  IsInRaid=%s IsInGroup=%s previewMode=%s", tostring(IsInRaid()), tostring(IsInGroup()), tostring(previewMode)))
+    print(string.format("  IsInRaid=%s IsInGroup=%s previewMode=%s AurasAreSecret=%s",
+        tostring(IsInRaid()), tostring(IsInGroup()), tostring(previewMode), tostring(AurasAreSecret())))
+
+    -- Dump brut des auras HELPFUL de l'unite (spellId ou "SECRET"/"nil") : pour voir si le sort
+    -- cherche est vraiment absent, ou juste cache derriere une valeur secrete.
+    local function DumpAuras(unit)
+        if not (AuraUtil and AuraUtil.ForEachAura) then return "AuraUtil indisponible" end
+        local parts, n = {}, 0
+        pcall(AuraUtil.ForEachAura, unit, "HELPFUL", nil, function(aura)
+            n = n + 1
+            if not aura then parts[#parts+1] = "nil"; return false end
+            local sid = aura.spellId
+            if IsSecret(sid) then parts[#parts+1] = "SECRET"
+            elseif sid == nil then parts[#parts+1] = "nil"
+            else parts[#parts+1] = tostring(sid) end
+            return false
+        end, true)
+        if n == 0 then return "(aucune aura HELPFUL)" end
+        return string.format("%d auras : %s", n, table.concat(parts, ", "))
+    end
 
     local function DumpUnit(unit)
         local exists = UnitExists(unit)
@@ -1440,7 +1368,10 @@ SlashCmdList["AISHBUFFDEBUG"] = function(msg)
         end
         local ciOk, ciNear = pcall(CheckInteractDistance, unit, 1)
         local passes = PassesRangeCheck(unit, entry)
-        local hasBuff = valid and UnitHasBuff(unit, entry) or nil
+        local hasBuff
+        -- IsValidAllyUnit exclut toujours "player" par construction (filtre "allie") -- cas
+        -- particulier pour que la ligne player reflete le vrai check d'AnyoneMissingBuff().
+        if unit == "player" or valid then hasBuff = UnitHasBuff(unit, entry) else hasBuff = "n/a (valid=false)" end
         print(string.format(
             "  %s : exists=%s valid=%s | UnitInRange ok=%s inRange=%s checked=%s | IsSpellInRange ok=%s inRange=%s | CheckInteractDistance ok=%s near=%s | PassesRangeCheck=%s | UnitHasBuff=%s",
             unit, tostring(exists), tostring(valid),
@@ -1448,6 +1379,7 @@ SlashCmdList["AISHBUFFDEBUG"] = function(msg)
             tostring(spOk), tostring(spInRange),
             tostring(ciOk), tostring(ciNear),
             tostring(passes), tostring(hasBuff)))
+        print("    " .. DumpAuras(unit))
     end
 
     local ok, err = pcall(function()

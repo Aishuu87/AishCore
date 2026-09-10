@@ -1,6 +1,5 @@
 ﻿-- Modules/OutOfCombatResourceCircle.lua : Cercle de ressource hors combat
--- Meme fonctionnement que ResourceCircle mais visible UNIQUEMENT hors combat.
--- Pas de dots decoratifs (fond + arc + texte), secondary dots sans runes DK.
+-- Même fonctionnement que ResourceCircle, visible uniquement hors combat ; secondary dots sans runes DK.
 
 local addonName, ns = ...
 local L = ns.L
@@ -14,28 +13,21 @@ local animationTicker   = nil
 local _ocrcAnimElems = {}   -- slots créés lazily au premier appel, réutilisés ensuite
 local lastVisibilityState = nil
 local previewMode       = false
+-- File d'attente de transition : ne jamais interrompre une animation show/hide en cours, relancer UpdateVisibility() apres
+local ocrcAnimBusy = false
+local ocrcAnimDirty = false
 local lastResourceType  = nil
 local secDots           = {}
 local secDotCount       = 0
 local secUpdateTicker   = nil
 local secDotType        = nil
--- Force-masquage GUI (2026-08-16, meme pattern que PriorityBar/UnitBars/
--- TopTargetBar.SetGuiHidden) : SetPreview(false) seul ne SUPPRIME PAS
--- l'affichage normal hors-combat -- il retombe juste sur ShouldShow(), qui
--- montre a nouveau le cercle des que le joueur est hors combat (quasi
--- toujours vrai pendant qu'on regle les settings). Ce flag permet un
--- masquage INCONDITIONNEL depuis le panneau de reglages (section "Auras &
--- Procs"), independant de la logique de visibilite normale.
+-- Force-masquage GUI (meme pattern que PriorityBar/UnitBars/TopTargetBar.SetGuiHidden) : masquage inconditionnel depuis le panneau de reglages
 local ocrcHiddenForGui  = false
 
--- Zone vide supprimee de circle_piecrop.tga (deja crop) : ratio hauteur restante
--- La texture croppee = arcPx de large x arcPx*ARC_CROP_H de haut, ancrage TOP
+-- Ratio hauteur restante de circle_piecrop.tga (déjà croppée) : texture = arcPx x arcPx*ARC_CROP_H, ancrage TOP
 local ARC_CROP_H = 0.88
 
--- [EXPERIMENTAL] Remplissage radial : même système que ResourceCircle.lua (voir
--- les commentaires détaillés là-bas), porté ici à l'identique pour le cercle
--- hors combat. Jauge en arc de 280° (trou de 80° en bas), 1 quartier
--- (RadialWedge.tga) par %. Bascule via cfg.radialFillTest (GUI ou /rcocradial).
+-- Remplissage radial (meme systeme que ResourceCircle.lua) : arc 280°, 1 quartier par %, bascule via cfg.radialFillTest
 local RADIAL_FRAG_COUNT = 100
 local RADIAL_ARC_SPAN_DEG  = 280
 local RADIAL_ARC_START_DEG = 220
@@ -64,8 +56,7 @@ local function LayoutRadialFrags()
   end
 end
 
--- Bascule vertical/radial : montre l'élément actif, cache l'autre depuis un
--- état propre (alpha/scale remis à 1 pour éviter un blocage mi-transition).
+-- Bascule vertical/radial : montre l'élément actif, cache l'autre depuis un état propre (alpha/scale à 1).
 function OutOfCombatResourceCircle.ApplyRadialMode()
   if not bar then return end
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
@@ -79,8 +70,7 @@ function OutOfCombatResourceCircle.ApplyRadialMode()
   pcall(OutOfCombatResourceCircle.Update)
 end
 
--- Applique pct (0-100) à l'arc actif (vertical ou radial) — même sink
--- ns.SmoothSetValue pour les deux, cf. ApplyArcValue dans ResourceCircle.lua.
+-- Applique pct (0-100) à l'arc actif (vertical ou radial) via ns.SmoothSetValue pour les deux.
 local function ApplyArcValue(pct)
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
   if cfg.radialFillTest and bar.radialFrags then
@@ -92,11 +82,7 @@ local function ApplyArcValue(pct)
   end
 end
 
----------------------------------------------------------------------------
--- Suivi des changements de ressource via UNIT_POWER_FREQUENT
--- Evite toute arithmetique / comparaison ordonnee sur les secret numbers.
--- UnitPower() est tainté quand son argument l'est ; GetTime() est toujours propre.
----------------------------------------------------------------------------
+-- Suivi des changements via UNIT_POWER_FREQUENT (evite comparaison sur secret numbers, GetTime() reste propre)
 local powerLastChanged = {}  -- ["MANA"], ["ENERGY"], ... -> GetTime()
 local POWER_TIMEOUT    = 2.5 -- secondes sans changement => considere "plein"
 
@@ -113,9 +99,7 @@ local function PowerChangedRecently(token)
   return t ~= nil and (GetTime() - t) < POWER_TIMEOUT
 end
 
----------------------------------------------------------------------------
 -- Specs de soin + Mage Arcane (pour la logique mana)
----------------------------------------------------------------------------
 local ARCANE_MAGE_SPEC = 62
 local HEAL_SPECS = {
   [65]   = true,  -- Paladin Holy
@@ -135,18 +119,14 @@ local function GetSpecID()
   return id
 end
 
----------------------------------------------------------------------------
 -- Visibilite : uniquement HORS combat, avec logique par ressource
----------------------------------------------------------------------------
 function OutOfCombatResourceCircle.ShouldShow()
   if ocrcHiddenForGui then return false end
   if ns.IsInBlockedState() then return false end
   if ns.skyridingActive and ns.GetCfg("skyriding").hideOOCResourceCircle ~= false then return false end
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
   if cfg.enabled == false then return false end
-  -- Ne jamais s'afficher si le cercle central (ResourceCircle) est deja
-  -- visible : ce cercle hors-combat n'est qu'un rappel minimaliste pour quand
-  -- le cercle central n'est PAS affiche -- double affichage sinon (meme info).
+  -- Ne jamais s'afficher si le cercle central (ResourceCircle) est deja visible (evite le double affichage)
   local RC = ns.Modules and ns.Modules.ResourceCircle
   if RC and RC.ShouldShow and RC.ShouldShow() then return false end
   if UnitAffectingCombat("player") then return false end
@@ -156,7 +136,7 @@ function OutOfCombatResourceCircle.ShouldShow()
 
   local resource = ns.GetPlayerResource()
 
-  -- ── Ressource aura (string key) ────────────────────────────────────────
+  -- Ressource aura (string key)
   if type(resource) == "string" then
     -- MAELSTROM_WEAPON : montrer si stacks != 0
     if resource == "MAELSTROM_WEAPON" then
@@ -166,21 +146,7 @@ function OutOfCombatResourceCircle.ShouldShow()
     return false
   end
 
-  -- ── Ressources numeriques ─────────────────────────────────────────────────
-  -- UnitPower() retourne un secret number dans certains contextes (valeur taintee
-  -- par l'addon). Meme == / ~= contre une valeur non-nil leve une exception.
-  -- SEULE operation safe : comparaison avec nil (== nil / ~= nil).
-  --
-  -- Solution : ne jamais toucher la valeur retournee par UnitPower dans ShouldShow.
-  -- On se base uniquement sur UNIT_POWER_FREQUENT (stocke dans powerLastChanged)
-  -- dont le timestamp (GetTime()) est toujours propre.
-  --
-  -- Semantique de PowerChangedRecently(token) :
-  --   - Energie/focus/mana : l'event s'arrete quand la ressource est pleine
-  --     => revient false quand plein   => cercle cache quand plein          [voulu]
-  --   - Rage/fury/runic/etc. : l'event s'arrete quand la ressource est vide
-  --     => revient false apres vidange => cercle cache quand vide           [voulu]
-  --   - Combo points : le token est "COMBO_POINTS", fire a chaque changement
+  -- UnitPower() peut renvoyer un secret number (seule comparaison safe = nil) ; on se base sur PowerChangedRecently().
 
   -- Energie : en regen OU combo points OU chi en train de changer
   if resource == Enum.PowerType.Energy then
@@ -248,15 +214,16 @@ function OutOfCombatResourceCircle.ShouldShow()
   return true
 end
 
----------------------------------------------------------------------------
 -- Applique les settings en live
----------------------------------------------------------------------------
 function OutOfCombatResourceCircle.ApplySettings()
   if not bar then return end
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
 
   if cfg.enabled == false then
     if animationTicker then animationTicker:Cancel(); animationTicker = nil end
+    -- Desactivation live du module : interruption immediate voulue, verrou de file remis a plat
+    ocrcAnimBusy = false
+    ocrcAnimDirty = false
     bar:Hide()
     lastVisibilityState = nil
     return
@@ -292,7 +259,7 @@ function OutOfCombatResourceCircle.ApplySettings()
       bar.overlay:Hide()
     end
   end
-  -- [EXPERIMENTAL] Recaler les 100 quartiers radiaux (dépendent de arcPx/overlayRatio).
+  -- Recaler les 100 quartiers radiaux (dépendent de arcPx/overlayRatio)
   LayoutRadialFrags()
   if previewMode and bar.radialFrags then
     for _, frag in ipairs(bar.radialFrags) do
@@ -319,9 +286,7 @@ function OutOfCombatResourceCircle.ApplySettings()
   end
 end
 
----------------------------------------------------------------------------
 -- Couleurs selon la ressource active
----------------------------------------------------------------------------
 function OutOfCombatResourceCircle.UpdateResourceColors()
   if not bar then return end
   local powerType = ns.GetPlayerResource()
@@ -332,7 +297,7 @@ function OutOfCombatResourceCircle.UpdateResourceColors()
   local textC = (CLR and CLR.Get("powertext"))   or colors.text
 
   if bar.arc then bar.arc:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1) end
-  -- [EXPERIMENTAL] Fragments radiaux : même couleur que l'arc vertical.
+  -- Fragments radiaux : même couleur que l'arc vertical
   if bar.radialFrags then
     for _, frag in ipairs(bar.radialFrags) do
       frag:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1)
@@ -357,9 +322,7 @@ function OutOfCombatResourceCircle.OnResourceChanged()
   return true
 end
 
----------------------------------------------------------------------------
 -- Creation du cercle
----------------------------------------------------------------------------
 function OutOfCombatResourceCircle.Create(parent)
   if bar then return bar end
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
@@ -392,9 +355,7 @@ function OutOfCombatResourceCircle.Create(parent)
   bgLarge:SetVertexColor(0x0e/255, 0x0e/255, 0x0e/255, 1)
   bar.bgLarge = bgLarge
 
-  -- Arc (remplissage bas -> haut, texture circulaire pre-croppee)
-  -- Frame non-carre : largeur=arcPx, hauteur=arcPx*ARC_CROP_H pour eviter le stretch
-  -- Ancre au TOP de bar => le cercle visuel reste centre sur bar
+  -- Arc (remplissage bas -> haut) : frame non-carre (arcPx x arcPx*ARC_CROP_H), ancre TOP pour rester centre
   local arcPx = cfg.size * (cfg.arcSizeRatio or 1.0)
   local arc = CreateFrame("StatusBar", "AishCoreOCResourceRingArc", bar)
   arc:SetFrameLevel(bar:GetFrameLevel() + 1)
@@ -407,8 +368,7 @@ function OutOfCombatResourceCircle.Create(parent)
   arc:Show()
   bar.arc = arc
 
-  -- [EXPERIMENTAL] Remplissage radial (100 quartiers, cf. LayoutRadialFrags/
-  -- ApplyRadialMode en tête de fichier). Activé/désactivé via cfg.radialFillTest.
+  -- Remplissage radial (100 quartiers, cf. LayoutRadialFrags/ApplyRadialMode) : actif via cfg.radialFillTest
   local radialFillFrame = CreateFrame("Frame", nil, bar)
   radialFillFrame:SetFrameLevel(arc:GetFrameLevel())
   radialFillFrame:SetAllPoints(bar)
@@ -431,10 +391,7 @@ function OutOfCombatResourceCircle.Create(parent)
   -- Overlay sombre : masque le centre pour simuler un arc en anneau
   local overlayPx = arcPx * (cfg.overlayRatio or 0.75)
   local overlayFrame = CreateFrame("Frame", nil, bar)
-  -- +101 (pas +1) : doit rester AU-DESSUS des 100 quartiers radiaux (radialFillFrame
-  -- va de arc:GetFrameLevel()+1 à +100 selon k), sinon l'overlay se retrouve caché
-  -- sous eux en mode radial et la "épaisseur" (overlayRatio) n'a plus aucun effet
-  -- visible. Même valeur que ResourceCircle.lua.
+  -- +101 (pas +1) : doit rester au-dessus des 100 quartiers radiaux (frameLevel +1 a +100), sinon caché en mode radial
   overlayFrame:SetFrameLevel(arc:GetFrameLevel() + 101)
   overlayFrame:SetAllPoints(bar)
   local overlay = overlayFrame:CreateTexture(nil, "ARTWORK")
@@ -464,9 +421,7 @@ function OutOfCombatResourceCircle.Create(parent)
   return bar
 end
 
----------------------------------------------------------------------------
 -- Mise a jour des valeurs (copie de ResourceCircle.Update)
----------------------------------------------------------------------------
 function OutOfCombatResourceCircle.Update()
   if not bar or not bar.text then return end
   if previewMode then return end
@@ -522,9 +477,7 @@ function OutOfCombatResourceCircle.ResetVisibility()
   lastVisibilityState = nil
 end
 
----------------------------------------------------------------------------
 -- Secondary Dots — combo points uniquement (pas de runes DK)
----------------------------------------------------------------------------
 local SEC_COLORS = {
   COMBO_ROGUE = {
     default = { 1.0, 0.8, 0.0 },   -- jaune doré
@@ -558,7 +511,7 @@ function OutOfCombatResourceCircle.DetectSecondaryDots()
   local newType  = nil
   local newCount = 0
 
-  -- NOTE : DK non gere volontairement (pas de runes hors combat)
+  -- DK non géré volontairement (pas de runes hors combat)
   if playerClass == "ROGUE" then
     newType  = "COMBO_ROGUE"
     local maxCP = UnitPowerMax("player", Enum.PowerType.ComboPoints)
@@ -651,7 +604,7 @@ function OutOfCombatResourceCircle.LayoutSecDots()
   if not bar or secDotCount == 0 then return end
   local cfg       = ns.GetCfg("outOfCombatResourceCircle")
   local size      = cfg.size
-  -- Lecture avec fallback per-dotType → global (Feature 5)
+  -- Lecture avec fallback per-dotType → global
   local pfx = secDotType and ("secondaryDots_" .. secDotType .. "_") or ""
   local function pv(k, fallback) local v = pfx ~= "" and cfg[pfx..k] or nil; return v ~= nil and v or cfg[fallback] end
   local dotSize     = size * (pv("size",     "secondaryDotsSize")     or 0.16)
@@ -824,16 +777,13 @@ function OutOfCombatResourceCircle.UpdateSecDots()
   end
 end
 
----------------------------------------------------------------------------
 -- Animation apparition / disparition
----------------------------------------------------------------------------
 function OutOfCombatResourceCircle.AnimateVisibility(shouldShow)
   if animationTicker then animationTicker:Cancel(); animationTicker = nil end
   if not bar then return end
 
   local si = 0.04
-  -- Rebuild en place : les tables {element,delay} sont créées une seule fois, puis les champs sont mutés.
-  -- Aucune allocation après le premier appel, même si secDotCount change.
+  -- Rebuild en place : tables {element,delay} créées une fois puis mutées (pas d'allocation apres le 1er appel)
   local cfgRadial = ns.GetCfg("outOfCombatResourceCircle")
   local arcEl = (cfgRadial.radialFillTest and bar.radialFillFrame) or bar.arc
   _ocrcAnimElems[1] = _ocrcAnimElems[1] or {}; _ocrcAnimElems[1].element = bar.bgGlow;       _ocrcAnimElems[1].delay = 0
@@ -851,18 +801,27 @@ function OutOfCombatResourceCircle.AnimateVisibility(shouldShow)
   for i = secDotCount + 6, #_ocrcAnimElems do _ocrcAnimElems[i] = nil end
 
   animationTicker = ns.AnimateStagger(_ocrcAnimElems, shouldShow, 0.35, si, function()
-    if previewMode then return end
+    if previewMode then
+      ocrcAnimBusy = false
+      return
+    end
     if not shouldShow then bar:Hide() end
+    ocrcAnimBusy = false
+    if ocrcAnimDirty then
+      ocrcAnimDirty = false
+      OutOfCombatResourceCircle.UpdateVisibility()
+    end
   end)
 end
 
----------------------------------------------------------------------------
 -- Mode preview (settings panel)
----------------------------------------------------------------------------
 function OutOfCombatResourceCircle.SetPreview(on)
   previewMode = on
   if not bar then return end
+  -- Override manuel du panneau de reglages : interruption immediate voulue, verrou de file remis a plat
   if animationTicker then animationTicker:Cancel(); animationTicker = nil end
+  ocrcAnimBusy = false
+  ocrcAnimDirty = false
 
   if on then
     lastVisibilityState = nil
@@ -878,7 +837,7 @@ function OutOfCombatResourceCircle.SetPreview(on)
         bar.bgGlow:Hide()
       end
     end
-    -- [EXPERIMENTAL] Respecter le mode radial en preview : montrer le bon élément actif.
+    -- Respecter le mode radial en preview : montrer le bon élément actif
     local radial = cfgPrev.radialFillTest == true
     if radial then
       bar.arc:Hide()
@@ -905,20 +864,14 @@ function OutOfCombatResourceCircle.SetPreview(on)
   end
 end
 
----------------------------------------------------------------------------
--- Force-masquage GUI (2026-08-16) : cf. commentaire sur ocrcHiddenForGui --
--- contrairement a SetPreview(false), masque INCONDITIONNELLEMENT, meme hors
--- combat. Meme pattern que PriorityBar/UnitBars/TopTargetBar.SetGuiHidden.
----------------------------------------------------------------------------
+-- Force-masquage GUI : masque inconditionnellement, meme hors combat (contrairement a SetPreview(false))
 function OutOfCombatResourceCircle.SetGuiHidden(on)
   ocrcHiddenForGui = on and true or false
   lastVisibilityState = nil  -- forcer UpdateVisibility a reevaluer
   OutOfCombatResourceCircle.UpdateVisibility()
 end
 
----------------------------------------------------------------------------
 -- Drag (pour le settings panel)
----------------------------------------------------------------------------
 function OutOfCombatResourceCircle.SetDraggable(on)
   if not bar then return end
   if on then
@@ -967,9 +920,7 @@ function OutOfCombatResourceCircle.SetDraggable(on)
   end
 end
 
----------------------------------------------------------------------------
 -- Reinitialise la position aux valeurs par defaut
----------------------------------------------------------------------------
 function OutOfCombatResourceCircle.ResetPosition()
   if not ns.DB then ns.DB = {} end
   if not ns.DB.outOfCombatResourceCircle then ns.DB.outOfCombatResourceCircle = {} end
@@ -983,15 +934,19 @@ function OutOfCombatResourceCircle.ResetPosition()
   OutOfCombatResourceCircle.ApplySettings()
 end
 
----------------------------------------------------------------------------
 -- Mise a jour de la visibilite
----------------------------------------------------------------------------
 function OutOfCombatResourceCircle.UpdateVisibility()
   if not bar then return end
   if previewMode then return end
   local shouldShow = OutOfCombatResourceCircle.ShouldShow()
   if lastVisibilityState == shouldShow then return end
+
+  if ocrcAnimBusy then
+    ocrcAnimDirty = true
+    return
+  end
   lastVisibilityState = shouldShow
+  ocrcAnimBusy = true
 
   if shouldShow then
     bar:Show()
@@ -1016,9 +971,7 @@ function OutOfCombatResourceCircle.UpdateVisibility()
   end
 end
 
----------------------------------------------------------------------------
 -- Debug : /rcocradial — bascule vertical/radial à chaud (miroir de /rcradial)
----------------------------------------------------------------------------
 SLASH_RCOCRADIAL1 = "/rcocradial"
 SlashCmdList["RCOCRADIAL"] = function()
   local cfg = ns.GetCfg("outOfCombatResourceCircle")

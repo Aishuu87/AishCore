@@ -5,9 +5,7 @@ local L = ns.L
 local UnitBars = {}
 ns.Modules.UnitBars = UnitBars
 
----------------------------------------------------------------------------
 -- Constantes visuelles
----------------------------------------------------------------------------
 local BAR_TEXTURE  = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga"
 local BEBAS_FONT   = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\BebasNeue-Regular.ttf"
 -- Couleur "noire" commune (#0e0e0e)
@@ -85,9 +83,7 @@ local REACTION_COLORS = {
     hostile  = { 0.780, 0.251, 0.251, 1 },
 }
 
----------------------------------------------------------------------------
 -- Descripteurs de chaque barre
----------------------------------------------------------------------------
 local BAR_DEFS = {
     {
         key       = "player",
@@ -162,12 +158,11 @@ local BAR_DEFS = {
     },
 }
 
----------------------------------------------------------------------------
 -- Tables des frames créés
----------------------------------------------------------------------------
 local bars = {}   -- bars[key] = frame
 local pendingSettingsApply  = false  -- re-appliquer les settings apres combat
 local ubFadeTickers         = {}     -- key → ticker de fade par barre
+local ubPosPending          = {}     -- key → frame dont le snap de position finale a ete saute (combat lockdown)
 local ubLastVisState        = {}     -- key → dernier état de visibilité (true/false)
 local ubHiddenForSkyriding  = false  -- masquées pour le skyriding
 local ubHiddenForGui        = false  -- onglet Animations 3D : tout masqué
@@ -175,16 +170,13 @@ local ubPreviewMode         = false  -- panneau settings ouvert → forcer affic
 local inVehicle             = false
 local inPetBattle           = false
 
----------------------------------------------------------------------------
 -- Helpers
----------------------------------------------------------------------------
 local function Cfg(key)
     local db = ns.GetCfg("unitBars")
     return db and db.bars and db.bars[key] or {}
 end
 
--- Calcule si une barre doit être visible selon l'état courant du jeu.
--- Pas de StateDriver : pure Lua, même pattern que ResourceCircle.ShouldShow().
+-- Calcule si une barre doit être visible selon l'état du jeu (pure Lua, pas de StateDriver)
 local function ShouldShowBar(frame)
     if ubHiddenForGui  then return false end  -- onglet Animations 3D : masqué
     if ubPreviewMode   then return true  end
@@ -196,9 +188,7 @@ local function ShouldShowBar(frame)
     if inVehicle                then return false end
     if inPetBattle              then return false end
     local unit  = frame._def.unit
-    -- "Toujours actif en instance" : ignore les transitions combat tant qu'on
-    -- est en donjon/raid (ns.inInstance, cf. Core.lua) -- le unit doit quand
-    -- meme exister (pas de barre "target" sans cible, meme en instance).
+    -- "Toujours actif en instance" : ignore les transitions combat en donjon/raid, mais le unit doit exister
     if db and db.alwaysInInstance and ns.inInstance then return UnitExists(unit) end
     local vMode = (db and db.visibilityMode)
     if not vMode then
@@ -208,10 +198,7 @@ local function ShouldShowBar(frame)
         return UnitExists(unit)
     elseif vMode == "combat" then
         return UnitAffectingCombat("player") and UnitExists(unit)
-    else  -- "target" : n'affiche RIEN sans cible, meme la barre du joueur
-        -- (UnitExists("player") est toujours vrai -- sans ce garde explicite
-        -- sur la cible, la barre joueur restait affichee en permanence dans
-        -- ce mode, cible ou non).
+    else  -- "target" : n'affiche RIEN sans cible, meme la barre du joueur (garde explicite sur target)
         return UnitExists("target") and UnitExists(unit)
     end
 end
@@ -231,14 +218,10 @@ local function GetEffectiveHeight(def, cfg)
     return cfg.height or def.defaults.height
 end
 
--- Retourne la couleur d'une unité : classe pour les joueurs, réaction pour les PNJ.
--- Même logique que TopTargetBar.GetUnitColor, avec alpha (4ème composante).
+-- Couleur d'une unité : classe pour les joueurs, réaction pour les PNJ (cf. TopTargetBar.GetUnitColor)
 local function GetClassFillColor(unit, fallback)
     if UnitIsPlayer(unit) then
-        -- L'indexation CLASS_COLORS[classFile] DOIT rester dans le même pcall
-        -- que UnitClass() : classFile peut être une valeur secrète (observé
-        -- sur targettarget), et indexer une table avec une clé secrète lève
-        -- une erreur Lua non catchée si elle est faite hors du pcall.
+        -- classFile peut être une valeur secrète (targettarget) : indexation dans le même pcall que UnitClass()
         local ok, color = pcall(function()
             local classFile = select(2, UnitClass(unit))
             return classFile and CLASS_COLORS[classFile]
@@ -246,13 +229,12 @@ local function GetClassFillColor(unit, fallback)
         if ok and color then
             return color
         end
-        return fallback
+        -- Lecture ratée : repli "allié visible" plutôt que le gris de config par défaut (evite un gris fige)
+        return REACTION_COLORS.friendly
     end
     local ok, reaction = pcall(function() return UnitReaction(unit, "player") end)
     if ok and reaction then
-        -- UnitReaction peut retourner un nombre privé en raid : le détainter avant
-        -- toute comparaison (sinon == / > lève une erreur Lua non catchée ici,
-        -- interrompant l'handler d'événement et laissant la barre dans un état incohérent).
+        -- UnitReaction peut être un nombre privé en raid : détainter avant comparaison (sinon erreur Lua)
         local r = tonumber(tostring(reaction)) or 0
         if     r == 4 then return REACTION_COLORS.neutral
         elseif r  > 4 then return REACTION_COLORS.friendly
@@ -262,9 +244,7 @@ local function GetClassFillColor(unit, fallback)
     return fallback
 end
 
----------------------------------------------------------------------------
 -- Création d'une barre (appelée une seule fois par key)
----------------------------------------------------------------------------
 local function CreateUnitBar(def)
     local cfg      = Cfg(def.key)
     local w        = cfg.width or def.defaults.width
@@ -291,9 +271,7 @@ local function CreateUnitBar(def)
     frame:SetAttribute("*type1", "target")      -- clic gauche = cibler l'unité
     frame:SetAttribute("*type2", "togglemenu")  -- clic droit  = menu contextuel
     frame:SetClampedToScreen(true)
-    -- Show() appelé une seule fois à la création (hors combat, jamais bloqué).
-    -- La visibilité est ensuite gérée exclusivement par SetAlpha() qui n'est
-    -- jamais protégé en combat. Show/Hide/EnableMouse ne sont plus jamais rappelés.
+    -- Show() une seule fois à la création ; visibilité gérée ensuite via SetAlpha() (jamais protégé en combat)
     frame:Show()
     frame:SetAlpha(0)
     frame:SetScript("OnDragStart", function(self)
@@ -329,8 +307,7 @@ local function CreateUnitBar(def)
     -- Position initiale (ancre bas : grandit vers le haut si hauteur augmente)
     local x = cfg.x or def.defaults.x
     local y = cfg.y or def.defaults.y
-    -- La barre de pet est ancrée sur la barre du joueur (pas UIParent) pour
-    -- être correcte sur tous les ratios d'écran (ultrawide, etc.).
+    -- Le pet est ancré sur la barre du joueur (pas UIParent) pour rester correct sur tout ratio d'écran
     if def.key == "pet" and bars.player then
         local pDef = BAR_DEFS[1].defaults
         local pCfg = Cfg("player")
@@ -341,9 +318,7 @@ local function CreateUnitBar(def)
         frame:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
     end
 
-    -- -----------------------------------------------------------------------
     -- Zone de la barre (à droite ou à gauche selon dotsRight)
-    -- -----------------------------------------------------------------------
     local barOffX = (not def.noDots and def.dotsLeft) and dotsW or 0  -- pas de dotGap ici
     local barH    = h
 
@@ -368,9 +343,7 @@ local function CreateUnitBar(def)
 
     frame._barW = w
 
-    -- Barre d'absorb : StatusBar sans REVERSE_FILL, ancrée au bord droit du fill HP.
-    -- SetMinMaxValues/SetValue C-side → aucune arithmétique Lua, accepte les secret numbers.
-    -- Avec mode WithAbsorbs : GetMaximumHealth()=maxHP+absorb → espace visible même à 100% HP.
+    -- Barre d'absorb : StatusBar sans REVERSE_FILL, ancrée au bord droit du fill HP (C-side, secret numbers OK)
     pcall(function()
         local absorbBar = CreateFrame("StatusBar", nil, frame)
         absorbBar:SetFrameLevel(parentLevel + 2)
@@ -422,9 +395,7 @@ local function CreateUnitBar(def)
     glowFrame:SetAlpha(0)
     frame.glowFrame = glowFrame
 
-    -- -----------------------------------------------------------------------
     -- Trois dots décoratifs (absents pour targettarget)
-    -- -----------------------------------------------------------------------
     if not def.noDots then
         local fc_dot     = cfg.fillColor or def.defaults.fillColor
         local dotColors  = { fc_dot, fc_dot, { DARK, DARK, DARK, 1 } }
@@ -455,9 +426,7 @@ local function CreateUnitBar(def)
         frame._dotYCenter = dotYCenter
     end
 
-    -- -----------------------------------------------------------------------
     -- Texte HP% (player et target uniquement)
-    -- -----------------------------------------------------------------------
     if def.showText then
         -- Fond du texte (rectangle sombre 32x17)
         local tbFrame = CreateFrame("Frame", nil, frame)
@@ -502,9 +471,7 @@ local function CreateUnitBar(def)
         UIFrameFadeOut(self.glowFrame, 0.2, self.glowFrame:GetAlpha(), 0)
     end)
 
-    -- -----------------------------------------------------------------------
     -- Texte de nom d'unité (target, focus, pet, targettarget)
-    -- -----------------------------------------------------------------------
     if def.showName then
         local db      = ns.GetCfg("unitBars")
         local cfg2    = Cfg(def.key)
@@ -531,9 +498,7 @@ local function CreateUnitBar(def)
     return frame
 end
 
----------------------------------------------------------------------------
 -- Helper : mise à jour du texte HP selon le mode (pct ou value)
----------------------------------------------------------------------------
 local function SetHPText(hpTextWidget, unit)
     local db   = ns.GetCfg("unitBars")
     local mode = (db and db.hpDisplayMode) or "pct"
@@ -552,21 +517,14 @@ local function SetHPText(hpTextWidget, unit)
     end
 end
 
----------------------------------------------------------------------------
 -- Mise à jour d'une barre (health valeur)
----------------------------------------------------------------------------
 local function UpdateBarHealth(frame)
     local unit   = frame.unit
     local barCfg = Cfg(frame._def.key)
     if barCfg.enabled == false then return end
     if not UnitExists(unit) then return end
 
-    -- Pcall HP bar : calculateur (WithAbsorbs, mode normal) ou C-side (mode miroir/fallback).
-    -- En mode miroir (absorbReversed), le HP bar ne doit pas utiliser WithAbsorbs pour éviter
-    -- un gap visible à droite — on reste sur C-side pur.
-    -- Pcall HP bar : calculateur (WithAbsorbs, mode normal) ou C-side (mode miroir/fallback).
-    -- En mode miroir (absorbReversed), le HP bar ne doit pas utiliser WithAbsorbs pour éviter
-    -- un gap visible à droite — on reste sur C-side pur.
+    -- Calculateur (WithAbsorbs) en mode normal, C-side pur en mode miroir (absorbReversed) pour éviter un gap
     local calcUpdated = false
     local absorbReversed = (ns.GetCfg("unitBars") or {}).absorbReversed
     if frame.hpCalc and not absorbReversed then
@@ -590,16 +548,13 @@ local function UpdateBarHealth(frame)
     end
 end
 
----------------------------------------------------------------------------
 -- Mise à jour absorb (commune à toutes les barres, y compris target)
----------------------------------------------------------------------------
 local function UpdateAbsorb(frame)
     if not frame.hpCalc or not frame.absorbBar then return end
     local db2  = ns.GetCfg("unitBars")
     local show = db2 == nil or db2.showAbsorb ~= false
     if not show then frame.absorbBar:SetValue(0); return end
-    -- UnitGetTotalAbsorbs retourne un secret number → passé directement à SetValue (C-side).
-    -- Pas d'arithmetic Lua : fill = absorb / GetMaximumHealth() calculé par WoW en interne.
+    -- UnitGetTotalAbsorbs retourne un secret number, passé directement à SetValue (C-side)
     local cfg2     = ns.GetCfg("unitBars") or {}
     local reversed = cfg2.absorbReversed or false
     local ac       = cfg2.absorbColor or { 0, 1, 0.918, 1 }
@@ -685,15 +640,12 @@ local function UpdateBarColor(frame)
     end
 end
 
----------------------------------------------------------------------------
 -- Mise à jour du nom d'unité
----------------------------------------------------------------------------
 local function UpdateBarName(frame)
     if not frame.nameTxt then return end
     local unit = frame.unit
     if UnitExists(unit) then
-        -- Détainter UnitName (secret string en instance/raid) via concaténation
-        -- avant de passer à SetText (sinon # ou sub planteraient).
+        -- Détainter UnitName (secret string en instance/raid) via concaténation avant SetText
         local rawName = UnitName(unit)
         frame.nameTxt:SetText((rawName and ("" .. rawName)) or "")
     elseif ubPreviewMode and (unit == "target" or unit == "targettarget" or unit == "focus" or unit == "pet") then
@@ -710,10 +662,7 @@ local function UpdateBarName(frame)
     end
 end
 
--- Repositionne frame selon cfg.x/y, avec un decalage horizontal temporaire
--- optionnel (extraX) utilise par l'animation de slide-in/out. Factorise pour
--- que l'animation puisse repositionner a chaque tick sans dupliquer le cas
--- particulier "pet ancre sur la barre du joueur".
+-- Repositionne frame selon cfg.x/y, avec decalage horizontal optionnel (extraX, pour l'anim slide-in/out)
 local function PositionBarFrame(frame, extraX)
     local def = frame._def
     local cfg = Cfg(def.key)
@@ -731,9 +680,7 @@ local function PositionBarFrame(frame, extraX)
     end
 end
 
----------------------------------------------------------------------------
 -- Application des settings sur un bar déjà créé (ApplySettings)
----------------------------------------------------------------------------
 local function ApplyBarSettings(frame)
     -- SetSize / ClearAllPoints / SetPoint sont bloques en combat lockdown
     if InCombatLockdown() then
@@ -883,14 +830,8 @@ local function ApplyBarSettings(frame)
     UpdateBarName(frame)
 end
 
----------------------------------------------------------------------------
 -- Animation de visibilité (fade + slide in/out) — remplace les StateDrivers
----------------------------------------------------------------------------
--- Sens du glissement par barre : +1 = arrive EN VENANT de la droite (part
--- decalee vers la droite, glisse vers la gauche jusqu'a sa position finale),
--- -1 = arrive en venant de la gauche. Independant de la position finale a
--- l'ecran (target finit a droite mais arrive quand meme depuis la gauche,
--- pour un effet de croisement avec la barre du joueur/pet).
+-- Sens du glissement par barre : +1 = arrive en venant de la droite, -1 = de la gauche (croisement voulu avec joueur/pet)
 local SLIDE_DIR = {
     player       = 1,
     pet          = 1,
@@ -908,46 +849,27 @@ local DOT_SCALE_START = 0.35  -- taille de depart des dots (ratio de la taille f
 local BAR_SCALE_START = 0.15  -- largeur de depart de la barre (ratio de sa largeur finale)
 local NAME_SLIDE_EXTRA = 18   -- px de glissement supplementaire du nom (meme sens que la barre)
 
--- Amorti ease-out QUINT (teste puis abandonne : ease-out expo, trop agressif
--- au gout de l'utilisateur -- revenu au quint).
+-- Amorti ease-out QUINT (ease-out expo testé mais jugé trop agressif)
 local function EaseOut(p)
     if p >= 1 then return 1 end
     if p <= 0 then return 0 end
     return 1 - (1 - p)^5
 end
 
--- Delais d'ARRIVEE (entree), en multiples de DOT_STAGGER, a partir du debut
--- de l'anim : barre+dot3(gros) ensemble en premier, puis dot2, dot1, et le
--- nom d'unite en dernier (cascade complete bar -> dots -> nom).
+-- Delais d'entree (cascade bar+dot3 -> dot2 -> dot1 -> nom), en multiples de DOT_STAGGER
 local ENTER_DELAY_DOT = { [3] = 0, [2] = 1, [1] = 2 }
 local ENTER_DELAY_NAME = 3
--- Delais de DEPART (sortie), en multiples de DOT_STAGGER_OUT : LIFO exact de
--- la cascade d'entree -- le nom (arrive en dernier) part en premier, puis
--- dot1, dot2, et enfin dot3+la barre ensemble (derniers arrives, derniers
--- partis).
+-- Delais de sortie : LIFO exact de la cascade d'entree (nom part en premier, bar+dot3 en dernier)
 local LEAVE_DELAY_DOT = { [1] = 1, [2] = 2, [3] = 3 }
 local LEAVE_DELAY_NAME = 0
 local LEAVE_DELAY_BAR = 3
--- Duree totale d'un cycle : le dernier element demarre a 3*stagger et met
--- lui-meme fade_duration a finir (entree et sortie ont chacune leur propre
--- duree/stagger, la sortie etant plus rapide).
+-- Duree totale d'un cycle (dernier element demarre a 3*stagger + sa propre fade_duration)
 local TOTAL_STAGGER_STEPS = 3
 local TOTAL_DURATION     = FADE_DURATION + TOTAL_STAGGER_STEPS * DOT_STAGGER
 local TOTAL_DURATION_OUT = FADE_DURATION_OUT + TOTAL_STAGGER_STEPS * DOT_STAGGER_OUT
 
--- Scale horizontal de la barre : agit UNIQUEMENT sur frame.bgTex/frame.bar
--- (textures/StatusBar enfants ordinaires, jamais protegees -- contrairement a
--- `frame` lui-meme, cree via SecureUnitButtonTemplate). Toujours sur, meme en
--- combat : border/glowFrame suivent automatiquement (ancres relatives a
--- bgTex), et le StatusBar recalcule son propre remplissage proportionnel a
--- sa largeur courante.
---
--- Cote fixe (ancre) choisi pour prolonger le sens du glissement d'arrivee, pas
--- def.dotsLeft : player/pet arrivent en glissant vers la GAUCHE (dir>0, cf.
--- SLIDE_DIR) donc grandissent depuis leur bord DROIT (fixe) vers la gauche --
--- sinon le grandissement (vers la droite par defaut) allait a l'encontre du
--- glissement. target/focus arrivent en glissant vers la droite (dir<0) et
--- grandissent deja correctement depuis leur bord gauche (comportement par defaut).
+-- Scale horizontal de la barre : agit sur frame.bgTex/frame.bar uniquement (jamais protégés, contrairement à frame)
+-- Le cote d'ancrage suit le sens du glissement (dir) pour que grandissement et slide aillent dans le même sens
 local function ApplyBarWidthScale(frame, ratio, dir)
     local fullW = frame._barW
     if not fullW then return end
@@ -963,9 +885,7 @@ local function ApplyBarWidthScale(frame, ratio, dir)
     if frame.bar then frame.bar:SetWidth(w) end
 end
 
--- Remet un dot a son etat de repos (taille finale, decalage nul) -- utilise
--- a la fin de l'animation d'entree et au debut de l'animation de sortie pour
--- ne jamais laisser un dot bloque a mi-animation si les etats s'enchainent vite.
+-- Remet un dot a son etat de repos (taille finale, decalage nul), utilise en fin/debut de cycle d'anim
 local function ResetDotToRest(frame, i, dotSizes)
     local d = frame["dot" .. i]
     if not d then return end
@@ -978,8 +898,7 @@ local function ResetDotToRest(frame, i, dotSizes)
     d:SetAlpha(1)
 end
 
--- Meme principe pour le texte de nom (fade + glissement, pas de scale --
--- FontString n'a pas de SetScale independant du frame parent).
+-- Meme principe pour le nom (fade + glissement, pas de scale : FontString n'a pas de SetScale independant)
 local function ResetNameToRest(frame)
     local n = frame.nameTxt
     if not n or not frame._nameAnchorS then return end
@@ -988,29 +907,47 @@ local function ResetNameToRest(frame)
     n:SetAlpha(1)
 end
 
+-- Anim mise en file (jamais interrompue) : la derniere direction demandee rejoue en fin de cycle
 local function AnimateBar(frame, shouldShow)
     local key = frame._def.key
     local def = frame._def
+
+    if frame._aishAnimBusyDir ~= nil then
+        if frame._aishAnimBusyDir ~= shouldShow then
+            frame._aishAnimQueuedDir = shouldShow
+        else
+            frame._aishAnimQueuedDir = nil
+        end
+        return
+    end
+
     if ubFadeTickers[key] then ubFadeTickers[key]:Cancel(); ubFadeTickers[key] = nil end
     local dir = SLIDE_DIR[key] or 0
     local dotSizes = not def.noDots and GetDotSizes() or nil
     local hasName  = frame.nameTxt ~= nil and frame._nameAnchorS ~= nil
-    -- Visibilité contrôlée exclusivement via SetAlpha() sur la frame elle-même.
-    -- SetAlpha() n'est JAMAIS protégé en combat. Show()/Hide() ne sont plus appelés.
+
+    -- Appelee en fin de cycle (show ou hide) : libere le verrou et rejoue la derniere direction en file
+    local function FinishAndMaybeReplay()
+        frame._aishAnimBusyDir = nil
+        local queued = frame._aishAnimQueuedDir
+        frame._aishAnimQueuedDir = nil
+        if queued ~= nil and queued ~= shouldShow then
+            AnimateBar(frame, queued)
+        end
+    end
+
+    -- Visibilité contrôlée exclusivement via SetAlpha() (jamais protégé en combat) ; Show()/Hide() jamais appelés
     if shouldShow then
         local startA = frame:GetAlpha()
         if startA >= 1 then UpdateBarHealth(frame); return end
+        frame._aishAnimBusyDir = true
         local _t0 = GetTime()
         ubFadeTickers[key] = C_Timer.NewTicker(0.016, function()
             local elapsed = GetTime() - _t0
             local p = math.min(elapsed / FADE_DURATION, 1)
             local eased = EaseOut(p)
             frame:SetAlpha(startA + (1 - startA) * eased)
-            -- ClearAllPoints/SetPoint sur `frame` (SecureUnitButtonTemplate)
-            -- sont des appels PROTEGES -- confirme en jeu (ADDON_ACTION_BLOCKED
-            -- sur AishCoreUnitBar_target:ClearAllPoints() en combat). On saute
-            -- le glissement pendant le combat lockdown ; la barre reste alors a
-            -- sa position de repos (deja correcte) et ne fait que fondre/scaler.
+            -- ClearAllPoints/SetPoint sur `frame` sont protégés en combat : on saute le glissement (fond/scale seuls)
             if not InCombatLockdown() then
                 PositionBarFrame(frame, dir * SLIDE_DISTANCE * (1 - eased))
             end
@@ -1046,24 +983,25 @@ local function AnimateBar(frame, shouldShow)
             if elapsed >= TOTAL_DURATION then
                 ubFadeTickers[key]:Cancel(); ubFadeTickers[key] = nil
                 frame:SetAlpha(1)
-                if not InCombatLockdown() then PositionBarFrame(frame, 0) end
+                -- SetPoint final protégé en combat : si lockdown, on note la barre en attente (rattrapée à PLAYER_REGEN_ENABLED)
+                if InCombatLockdown() then ubPosPending[key] = frame else PositionBarFrame(frame, 0) end
                 ApplyBarWidthScale(frame, 1, dir)
                 if dotSizes then
                     for i = 1, 3 do ResetDotToRest(frame, i, dotSizes) end
                 end
                 if hasName then ResetNameToRest(frame) end
+                FinishAndMaybeReplay()
             end
         end)
         UpdateBarHealth(frame)
     else
         local startA = frame:GetAlpha()
         if startA <= 0 then return end
+        frame._aishAnimBusyDir = false
         local _t0 = GetTime()
         ubFadeTickers[key] = C_Timer.NewTicker(0.016, function()
             local elapsed = GetTime() - _t0
-            -- Cascade de sortie = exact LIFO de la cascade d'entree : le nom
-            -- part en premier (dernier arrive), puis dot1, dot2, et enfin
-            -- dot3+la barre ensemble (premiers arrives, derniers partis).
+            -- Cascade de sortie = LIFO exact de la cascade d'entree (nom part en premier, bar+dot3 en dernier)
             local barDelay = LEAVE_DELAY_BAR * DOT_STAGGER_OUT
             local bp = math.min(math.max(elapsed - barDelay, 0) / FADE_DURATION_OUT, 1)
             local bEased = EaseOut(bp)
@@ -1103,12 +1041,14 @@ local function AnimateBar(frame, shouldShow)
             if elapsed >= TOTAL_DURATION_OUT then
                 ubFadeTickers[key]:Cancel(); ubFadeTickers[key] = nil
                 frame:SetAlpha(0)
-                if not InCombatLockdown() then PositionBarFrame(frame, 0) end
+                -- Meme raisonnement que la branche show : ne pas sauter le snap final si en combat lockdown
+                if InCombatLockdown() then ubPosPending[key] = frame else PositionBarFrame(frame, 0) end
                 ApplyBarWidthScale(frame, 1, dir)
                 if dotSizes then
                     for i = 1, 3 do ResetDotToRest(frame, i, dotSizes) end
                 end
                 if hasName then ResetNameToRest(frame) end
+                FinishAndMaybeReplay()
             end
         end)
     end
@@ -1124,8 +1064,8 @@ function UnitBars.UpdateAllVisibility()
         end
     end
 end
+
 -- Interface publique
----------------------------------------------------------------------------
 function UnitBars.ApplySettings()
     for _, frame in pairs(bars) do
         ApplyBarSettings(frame)
@@ -1133,12 +1073,9 @@ function UnitBars.ApplySettings()
 end
 
 -- Appelé par Skyriding.lua quand le skyriding commence/se termine.
--- Même approche que le véhicule : hide forcé via StateDriver puis restauration.
 function UnitBars.SetSkyridingActive(active)
     if not next(bars) then return end
     ubHiddenForSkyriding = active
-    -- Pas de reset de ubLastVisState : le debounce d'UpdateAllVisibility
-    -- détecte naturellement le changement via ShouldShowBar().
     UnitBars.UpdateAllVisibility()
 end
 
@@ -1148,18 +1085,12 @@ function UnitBars.SetGuiHidden(on)
     UnitBars.UpdateAllVisibility()
 end
 
--- bars est locale a ce fichier, jamais de nom global par barre (contrairement
--- a la plupart des autres modules) : accesseur pour le survol GUI -> lien
--- direct vers la section de reglages (cf. UI/ModuleHoverOverlay.lua).
+-- bars est locale a ce fichier (pas de nom global par barre) : accesseur pour le survol GUI (ModuleHoverOverlay.lua)
 function UnitBars.GetBars()
     return bars
 end
 
--- Etat de visibilite ACTUEL (pas juste la config) de la barre "player" --
--- ubLastVisState est locale a ce fichier. Utilise par HealthCircle.ShouldShow()
--- pour ne jamais s'afficher en double avec la vraie barre de vie du joueur :
--- le cercle hors-combat n'est qu'un rappel minimaliste pour quand cette barre
--- n'est PAS affichee.
+-- Etat de visibilite ACTUEL (pas juste la config) de "player", utilise par HealthCircle pour eviter le doublon
 function UnitBars.IsPlayerBarShown()
     return ubLastVisState["player"] == true
 end
@@ -1213,9 +1144,7 @@ function UnitBars.Create(parent)
     end)
 end
 
----------------------------------------------------------------------------
 -- Événements
----------------------------------------------------------------------------
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterUnitEvent("UNIT_HEALTH",                 "player", "target", "focus", "pet", "targettarget")
 eventFrame:RegisterUnitEvent("UNIT_MAXHEALTH",               "player", "target", "focus", "pet", "targettarget")
@@ -1254,6 +1183,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
     if event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
+        -- Rattraper les snaps de position finale sautes en combat (cf. AnimateBar)
+        if next(ubPosPending) then
+            for k, f in pairs(ubPosPending) do
+                PositionBarFrame(f, 0)
+                ubPosPending[k] = nil
+            end
+        end
         UnitBars.UpdateAllVisibility()   -- le debounce détecte le changement d'état
         if pendingSettingsApply then
             C_Timer.After(0.4, function()
@@ -1310,21 +1246,16 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         for _, f in pairs(bars) do
             ApplyBarSettings(f)
         end
-        -- Retry deferred : UnitHealthMax("player") retourne 0 juste apres un
-        -- reload tant que le serveur n'a pas renvoye les donnees d'unite.
-        -- On reessaie a 0.3s, 0.8s et 2.0s jusqu'a obtenir une valeur valide.
+        -- Retry deferred : UnitHealthMax retourne 0 juste apres un reload tant que le serveur n'a pas repondu
         local retryCount = 0
         local function RetryHealth()
             retryCount = retryCount + 1
             local allValid = true
             for _, f in pairs(bars) do
-                -- UnitHealthMax peut retourner un "secret number" tainté si le timer
-                -- se déclenche juste après une action sur une frame sécurisée.
-                -- On encapsule la comparaison dans pcall pour éviter l'erreur de taint.
+                -- pcall car UnitHealthMax peut retourner un secret number tainté (timer après action sécurisée)
                 local ok, maxIsZero = pcall(function()
                     return UnitExists(f.unit) and UnitHealthMax(f.unit) == 0
                 end)
-                -- Si pcall a échoué (valeur taintée) OU si max == 0 : données invalides, reessayer.
                 if (not ok) or maxIsZero then
                     allValid = false
                 end
@@ -1342,8 +1273,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "PLAYER_TARGET_CHANGED" then
         local f  = bars.target
         local tt = bars.targettarget
-        -- Comme TopTargetBar : ne pas lire UnitHealth ici (tainté après clic secure).
-        -- Le fill est géré par le ticker 0.1s. On met à jour seulement couleur + nom.
+        -- Comme TopTargetBar : ne pas lire UnitHealth ici (tainté après clic secure), le fill vient du ticker 0.1s
         if f  then UpdateBarColor(f);  UpdateBarName(f)  end
         if tt then UpdateBarHealth(tt); UpdateBarColor(tt); UpdateBarName(tt) end
         UnitBars.UpdateAllVisibility()   -- target appear/disappear => réévaluer visibilité
@@ -1370,9 +1300,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
 
-    -- UNIT_HEALTH / UNIT_MAXHEALTH
-    -- Pour target : ne pas lire UnitHealth ici (peut être tainté).
-    -- Le fill de target vient exclusivement du ticker 0.1s (comme TopTargetBar).
+    -- UNIT_HEALTH / UNIT_MAXHEALTH : pour target, fill géré exclusivement par le ticker 0.1s (health tainté)
     local key = UNIT_KEY[arg1]
     if key and key ~= "target" then
         local f = bars[key]
@@ -1384,7 +1312,6 @@ end)
 local function _TickUBTargetHP()
     local tg  = bars.target
     local absorbReversed = (ns.GetCfg("unitBars") or {}).absorbReversed
-    -- Calculateur WithAbsorbs uniquement en mode normal (pas en miroir)
     -- Calculateur WithAbsorbs uniquement en mode normal (pas en miroir)
     if tg.hpCalc and not absorbReversed then
         pcall(UnitGetDetailedHealPrediction, "target", nil, tg.hpCalc)

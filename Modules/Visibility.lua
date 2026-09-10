@@ -1,46 +1,14 @@
--- Modules/Visibility.lua : reglages de transparence pour des elements tiers
--- (ElvUI...) que l'addon ne cree pas lui-meme mais peut ajuster via SetAlpha
--- (jamais bloque par le lockdown combat, contrairement a Show/Hide).
+-- Modules/Visibility.lua : reglages de transparence d'elements tiers (ElvUI) via SetAlpha, non bloque par le lockdown combat.
 local addonName, ns = ...
 
 local Visibility = {}
 ns.Modules.Visibility = Visibility
 
-------------------------------------------------------------------------
--- Zone de buffs ElvUI : ElvUI ne propose pas de reglage d'opacite hors
--- combat nativement. On essaie les noms de frame connus ; silencieux si
--- ElvUI n'est pas installe ou si son nom de frame differe (meme approche
--- defensive que ApplyElvUITargetAlpha dans TopTargetBar.lua).
---
--- Detection du survol -- HISTORIQUE (pour ne pas retenter les memes pistes) :
--- 1) MouseIsOver(frame)/IsMouseOver() -> secret boolean, plante (patch 12.0).
--- 2) ns.IsFrameMouseOver(f), sondage geometrique via GetRect/GetCursorPosition
---    -> ne plante pas mais ne detecte plus jamais rien : le conteneur ElvUI
---    (CreateFrame('AuraContainer', ..., 'DisableUntrustedLayoutScriptsTemplate'))
---    a sa geometrie TOUJOURS secrete (confirme via /aishdebug buffs :
---    issecretvalue() = true sur les 4 valeurs de f:GetRect(), meme hors combat).
--- 3) Frame a nous ancre sur le conteneur via SetAllPoints(f), puis sonde de
---    CE frame -> toujours rien : confirme via /aishdebug buffs que
---    catcher:GetRect() renvoie les memes valeurs (secretes par propagation).
---    Le statut "secret" suit le graphe d'ancrage, pas seulement le widget
---    d'origine -- impossible d'obtenir une geometrie lisible pour quoi que
---    ce soit qui derive, meme indirectement, de ce conteneur.
--- 4) (actuel) Evenements natifs OnEnter/OnLeave. Le moteur declenche ces
---    scripts sans jamais exposer de valeur secrete a Lua (on ne LIT rien,
---    on reagit juste a un evenement) -- aucun rapport avec le mecanisme de
---    Secret Values. On force EnableMouse(true) sur le conteneur (l'etat
---    mouse-enabled n'est pas protege par le combat lockdown) pour etre sûr
---    qu'il recoive lui-meme OnEnter/OnLeave, meme si visuellement les icones
---    (ses enfants) sont les elements normalement survoles pour le tooltip.
---    Un delai de grace apres OnLeave absorbe le "saut de focus" entre le
---    conteneur, une icone et le tooltip natif d'ElvUI qui s'affiche par-
---    dessus au survol (cause du clignotement observe avec un OnLeave direct
---    sans delai).
-------------------------------------------------------------------------
+-- Zone de buffs ElvUI : ajustée via noms de frame connus, pas de réglage d'opacité natif hors combat.
+-- Survol détecté via OnEnter/OnLeave (GetRect/MouseIsOver échouent) ; délai de grâce pour éviter le clignotement.
 local ELVUI_BUFFS_FRAME_CANDIDATES = { "ElvuiPlayerBuffs", "ElvUIPlayerBuffs" }
 
--- Vitesse de la transition (ease exponentiel, meme principe que
--- StatusBarInterpolation.ExponentialEaseOut) : plus haut = plus rapide.
+-- Vitesse de transition (ease exponentiel, comme StatusBarInterpolation.ExponentialEaseOut) : plus haut = plus rapide.
 local FADE_SPEED    = 8
 local TICK_INTERVAL = 0.02
 local HOVER_GRACE   = 0.15  -- delai avant de considerer le survol termine
@@ -113,10 +81,7 @@ ticker:SetScript("OnUpdate", function(self, elapsed)
   end
 end)
 
--- Rien a initialiser explicitement : le ticker OnUpdate lit ns.GetCfg("visibility")
--- a chaque frame et s'adapte immediatement (activation/desactivation, sliders
--- modifies en live). Si la fonctionnalite est desactivee, on remet les frames
--- connus a alpha=1 (comportement natif ElvUI) une bonne fois.
+-- Rien à initialiser (le ticker relit ns.GetCfg() à chaque frame) ; si désactivé, on remet alpha=1.
 function Visibility.ApplySettings()
   local cfg = ns.GetCfg("visibility")
   if cfg and cfg.elvuiBuffsEnabled == false then
@@ -127,11 +92,7 @@ function Visibility.ApplySettings()
   end
 end
 
-------------------------------------------------------------------------
--- Diagnostic : /aishdebug buffs. On ne devine plus -- on affiche les
--- valeurs reelles (tostring() marche meme sur une valeur secrete, cf.
--- DumpPBCharges dans Debug.lua) pour voir precisement ou ca coince.
-------------------------------------------------------------------------
+-- Diagnostic : /aishdebug buffs (tostring() fonctionne meme sur une valeur secrete).
 function Visibility.Debug()
   local P = function(s) print("|cff00ccff[Buffs]|r " .. s) end
 

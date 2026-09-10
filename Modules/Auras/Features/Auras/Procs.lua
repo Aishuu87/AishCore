@@ -1,6 +1,4 @@
--- AishUIAura/Features/Auras/Procs.lua
--- Layout Fury (sous le portrait du joueur)
-------------------------------------------------------------------------
+-- Procs.lua : layout Fury (sous le portrait du joueur)
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 local Inst = {}
@@ -8,8 +6,7 @@ ns.RegisterRender("icons", Inst)
 local CreateFrame, math, pcall = CreateFrame, math, pcall
 local TEXCOORD = 0.07
 
--- Forward declaration : HideRowModels est defini plus bas mais reference par
--- CreateFuryRow pour le callback _aishHideCleanup.
+-- Forward declaration : reference par CreateFuryRow pour _aishHideCleanup
 local HideRowModels
 
 local function Dims()
@@ -17,11 +14,7 @@ local function Dims()
     return c.iconW or 26, c.iconH or 26, c.barW or 26, c.barH or 3, c.gap or 4, c.rowGap or 2
 end
 
--- SPARK ajoute pour l'apercu ("icons" n'en avait jamais eu dans l'ancien
--- pipeline). Meme pattern que Cooldowns.lua::CreateSpark. sparkSameAsBar :
--- repli sur ns.barColor (couleur statique par defaut de la barre a la
--- creation) -- pas de suivi dynamique par-aura ici, meme limitation deja
--- acceptee sur les sparks des 3 autres destinations en mode apercu.
+-- Spark d'apercu, meme pattern que Cooldowns.lua::CreateSpark ; sparkSameAsBar reprend ns.barColor
 local function CreateSpark(bar, cfg)
     if not cfg.sparkEnabled then return nil end
     local s = bar:CreateTexture(nil, "OVERLAY", nil, 6)
@@ -60,10 +53,7 @@ local function CreateFuryRow(cont, i, cfg)
     local row = CreateFrame("Frame", "AishIFR"..i, cont); row:SetSize(iw, rowH)
     local barPos = cfg.barPosition or "BOTTOM"
     local ib = CreateFrame("Button", nil, row); ib:SetSize(iw, ih)
-    -- Insets négatifs : élargit légèrement la zone de survol au-delà du cadre
-    -- visuel pour absorber les écarts d'arrondi pixel entre ib et le Cooldown
-    -- superposé (cd), qui pouvaient laisser une fine bande (1-2px) sur un bord
-    -- comme seule zone réellement réactive au tooltip.
+    -- Insets négatifs : élargit la zone de survol pour éviter une fine bande morte au tooltip
     ib:SetHitRectInsets(-1, -1, -1, -1)
     ib:SetScript("OnEnter", ns.AuraIconOnEnter)
     ib:SetScript("OnLeave", ns.AuraIconOnLeave)
@@ -123,9 +113,7 @@ local function CreateFuryRow(cont, i, cfg)
         bg:SetColorTexture(bgR, bgG, bgB, type(cfg.barBgAlpha) == "number" and cfg.barBgAlpha or 1)
         wr._bar = bar  -- utilise par ShowFill2D pour ancrer la texture sur bar:GetStatusBarTexture()
 
-        -- SPARK : "front" (sur la StatusBar, au-dessus du fill) ou "back"
-        -- (sur le wrapper, en-dessous) -- meme convention que les 3 autres
-        -- destinations.
+        -- "front" (sur la StatusBar) ou "back" (sur le wrapper) -- meme convention que les autres destinations
         local sparkParent = (cfg.sparkLayer ~= "back") and bar or wr
         spark = CreateSpark(sparkParent, cfg)
         wr._spark = spark
@@ -134,23 +122,14 @@ local function CreateFuryRow(cont, i, cfg)
         barWrap = wr
     end
     row:Hide(); row.iconBtn = ib; row.icon = icon; row.iconCD = cd
-    -- row.spark (pas seulement wr._spark2D) : Animation.lua::AnimateRender
-    -- lit row.spark DIRECTEMENT pour la mise a jour de position par frame
-    -- (meme convention que Cooldowns.lua CreateVanguardRow/CreateBannerRow,
-    -- single-bar) -- sans ce champ le spark reste cree mais jamais anime/
-    -- positionne, donc invisible/fige.
+    -- row.spark : Animation.lua::AnimateRender lit ce champ directement pour la position par frame
     row.bar = bar; row.wrap = barWrap; row.spark = spark
     row._reverse = (cfg.barReverseFill == true)
-    -- Callback de cleanup FX3D appele par DeferHideRow juste avant row:Hide().
-    -- Cache les PlayerModels qui ne suivent pas toujours Hide() de leur parent
-    -- (quirk Blizzard). Necessaire au decochage d'un sort en cours de tracking.
+    -- Cleanup FX3D avant row:Hide() : les PlayerModels ne suivent pas toujours le Hide() du parent
     row._aishHideCleanup = function() HideRowModels(row) end
     return row
 end
 
-------------------------------------------------------------------------
--- 3D MODEL APPLY
-------------------------------------------------------------------------
 -- Scratch tables réutilisées pour ShowXxxModel (évite alloc par aura par scan si fx3d on)
 local _iconModelCfg = {}
 local _barModelCfg = {}
@@ -158,8 +137,7 @@ local _sparkModelCfg = {}
 local _fill2DCfg = {}
 local _overlayCfg = {}
 
--- Helpers hoist pour HideRowModels
--- Note : on NE cache PAS les Fill 2D ici (voir Cooldowns.lua pour la raison)
+-- Helpers hoist pour HideRowModels. Ne cache pas les Fill 2D (voir Cooldowns.lua)
 local function _HideBar(fx, wrap) fx:Hide(wrap, "bar") end
 local function _HideSpark(fx, wrap) fx:Hide(wrap, "spark") end
 local function _HideIcon(fx, ib) fx:Hide(ib, "icon") end
@@ -251,11 +229,8 @@ HideRowModels = function(row)
     end
 end
 
-------------------------------------------------------------------------
--- INIT
-------------------------------------------------------------------------
 function Inst:Init()
-    -- Cleanup old frames
+    -- Cleanup ancien container (cas reload/refresh)
     local old = ns.renderFrames.icons
     if old then
         if old.rows then for _, r in ipairs(old.rows) do r:Hide(); r:SetParent(nil) end end
@@ -318,18 +293,7 @@ function Inst:Init()
     ns.UpdateRenderFade("icons")
 end
 
-------------------------------------------------------------------------
--- UPDATE : rendu REEL supprime, remplace par le systeme AddAuraGroup natif
--- partage (AuraTrackerContainer.lua, ns.EnsureIconsNativeGrid/
--- RepositionIconsNativeGrid) -- flow anime natif Blizzard, fiable pour toute
--- aura, glow uniforme. Faire tourner les deux rendus en parallele causait
--- une superposition permanente.
---
--- La logique ORIGINALE est conservee telle quelle, UNIQUEMENT pour l'apercu
--- en direct dans le menu "Auras & Procs" -- cf. commentaire equivalent dans
--- Buffs.lua pour le detail complet. Le rendu reel est 100% natif. Inst:Init()
--- reste inchangee.
-------------------------------------------------------------------------
+-- Rendu reel remplace par le systeme AddAuraGroup natif ; cette fonction sert juste au preview du menu
 function Inst:Update(auras)
     local previewActive = ns._previewBars and (ns._previewMode == "all" or ns._previewMode == "icons")
     if not previewActive then
@@ -385,11 +349,7 @@ function Inst:Update(auras)
         if a.durObj then
             pcall(ns._SetCDFromDurObj, row.iconCD, a.durObj)
         elseif a._isPreview then
-            -- Les fausses entrees de preview n'ont jamais de durObj (secret,
-            -- n'existe pas pour une aura fictive) -- sans ce repli, le
-            -- Cooldown ne serait jamais lie, donc son texte de duree natif
-            -- resterait vide/fige, peu importe timerIconEnabled.
-            -- Cycle 12s synthetique, meme convention que Animation.lua::AnimateBar.
+            -- Les entrees de preview n'ont pas de durObj : cycle 12s synthetique pour lier le Cooldown
             pcall(row.iconCD.SetCooldown, row.iconCD, GetTime(), 12)
         end
         row.iconCD:SetDrawSwipe(cfg.swipeEnabled == true); row.iconCD:SetDrawEdge(cfg.swipeEnabled == true)
@@ -409,8 +369,7 @@ function Inst:Update(auras)
         local glIdx = a.glowIdx; local glColor = a.glowColor or a.spellColor; local glAlpha = a.glowAlpha
         local glScale = a.glowScale or 1.0
         local hasGlow = a.spellGlow and glIdx and glIdx > 1
-        -- Override render RETIRE, desactive via `false and` -- cf.
-        -- AuraTrackerContainer.lua::ApplySpellGlow.
+        -- Override render desactive via `false and`, cf. AuraTrackerContainer.lua::ApplySpellGlow
         if false and cfg.glowOverrideIdx and cfg.glowOverrideIdx > 1 then
             glIdx = cfg.glowOverrideIdx; hasGlow = true
             if cfg.glowOverrideR ~= nil then glColor = {cfg.glowOverrideR, cfg.glowOverrideG or 0.5, cfg.glowOverrideB or 0.5} end
@@ -438,17 +397,12 @@ function Inst:Update(auras)
         end
     end
 
-    -- SetAlpha(1) explicite (pas ns.UpdateRenderFade) : cette fonction route
-    -- desormais "icons" vers le conteneur NATIF (rendu reel), pas vers ce
-    -- conteneur Lua de preview -- l'appeler ici ne touchait donc jamais
-    -- l'alpha de CE conteneur, qui restait bloque a 0 (cf. lecon Buffs.lua).
+    -- SetAlpha(1) explicite : ns.UpdateRenderFade route vers le conteneur natif, pas celui-ci
     gfx.container:Show()
     gfx.container:SetAlpha(1)
 end
 
-------------------------------------------------------------------------
--- Debug : /rcicons — état des rows/icônes du render "icons" (survol/tooltip)
-------------------------------------------------------------------------
+-- Debug : /rcicons, état des rows/icônes du render "icons" (survol/tooltip)
 SLASH_AISHICONSDBG1 = "/rcicons"
 SlashCmdList["AISHICONSDBG"] = function()
     local function p(msg) DEFAULT_CHAT_FRAME:AddMessage("|cff00ff88[RCIcons]|r " .. tostring(msg)) end

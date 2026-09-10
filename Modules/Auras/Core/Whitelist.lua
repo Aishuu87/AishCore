@@ -1,16 +1,10 @@
 -- AishUIAura/Core/Whitelist.lua
--- Constructeur de whitelist : filtre les sorts découverts par destination
--- (debuffs/cooldowns/procs/equipment) et met en cache le set actif pour accès rapide
--- dans les boucles chaudes du scan.
-------------------------------------------------------------------------
+-- Filtre les sorts decouverts par destination (debuffs/cooldowns/procs/equipment), cache le set actif.
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 
 local tinsert, tsort = table.insert, table.sort
 local pcall = pcall
 
-------------------------------------------------------------------------
--- WHITELIST (multi-destination : debuffs/cooldowns/procs)
-------------------------------------------------------------------------
 function ns.BuildWhitelist()
     -- Auto-configure le sort du cercle central avant chaque rebuild
     if ns.AutoConfigCenterArc then pcall(ns.AutoConfigCenterArc) end
@@ -62,11 +56,25 @@ function ns.BuildWhitelist()
     -- auto-decouverte (jamais vue en jeu), rien a fusionner tant qu'elle
     -- n'existe pas dans discoveredSpells -- limitation inherente, pas de
     -- moyen combat-safe de deviner un spellID jamais observe.
+    --
+    -- BUG CORRIGE (confirme en jeu) : regrouper par NOM SEUL fusionnait
+    -- aussi des sorts totalement SANS RAPPORT qui partagent juste le meme
+    -- libelle generique (ex: un debuff de donjon nomme pareil qu'une
+    -- capacite du joueur deja cochee pour Barres de cercle/Totems) -- le
+    -- debuff ennemi heritait alors des destinations de l'autre et
+    -- apparaissait dans des barres ou il n'a jamais ete assigne, avec
+    -- exactement la meme duree (meme instance d'aura reelle, juste vue par
+    -- 2 entrees dont les destinations viennent d'etre fusionnees). Cle
+    -- composite (nom + source) : les vraies variantes de seuil (Precurseur
+    -- du Vide et consorts) partagent TOUJOURS le meme source ("debuff" des
+    -- deux cotes, "buff" des deux cotes, etc.) -- un debuff ennemi et une
+    -- capacite du joueur, jamais.
     local nameGroups = {}
     for id, info in pairs(spells) do
         if info.name and not info._invalid then
-            local g = nameGroups[info.name]
-            if not g then g = {}; nameGroups[info.name] = g end
+            local key = info.name .. "\0" .. tostring(info.source)
+            local g = nameGroups[key]
+            if not g then g = {}; nameGroups[key] = g end
             tinsert(g, id)
         end
     end
@@ -120,21 +128,27 @@ function ns.BuildWhitelist()
 
     local wl = {}
     for id, info in pairs(spells) do
-        if (info.enabled or linkedDest[id]) and not info._invalid then wl[id] = info end
+        if (info.enabled or linkedDest[id]) and not info._invalid and not info._adminDeleted then wl[id] = info end
     end
-    for id, info in pairs(linkedFallbackInfo) do wl[id] = info end
+    for id, info in pairs(linkedFallbackInfo) do
+        if not info._adminDeleted then wl[id] = info end
+    end
     ns.activeWhitelist = next(wl) and wl or nil
 
     -- Whitelists par destination
-    local byDest = {iconlist={}, freebars={}, circlebars={}, icons={}, centerArc={}}
-    local orderByDest = {iconlist={}, freebars={}, circlebars={}, icons={}, centerArc={}}
+    local byDest = {iconlist={}, freebars={}, circlebars={}, icons={}, centerArc={}, totems={}}
+    local orderByDest = {iconlist={}, freebars={}, circlebars={}, icons={}, centerArc={}, totems={}}
     -- Union plate de TOUTES les destinations : utilisée comme early-filter dans
     -- CollectAuras. Si un spellID n'est dans aucune destination, on skip
     -- l'allocation de MakeEntry + ses pcalls coûteux. Gain proportionnel au
     -- ratio (auras totales / auras whitelistées) qui en raid peut atteindre 10:1.
+    -- Mode admin ("Auras a tracker") : un sort marque "supprime" (croix, cf.
+    -- Tactics.lua) reste dans discoveredSpells (annulable) mais ne doit plus
+    -- JAMAIS rendre quoi que ce soit tant qu'il l'est -- exclu ici comme les
+    -- entrees _invalid.
     local any = {}
     for id, info in pairs(spells) do
-        if not info._invalid and info.destinations then
+        if not info._invalid and not info._adminDeleted and info.destinations then
             if info.enabled then
                 for dest, active in pairs(info.destinations) do
                     if active and byDest[dest] then
@@ -156,7 +170,7 @@ function ns.BuildWhitelist()
     end
     for id, info in pairs(linkedFallbackInfo) do
         local ld = linkedDest[id]
-        if ld and info.destinations then
+        if ld and info.destinations and not info._adminDeleted then
             for dest, active in pairs(ld) do
                 if active and byDest[dest] then
                     byDest[dest][id] = info
@@ -222,24 +236,44 @@ function ns.BuildWhitelist()
     if ns.EnsureIconsNativeGrid then pcall(ns.EnsureIconsNativeGrid) end
     if ns.RepositionIconsNativeGrid then pcall(ns.RepositionIconsNativeGrid) end
 
+    -- TEST/PROTOTYPE : meme grille native, mais SetUnit("target")+"HARMFUL"
+    -- pour les sorts info.source=="debuff" -- cf. AuraTrackerContainer.lua,
+    -- section "GRILLE NATIVE FLOW CIBLE". Rangee separee, empilee sous la
+    -- rangee joueur ci-dessus.
+    if ns.EnsureIconsNativeGridTarget then pcall(ns.EnsureIconsNativeGridTarget) end
+    if ns.RepositionIconsNativeGridTarget then pcall(ns.RepositionIconsNativeGridTarget) end
+
+    -- Grille MANUELLE pour la destination dediee "Totems" (Core/Totems.lua) --
+    -- pas d'AddAuraGroup possible (un totem n'est pas une vraie aura), meme
+    -- disposition/reglages que "Free Bars" (icone+barre, cf. Defaults.lua).
+    if ns.EnsureTotemsGrid then pcall(ns.EnsureTotemsGrid) end
+    if ns.RepositionTotemsGrid then pcall(ns.RepositionTotemsGrid) end
+
     -- Grille native pour la destination GUI "Circle Bars" (Buffs.lua, cle
     -- interne freebars) : meme methodologie que "icons". Barres de duree
     -- combat-safe SANS pin CDM, aucune icone (SetDurationBar seul).
     if ns.EnsureCircleBarsNativeGrid then pcall(ns.EnsureCircleBarsNativeGrid) end
     if ns.RepositionCircleBarsNativeGrid then pcall(ns.RepositionCircleBarsNativeGrid) end
 
+    if ns.EnsureCircleBarsNativeGridTarget then pcall(ns.EnsureCircleBarsNativeGridTarget) end
+    if ns.RepositionCircleBarsNativeGridTarget then pcall(ns.RepositionCircleBarsNativeGridTarget) end
+
     -- Grille native pour la destination GUI "Free Bars" (Cooldowns.lua, cle
     -- interne circlebars) : meme methodologie. Icone+cooldown+stacks+glow+
-    -- barre(s) de duree combat-safe SANS pin CDM, joueur uniquement (debuffs
-    -- cible differes, cf. plan de migration).
+    -- barre(s) de duree combat-safe SANS pin CDM.
     if ns.EnsureFreeBarsNativeGrid then pcall(ns.EnsureFreeBarsNativeGrid) end
     if ns.RepositionFreeBarsNativeGrid then pcall(ns.RepositionFreeBarsNativeGrid) end
 
+    if ns.EnsureFreeBarsNativeGridTarget then pcall(ns.EnsureFreeBarsNativeGridTarget) end
+    if ns.RepositionFreeBarsNativeGridTarget then pcall(ns.RepositionFreeBarsNativeGridTarget) end
+
     -- Grille native pour la destination GUI "Liste d'icones" (Debuffs.lua,
     -- cle interne iconlist) : meme methodologie. Icone+cooldown+stacks+glow+
-    -- barre(s) de duree combat-safe SANS pin CDM, joueur uniquement (debuffs
-    -- cible differes, cf. plan de migration).
+    -- barre(s) de duree combat-safe SANS pin CDM.
     if ns.EnsureIconListNativeGrid then pcall(ns.EnsureIconListNativeGrid) end
     if ns.RepositionIconListNativeGrid then pcall(ns.RepositionIconListNativeGrid) end
+
+    if ns.EnsureIconListNativeGridTarget then pcall(ns.EnsureIconListNativeGridTarget) end
+    if ns.RepositionIconListNativeGridTarget then pcall(ns.RepositionIconListNativeGridTarget) end
 end
 

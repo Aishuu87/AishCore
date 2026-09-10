@@ -1,43 +1,23 @@
--- AishUIAura/Features/Auras/Buffs.lua
--- Layout "Buff autour du cercle" : 2 barres miroir SANS icone, positionnees
--- a l'emplacement standard du Resource Circle (centre de l'ecran, leg. en bas).
--- L'utilisateur peut deplacer librement via Alt+clic gauche.
---
--- Auto-placement vertical par ordre d'apparition :
---   1ere row = centre (y=0)
---   2e row   = +espacement (au-dessus)
---   3e row   = -espacement (en-dessous)
---   4e row   = +2*espacement
---   5e row   = -2*espacement
---   ... (alternance haut/bas auto)
---
--- L'animation des barres est gerée par Core/Animation.lua (AnimateRender)
--- qui detecte automatiquement les rows ayant barL+barR et anime les deux.
-------------------------------------------------------------------------
+-- Buffs.lua : layout "Buff autour du cercle", 2 barres miroir sans icone, deplacable via Alt+clic
+-- Placement vertical auto par ordre d'apparition (alternance haut/bas depuis le centre)
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 local Buffs = {}
 ns.RegisterRender("freebars", Buffs)
 local CreateFrame, math, pcall = CreateFrame, math, pcall
 
-------------------------------------------------------------------------
--- DIMENSIONS (lit ns.db.freebars)
-------------------------------------------------------------------------
+-- Dimensions (lit ns.db.freebars)
 local function Dims()
     local c = ns.db and ns.db.freebars or ns.Defaults.freebars
     return c.barW or 60, c.barH or 2,
            c.gap or 12, c.rowGap or 6
 end
 
-------------------------------------------------------------------------
--- BARRE (StatusBar avec wrap pour fond + sparks)
--- Inspire de Debuffs.lua MakeBarWrap mais simplifie (pas d'icone-related).
-------------------------------------------------------------------------
+-- Barre (StatusBar + wrap pour fond/sparks), inspire de Debuffs.lua MakeBarWrap simplifie
 local function MakeBarWrap(parent, w, h, rev, texKey)
     local cfg = ns.db and ns.db.freebars or ns.Defaults.freebars
     local wr = CreateFrame("Frame", nil, parent)
-    -- PixelUtil.SetSize : aligne sur la grille pixel pour eviter le sub-pixel rendering
-    -- (cause des epaisseurs inegales entre barres a barH=2). Fallback SetSize si PixelUtil indispo.
+    -- PixelUtil.SetSize : aligne sur la grille pixel (evite epaisseurs inegales a barH=2)
     if PixelUtil and PixelUtil.SetSize then
         PixelUtil.SetSize(wr, w, h)
     else
@@ -66,13 +46,7 @@ local function MakeBarWrap(parent, w, h, rev, texKey)
     return wr, bar
 end
 
-------------------------------------------------------------------------
--- SPARK (la lueur a la pointe de remplissage de la barre)
--- Pattern bit-exact de Debuffs.lua MakeSpark : layer OVERLAY:7, couleur classe,
--- override user, gradient, desaturation auto.
--- L'ancrage et l'animation (suivi de la pointe de remplissage) sont gérés
--- par Core/Animation.lua AnimateOne (lignes 696-708).
-------------------------------------------------------------------------
+-- Spark (lueur en pointe de remplissage), pattern de Debuffs.lua MakeSpark ; ancrage/anim via Core/Animation.lua
 local function MakeSpark(parent)
     local cfg = ns.db and ns.db.freebars or ns.Defaults.freebars
     if not cfg.sparkEnabled then return nil end
@@ -87,11 +61,7 @@ local function MakeSpark(parent)
     local r, g, b = ns.sparkColor[1], ns.sparkColor[2], ns.sparkColor[3]
     local userOverride = cfg.sparkColorR ~= nil
     if userOverride then r, g, b = cfg.sparkColorR, cfg.sparkColorG or 0.5, cfg.sparkColorB or 0.5 end
-    -- CRITICAL : quand l'utilisateur force une couleur (via le color picker ou le gradient),
-    -- il faut désaturer l'atlas pour que SetVertexColor donne vraiment la couleur demandée.
-    -- Sans ça, SetVertexColor(1,0,0) sur le honor spark (jaune-doré natif) donne du rouge
-    -- très sombre car les canaux sont multipliés avec la teinte native de l'atlas.
-    -- On désature seulement si override actif pour garder le look natif par défaut.
+    -- Desature si override actif : sinon SetVertexColor se multiplie avec la teinte native de l'atlas
     if userOverride or cfg.sparkGradient then
         pcall(function() s:SetDesaturated(true) end)
     end
@@ -112,17 +82,11 @@ local function MakeSpark(parent)
     return s
 end
 
-------------------------------------------------------------------------
--- ROW : 2 barres miroir, pas d'icone au milieu.
--- La row est centree sur le container : barL a gauche, barR a droite,
--- avec un gap de 'gap' de chaque cote du centre (espace pour le cercle).
-------------------------------------------------------------------------
+-- Row : 2 barres miroir centrees sur le container, gap de chaque cote pour le cercle
 local function CreateBuffRow(cont, i)
     local bw, bh, gp = Dims()
     local cfg = ns.db and ns.db.freebars or ns.Defaults.freebars
     local row = CreateFrame("Frame", "AishBuffsRow" .. i, cont)
-    -- Largeur totale = barre gauche + 2*gap (espace cercle) + barre droite
-    -- PixelUtil pour aligner sur la grille pixel (epaisseur uniforme entre rows)
     if PixelUtil and PixelUtil.SetSize then
         PixelUtil.SetSize(row, bw * 2 + gp * 2, bh)
     else
@@ -149,23 +113,13 @@ local function CreateBuffRow(cont, i)
     local sR = MakeSpark(wR)
     wR._spark2D = sR  -- pour ShowSparkModel : ancrage du FX3D Spark sous le 2D
 
-    -- Duree (texte) : freebars n'a pas d'icone, donc pas de widget Cooldown existant a
-    -- reutiliser (contrairement a icons/circlebars/iconlist) -- on en cree
-    -- un DEDIE, purement pour heberger le texte de countdown NATIF Blizzard
-    -- (jamais de swipe/edge visible), positionne relatif au CONTENEUR DE
-    -- BARRE (row) plutot qu'a une icone, cf. ns._StyleCountdownFS. Le texte
-    -- reste rempli par Blizzard cote C++ (jamais de lecture de valeur
-    -- secrete) une fois liee via auraButton:SetDurationCooldown (en PLUS de
-    -- SetDurationBar sur les 2 barres miroir -- des slots de liaison
-    -- independants, meme bouton).
+    -- Widget Cooldown dedie (freebars n'a pas d'icone) pour heberger le countdown natif Blizzard
     local timerCD = CreateFrame("Cooldown", nil, row, "CooldownFrameTemplate")
-    timerCD:SetAllPoints(row) -- pas de taille 1x1 (BUG CORRIGE), cf. AuraTrackerContainer.lua
+    timerCD:SetAllPoints(row) -- pas de taille 1x1, cf. AuraTrackerContainer.lua
     timerCD:SetDrawSwipe(false); timerCD:SetDrawEdge(false); timerCD:SetDrawBling(false)
     timerCD:EnableMouse(false)
     row._timerCD = timerCD
-    -- L'ancien FontString manuel (jamais mis a jour -- ns.UpdateTimersForRender
-    -- n'a plus aucun appelant depuis la migration native, code mort) reste ici
-    -- inerte, gardee pour compat si un ancien appelant existait encore.
+    -- Ancien FontString manuel, inutilise depuis la migration native, garde pour compat
     local dt = row:CreateFontString(nil, "OVERLAY", nil, 7)
     dt:Hide()
     row._durText = dt
@@ -175,10 +129,7 @@ local function CreateBuffRow(cont, i)
     row.barL = bL; row.barR = bR
     row.wrapL = wL; row.wrapR = wR
     row.sparkL = sL; row.sparkR = sR
-    -- Callback de cleanup FX3D appele par DeferHideRow juste avant row:Hide().
-    -- Cache les PlayerModels qui ne suivent pas toujours Hide() de leur parent
-    -- (quirk Blizzard). Necessaire au decochage d'un sort en cours de tracking.
-    -- Buffs n'a pas d'icone donc pas de HideIconModel.
+    -- Cleanup FX3D avant row:Hide() : les PlayerModels ne suivent pas toujours le Hide() du parent
     row._aishHideCleanup = function()
         if not ns.SpellFX then return end
         if wL then
@@ -197,29 +148,17 @@ local function CreateBuffRow(cont, i)
     return row
 end
 
-------------------------------------------------------------------------
--- 3D MODEL APPLY (Step 4) — version Buffs : Bar + Spark seulement (pas d'icone)
-------------------------------------------------------------------------
--- Pattern bit-exact de Debuffs.ApplyBarModels mais sans la branche icon
--- (Buffs n'a pas d'icone, layout 2 barres miroir simplifie) ni l'overlay anime.
---
--- Le FX3D s'applique sur les 2 wraps (gauche/droite) avec la MEME aura :
--- chaque wrap a son propre `_fx3dBar` et `_fx3dSpark`, donc le rendu est
--- symetrique et chaque cote suit son propre remplissage. Aucune
--- synchronisation specifique necessaire.
+-- 3D Model Apply : Bar + Spark (pas d'icone), pattern de Debuffs.ApplyBarModels, applique aux 2 wraps
 local _barModelCfgB = {}
 local _sparkModelCfgB = {}
 local _fill2DCfgB = {}
 
 local function ApplyBarModels(barWrap, aura)
     if not barWrap or not ns.db or not ns.EffectsActive() or not ns.SpellFX then return end
-    -- Cache : si la meme aura est re-appliquee sur ce wrap, pas besoin de
-    -- redo Show. Evite le cycle "Show -> rien faire -> Show -> ..." a chaque
-    -- scan qui spammait avant. Le spellID est utilise comme cle stable.
+    -- Cache par spellID : evite de re-Show la meme aura a chaque scan
     local spellID = aura.spellID
     local prevID = barWrap._fxAuraID
-    -- Mode FOND (front) / REMPLISSAGE 3D (back) : PlayerModel 3D
-    -- Mode REMPLISSAGE 2D (mid) : Texture 2D qui se tronque avec la barre
+    -- front/back = PlayerModel 3D, mid = texture 2D qui se tronque avec la barre
     local mode = aura.barModelMode or "front"
     if (mode == "front" or mode == "back") and aura.barModelID and aura.barModelID ~= 0 then
         if barWrap._fx2dFill then ns.SpellFX:HideFill2D(barWrap._fx2dFill) end
@@ -281,9 +220,7 @@ local function ApplyBarModels(barWrap, aura)
     end
 end
 
-------------------------------------------------------------------------
--- INIT : cree le container + N rows + ancre sur UIParent (deplaçable via Alt+drag)
-------------------------------------------------------------------------
+-- Init : cree le container + N rows + ancre sur UIParent (deplacable via Alt+drag)
 function Buffs:Init()
     local cfg = ns.db and ns.db.freebars or ns.Defaults.freebars
     if not ns.db or (not ns.db.freebarsEnabled) then return end
@@ -308,8 +245,7 @@ function Buffs:Init()
     cont:SetMovable(true); cont:SetClampedToScreen(true); _addon.EnableMouseOnlyOnAlt(cont)
     cont:SetPropagateMouseClicks(true)  -- click-through par défaut (caméra, sélection, etc.)
 
-    -- Position par defaut : centre de l'ecran, leg. en bas (zone Resource Circle).
-    -- L'utilisateur peut deplacer via Alt+drag, la position sauvee dans cfg.x/cfg.y.
+    -- Position par defaut : centre ecran, leg. en bas. Deplacable via Alt+drag (sauve dans cfg.x/y)
     cont:ClearAllPoints()
     local x, y = cfg.x or 0, cfg.y or -100
     cont:SetPoint("CENTER", UIParent, "CENTER", x, y)
@@ -319,12 +255,7 @@ function Buffs:Init()
     local rowStep = bh + rg
     for i = 1, maxBars do
         local row = CreateBuffRow(cont, i)
-        -- Calcul de la position Y : alternance auto haut/bas
-        --   i=1 : 0           (centre)
-        --   i=2 : +1*rowStep  (au-dessus)
-        --   i=3 : -1*rowStep  (en-dessous)
-        --   i=4 : +2*rowStep
-        --   i=5 : -2*rowStep
+        -- Alternance auto haut/bas : i=1 centre, pairs au-dessus, impairs en-dessous
         local yOff
         if i == 1 then
             yOff = 0
@@ -376,13 +307,7 @@ function Buffs:Init()
     ns.UpdateRenderFade("freebars")
 end
 
-------------------------------------------------------------------------
--- ANIMATION D'APPARITION : delegue au helper generique ns.StartPopAnim
--- (cf. Core/Animation.lua). Les parametres sont lus depuis ns.db.freebars :
---   - popEnabled, popDuration, popEaseStrength, popAlphaFade
--- L'ancrage des wraps (wrapL=RIGHT au centre, wrapR=LEFT au centre) fait que
--- le deploiement se fait du centre vers l'exterieur (effet miroir naturel).
-------------------------------------------------------------------------
+-- Animation d'apparition : delegue a ns.StartPopAnim (Core/Animation.lua), deploiement centre->exterieur
 local function StartBuffPopAnim(row, targetW)
     local cfg = ns.db and ns.db.freebars or ns.Defaults.freebars
     if ns.StartPopAnim then
@@ -390,25 +315,7 @@ local function StartBuffPopAnim(row, targetW)
     end
 end
 
-------------------------------------------------------------------------
--- UPDATE : rendu REEL supprime (2026-08-16, meme methodologie que
--- Procs.lua/"icons") -- remplace par le systeme AddAuraGroup natif partage
--- (AuraTrackerContainer.lua, ns.EnsureCircleBarsNativeGrid/
--- RepositionCircleBarsNativeGrid) : barres de duree combat-safe pilotees
--- directement par Blizzard, sans jamais dependre du pin CDM.
---
--- PREVIEW CONSERVE : l'apercu en direct dans le menu "Auras & Procs" ne
--- marchait plus autrement. Scan:Run()
--- continue d'appeler CE Update() avec de fausses entrees (BuildPreviewEntries,
--- cf. Scan.lua) quand le menu Circle Bars est ouvert -- le systeme natif ne
--- peut PAS afficher de fausses auras (il ne lit que les vraies auras du
--- joueur via AuraContainer). Sans logique de secours ici, l'apercu restait
--- silencieusement invisible. On restaure donc la logique ORIGINALE
--- (geometrie/couleur, inchangee) mais UNIQUEMENT quand un apercu de CETTE
--- destination est actif -- sinon on cache comme avant (le rendu reel est
--- 100% natif). Buffs:Init() reste inchangee (cont/rows partagent encore
--- Dims()/MakeBarWrap utilises ailleurs).
-------------------------------------------------------------------------
+-- Update : rendu reel remplace par le systeme AddAuraGroup natif ; ici sert juste au preview du menu
 function Buffs:Update(auras)
     local previewActive = ns._previewBars and (ns._previewMode == "all" or ns._previewMode == "freebars")
     if not previewActive then
@@ -454,10 +361,7 @@ function Buffs:Update(auras)
             if not wasShown then
                 StartBuffPopAnim(row, targetW)
             end
-            -- Texte de duree (2026-08-16, AJOUTE) : cf. commentaire CreateBuffRow --
-            -- widget Cooldown dedie, jamais de lecture de valeur secrete, juste
-            -- restyle du FontString natif Blizzard. Cycle 12s synthetique pour
-            -- le mode preview (aucune vraie donnee de duree sur une fausse entree).
+            -- Texte de duree : widget Cooldown dedie, cycle 12s synthetique en mode preview
             if row._timerCD then
                 if a._isPreview then
                     pcall(row._timerCD.SetCooldown, row._timerCD, GetTime(), 12)

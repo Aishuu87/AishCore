@@ -1,123 +1,12 @@
--- AishUIAura/Data/Presets.lua
--- Presets par specialisation : configuration pre-etablie de sorts pour un nouvel
--- utilisateur. Chaque preset est un ENSEMBLE DE REGLES qui s'applique sur les
--- sorts DEJA DECOUVERTS par le Cooldown Manager de Blizzard — jamais de creation
--- de sorts, jamais de contournement du CDM, donc aucun risque de taint.
---
--- ARCHITECTURE :
---   - Le CDM Blizzard decouvre les sorts en jouant (inchange)
---   - Les sorts apparaissent dans ns.db.discoveredSpells[specKey]
---   - L'utilisateur applique un preset via Profiles menu
---   - Le preset cherche les sorts dans discoveredSpells par NOM (pas par spellID,
---     car les noms sont plus stables entre versions et supportent le multilingue)
---   - Chaque sort trouve recoit la configuration du preset (enabled, destinations,
---     priority, color, glow)
---   - Les sorts du preset non trouves sont ignores silencieusement (talent non pris,
---     sort pas encore decouvert, etc.)
---
--- FORMAT D'UN PRESET :
---   ns.Presets["DRUID_FERAL"] = {
---       label = "Druide Feral",        -- Affiche dans le dropdown
---       desc  = "Saignements + CDs",   -- Description courte sous le dropdown
---       rules = {
---           {
---               names = {"Griffure", "Rake"},  -- Noms possibles (FR, EN, alias)
---               source = "debuff",              -- "debuff" | "buff" | "enhancement"
---               priority = 1,                   -- 1 = plus haute priorite
---               destinations = { debuffs=true, cooldowns=false, procs=false },
---               color = {0.95, 0.35, 0.25},    -- optionnel
---               glow = false,                   -- optionnel, true pour gros CDs
---           },
---           -- ... autres regles
---       }
---   }
---
--- CLES DE SPEC : format "CLASS_SPEC" (majuscules), voir ns.SPEC_MAP dans Defaults.lua
-------------------------------------------------------------------------
+-- Presets.lua : config pre-etablie de sorts par spec, appliquee aux sorts deja decouverts par le CDM Blizzard
+-- Format : ns.Presets["CLASS_SPEC"] = { label, desc, rules = { {names, source, priority, destinations, color, glow}, ... } }
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 
 ns.Presets = {}
+-- Presets par spec a remplir au fil du temps (une entree par CLASS_SPEC)
 
-------------------------------------------------------------------------
--- PRESETS PAR SPEC — a remplir au fil du temps, en testant chaque spec en jeu
---
--- Druide :
---   ns.Presets["DRUID_BALANCE"]  = { ... }  -- Equilibre
---   ns.Presets["DRUID_FERAL"]    = { ... }  -- Feral
---   ns.Presets["DRUID_GUARDIAN"] = { ... }  -- Gardien
---   ns.Presets["DRUID_RESTO"]    = { ... }  -- Restauration
---
--- Guerrier :
---   ns.Presets["WARRIOR_ARMS"]       = { ... }  -- Armes
---   ns.Presets["WARRIOR_FURY"]       = { ... }  -- Fureur
---   ns.Presets["WARRIOR_PROTECTION"] = { ... }  -- Protection
---
--- Voleur :
---   ns.Presets["ROGUE_ASSASSINATION"] = { ... }  -- Assassinat
---   ns.Presets["ROGUE_OUTLAW"]        = { ... }  -- Hors-la-loi
---   ns.Presets["ROGUE_SUBTLETY"]      = { ... }  -- Finesse
---
--- Chevalier de la mort :
---   ns.Presets["DEATHKNIGHT_BLOOD"]  = { ... }  -- Sang
---   ns.Presets["DEATHKNIGHT_FROST"]  = { ... }  -- Givre
---   ns.Presets["DEATHKNIGHT_UNHOLY"] = { ... }  -- Impie
---
--- Chasseur :
---   ns.Presets["HUNTER_BEASTMASTERY"] = { ... }  -- Maitrise animale
---   ns.Presets["HUNTER_MARKSMANSHIP"] = { ... }  -- Precision
---   ns.Presets["HUNTER_SURVIVAL"]     = { ... }  -- Survie
---
--- Mage :
---   ns.Presets["MAGE_ARCANE"] = { ... }  -- Arcane
---   ns.Presets["MAGE_FIRE"]   = { ... }  -- Feu
---   ns.Presets["MAGE_FROST"]  = { ... }  -- Givre
---
--- Paladin :
---   ns.Presets["PALADIN_HOLY"]        = { ... }  -- Sacre
---   ns.Presets["PALADIN_PROTECTION"]  = { ... }  -- Protection
---   ns.Presets["PALADIN_RETRIBUTION"] = { ... }  -- Vindicte
---
--- Demoniste :
---   ns.Presets["WARLOCK_AFFLICTION"]  = { ... }  -- Affliction
---   ns.Presets["WARLOCK_DEMONOLOGY"]  = { ... }  -- Demonologie
---   ns.Presets["WARLOCK_DESTRUCTION"] = { ... }  -- Destruction
---
--- Pretre :
---   ns.Presets["PRIEST_DISCIPLINE"] = { ... }  -- Discipline
---   ns.Presets["PRIEST_HOLY"]       = { ... }  -- Sacre
---   ns.Presets["PRIEST_SHADOW"]     = { ... }  -- Ombre
---
--- Chaman :
---   ns.Presets["SHAMAN_ELEMENTAL"]   = { ... }  -- Elementaire
---   ns.Presets["SHAMAN_ENHANCEMENT"] = { ... }  -- Amelioration
---   ns.Presets["SHAMAN_RESTORATION"] = { ... }  -- Restauration
---
--- Moine :
---   ns.Presets["MONK_BREWMASTER"] = { ... }  -- Maitre brasseur
---   ns.Presets["MONK_WINDWALKER"] = { ... }  -- Marche-vent
---   ns.Presets["MONK_MISTWEAVER"] = { ... }  -- Tisse-brume
---
--- Chasseur de demons :
---   ns.Presets["DEMONHUNTER_HAVOC"]     = { ... }  -- Devastation
---   ns.Presets["DEMONHUNTER_VENGEANCE"] = { ... }  -- Vengeance
---
--- Evocateur :
---   ns.Presets["EVOKER_DEVASTATION"]  = { ... }  -- Devastation
---   ns.Presets["EVOKER_PRESERVATION"] = { ... }  -- Preservation
---   ns.Presets["EVOKER_AUGMENTATION"] = { ... }  -- Augmentation
-------------------------------------------------------------------------
-
-
-------------------------------------------------------------------------
--- API PUBLIQUE
-------------------------------------------------------------------------
-
--- Retourne la liste des presets disponibles pour la SPEC ACTIVE du joueur.
--- Un seul preset max par spec, filtre strictement sur la spec active (pas la classe).
--- Quand le joueur change de spec, la liste change automatiquement.
---
--- Returns: table { { key, label, desc }, ... } — souvent 0 ou 1 element
+-- Liste des presets pour la spec active (1 max par spec, filtre sur la spec pas la classe)
 function ns.GetAvailablePresets()
     local list = {}
     local specKey = nil
@@ -138,21 +27,8 @@ function ns.GetAvailablePresets()
     return list
 end
 
--- Applique un preset aux sorts deja decouverts dans la spec active.
--- Ne CREE aucun sort. Ne TOUCHE pas aux sorts deja configures par l'utilisateur
--- si mode = "merge". En mode "replace", reset la config des sorts non-equipment.
---
--- Matching : par NOM de sort (info.name), en testant tous les alias de chaque regle.
--- Les sorts du preset non trouves dans discoveredSpells sont ignores silencieusement.
---
--- Arguments:
---   presetKey : string, clef au format "CLASS_SPEC"
---   mode      : "merge" (garde config existante) | "replace" (ecrase non-equipment)
---
--- Returns: (applied_count, error_msg, skipped_names)
---   applied_count : nombre de sorts configures
---   error_msg     : string si erreur, nil sinon
---   skipped_names : table des noms du preset non trouves (pour feedback UX)
+-- Applique un preset aux sorts deja decouverts (matching par nom, alias). mode: "merge" | "replace"
+-- Returns: applied_count, error_msg, skipped_names
 function ns.ApplyPreset(presetKey, mode)
     local preset = ns.Presets[presetKey]
     if not preset then return 0, string.format(L["AURASDATA_PRESET_ERR_NOT_FOUND"], tostring(presetKey)), {} end
@@ -162,9 +38,7 @@ function ns.ApplyPreset(presetKey, mode)
 
     mode = mode or "merge"
 
-    -- Mode replace : desactive tous les sorts sauf equipment (source via Providers)
-    -- On garde les sorts en DB pour ne pas perdre la decouverte CDM ; l'utilisateur
-    -- peut toujours les recocher manuellement dans Tactics si besoin.
+    -- Mode replace : desactive tous les sorts sauf equipment, sans perdre la decouverte CDM
     if mode == "replace" then
         for sid, si in pairs(spells) do
             if si.source ~= "equipment" then

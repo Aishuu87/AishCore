@@ -1,11 +1,9 @@
 -- AishUIAura/Core/Config.lua
--- SOURCE UNIQUE pour TOUS les noms, thème, listes, constantes
--- Police système = WoW NATIF. SharedMedia = dropdown uniquement.
-------------------------------------------------------------------------
+-- Source unique pour tous les noms, theme, listes, constantes. Police systeme = WoW natif, SharedMedia en dropdown uniquement.
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 ns.ADDON_VERSION = "0.0.0"
 
--- Partage des utilitaires du namespace parent (définis dans Core.lua d'AishCore)
+-- Partage des utilitaires du namespace parent (definis dans Core.lua d'AishCore)
 ns.DeepCopy     = ns.DeepCopy     or _addon.DeepCopy
 ns.MergeDefaults = ns.MergeDefaults or _addon.MergeDefaults
 ns.FONT_LIST    = ns.FONT_LIST    or _addon.FONT_LIST
@@ -15,12 +13,9 @@ ns.CreateSlugRing       = ns.CreateSlugRing       or _addon.CreateSlugRing
 ns.ApplyTextOutlineStyle = ns.ApplyTextOutlineStyle or _addon.ApplyTextOutlineStyle
 ns.SetSlugRingText      = ns.SetSlugRingText      or _addon.SetSlugRingText
 
-------------------------------------------------------------------------
--- SAFE FONT  (essaie le path, fallback FRIZQT si échec)
-------------------------------------------------------------------------
 local SAFE_FONT = "Fonts\\FRIZQT__.TTF"
 
--- Wrapper sécurisé pour SetFont (JAMAIS de crash)
+-- Wrapper securise pour SetFont (jamais de crash)
 function ns.ApplyFont(fontString, path, size, flags)
     path = path or SAFE_FONT
     size = size or 11
@@ -32,22 +27,14 @@ function ns.ApplyFont(fontString, path, size, flags)
     end
 end
 
-------------------------------------------------------------------------
--- MEDIA PATHS  (WoW natif UNIQUEMENT — jamais SharedMedia en dur)
-------------------------------------------------------------------------
+-- Media paths (WoW natif uniquement, jamais SharedMedia en dur)
 ns.Media = {
     font      = SAFE_FONT,  -- Friz Quadrata
     sparkTex  = "Interface\\CastingBar\\UI-CastingBar-Spark",
     fallbackBar = "Interface\\TargetingFrame\\UI-StatusBar",
 }
 
-------------------------------------------------------------------------
--- LAYOUT NAMES
-------------------------------------------------------------------------
-
--- Noms des dispositions en français (labels UI).
--- Les clés internes (center_mirror, side_large, etc.) restent en anglais-descriptif
--- pour la compatibilité Lua et la lisibilité du code.
+-- Noms des dispositions en francais (labels UI) ; les cles internes restent en anglais-descriptif pour le code.
 ns.LAYOUT_NAMES = {
     CENTER_MIRROR        = "Icône centrée",
     RESOURCE_CIRCLE = "Buff autour du cercle",
@@ -97,10 +84,7 @@ ns.LAYOUT_ICON_FALLBACKS = {
     GRID_FREE      = "ability_rogue_sprint",
 }
 
-------------------------------------------------------------------------
--- DESTINATION BADGES  [L][C][I][B]
--- L = Liste d'icônes | C = Barres de cercle | I = Icones | B = Barres libres
-------------------------------------------------------------------------
+-- Destination badges [L][C][I][B] : L = Liste d'icones, C = Barres de cercle, I = Icones, B = Barres libres
 ns.DEST_BADGES = {
     L = { key = "iconlist",   label = "L" },
     C = { key = "freebars",   label = "C" },
@@ -108,11 +92,7 @@ ns.DEST_BADGES = {
     B = { key = "circlebars", label = "B" },
 }
 
-------------------------------------------------------------------------
--- THEME — AISHUI BLACK & GOLD
--- Pure dark surfaces, clean off-white text. Class color reserved for
--- active states only. Gold tone reserved for ornamental dots/spines.
-------------------------------------------------------------------------
+-- Theme AishUI black & gold : surfaces sombres, texte off-white, couleur de classe reservee aux etats actifs.
 ns.THEME = {
     -- Surfaces (noir quasi pur avec une légère teinte chaude)
     bg            = { 0.030, 0.030, 0.035, 0.97 },
@@ -147,9 +127,7 @@ ns.THEME = {
     rowHover      = { 1, 1, 1, 0.04 },
 }
 
-------------------------------------------------------------------------
--- GLOW DEFINITIONS  (1 Aucun + 67 boucle + 34 proc = 102 total)
-------------------------------------------------------------------------
+-- Glow definitions (1 Aucun + 67 boucle + 34 proc = 102 total)
 ns.GLOW_DEFS = {
     { name = "Aucun" },
     -- BOUCLE (2-36)
@@ -345,9 +323,7 @@ ns.GLOW_DEFS = {
       texCoord={0.00781250,0.50781250,0.27734375,0.52734375}, blendMode="ADD", fromAlpha=0.0, toAlpha=0.85, duration=0.28 },
 }
 
-------------------------------------------------------------------------
--- BAR TEXTURES  (~45)
-------------------------------------------------------------------------
+-- Bar textures (~45)
 ns.BAR_TEXTURES = {
     { value = "aish_grad",   text = "Aish Gradient",     path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient" },
     { value = "aish_grad2",  text = "Aish Gradient 2",   path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient2" },
@@ -397,14 +373,10 @@ ns.BAR_TEXTURES = {
     { value = "wisps",      text = "Wisps",             lsm = "Wisps" },
 }
 
-------------------------------------------------------------------------
--- CASCADE URGENCY (2 niveaux en SECONDES)
-------------------------------------------------------------------------
+-- Cascade urgency (2 niveaux en secondes)
 ns.URGENCY = { MEDIUM = 5, CRITICAL = 2 }
 
-------------------------------------------------------------------------
--- RESOLVE TEXTURE VIA LSM
-------------------------------------------------------------------------
+-- Resout une texture via LSM
 function ns.ResolveLSMTexture(entry)
     if entry.lsm then
         local ok, LSM = pcall(function()
@@ -428,9 +400,6 @@ function ns.ResolveBarTexFromKey(texKey)
     return def and ns.ResolveLSMTexture(def) or ns.Media.fallbackBar
 end
 
-------------------------------------------------------------------------
--- UTILITY
-------------------------------------------------------------------------
 function ns.DeepCopy(src)
     if type(src) ~= "table" then return src end
     local copy = {}
@@ -450,33 +419,16 @@ function ns.MergeDefaults(saved, defaults)
     return saved
 end
 
-------------------------------------------------------------------------
--- RENDER REGISTRY
-------------------------------------------------------------------------
 ns.RenderRegistry = {}
 function ns.RegisterRender(id, renderTable)
     ns.RenderRegistry[id] = renderTable
 end
 
-------------------------------------------------------------------------
--- TOOLTIP au survol des icônes buff/debuff (Debuffs/Cooldowns/Procs).
--- Partagé entre les 3 renders pour éviter de dupliquer la logique 3 fois.
--- Option dédiée aux auras (ns.db.tooltipAltCombatOnly, section Tactics du
--- menu Auras) — INDÉPENDANTE de l'équivalent priorityBar.tooltipAltCombatOnly
--- utilisé par la barre de priorité (les deux réglages étaient partagés à
--- l'origine, séparés sur demande pour pouvoir les activer/désactiver
--- indépendamment). En combat, le tooltip n'apparaît que tant qu'ALT est
--- maintenu (évite de saturer l'écran de tooltips en plein combat). Hors
--- combat, le tooltip s'affiche normalement au survol. MODIFIER_STATE_CHANGED
--- + PLAYER_REGEN_DISABLED/ENABLED permettent de montrer/cacher le tooltip EN
--- TEMPS RÉEL pendant qu'on survole une icône (appuyer/relâcher ALT sans
--- bouger la souris doit réagir immédiatement).
-------------------------------------------------------------------------
--- GameTooltip:SetUnitAura(unit, index, filter) attend un INDEX de position
--- dans la liste d'auras, pas un auraInstanceID (d'où un tooltip vide : l'API
--- cherchait la Nième aura au lieu de l'aura ciblée). Les instanceID ont leurs
--- propres méthodes dédiées — même pattern déjà utilisé et fonctionnel dans
--- Modules/TargetAuras.lua (Aura_OnEnter).
+-- Tooltip au survol des icones buff/debuff, partage entre les 3 renders. En combat, n'apparait que tant
+-- qu'ALT est maintenu (option ns.db.tooltipAltCombatOnly, independante de priorityBar.tooltipAltCombatOnly) ;
+-- hors combat, affichage normal au survol.
+-- GameTooltip:SetUnitAura attend un index de position, pas un auraInstanceID (d'ou un tooltip vide sinon) :
+-- les instanceID ont leurs propres methodes dediees, meme pattern que Modules/TargetAuras.lua.
 local function _SetUnitAuraTooltip(unit, instID, filter)
     if filter == "HELPFUL" then
         GameTooltip:SetUnitBuffByAuraInstanceID(unit, instID)

@@ -1,7 +1,4 @@
--- AishUIAura/Features/Equipment/Providers.lua
--- War Gear : bijoux (trinkets), raciales (24 races), items on-use
--- Fournit la liste des slots trackables pour le render Equipment
-------------------------------------------------------------------------
+-- Providers.lua : War Gear, bijoux/raciales/items on-use, fournit les slots trackables pour Equipment
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 ns.Providers = ns.Providers or {}
 local ARS = ns.Providers
@@ -282,10 +279,7 @@ end
 local _providerIcon3DCfg = {}
 
 local function UpdateIcon(f, slot, sd)
-    -- CRITICAL anti-clignotement : on ne ré-apppelle SetTexture que si la valeur change.
-    -- Cette fonction est appelée à chaque tick (toutes les 200ms-1s), et re-setter la
-    -- texture à la même valeur peut causer un flash d'1 frame dans Blizzard (recharge
-    -- interne). Pareil pour ShowGlow qui redémarre l'animation si appelé en boucle.
+    -- Anti-clignotement : ne ré-appelle SetTexture que si la valeur change (evite un flash)
     local newTex = GetSlotTexture(slot)
     if f._lastTex ~= newTex then
         f._icon:SetTexture(newTex)
@@ -412,10 +406,7 @@ end
 
 local tickerFrame = nil
 
--- Ticker adaptatif :
--- - Mode actif (200ms = 5fps) : au moins 1 slot en cooldown → animation fluide du swipe
--- - Mode idle (1000ms = 1fps) : aucun slot en CD → on continue de polling pour détecter le démarrage d'un nouveau CD
--- L'event SPELL_UPDATE_COOLDOWN appelle UpdateAll directement quand un CD démarre, donc le passage idle → actif est instantané.
+-- Ticker adaptatif : 5fps si un slot est en CD (swipe fluide), sinon 1fps en idle
 local function GetTickInterval()
     return (activeCDCount > 0) and 0.2 or 1.0
 end

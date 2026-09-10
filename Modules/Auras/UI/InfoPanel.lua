@@ -1,18 +1,6 @@
 -- AishUIAura/UI/InfoPanel.lua
--- ============================================================================
--- Panneau d'info contextuelle à droite du panel de config.
---
--- Affiche pour la section active :
---   • Une image preview (si section.preview est défini dans Categories.lua)
---     sinon un cartouche visuel avec le label de la section en gros (fallback)
---   • Le nom de la section en titre
---   • La description (section.desc) en texte dim
---   • Un tag "À venir" discret si la section est un placeholder AishCore
---
--- Usage :
---   local info = ns.InfoPanel.Create(parent, width)
---   info:ShowFor(catId, secId)
--- ============================================================================
+-- Panneau d'info contextuelle (preview, titre, description) à droite du panel de config.
+-- Usage : local info = ns.InfoPanel.Create(parent, width); info:ShowFor(catId, secId)
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
@@ -20,12 +8,6 @@ ns.InfoPanel = ns.InfoPanel or {}
 
 local CreateFrame = CreateFrame
 
--- ============================================================================
--- Création du panneau
--- ============================================================================
--- @param parent Frame parente (le panel principal)
--- @param width  Largeur fixe du panneau (typiquement 240)
--- @return frame La frame InfoPanel (à positionner avec SetPoint)
 function ns.InfoPanel.Create(parent, width)
     local Theme = ns.THEME
     local FONT = ns.Media.font
@@ -33,9 +15,7 @@ function ns.InfoPanel.Create(parent, width)
 
     local f = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     f:SetWidth(width or 240)
-    -- Fond + bordure transparents : quand on est child d'une fenêtre flottante
-    -- (previewFrame) qui a déjà son propre cadre, on ne veut pas doubler les
-    -- bordures. Le fond du parent fait le boulot.
+    -- Fond/bordure transparents (évite de doubler le cadre du parent flottant)
     f:SetBackdrop({
         bgFile   = "Interface\\Buttons\\WHITE8x8",
         edgeFile = "Interface\\Buttons\\WHITE8x8",
@@ -45,9 +25,7 @@ function ns.InfoPanel.Create(parent, width)
     f:SetBackdropColor(0, 0, 0, 0)         -- transparent
     f:SetBackdropBorderColor(0, 0, 0, 0)   -- transparent
 
-    -- Pas d'en-tête orné au-dessus du cadre preview.
-    -- Les boutons i/x sont ajoutés par SettingsPanel dans le wrapper en haut-droite,
-    -- donc on laisse juste une marge de 40px en haut pour ne pas les chevaucher.
+    -- Marge de 40px en haut pour ne pas chevaucher les boutons i/x ajoutés par SettingsPanel
 
     -- Zone preview : cadre carré en haut qui accueille une image ou un fallback
     local preview = CreateFrame("Frame", nil, f)
@@ -115,20 +93,17 @@ function ns.InfoPanel.Create(parent, width)
     f._title         = title
     f._desc          = desc
 
-    -- ------------------------------------------------------------------------
     -- Mise à jour du contenu selon la section active
-    -- ------------------------------------------------------------------------
     function f:ShowFor(catId, secId)
         local section = ns.GetSection and ns.GetSection(catId, secId)
         if not section then
             self:Hide()
             return
         end
-        -- Ne PAS faire Show() si la preview parent est en mode collapsed
-        -- (autrement le contenu de l'InfoPanel ressort chaque fois qu'on change de section)
+        -- Ne pas Show() si la preview parent est collapsed
         local previewParent = self:GetParent()
         if previewParent and previewParent._collapsed then
-            return   -- on laisse l'InfoPanel caché, on ne touche pas son contenu
+            return
         end
         self:Show()
 
@@ -139,14 +114,11 @@ function ns.InfoPanel.Create(parent, width)
             self._fallback:SetText("")
         else
             self._previewImg:Hide()
-            -- Fallback neutre : "Aperçu à venir" au lieu du label de la section.
-            -- Évite le doublon avec le vrai titre de section affiché juste en dessous.
+            -- Fallback neutre, évite le doublon avec le titre affiché en dessous
             self._fallback:SetText(L["AURASMENU_INFOPANEL_PREVIEW_COMING_SOON"])
         end
 
-        -- Tag "À venir" supprimé de la preview : l'info est déjà dans le panneau
-        -- central (placeholder "À venir / Cadres d'unités / Cette section sera..."),
-        -- pas besoin de la répéter à 30 cm à droite.
+        -- Tag "À venir" déjà présent dans le panneau central, pas besoin de le répéter ici
         self._comingSoonTag:SetText("")
 
         -- Titre + description

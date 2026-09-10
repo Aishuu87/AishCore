@@ -1,10 +1,4 @@
--- AishUIAura/Data/AishUITemplates.lua
--- 25 presets uniques de barres animees avec noms thematiques.
--- Chaque preset definit des dimensions (bar + spark). Les couleurs
--- ne sont JAMAIS imposees par les presets : AishUIAura gere les
--- couleurs separement par sort.
--- Pas de filtre par classe : l'utilisateur parcourt la liste par style visuel.
-------------------------------------------------------------------------
+-- AishUITemplates.lua : presets de barres (dimensions + spark), couleurs gerees separement par sort
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 

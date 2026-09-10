@@ -1,13 +1,9 @@
 -- AishUIAura/Core/MissingBuffsData.lua
--- Donnees "Buffs manquants" : table de reference des buffs de classe/groupe
--- a detecter, avec leurs variantes et conditions d'application.
+-- Donnees "Buffs manquants" : table de reference des buffs de classe/groupe a detecter, variantes et conditions.
 -- Table de donnees pure, aucune dependance Ace3/LibEditMode/LibDualSpec.
-------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 
-------------------------------------------------------------------------
 -- Libelles affiches sous l'icone d'alerte (cf. MissingBuffs.lua)
-------------------------------------------------------------------------
 ns.MISSING_TEXT = {
     MISSING          = "MANQUANT",
     WRONG            = "INCORRECT",
@@ -19,9 +15,7 @@ ns.MISSING_TEXT = {
     APPLY_LETHAL     = "APPLIQUER POISON",
     APPLY_NONLETHAL  = "APPLIQUER POISON",
     REAPPLY          = "RÉAPPLIQUER",
-    -- Rappel "bientot expire" (2026-08-30, distinct de REAPPLY -- deja
-    -- present mais jamais consomme) : affiche quand un buff suivi est encore
-    -- actif mais approche de sa fin (cf. GetSelfBuffExpiringSoon).
+    -- Affiche quand un buff suivi est encore actif mais approche de sa fin (cf. GetSelfBuffExpiringSoon).
     EXPIRING_SOON    = "RAFRAICHIR",
     BUFF_ALLY        = "BUFFER UN ALLIÉ",
     USE_FLASK        = "BOIRE UN FLACON",
@@ -29,13 +23,8 @@ ns.MISSING_TEXT = {
     USE_WEAPON_BUFF  = "ENCHANTER L'ARME",
 }
 
-------------------------------------------------------------------------
--- Masques de forme pour l'icone d'alerte (cf. UI/Menus/MissingBuffs.lua et
--- Core/MissingBuffs.lua:RefreshAppearance). value=1 "Defaut" = pas de
--- masque (carre actuel) ; les autres utilisent soit un atlas Blizzard,
--- soit notre texture degrade "feather" generee sur mesure (PNG RGBA,
--- dégradé alpha radial, cf. Media/UI/IconFeatherMask.png).
-------------------------------------------------------------------------
+-- Masques de forme pour l'icone d'alerte (cf. UI/Menus/MissingBuffs.lua, MissingBuffs.lua:RefreshAppearance).
+-- value=1 "Defaut" = pas de masque ; les autres utilisent un atlas Blizzard ou notre texture degrade "feather".
 ns.MISSING_BUFF_ICON_MASKS = {
     { value = 1, text = "Par defaut (carre)" },
     { value = 2, text = "Cercle", atlas = "CircleMaskScalable" },
@@ -44,8 +33,7 @@ ns.MISSING_BUFF_ICON_MASKS = {
     { value = 5, text = "Feather grunge", texture = "Interface\\AddOns\\AishCore\\Media\\UI\\IconGrungeMask.png" },
 }
 
-------------------------------------------------------------------------
--- BUFFS DE CLASSE : le sort que LE JOUEUR peut fournir au groupe/raid.
+-- Buffs de classe : le sort que le joueur peut fournir au groupe/raid.
 -- Champs :
 --   spellId               spellID de l'aura a detecter
 --   spellbookId            spellID a verifier via IsSpellKnown si different de spellId
@@ -70,17 +58,17 @@ ns.MISSING_BUFF_ICON_MASKS = {
 --   ignoreDuration            ignore la notification "duree bientot expiree"
 --   text                      cle de ns.MISSING_TEXT affichee
 --   default                   marque le choix par defaut dans un groupe exclusif (stance/aura/...)
---   showRaidCount             affiche "10/14" (couverture allies a portee) a la
---                             place du texte "text" -- reserve aux VRAIS buffs
---                             de raid un-par-personne (Cri de guerre, Marque de
---                             la nature sauvage, Benediction du Bronze,
---                             Intellect sublime, Fortitude, Fureur des cieux) --
---                             PAS aux buffs a instance unique (onlyOnePerGroup),
---                             ou le compte n'aurait pas de sens.
-------------------------------------------------------------------------
+--   showRaidCount             affiche "10/14" (couverture allies a portee) au lieu du texte, reserve aux
+--                             vrais buffs de raid un-par-personne, pas aux buffs a instance unique
 ns.MISSING_CLASS_BUFFS = {
     DRUID = {
-        { spellId = 1126,   settingsId = 31, learned = true, whitelist = true, showRaidCount = true, text = "MISSING" },
+        -- extraBuffSpellIds 432661 : variante appliquee sur un allie PNJ
+        -- (compagnon de Delve/donjon suivi type Valeera) plutot que 1126 --
+        -- confirme en jeu via /aishbuffdebug 1126 (dump brut des auras de
+        -- party1 : 1252003, 432661 -- jamais 1126 -- alors que le joueur,
+        -- lui, a bien 1126 dans ses propres auras).
+        { spellId = 1126,   settingsId = 31, learned = true, whitelist = true, showRaidCount = true, text = "MISSING",
+          extraBuffSpellIds = { 432661 } },
         { spellId = 474750, settingsId = 34, onlyOnePerGroup = true, ignoreSelf = true,
           overrideIgnoreAllies = true, playerCanHaveMultiples = true, clickingUsesTarget = true,
           text = "BUFF_ALLY" },
@@ -146,18 +134,12 @@ ns.MISSING_CLASS_BUFFS = {
     -- ROGUE : poisons geres a part (ns.MISSING_POISONS), pas un buff de groupe.
 }
 
-------------------------------------------------------------------------
--- ENTREES SPECIALES "shapeshift" (chemin prioritaire, ignoreAsBuff=true —
--- exclues de la boucle generique ci-dessus, verifiees en premier)
-------------------------------------------------------------------------
+-- Entrees speciales "shapeshift" (chemin prioritaire, ignoreAsBuff=true, verifiees en premier)
 ns.MISSING_BALANCE_MOONKIN = { spellId = 24858, ignoreAsBuff = true, onlySelf = true, specIds = { 102 }, text = "USE_STANCE" }
 ns.MISSING_SHADOW_FORM     = { spellId = 232698, ignoreAsBuff = true, ignoreDuration = true, onlySelf = true,
                                 specIds = { 258 }, extraBuffSpellIds = { 194249 }, text = "USE_STANCE" }
 
-------------------------------------------------------------------------
--- GROUPES MUTUELLEMENT EXCLUSIFS (soi uniquement) : stances/auras/attunements.
--- `default` = choix suppose si l'utilisateur n'a pas surcharge dans les reglages.
-------------------------------------------------------------------------
+-- Groupes mutuellement exclusifs (soi uniquement) : stances/auras/attunements. `default` = choix suppose.
 ns.MISSING_WARRIOR_STANCES = {
     { spellId = 386164, name = "Battle",     text = "USE_STANCE" },
     { spellId = 386196, name = "Berserker",  text = "USE_STANCE" },
@@ -177,9 +159,7 @@ ns.MISSING_EVOKER_ATTUNEMENTS = {
     { spellId = 403265, name = "Bronze", text = "USE_ATTUNEMENT" },
 }
 
-------------------------------------------------------------------------
--- FAMILIERS (Chasseur / Demoniste) : verification "presence + vivant" (soi uniquement)
-------------------------------------------------------------------------
+-- Familiers (Chasseur/Demoniste) : verification "presence + vivant" (soi uniquement)
 ns.MISSING_HUNTER_PET_MISSING = 883  -- Call Pet 1
 ns.MISSING_HUNTER_PET_DEAD    = 982
 ns.MISSING_HUNTER_ALL_PETS = {
@@ -202,10 +182,12 @@ ns.MISSING_WARLOCK_ALL_PETS = {
 ns.MISSING_UNHOLY_GHOUL_MISSING  = 46584
 ns.MISSING_FROST_ELEMENTAL_MISSING = 31687
 
-------------------------------------------------------------------------
--- POISONS VOLEUR : lethal / non-lethal, un des deux groupes doit etre actif
--- (soi uniquement). `default` = choix suppose sans talent detecte.
-------------------------------------------------------------------------
+-- Ruee ardente (Demoniste) : cas "buff manquant" inverse (buff qu'on oublie parfois de retirer, pas un
+-- qu'on cherche a avoir). N'apparait pas dans ns.MISSING_CLASS_BUFFS, sert de spellID de reference partage
+-- entre MissingBuffs.lua (IsBurningRushActive) et SpellEffects.lua (ScanMissingBuffCombos).
+ns.MISSING_WARLOCK_BURNING_RUSH = 111400
+
+-- Poisons voleur : lethal/non-lethal, un des deux groupes doit etre actif (soi uniquement).
 ns.MISSING_ROGUE_POISONS = {
     nonlethal = {
         { spellId = 381637, settingsId = 25, name = "Atrophic" },
@@ -223,20 +205,13 @@ ns.MISSING_ROGUE_POISONS = {
 ns.MISSING_ROGUE_DRAGON_TEMPERED_SPELL   = 381801  -- deux poisons de meme letalite actifs en meme temps
 ns.MISSING_ROGUE_IMPROVED_WOUND_SPELL    = 319066  -- bascule le lethal par defaut vers Wound
 
-------------------------------------------------------------------------
--- SPEC -> classe mapping additionnel (talents necessitant un check de spe,
--- reutilise ns.SPEC_MAP de Defaults.lua pour class/spec — table dediee ici
--- seulement pour les cas particuliers non couverts par `specIds` simple).
-------------------------------------------------------------------------
+-- Spec -> classe mapping additionnel, pour les cas particuliers non couverts par `specIds` simple.
 ns.MISSING_UNHOLY_DK_SPEC          = 252
 ns.MISSING_AUGMENTATION_EVOKER_SPEC = 1473
 ns.MISSING_BALANCE_DRUID_SPEC      = 102
 ns.MISSING_SHADOW_PRIEST_SPEC      = 258
 ns.MISSING_MARKSMANSHIP_HUNTER_SPEC = 254
 
-------------------------------------------------------------------------
--- Zones / difficultes (reserve pour la Phase 2 — reglages fins par
--- zone/difficulte). Table presente des maintenant pour reference stable.
-------------------------------------------------------------------------
+-- Zones/difficultes (reserve pour reglages fins par zone/difficulte)
 ns.MISSING_DUNGEON_DIFFICULTIES = { [1] = "normal", [2] = "heroic", [23] = "mythic", [8] = "mythicplus" }
 ns.MISSING_RAID_DIFFICULTIES    = { [14] = "normal", [15] = "heroic", [16] = "mythic", [17] = "lfr" }

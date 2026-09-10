@@ -1,26 +1,12 @@
--- Modules/TargetAuras.lua : Buffs & Debuffs de la cible, affichés sous la TopTargetBar
---
--- RENDU NATIF : ni GetAuraSlots ni l'énumération legacy (GetAuraDataByIndex)
--- ne sont utilisables sur "target" en combat -- les DEUX lèvent
--- systématiquement "Auras cannot be accessed when secret while tainted by
--- 'AishCore'" dès qu'une seule aura de la cible est secrète/tainted
--- (contrairement au joueur, où l'énumération individuelle survit). Aucun
--- fallback Lua possible ici. Seule solution : un AuraContainer natif
--- (AddAuraGroup, SetUnit("target")) -- même recette que les auras du joueur
--- (cf. Modules/Auras/Core/AuraTrackerContainer.lua). Blizzard lit les
--- données secrètes côté C++ et ne nous rend que des pixels déjà dessinés --
--- immunisé au taint. La preview (pas de vraie cible) reste sur l'ancien
--- pipeline Lua/icônes manuelles (le natif ne peut afficher que de VRAIES
--- auras).
+-- Modules/TargetAuras.lua : Buffs & Debuffs de la cible, affichés sous la TopTargetBar.
+-- Rendu natif obligatoire (AuraContainer) car GetAuraSlots plante en combat sur aura secrète ; preview reste en Lua manuel.
 local addonName, ns = ...
 
 ns.Modules = ns.Modules or {}
 local TargetAuras = {}
 ns.Modules.TargetAuras = TargetAuras
 
----------------------------------------------------------------------------
 -- Raccourcis API (cache local) -- conservés uniquement pour /tadebug
----------------------------------------------------------------------------
 local GetAuraSlots       = C_UnitAuras and C_UnitAuras.GetAuraSlots
 local GetAuraDataBySlot  = C_UnitAuras and C_UnitAuras.GetAuraDataBySlot
 local _issecretvalue     = issecretvalue
@@ -29,9 +15,7 @@ local GetTime = GetTime
 local pcall   = pcall
 local ipairs  = ipairs
 
----------------------------------------------------------------------------
 -- Helpers secret-value
----------------------------------------------------------------------------
 local function IsSecret(value)
   return _issecretvalue and _issecretvalue(value) or false
 end
@@ -42,9 +26,7 @@ local function SafeNum(value, fallback)
   return value
 end
 
----------------------------------------------------------------------------
 -- Constantes / Textures
----------------------------------------------------------------------------
 local DARK        = 14 / 255
 local FONT_BOLD   = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Bold.ttf"
 local FONT_FILE   = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf"
@@ -56,9 +38,7 @@ local DEBUFF_TYPE_COLORS = {
   none    = { 0.80, 0.00, 0.00 },
 }
 
----------------------------------------------------------------------------
 -- Etat du module
----------------------------------------------------------------------------
 local frame         = nil
 local buffIcons     = {}   -- pool preview uniquement (pas de vraie cible)
 local debuffIcons   = {}   -- idem
@@ -67,9 +47,7 @@ local debuffRow     = nil
 local previewMode   = false
 local lastUnit      = "target"
 
----------------------------------------------------------------------------
 -- Configuration helpers
----------------------------------------------------------------------------
 local function Cfg()
   return ns.GetCfg("targetAuras")
 end
@@ -94,10 +72,7 @@ local function SafeName(aura)
   return ""
 end
 
----------------------------------------------------------------------------
--- Tooltip handlers (preview uniquement -- les auraButton natifs affichent
--- déjà leur tooltip nativement, cf. ApplyNativeButtonStyle plus bas)
----------------------------------------------------------------------------
+-- Tooltip handlers (preview uniquement, les auraButton natifs affichent déjà leur tooltip -- cf. ApplyNativeButtonStyle)
 local function Aura_OnEnter(self)
   if not self.auraInstanceID then return end
   if not self._unit then return end
@@ -117,9 +92,7 @@ local function Aura_OnLeave(self)
   GameTooltip:Hide()
 end
 
----------------------------------------------------------------------------
 -- Création d'une icône réutilisable (PREVIEW uniquement)
----------------------------------------------------------------------------
 local function CreateAuraIcon(parent, index, namePrefix)
   local f = CreateFrame("Frame", "AishCore" .. namePrefix .. index, parent)
   f:SetSize(26, 26)
@@ -269,10 +242,7 @@ local function ApplyAuraToIcon(icon, aura, unit, isDebuff, grp)
   icon.totalDuration  = SafeNum(aura.duration, 0)
 end
 
----------------------------------------------------------------------------
--- Style d'un FontString de countdown natif (widget Cooldown) -- utilisé à
--- la fois par la preview (icônes manuelles) et le rendu natif (auraButton).
----------------------------------------------------------------------------
+-- Style d'un FontString de countdown natif (widget Cooldown), utilisé par la preview et le rendu natif (auraButton).
 local function StyleCooldownText(cd, iconFrame, font, fontSize, color, anchor, relPoint, offX, offY)
   local function styleFS(fs)
     if not fs or not fs.SetFont then return end
@@ -337,10 +307,7 @@ local function StyleIcons(pool, grp)
   end
 end
 
----------------------------------------------------------------------------
--- Tri (PREVIEW uniquement -- le rendu natif utilise TASortParams, cf. plus
--- bas, qui traduit ces mêmes modes vers l'équivalent Blizzard le plus proche)
----------------------------------------------------------------------------
+-- Tri (PREVIEW uniquement -- le rendu natif utilise TASortParams plus bas)
 local SORT_COMPARATORS = {
   playerFirst = function(a, b)
     local ap, bp = IsPlayer(a), IsPlayer(b)
@@ -387,9 +354,7 @@ local function SortAuras(list, mode, reverse)
   end
 end
 
----------------------------------------------------------------------------
 -- Données de preview (faux buffs/debuffs quand pas de cible)
----------------------------------------------------------------------------
 local PREVIEW_BUFF_TEMPLATES = {
   { icon = 135932, name = "Fortitude",      duration = 3600, remaining = 2880, applications = 0, sourceUnit = "player" },
   { icon = 135987, name = "Renew",          duration = 15,   remaining = 11,   applications = 0, sourceUnit = "player" },
@@ -422,10 +387,7 @@ local function MakePreviewAuras(templates)
   return out
 end
 
----------------------------------------------------------------------------
--- Rafraîchissement PREVIEW (pas de vraie cible) -- le rendu réel passe par
--- les AuraContainer natifs (ConfigureNativeRow plus bas), jamais par ici.
----------------------------------------------------------------------------
+-- Rafraîchissement PREVIEW (pas de vraie cible) -- le rendu réel passe par les AuraContainer natifs (ConfigureNativeRow).
 local function RefreshAuras()
   if not frame then return end
   local cfg = Cfg()
@@ -472,22 +434,8 @@ local function RefreshAuras()
   LayoutRow(debuffIcons, debuffCount, debuffRow, dGrp)
 end
 
----------------------------------------------------------------------------
--- RENDU NATIF (AddAuraGroup, unit="target") -- combat-safe.
--- Recette identique à AuraTrackerContainer.lua (auras du joueur) : icône/
--- bordure/cooldown/stacks créés UNE SEULE FOIS dans initializeFrame, jamais
--- retouchés en dehors (les enfants deviennent "forbidden" dès qu'une vraie
--- aura secrète leur est assignée) -- seules leurs PROPRIÉTÉS (taille,
--- couleur, police, position) peuvent être remises à jour ensuite, via
--- ApplyNativeButtonStyle, à chaque changement de réglage.
---
--- candidateFilters = {} (aucun includeSpellIDs) = AUCUNE liste blanche =
--- Blizzard montre TOUT ce qui matche le filtre HELPFUL/HARMFUL -- confirmé
--- par lecture du code source d'ElvUI (Modules/UnitFrames/Elements/Auras.lua :
--- allowList/blockList restent nil par défaut, et Auras_CanidateFilters(nil,
--- nil, ...) produit exactement cette table vide) -- c'est la même API que
--- les unitframes buffs/debuffs d'ElvUI, jamais spécifique à un sort.
----------------------------------------------------------------------------
+-- Rendu natif (AddAuraGroup, unit="target"), combat-safe : widgets créés une fois dans initializeFrame, jamais retouchés après.
+-- candidateFilters = {} : aucune liste blanche, Blizzard montre tout ce qui matche HELPFUL/HARMFUL.
 local SORTMETHOD    = _G.AuraContainerSortMethod
 local SORTDIRECTION = _G.AuraContainerSortDirection
 local AURA_BORDER_STYLE = _G.AuraButtonBorderStyle
@@ -495,9 +443,7 @@ local AURA_BORDER_STYLE = _G.AuraButtonBorderStyle
 local buffState   = { container = nil, pool = {}, groupCreated = false, key = "aishTABuffs" }
 local debuffState = { container = nil, pool = {}, groupCreated = false, key = "aishTADebuffs" }
 
--- growDirection (LEFT/RIGHT) + growUpward -> paramètres du flow layout natif.
--- Toujours horizontal (multi-lignes gérées via SetFlowLayoutMaximumLineSize),
--- même principe que GrowthToFlowParams dans AuraTrackerContainer.lua.
+-- growDirection/growUpward -> flow layout natif horizontal (multi-lignes via SetFlowLayoutMaximumLineSize).
 local function TAFlowParams(growDirection, growUpward)
   local growLeft = growDirection == "LEFT"
   local hDir = growLeft and -1 or 1
@@ -511,11 +457,7 @@ local function TAFlowParams(growDirection, growUpward)
   return anchorPoint, hDir, vDir
 end
 
--- sortMode/reverseSort -> équivalent natif Blizzard le plus proche.
--- "playerFirst" n'a pas d'équivalent direct (le tri natif ne connaît pas la
--- notion de source du buff) -- UnitFrameDebuff est l'heuristique utilisée
--- par les unitframes Blizzard elles-mêmes (priorité/source), approximation
--- la plus proche disponible côté natif.
+-- sortMode/reverseSort -> équivalent natif le plus proche ("playerFirst" approxime via UnitFrameDebuff, le tri natif n'a pas de notion de source du buff).
 local function TASortParams(sortMode, reverseSort)
   if not SORTMETHOD then return nil, nil end
   local method
@@ -533,15 +475,12 @@ local function TASortParams(sortMode, reverseSort)
   return method, direction
 end
 
--- Créé UNE SEULE FOIS (dans initializeFrame) : icône, bordure(s), cooldown,
--- texte de stacks. Jamais retouché ailleurs -- cf. en-tête de section.
+-- Créé une seule fois dans initializeFrame (icône, bordure, cooldown, stacks) ; jamais retouché ailleurs.
 local function CreateNativeButtonWidgets(auraButton, isDebuff)
   local icon = auraButton:CreateTexture(nil, "ARTWORK")
   icon:SetAllPoints(auraButton)
   icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-  -- NE PAS remplir icon:SetTexture() -- Blizzard le fait en interne dès que
-  -- SetIcon() est lié à un vrai candidat (même recette que la destination
-  -- "icons" des auras du joueur).
+  -- NE PAS remplir icon:SetTexture() -- Blizzard le fait via SetIcon() dès qu'un vrai candidat est lié.
   auraButton:SetIcon(icon)
 
   local border = auraButton:CreateTexture(nil, "BACKGROUND")
@@ -550,10 +489,7 @@ local function CreateNativeButtonWidgets(auraButton, isDebuff)
   border:SetColorTexture(DARK, DARK, DARK, 1)
   auraButton._aishBorder = border
 
-  -- Bordure debuff : colorée par TYPE DE DISPEL directement par Blizzard
-  -- (SetAuraBorder, natif) -- on ne peut JAMAIS lire aura.dispelName
-  -- nous-mêmes pour une aura cible (donnée non exposée par l'AuraContainer),
-  -- donc on délègue entièrement le calcul de couleur à Blizzard.
+  -- Bordure debuff colorée par Blizzard (SetAuraBorder) : aura.dispelName n'est jamais lisible pour une aura cible.
   local dispelBorder = auraButton:CreateTexture(nil, "BACKGROUND", nil, -1)
   dispelBorder:SetPoint("TOPLEFT", auraButton, "TOPLEFT", -1, 1)
   dispelBorder:SetPoint("BOTTOMRIGHT", auraButton, "BOTTOMRIGHT", 1, -1)
@@ -575,10 +511,7 @@ local function CreateNativeButtonWidgets(auraButton, isDebuff)
   auraButton:SetDurationCooldown(cd)
   auraButton._aishCD = cd
 
-  -- Le FONT doit être posé AVANT SetApplicationCount -- Blizzard touche le
-  -- texte immédiatement/synchroniquement dès l'appel (confirmé en jeu pour
-  -- la destination "icons" : sans font posé avant, ça plante avec "Font not
-  -- set" et fait échouer tout AddAuraGroup englobant).
+  -- Le FONT doit être posé AVANT SetApplicationCount, sinon erreur "Font not set".
   local countFS = auraButton:CreateFontString(nil, "OVERLAY", nil, 7)
   auraButton._aishCountSlug = ns.CreateSlugRing(auraButton, countFS)
   ns.ApplyTextOutlineStyle(countFS, auraButton._aishCountSlug, FONT_BOLD, 10, nil)
@@ -587,10 +520,7 @@ local function CreateNativeButtonWidgets(auraButton, isDebuff)
   auraButton._aishCount = countFS
 end
 
--- Réapplique le style COURANT (taille/bordure/swipe/police durée/police
--- stacks/positions) à un auraButton DÉJÀ créé -- AddAuraGroup ne rappelle
--- initializeFrame qu'une seule fois par bouton, jamais à chaque changement
--- de réglage (même limitation que la destination "icons").
+-- Réapplique le style courant à un auraButton déjà créé -- AddAuraGroup ne rappelle initializeFrame qu'une fois par bouton.
 local function ApplyNativeButtonStyle(auraButton, grp, isDebuff)
   local okCheck, canAccess = pcall(function()
     return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
@@ -660,18 +590,14 @@ local function EnsureNativeContainer(state, rowFrame)
   if not ok or not result then return nil end
   state.container = result
   result:SetSize(8, 8) -- redimensionné par le flow layout lui-même
-  -- ORDRE OBLIGATOIRE (confirmé en jeu, destination "icons") :
-  -- SetEnabled/SetUnit/Show AVANT AddAuraGroup, jamais après.
+  -- Ordre requis : SetEnabled/SetUnit/Show avant AddAuraGroup, jamais après.
   pcall(result.SetEnabled, result, true)
   pcall(result.SetUnit, result, "target")
   result:Show()
   return result
 end
 
--- Crée (une seule fois) ou reconfigure (via les setters Set* natifs) le
--- groupe partagé d'une ligne (buffs ou debuffs). Appelée depuis ApplySettings
--- à chaque changement de réglage -- AddAuraGroup lui-même ne peut être
--- rappelé qu'une seule fois pour une même clé.
+-- Crée une fois ou reconfigure (setters Set* natifs) le groupe partagé d'une ligne -- AddAuraGroup n'est appelable qu'une fois par clé.
 local function ConfigureNativeRow(state, rowFrame, filterBase, grp, isDebuff)
   local c = EnsureNativeContainer(state, rowFrame)
   if not c then return end
@@ -741,11 +667,7 @@ local function ConfigureNativeRow(state, rowFrame, filterBase, grp, isDebuff)
   end
 end
 
----------------------------------------------------------------------------
--- /tadebug : diagnostic API brute (GetAuraSlots + énumération legacy) --
--- confirme que les deux échouent en combat sur "target". Ne reflète plus le
--- pipeline de rendu réel (natif désormais), gardé pour diagnostic futur.
----------------------------------------------------------------------------
+-- /tadebug : diagnostic API brute (GetAuraSlots + énumération legacy), gardé pour référence -- le rendu réel passe désormais par le natif.
 local function DebugDumpTargetAuras(filter)
   filter = filter == "debuff" and "HARMFUL" or "HELPFUL"
   local unit = "target"
@@ -791,9 +713,7 @@ SlashCmdList["TADEBUG"] = function(msg)
   DebugDumpTargetAuras(msg == "debuff" and "debuff" or "buff")
 end
 
--- /tanative : état des conteneurs/groupes natifs (creation, taille du pool,
--- filtre courant) -- pour verifier en jeu que le rendu natif est bien
--- alimente sans avoir a deviner.
+-- /tanative : état des conteneurs/groupes natifs (creation, taille du pool, filtre courant).
 SLASH_TANATIVE1 = "/tanative"
 SlashCmdList["TANATIVE"] = function()
   local P = "|cff00ffff[TA-NATIVE]|r "
@@ -810,9 +730,7 @@ SlashCmdList["TANATIVE"] = function()
     tostring(SORTMETHOD ~= nil), tostring(SORTDIRECTION ~= nil), tostring(AURA_BORDER_STYLE ~= nil)))
 end
 
----------------------------------------------------------------------------
 -- Événements
----------------------------------------------------------------------------
 local eventFrame = CreateFrame("Frame")
 
 local function OnEvent(self, event)
@@ -828,9 +746,7 @@ local function OnEvent(self, event)
   end
 end
 
----------------------------------------------------------------------------
 -- ShouldShow
----------------------------------------------------------------------------
 function TargetAuras.ShouldShow()
   if ns.IsInBlockedState and ns.IsInBlockedState() then return false end
   local cfg = Cfg()
@@ -838,9 +754,7 @@ function TargetAuras.ShouldShow()
   return UnitExists(lastUnit)
 end
 
----------------------------------------------------------------------------
 -- Create
----------------------------------------------------------------------------
 function TargetAuras.Create(parent)
   if frame then return frame end
   local cfg = Cfg()
@@ -866,9 +780,12 @@ function TargetAuras.Create(parent)
   return frame
 end
 
----------------------------------------------------------------------------
+-- Rangées à utiliser pour la détection de survol (ModuleHoverOverlay.lua) : buffRow/debuffRow, pas "frame" (ancre fixe sans rapport avec leur position réelle).
+function TargetAuras.GetHoverRows()
+  return buffRow, debuffRow
+end
+
 -- ApplySettings
----------------------------------------------------------------------------
 function TargetAuras.ApplySettings()
   if not frame then return end
   local cfg = Cfg()
@@ -919,9 +836,7 @@ function TargetAuras.ApplySettings()
   RefreshAuras()
 end
 
----------------------------------------------------------------------------
 -- Visibilité
----------------------------------------------------------------------------
 function TargetAuras.UpdateVisibility()
   if not frame then return end
   if previewMode then frame:Show(); return end
@@ -932,9 +847,7 @@ function TargetAuras.UpdateVisibility()
   end
 end
 
----------------------------------------------------------------------------
 -- Preview
----------------------------------------------------------------------------
 function TargetAuras.SetPreview(on)
   previewMode = on
   if not frame then return end
@@ -947,9 +860,7 @@ function TargetAuras.SetPreview(on)
   end
 end
 
----------------------------------------------------------------------------
 -- Init
----------------------------------------------------------------------------
 function TargetAuras.Init()
   TargetAuras.Create(UIParent)
 end

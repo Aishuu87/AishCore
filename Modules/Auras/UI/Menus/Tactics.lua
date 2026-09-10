@@ -1,22 +1,13 @@
 -- AishUIAura/UI/Menus/Tactics.lua
 -- Menu Tactics : liste des sorts découverts avec badges destination, glow, couleur
-------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
 
 local TC = 0.07
 
--- BUG CORRIGE (2026-08-16) : ns.ScanAuras (Scan.Run) ne pilote plus les 4
--- destinations natives (icons/iconlist/circlebars/freebars, migrees vers
--- AddAuraGroup -- cf. AuraTrackerContainer.lua) -- Blizzard les met a jour
--- cote C++ des que la donnee d'aura change, jamais quand on retouche juste
--- un reglage d'apparence. Chacune des 4 a sa propre fonction de refresh de
--- style par bouton (couleur/spark/glow) -- a appeler explicitement partout
--- ou un glow (par sort OU par defaut) est modifie, sinon un glow deja
--- affiche garde son ancienne couleur/opacite/echelle jusqu'au prochain
--- /reload ou decoche+recoche du sort. Partagee par OpenGlowPopup (glow par
--- sort) et ns.RollDefaultGlow (glow par defaut).
+-- Les 4 destinations natives ne se rafraichissent pas seules sur un changement de glow (Blizzard
+-- ne les met a jour que sur changement de donnee d'aura) : a appeler explicitement apres tout edit.
 local function RefreshAllNativeGlow()
     pcall(ns.RepositionIconsNativeGrid)      -- [I] ICONES
     pcall(ns.RepositionCircleBarsNativeGrid) -- [C] CERCLE (GUI "Circle Bars", cle freebars)
@@ -24,10 +15,7 @@ local function RefreshAllNativeGlow()
     pcall(ns.RepositionIconListNativeGrid)   -- [L] LISTE (GUI "Liste d'icones", cle iconlist)
 end
 
-------------------------------------------------------------------------
--- GLOW POPUP (floating, draggable)
--- Port depuis AishUIAura — manquant dans AishCore, stocké en ns._glowPopup.
-------------------------------------------------------------------------
+-- GLOW POPUP (floating, draggable), stocke en ns._glowPopup.
 function ns.OpenGlowPopup(sid, info)
     local FONT  = ns.Media and ns.Media.font or "Fonts\\FRIZQT__.TTF"
     local Theme = ns.THEME or {}
@@ -126,34 +114,16 @@ function ns.OpenGlowPopup(sid, info)
 
     local rc = info.glowColor or info.color or ns.barColor
     gp._colorBtn:SetColor(rc[1],rc[2],rc[3]); gp._colorBtn.onChanged=function(c) info.glowColor=c; info._glowCustom=true; RefreshGlowPreview(); pcall(ns.ScanAuras); RefreshNativeGlow() end
-    -- BUG CORRIGE (2026-08-16) : contrairement au dropdown de style et au
-    -- color picker ci-dessus, ces deux sliders ne declenchaient meme pas
-    -- ns.ScanAuras -- la preview du popup se mettait a jour, mais l'aura
-    -- deja affichee en jeu gardait son ancienne opacite/taille de glow
-    -- jusqu'au prochain rescan (decoche/recoche du sort ou /reload).
+    -- Ces sliders doivent aussi rescanner, sinon l'aura deja affichee garde son ancienne opacite/taille.
     gp._opacSlider:SetValue(info.glowAlpha or 0.7); gp._opacSlider.onChanged=function(v) info.glowAlpha=v; info._glowCustom=true; RefreshGlowPreview(); pcall(ns.ScanAuras); RefreshNativeGlow() end
     gp._sizeSlider:SetValue(info.glowScale or 1.0); gp._sizeSlider.onChanged=function(v) info.glowScale=v; info._glowCustom=true; RefreshGlowPreview(); pcall(ns.ScanAuras); RefreshNativeGlow() end
     gp:Show(); C_Timer.After(0.05, RefreshGlowPreview)
 end
 
-------------------------------------------------------------------------
--- GLOW PAR DEFAUT
--- S'applique a toute aura qui n'a pas de glow personnalise (info._glowCustom
--- reste false/nil tant que l'utilisateur n'a pas touche manuellement au glow
--- de ce sort precis, cf. CreateSpellRow / OpenGlowPopup ci-dessous). Des que
--- l'utilisateur personnalise le glow d'un sort, ce sort n'est plus jamais
--- retouche par le defaut (_glowCustom=true, verrouille comme _colorDefault
--- dans CDMHooks.lua).
-------------------------------------------------------------------------
--- Couleur de repli quand l'utilisateur n'a pas choisi de couleur de glow par
--- defaut explicite (db.defaultGlowColorR nil) : couleur "Lueur" du module
--- Colors (element "glow"), qui suit deja la chaine override DB -> defaut de
--- spe -> couleur de classe -- donc change automatiquement avec la spe active.
--- ns.barColor (couleur de classe statique, Auras/Core/ClassColors.lua) ne sert
--- plus que de tout dernier filet si le module Colors n'est pas disponible.
--- Copie defensive ({c[1],c[2],c[3]}) : Colors.Get() peut renvoyer une
--- reference directe vers une table interne (CLASS_FALLBACK/SPEC_DEFAULTS/
--- overrides), jamais une valeur qu'on veut modifier/partager par accident.
+-- GLOW PAR DEFAUT : s'applique tant qu'un sort n'a pas de glow personnalise (_glowCustom).
+-- Une fois personnalise, ce sort n'est plus jamais retouche par le defaut.
+-- Repli sur la couleur "Lueur" du module Colors (suit deja la chaine DB -> spe -> classe), sinon
+-- ns.barColor en tout dernier filet. Copie defensive : Colors.Get() peut renvoyer une reference interne.
 local function GetDefaultGlowColorFallback()
     local CLR = _addon.Modules and _addon.Modules.Colors
     local c = CLR and CLR.Get and CLR.Get("glow")
@@ -161,27 +131,15 @@ local function GetDefaultGlowColorFallback()
     return ns.barColor or { 0.5, 0.5, 0.5 }
 end
 
--- GLOW PAR DEFAUT PAR SPE : type/anim/opacite/taille/couleur, comme la
--- personnalisation par sort, doivent pouvoir differer d'une spe a l'autre
--- (ex: glow discret en Brasseur, flashy en Devastation). Stocke sous
--- ns.db.defaultGlowBySpec[GetSpecKey()] plutot que les anciennes cles plates
--- ns.db.defaultGlow* (globales, partagees entre TOUTES les specs -- confirme
--- en jeu par l'utilisateur : une couleur choisie sur Moine restait affichee
--- sur Guerrier). GetSpecKey() (Init.lua) est deja le meme identifiant
--- (perso-realm_classe_spe) qui isole discoveredSpells par spe.
--- Migration one-shot : au premier acces pour une spe donnee, on seede depuis
--- les anciennes cles globales (comportement pre-per-spec) plutot que reset a
--- zero -- evite de perdre silencieusement le reglage deja en place pour la
--- spe active au moment de la mise a jour.
+-- GLOW PAR DEFAUT PAR SPE : stocke sous db.defaultGlowBySpec[GetSpecKey()] (au lieu des anciennes
+-- cles globales, qui melangeaient le reglage entre toutes les specs). Migre depuis les anciennes
+-- cles globales au premier acces pour une spe, plutot que de reset a zero.
 local function GetDefaultGlowCfg()
     local db = ns.db
     if not db then return {} end
     local key = ns.GetSpecKey and ns.GetSpecKey()
     if not key then
-        -- Spe inconnue (rare) : table jetable reprenant les anciennes cles
-        -- plates en lecture (jamais persistee -- pas de cle valable pour la
-        -- stocker). db.idx/db.colorR etc n'existent pas : ne JAMAIS renvoyer
-        -- db lui-meme ici, les noms de champs ne correspondent pas.
+        -- Spe inconnue : table jetable en lecture depuis les anciennes cles globales, jamais persistee.
         return {
             idx     = db.defaultGlowIdx,
             colorR  = db.defaultGlowColorR,
@@ -236,28 +194,92 @@ function ns.RollDefaultGlow()
         end
     end
     pcall(ns.ScanAuras)
-    -- BUG CORRIGE (2026-08-16) : meme lacune que le glow par-sort
-    -- (OpenGlowPopup) -- ns.ScanAuras seul ne touche jamais les 4
-    -- destinations natives, donc le glow par defaut (type/couleur/opacite/
-    -- echelle) ne se repercutait jamais sur les boutons deja affiches.
+    -- ScanAuras seul ne touche pas les destinations natives deja affichees, RefreshAllNativeGlow l'impose.
     RefreshAllNativeGlow()
 end
 
-------------------------------------------------------------------------
+-- EXPORT DES CORRECTIONS ADMIN (/aishadmin) : popup avec EditBox en Lua lisible, a copier
+-- manuellement dans le code source (un addon ne peut pas reecrire ses propres fichiers .lua).
+function ns.ExportAdminOverrides()
+    local ov = ns.db and ns.db.adminOverrides
+    if not (ov and next(ov)) then
+        print("|cff00ffff[AishCore]|r Aucune correction admin a exporter.")
+        return
+    end
+    local ids = {}
+    for sid in pairs(ov) do ids[#ids+1] = sid end
+    table.sort(ids)
+
+    local GetSpellName = (C_Spell and C_Spell.GetSpellName) or GetSpellInfo
+    local lines = { "-- Corrections admin exportees le " .. date("%Y-%m-%d %H:%M"), "ns.SpellClassificationOverrides = {" }
+    for _, sid in ipairs(ids) do
+        local o = ov[sid]
+        local parts = {}
+        if o.source then parts[#parts+1] = string.format('source="%s"', o.source) end
+        if o.deleted then parts[#parts+1] = "deleted=true" end
+        if #parts > 0 then
+            local name = "?"
+            pcall(function() name = (GetSpellName and GetSpellName(sid)) or name end)
+            lines[#lines+1] = string.format('    [%d] = { %s }, -- %s', sid, table.concat(parts, ", "), tostring(name))
+        end
+    end
+    lines[#lines+1] = "}"
+    local text = table.concat(lines, "\n")
+
+    if not ns._adminExportPopup then
+        local FONT = ns.Media.font
+        local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+        f:SetSize(560, 440); f:SetPoint("CENTER")
+        f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetMovable(true); f:SetClampedToScreen(true)
+        f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
+        f:SetBackdropColor(0.07, 0.07, 0.09, 0.97); f:Hide()
+
+        local h = CreateFrame("Frame", nil, f); h:SetHeight(26); h:SetPoint("TOPLEFT"); h:SetPoint("TOPRIGHT"); h:EnableMouse(true)
+        h:SetScript("OnMouseDown", function(_, b) if b == "LeftButton" then f:StartMoving() end end)
+        h:SetScript("OnMouseUp", function() f:StopMovingOrSizing() end)
+        local hBg = h:CreateTexture(nil,"BACKGROUND"); hBg:SetAllPoints(); hBg:SetColorTexture(0.10,0.10,0.12,1)
+        local title = h:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(title,FONT,10); title:SetPoint("LEFT",8,0)
+        title:SetTextColor(unpack(ns.THEME.textDim)); title:SetText("Export corrections admin -- Ctrl+A puis Ctrl+C")
+        local xB = CreateFrame("Button",nil,h); xB:SetSize(26,26); xB:SetPoint("TOPRIGHT")
+        local xT = xB:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(xT,FONT,12); xT:SetAllPoints(); xT:SetText("x")
+        xT:SetTextColor(unpack(ns.THEME.textDim))
+        xB:SetScript("OnClick", function() f:Hide() end)
+
+        local eBg = f:CreateTexture(nil,"BACKGROUND"); eBg:SetPoint("TOPLEFT",8,-32); eBg:SetPoint("BOTTOMRIGHT",-8,8)
+        eBg:SetColorTexture(0.04,0.04,0.06,0.9)
+        local sf = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+        sf:SetPoint("TOPLEFT", 10, -34); sf:SetPoint("BOTTOMRIGHT", -26, 10)
+        local eb = CreateFrame("EditBox", nil, sf); eb:SetMultiLine(true); eb:SetAutoFocus(false)
+        eb:SetWidth(510); ns.ApplyFont(eb,FONT,10); eb:SetTextColor(0.85,0.85,0.85); eb:SetJustifyH("LEFT")
+        sf:SetScrollChild(eb)
+        eb:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
+        f._eb = eb
+        ns._adminExportPopup = f
+    end
+    ns._adminExportPopup._eb:SetText(text)
+    ns._adminExportPopup._eb:SetHeight(math.max(400, 14 * #lines))
+    ns._adminExportPopup:Show()
+    ns._adminExportPopup._eb:HighlightText()
+    ns._adminExportPopup._eb:SetFocus()
+end
+
 -- SPELL ROW (one row per discovered spell)
-------------------------------------------------------------------------
-local function CreateSpellRow(par,sid,info,y,W,onChg)
+local function CreateSpellRow(par,sid,info,y,W,onChg,rebuildFn)
     local SW = ns.SharedWidgets
     local Theme = ns.THEME
     local FONT = ns.Media.font
     local sc = info.color or ns.barColor
+    local adminMode = ns._adminMode == true
     local row = CreateFrame("Frame",nil,par); row:SetSize(W,28); row:SetPoint("TOPLEFT",0,-y)
     local rBg = row:CreateTexture(nil,"BACKGROUND"); rBg:SetAllPoints(); rBg:SetColorTexture(0,0,0,0)
+    -- Mode admin : un sort marque supprime reste visible (annulable) mais grise (deja exclu du rendu par Whitelist.lua).
+    if adminMode and info._adminDeleted then row:SetAlpha(0.35) end
 
-    -- Forward-declare : assigne plus bas (section glow fusionne), mais doit
-    -- deja exister ici pour que la checkbox puisse rafraichir le badge glow
-    -- quand elle applique le glow par defaut a l'activation du sort.
+    -- Forward-declare : la checkbox doit pouvoir rafraichir le badge glow a l'activation du sort.
     local RGD
+    -- Forward-declare : un totem n'a qu'une seule destination (badge "T"), donc la checkbox de
+    -- gauche doit suivre son etat au lieu d'activer un sort sans destination.
+    local RefreshTBadge
 
     local rx = 4
     -- Checkbox (activation du sort)
@@ -271,6 +293,11 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
     end; RCB()
     cb:SetScript("OnClick",function()
         info.enabled=not info.enabled
+        if info.source == "totem" then
+            if not info.destinations then info.destinations = {iconlist=false, freebars=false, circlebars=false, icons=false, totems=false} end
+            info.destinations.totems = info.enabled
+            if RefreshTBadge then RefreshTBadge() end
+        end
         -- A l'activation, si ce sort n'a jamais eu de glow personnalise, on lui
         -- applique le glow par defaut courant (voir GLOW PAR DEFAUT du menu).
         if info.enabled and info._glowCustom ~= true and ns.ApplyDefaultGlowToSpell then
@@ -288,17 +315,16 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
     rx = rx + 26
 
     -- Nom du sort
+    -- Mode admin : reserve la place des 2 controles ajoutes (reclassification
+    -- + suppression, cf. plus bas) en reduisant la largeur dispo pour le nom.
     local nm = row:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(nm,FONT,11)
-    nm:SetPoint("LEFT",rx,0); nm:SetPoint("RIGHT",row,"RIGHT",-205,0)
+    nm:SetPoint("LEFT",rx,0); nm:SetPoint("RIGHT",row,"RIGHT",adminMode and -345 or -205,0)
     nm:SetJustifyH("LEFT"); nm:SetWordWrap(false)
     nm:SetTextColor(unpack(Theme.textNormal))
     nm:SetText((info.name or tostring(sid)).." |cff3a3a3a("..sid..")|r")
 
-    ------------------------------------------------------------------
-    -- CÔTÉ DROIT : zones ancrées depuis la droite vers la gauche
-    -- Ordre visuel : [DESTINATIONS] | [STYLE]
-    -- Où STYLE = glow(type) + desat + color swatch
-    ------------------------------------------------------------------
+    -- Cote droit : zones ancrees depuis la droite vers la gauche. Ordre visuel : [DESTINATIONS] | [STYLE]
+    -- (glow + desat + color swatch).
 
     -- Color swatch (extrême droite)
     local sw1 = CreateFrame("Button",nil,row); sw1:SetSize(16,16); sw1:SetPoint("RIGHT",-4,0)
@@ -391,15 +417,14 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
     local sep = row:CreateTexture(nil,"OVERLAY"); sep:SetSize(1,14); sep:SetPoint("RIGHT",gFus,"LEFT",-5,0)
     sep:SetColorTexture(Theme.accent[1], Theme.accent[2], Theme.accent[3], 0.15)
 
-    -- Badges destinations [L][C][I][B] harmonisés
-    -- Ordre d'affichage : L | C | I | B (de gauche à droite)
-    -- Comme chaque bouton est ancré "RIGHT" de prevAnchor, on itère dans l'ordre INVERSE
-    -- pour obtenir l'ordre voulu à l'écran : B est rendu en premier (le plus à droite),
-    -- puis I, puis C, puis L (le plus à gauche).
+    -- Badges destinations [L][C][I][B], ancres RIGHT donc iteres en ordre inverse pour l'affichage voulu.
+    -- Un totem (info.source=="totem") n'est pas une vraie aura Blizzard : un seul badge "T" dedie
+    -- (Modules/Auras/Core/Totems.lua) remplace le groupe de 4, pas de mix&match possible.
     local destX = 10  -- espace depuis le séparateur
     local prevAnchor = sep
-    for _, bk in ipairs({"B","I","C","L"}) do
-        local bd = ns.DEST_BADGES[bk]
+    local badgeKeys = (info.source == "totem") and {"T"} or {"B","I","C","L"}
+    for _, bk in ipairs(badgeKeys) do
+        local bd = (bk == "T") and {label="T", key="totems"} or ns.DEST_BADGES[bk]
         if bd then
             local btn = CreateFrame("Button",nil,row,"BackdropTemplate"); btn:SetSize(18,16)
             btn:SetPoint("RIGHT", prevAnchor, "LEFT", (prevAnchor == sep) and -destX or -3, 0)
@@ -421,14 +446,12 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
                 end
             end
             Ref()
+            -- Expose Ref() du badge "T" a RefreshTBadge pour que la checkbox de gauche puisse le suivre.
+            if bk == "T" then RefreshTBadge = Ref end
             btn:SetScript("OnClick",function()
-                if not info.destinations then info.destinations = {iconlist=false, freebars=false, circlebars=false, icons=false} end
+                if not info.destinations then info.destinations = {iconlist=false, freebars=false, circlebars=false, icons=false, totems=false} end
                 info.destinations[bd.key] = not info.destinations[bd.key]
-                -- Active/désactive automatiquement le toggle de gauche (info.enabled)
-                -- selon qu'au moins un mode d'affichage reste actif ou plus aucun --
-                -- un sort sans destination cochée n'a de toute façon aucun effet
-                -- visuel, autant que le toggle principal reflète cet état sans
-                -- action manuelle en plus.
+                -- Le toggle principal (info.enabled) suit automatiquement l'etat des destinations.
                 local anyDest = false
                 for _, v in pairs(info.destinations) do if v then anyDest = true; break end end
                 if anyDest and not info.enabled then
@@ -450,13 +473,87 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
             btn:SetScript("OnEnter",function()
                 btn:SetBackdropBorderColor(Theme.accent[1], Theme.accent[2], Theme.accent[3], 1)
                 GameTooltip:SetOwner(btn,"ANCHOR_TOP")
-                local names = { iconlist = L["AURASMENU_PREVIEW_RENDER_ICONLIST"], freebars = L["AURASMENU_PREVIEW_RENDER_CIRCLE_BARS"], circlebars = L["AURASMENU_PREVIEW_RENDER_FREE_BARS"], icons = L["AURASMENU_PREVIEW_RENDER_ICONS"] }
+                local names = { iconlist = L["AURASMENU_PREVIEW_RENDER_ICONLIST"], freebars = L["AURASMENU_PREVIEW_RENDER_CIRCLE_BARS"], circlebars = L["AURASMENU_PREVIEW_RENDER_FREE_BARS"], icons = L["AURASMENU_PREVIEW_RENDER_ICONS"], totems = L["AURASMENU_PREVIEW_RENDER_TOTEMS"] }
                 GameTooltip:SetText(string.format(L["AURASMENU_TACTICS_DEST_TOOLTIP"], (names[bd.key] or bd.key)), 1, 1, 1)
                 GameTooltip:Show()
             end)
             btn:SetScript("OnLeave",function() Ref(); GameTooltip:Hide() end)
             prevAnchor = btn
         end
+    end
+
+    -- MODE ADMIN (/aishadmin) : reclassification + suppression annulable (Init.lua / Whitelist.lua).
+    if adminMode then
+        -- Suppression/annulation : grise toute la ligne au lieu de la cacher, pour pouvoir annuler.
+        local delBtn = CreateFrame("Button",nil,row,"BackdropTemplate"); delBtn:SetSize(18,16)
+        delBtn:SetPoint("RIGHT", prevAnchor, "LEFT", -10, 0)
+        delBtn:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
+        local delTx = delBtn:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(delTx,FONT,10,"OUTLINE")
+        delTx:SetAllPoints(); delTx:SetJustifyH("CENTER")
+        local function RefreshDelBtn()
+            if info._adminDeleted then
+                delBtn:SetBackdropColor(0.20, 0.42, 0.20, 0.9); delBtn:SetBackdropBorderColor(0.45, 0.75, 0.40, 1)
+                delTx:SetText(L["AURASMENU_TACTICS_UNDELETE_LABEL"]); delTx:SetTextColor(0.85, 1, 0.8)
+            else
+                delBtn:SetBackdropColor(0.45, 0.15, 0.12, 0.9); delBtn:SetBackdropBorderColor(0.75, 0.25, 0.20, 1)
+                delTx:SetText("X"); delTx:SetTextColor(1, 0.85, 0.85)
+            end
+        end
+        RefreshDelBtn()
+        delBtn:SetScript("OnClick",function()
+            info._adminDeleted = (not info._adminDeleted) or nil
+            if ns.SetAdminDeletedOverride then ns.SetAdminDeletedOverride(sid, info._adminDeleted) end
+            row:SetAlpha(info._adminDeleted and 0.35 or 1)
+            RefreshDelBtn(); onChg()
+        end)
+        delBtn:SetScript("OnEnter",function()
+            GameTooltip:SetOwner(delBtn,"ANCHOR_TOP")
+            GameTooltip:SetText(info._adminDeleted and L["AURASMENU_TACTICS_UNDELETE_SPELL_TOOLTIP"] or L["AURASMENU_TACTICS_DELETE_SPELL_TOOLTIP"], 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        delBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
+
+        -- Reclassification (Debuff -> Buff -> Totem -> ...) : change info.source, persiste
+        -- l'override, puis reconstruit la liste puisque la ligne change de section.
+        local CYCLE = {"debuff","buff","totem"}
+        local CYCLE_LABEL = {
+            debuff = L["AURASMENU_TACTICS_SECTION_DEBUFFS_TARGET"],
+            buff   = L["AURASMENU_TACTICS_SECTION_BUFFS_PLAYER"],
+            totem  = L["AURASMENU_TACTICS_SECTION_TOTEMS"],
+        }
+        local function CurrentCycleKey()
+            if info.source == "totem" then return "totem" end
+            if info.source == "buff" or info.source == "enhancement" then return "buff" end
+            return "debuff"
+        end
+        local srcBtn = CreateFrame("Button",nil,row,"BackdropTemplate"); srcBtn:SetSize(100,16)
+        srcBtn:SetPoint("RIGHT", delBtn, "LEFT", -6, 0)
+        srcBtn:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
+        srcBtn:SetBackdropColor(0.10,0.10,0.14,0.9); srcBtn:SetBackdropBorderColor(0.35,0.32,0.20,0.8)
+        local srcTx = srcBtn:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(srcTx,FONT,8,"OUTLINE")
+        srcTx:SetAllPoints(); srcTx:SetJustifyH("CENTER"); srcTx:SetTextColor(unpack(Theme.textDim))
+        srcTx:SetText("-> "..(CYCLE_LABEL[CurrentCycleKey()] or CurrentCycleKey()))
+        -- Clic gauche = categorie suivante, clic droit = categorie
+        -- precedente (meme cycle Debuff/Buff/Totem, sens inverse).
+        srcBtn:RegisterForClicks("LeftButtonUp","RightButtonUp")
+        srcBtn:SetScript("OnClick",function(_,btn)
+            local idx = 1
+            for i, k in ipairs(CYCLE) do if k == CurrentCycleKey() then idx = i end end
+            local nextIdx = (btn == "RightButton") and (((idx - 2) % #CYCLE) + 1) or ((idx % #CYCLE) + 1)
+            local nextKey = CYCLE[nextIdx]
+            info.source = nextKey
+            if ns.SetAdminSourceOverride then ns.SetAdminSourceOverride(sid, nextKey) end
+            onChg()
+            if rebuildFn then rebuildFn() end
+        end)
+        srcBtn:SetScript("OnEnter",function()
+            srcBtn:SetBackdropBorderColor(Theme.accent[1], Theme.accent[2], Theme.accent[3], 1)
+            GameTooltip:SetOwner(srcBtn,"ANCHOR_TOP")
+            GameTooltip:SetText(L["AURASMENU_TACTICS_RECLASSIFY_TOOLTIP"], 1, 1, 1)
+            GameTooltip:AddLine(L["AURASMENU_TACTICS_RECLASSIFY_TOOLTIP_RIGHT"], 0.7, 0.7, 0.7)
+            GameTooltip:Show()
+        end)
+        srcBtn:SetScript("OnLeave",function() srcBtn:SetBackdropBorderColor(0.35,0.32,0.20,0.8); GameTooltip:Hide() end)
     end
 
     -- Hover sur la ligne entière : surlignage + tooltip du sort
@@ -477,19 +574,13 @@ local function CreateSpellRow(par,sid,info,y,W,onChg)
     return row, 28
 end
 
-------------------------------------------------------------------------
--- TACTICS MENU (liste complète déroulée, pas de dropdown de section)
--- 2 sections : DEBUFFS CIBLE (auras appliquées sur la cible) + BUFFS JOUEUR
--- (auras sur le joueur : buffs et enhancements). ACTIONS toujours en bas.
-------------------------------------------------------------------------
+-- TACTICS MENU (liste complète déroulée) : 2 sections DEBUFFS CIBLE + BUFFS JOUEUR, ACTIONS en bas.
 function ns.SettingsPanel.BuildTacticsMenu(p, cw)
     local SW = ns.SharedWidgets
     local Theme = ns.THEME
     local FONT = ns.Media.font
 
-    -- Forward-declare : assigne plus bas. Permet aux controles GLOW PAR DEFAUT
-    -- (definis avant Build) de forcer un rafraichissement visuel des badges glow
-    -- de chaque ligne apres un ns.RollDefaultGlow().
+    -- Forward-declare : permet aux controles GLOW PAR DEFAUT de rafraichir les badges apres RollDefaultGlow().
     local Build
 
     -- ● TOGGLE CDM NATIF (unique point de contrôle pour tous les renders)
@@ -519,9 +610,10 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
     overlayBg:SetAllPoints(); overlayBg:SetColorTexture(0.05, 0.05, 0.07, 0.65)
     overlay:SetShown(ns.db and ns.db.useNativeCDM == true)
 
-    cbCDM.onChanged = function(v)
+    -- Fonction partagee : le toggle "Tracking d'auras" de UI/SettingsPanel.lua doit declencher
+    -- les memes effets de bord sans dupliquer cette logique.
+    ns.SetUseNativeCDM = ns.SetUseNativeCDM or function(v)
         if ns.db then ns.db.useNativeCDM = v end
-        overlay:SetShown(v)
         if v then
             -- SetAlpha(0) immédiat sur tous les containers (cohérent avec le pattern
             -- des Update functions qui vérifient useNativeCDM et appliquent SetAlpha(0))
@@ -535,14 +627,13 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         pcall(ns.RefreshCDMMask)
     end
 
-    ------------------------------------------------------------------------
-    -- ● GLOW PAR DEFAUT — s'applique a toute aura cochee qui n'a pas de glow
-    -- personnalise (voir ns.ApplyDefaultGlowToSpell / ns.RollDefaultGlow plus
-    -- haut dans ce fichier). Grisee avec le reste par l'overlay CDM natif
-    -- puisqu'elle ne concerne que le rendu custom.
-    -- Layout compact : Type de glow + Anim de proc sur une ligne, puis
-    -- Opacite + Taille + Couleur sur une autre, pour limiter l'espace occupe.
-    ------------------------------------------------------------------------
+    cbCDM.onChanged = function(v)
+        ns.SetUseNativeCDM(v)
+        overlay:SetShown(v)
+    end
+
+    -- GLOW PAR DEFAUT : s'applique aux auras cochees sans glow personnalise. Grisee avec le reste
+    -- par l'overlay CDM natif (ne concerne que le rendu custom).
     local dgY = -66
     local dgH=SW.CreateSectionHeader(p,L["AURASMENU_TACTICS_DEFAULT_GLOW_HEADER"],cw-20); dgH:SetPoint("TOPLEFT",10,dgY); dgY=dgY-22
     local dgInfo=p:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(dgInfo,FONT,9)
@@ -608,18 +699,13 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         GetDefaultGlowCfg().scale = v
         RefreshDefaultGlowPreview(); pcall(ns.RollDefaultGlow)
     end
-    -- Largeur reduite (pas dgSlW3, contrairement aux 2 sliders de la ligne) :
-    -- CreateColorButton ancre son label a LEFT+8 et son swatch a RIGHT-8 du
-    -- conteneur -- avec la pleine largeur de colonne (dgSlW3, dimensionnee
-    -- pour un slider), le swatch se retrouvait tres loin du label "Couleur".
-    -- Le positionnement (TOPLEFT) ne depend pas de cette largeur, seule la
-    -- 3e colonne se resserre.
+    -- Largeur reduite (pas dgSlW3) : en pleine largeur de colonne le swatch se retrouve loin du label.
     local dgColorW = 130
     local dgColor = SW.CreateColorButton(p, L["AURASMENU_TACTICS_GLOW_COLOR"], dgColorW); dgColor:SetPoint("TOPLEFT",dgOx3+2*(dgSlW3+dgGap),dgY)
     if dgColor._swatch then
         dgColor._swatch:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText(L["AURASMENU_TACTICS_DEFAULT_GLOW_COLOR_TOOLTIP"], 1, 1, 1, true)
+            GameTooltip:SetText(L["AURASMENU_TACTICS_DEFAULT_GLOW_COLOR_TOOLTIP"], 1, 1, 1)
             GameTooltip:Show()
         end)
         dgColor._swatch:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -650,11 +736,8 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
     dgY = dgY - 60
     C_Timer.After(0.1, RefreshDefaultGlowPreview)
 
-    -- Resynchronise les 5 controles avec la config de la spe active : appele
-    -- au changement de spe pendant que ce menu est deja construit et affiche
-    -- (sinon les widgets resteraient figes sur les valeurs de l'ancienne spe
-    -- jusqu'au prochain re-Build). Cf. Modules/Colors.lua (callback broadcast,
-    -- deja declenche sur PLAYER_SPECIALIZATION_CHANGED).
+    -- Resynchronise les 5 controles avec la config de la spe active au changement de spe, sinon
+    -- les widgets restent figes sur les valeurs de l'ancienne spe jusqu'au prochain re-Build.
     ns.RefreshDefaultGlowWidgets = function()
         local cfg = GetDefaultGlowCfg()
         dgDD:SetValue(cfg.idx or 2)
@@ -678,6 +761,14 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         -- Nettoie l'ancien contenu avant de reconstruire
         for _,c in pairs({p:GetChildren()}) do if c._isSpellContent then c:Hide() end end
 
+        -- Banniere mode admin : rappelle que la liste affiche aussi les sorts supprimes (grises).
+        if ns._adminMode then
+            local banner = p:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(banner,FONT,10,"OUTLINE")
+            banner:SetPoint("TOP",0,dgY-6); banner:SetTextColor(0.95, 0.55, 0.25)
+            banner:SetText(L["AURASMENU_TACTICS_ADMIN_BANNER"])
+            banner._isSpellContent = true
+        end
+
         -- Tente de corriger la source des debuffs actifs mal classés (source="buff")
         pcall(function() if ns.ReclassifyExistingSpells then ns.ReclassifyExistingSpells() end end)
 
@@ -692,17 +783,19 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
 
         local function onChg() pcall(function() ns.BuildWhitelist(); ns.ScanAuras() end) end
 
-        -- Classement par source : 2 groupes seulement
-        --   deb = debuffs cible (unit="target", source="debuff")
-        --   buf = buffs joueur (unit="player", source="buff" ou "enhancement")
-        local deb,buf={},{}
+        -- Classement par source : deb = debuffs cible, buf = buffs joueur, tot = totems (pas une
+        -- aura reelle, suivi via GetTotemInfo/GetTotemDuration, cf. Core/Totems.lua).
+        local deb,buf,tot={},{},{}
         for sid,info in pairs(spells) do
-            if info.source ~= "equipment" then  -- skip items WG dans ce menu
-                if not info.destinations then info.destinations=ns.DeepCopy and ns.DeepCopy(ns.SpellDefaults.destinations) or {iconlist=false,freebars=false,circlebars=false,icons=false} end
+            -- Un sort supprime (mode admin) reste dans la liste (annulable) mais cache hors mode admin.
+            if info.source ~= "equipment" and not (info._adminDeleted and not ns._adminMode) then  -- skip items WG dans ce menu
+                if not info.destinations then info.destinations=ns.DeepCopy and ns.DeepCopy(ns.SpellDefaults.destinations) or {iconlist=false,freebars=false,circlebars=false,icons=false,totems=false} end
                 if info.glow==nil then info.glow=false end
                 if info.desat==nil then info.desat=false end
                 local src=info.source or "debuff"
-                if src=="buff" or src=="enhancement" then
+                if src=="totem" then
+                    tot[#tot+1]={id=sid,info=info}
+                elseif src=="buff" or src=="enhancement" then
                     buf[#buf+1]={id=sid,info=info}
                 else
                     deb[#deb+1]={id=sid,info=info}
@@ -711,14 +804,11 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         end
         local function srt(a,b)
             if a.info.enabled~=b.info.enabled then return a.info.enabled end
-            -- _addon.FoldAccentsLower (Core.lua) : replie chaque lettre
-            -- accentuée sur sa lettre de base (é/è/ê/ë -> e, etc.) puis
-            -- minuscule -- résultat 100% ASCII comparable au `<` normal.
-            -- strcmputf8i seul NE SUFFISAIT PAS pour ce client (confirmé en
-            -- jeu : classait toujours les noms accentués après Z).
+            -- FoldAccentsLower replie les accents (é->e) en ASCII : strcmputf8i seul classait
+            -- toujours les noms accentués après Z sur ce client.
             return _addon.FoldAccentsLower(a.info.name or "") < _addon.FoldAccentsLower(b.info.name or "")
         end
-        table.sort(deb,srt); table.sort(buf,srt)
+        table.sort(deb,srt); table.sort(buf,srt); table.sort(tot,srt)
 
         -- Conteneur principal déroulé
         local cont=CreateFrame("Frame",nil,p); cont:SetPoint("TOPLEFT",0,dgY-40); cont:SetSize(cw,1); cont._isSpellContent=true
@@ -749,7 +839,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
                 wrap:SetPoint("TOPLEFT", 10, -y); wrap:SetPoint("TOPRIGHT", -10, -y)
                 local listY = 0
                 for _, e in ipairs(list) do
-                    local r, h = CreateSpellRow(wrap, e.id, e.info, listY, cw-20, onChg)
+                    local r, h = CreateSpellRow(wrap, e.id, e.info, listY, cw-20, onChg, Build)
                     r:Show(); listY = listY + h
                 end
                 wrap:SetHeight(listY)
@@ -768,6 +858,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
 
         RenderSection(L["AURASMENU_TACTICS_SECTION_DEBUFFS_TARGET"], deb)
         RenderSection(L["AURASMENU_TACTICS_SECTION_BUFFS_PLAYER"],  buf)
+        RenderSection(L["AURASMENU_TACTICS_SECTION_TOTEMS"],        tot)
 
         -- Section ACTIONS à la fin (3 boutons)
         y = y + 6  -- petit espace avant les boutons
@@ -825,16 +916,23 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         b4:SetScript("OnClick", function() wipe(spells); onChg(); Build() end)
         y = y + 28
 
+        -- Mode admin uniquement : export des corrections vers une popup copiable a integrer en dur.
+        if ns._adminMode then
+            local b5 = SW.CreateActionBtn(cont, L["AURASMENU_TACTICS_EXPORT_OVERRIDES"], 200,
+                dark,
+                {0.45, 0.35, 0.65, 0.75},
+                {0.70, 0.60, 0.90})
+            b5:SetPoint("TOP", cont, "TOP", 0, -y)
+            b5:SetScript("OnClick", function() if ns.ExportAdminOverrides then ns.ExportAdminOverrides() end end)
+            y = y + 28
+        end
+
         cont:SetHeight(y + 10)
         p:SetHeight(y - dgY + 60)
     end
 
-    -- Preview live : tant que ce menu est ouvert, affiche les sorts coches
-    -- (avec leurs destinations reellement assignees) comme s'ils etaient
-    -- actifs, a l'emplacement concerne (L/C/I/B) — meme mecanisme que les
-    -- menus de rendu par emplacement (Render.lua), mais sans les icones
-    -- generiques de remplissage : seuls les sorts vraiment coches previsualisent,
-    -- pour rester fidele a l'etat de la liste pendant qu'on la configure.
+    -- Preview live : affiche les sorts coches comme actifs a leur emplacement (L/C/I/B), sans
+    -- icones generiques de remplissage, pour rester fidele a l'etat reel de la liste.
     p:SetScript("OnShow", function()
         Build()
         ns._previewBars = true
@@ -842,6 +940,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         ns._previewNoFallback = true
         if ns.UpdateAllFades then pcall(ns.UpdateAllFades) end
         pcall(function() ns.ScanAuras() end)
+        if ns.RepositionTotemsGrid then pcall(ns.RepositionTotemsGrid) end
     end)
     p:SetScript("OnHide", function()
         ns._previewBars = false
@@ -849,6 +948,23 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         ns._previewNoFallback = nil
         if ns.UpdateAllFades then pcall(ns.UpdateAllFades) end
         pcall(function() ns.ScanAuras() end)
+        if ns.RepositionTotemsGrid then pcall(ns.RepositionTotemsGrid) end
     end)
+    -- Expose pour /aishadmin : la page peut avoir ete construite avant le tout premier toggle.
+    ns._tacticsBuildFn = Build
     Build()
+end
+
+-- /aishadmin : bascule le mode admin (reclassification + suppression annulable, cf. CreateSpellRow).
+-- Flag en memoire uniquement, jamais sauvegarde : repart desactive au /reload.
+SLASH_AISHADMIN1 = "/aishadmin"
+SlashCmdList["AISHADMIN"] = function()
+    ns._adminMode = not ns._adminMode
+    local P = "|cff00ffff[AishCore]|r "
+    if ns._adminMode then
+        print(P .. "|cffff8800Mode admin ACTIVE|r (Auras a tracker) -- /aishadmin pour quitter.")
+    else
+        print(P .. "Mode admin desactive.")
+    end
+    if ns._tacticsBuildFn then pcall(ns._tacticsBuildFn) end
 end

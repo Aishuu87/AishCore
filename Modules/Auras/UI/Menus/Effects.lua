@@ -1,6 +1,5 @@
 -- AishUIAura/UI/Menus/Effects.lua
 -- 3D Effects menu: spell list + per-layer (bar/icon/spark) editing
-------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
@@ -16,8 +15,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
     local hdr=SW.CreateSectionHeader(p,L["AURASMENU_EFFECTS_MODULE_HEADER"],cw-20); hdr:SetPoint("TOPLEFT",10,0)
     local cbFx=SW.CreateCheckbox(p,L["AURASMENU_EFFECTS_ENABLE_3D"],cw-30)
     cbFx:SetPoint("TOPLEFT",15,-22); cbFx:SetChecked(ns.db and ns.db.effectsEnabled)
-    -- Option auto-disable en raid : utile pour économiser GPU dans les combats denses
-    -- (8 DoTs × 3 modèles 3D par bar = 24 rendus 3D par frame). Opt-in, false par défaut.
+    -- Auto-disable en raid : économise le GPU dans les combats denses (opt-in)
     local cbAutoRaid=SW.CreateCheckbox(p,L["AURASMENU_EFFECTS_AUTO_DISABLE_RAID"],cw-30)
     cbAutoRaid:SetPoint("TOPLEFT",15,-44); cbAutoRaid:SetChecked(ns.db and ns.db.effects3DAutoDisableInRaid or false)
     cbAutoRaid.onChanged=function(v)
@@ -28,27 +26,15 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
     do local _sfH = (panel and panel._scrollFrame and panel._scrollFrame:GetHeight()) or 668
        fxCont:SetHeight(math.max(560, _sfH - 60)) end
     local function BuildFx()
-        -- Style des onglets actifs : texture parchemin (AishParchemin.tga) reutilisee
-        -- depuis les cartouches Modules pour coherence visuelle avec la sidebar.
-        -- Liseré or interne integre dans la texture, slice margins 16px pour bien
-        -- preserver les coins arrondis quel que soit le redimensionnement.
+        -- Style des onglets actifs : texture parchemin reutilisee depuis les cartouches Modules
         local PARCHEMIN_PATH = "Interface\\AddOns\\AishCore\\Media\\UI\\AishParchemin"
         local ACTIVE_TEXT = {1, 1, 1}                      -- blanc brillant pour l'actif
         local INACTIVE_TEXT = ns.THEME.textDim or {0.5, 0.5, 0.55}
-        -- Selection dans la liste des sorts a gauche : fond noir un peu plus opaque
-        -- (effet "row selectionnee" discret, pas le meme traitement que les onglets
-        -- pour eviter trop de parchemin a l'ecran).
+        -- Fond de la row selectionnee dans la liste de sorts a gauche
         local ROW_SELECTED_BG = {0.08, 0.08, 0.10, 0.85}
 
-        -- SetTabActive(btn, btnTable, isActive) : applique l'etat actif/inactif a UN onglet.
-        -- btnTable contient {btn, tBg, tx, ul} ou {btn, bg, tx, ul} selon la zone.
-        -- L'actif a un fond parchemin, l'inactif un fond transparent. Le soulignement (ul)
-        -- est toujours cache car on n'en a plus besoin avec la texture parchemin.
-        --
-        -- IMPORTANT : pour passer de actif a inactif, on ne peut PAS faire
-        -- bg:SetTexture(nil) sans risque (l'ancienne texture peut rester visible
-        -- sur certains clients). Solution : on force SetColorTexture transparent
-        -- ce qui ecrase la texture parchemin par un solide alpha 0 = invisible.
+        -- Applique l'etat actif/inactif a un onglet (fond parchemin vs transparent)
+        -- SetTexture(nil) seul ne suffit pas a effacer (reste visible sur certains clients)
         local function SetTabActive(t, isActive)
             if not t then return end
             local bg = t.tBg or t.bg
@@ -66,49 +52,31 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                 bg:SetVertexColor(1, 1, 1, 1)
                 tx:SetTextColor(unpack(ACTIVE_TEXT))
             else
-                -- Inactif : on EFFACE explicitement la texture parchemin par un solide
-                -- transparent. SetTexture(nil) seul ne suffit pas (la texture reste visible
-                -- sur certains clients WoW Midnight). SetColorTexture force un nouveau slot.
+                -- Efface la texture parchemin par un solide transparent (nouveau slot)
                 bg:SetColorTexture(0, 0, 0, 0)
                 tx:SetTextColor(unpack(INACTIVE_TEXT))
             end
-            -- Soulignement toujours cache : la texture parchemin gere l'effet "actif"
             if ul then ul:Hide() end
         end
 
-        -- SetActiveOne(btnList, key) : reset tous les onglets de la liste, puis active
-        -- celui dont .key correspond. Solution definitive contre le bug du soulignement
-        -- cumule (plusieurs onglets actifs en meme temps).
+        -- Reset tous les onglets puis active celui dont .key correspond
         local function SetActiveOne(btnList, key)
             for _, t in ipairs(btnList) do
                 SetTabActive(t, t.key == key)
             end
         end
 
-        -- CLEANUP RAM avant rebuild : la BuildFx est appelée à chaque OnShow du menu
-        -- et à chaque toggle de la checkbox "Activer effets 3D". Sans cleanup, chaque
-        -- appel crée un nouveau PlayerModel (pvModelView) qui retient un .m2 en mémoire
-        -- indéfiniment. Avec 10 ouvertures du menu = 10 modèles fantômes = plusieurs MB perdus.
-        -- On itère les anciens enfants, ClearModel sur tous les PlayerModel, puis Hide
-        -- recursif puis SetParent(nil). Le Hide recursif est crucial : sans lui, les
-        -- boutons textures restent visibles a l'ecran meme apres SetParent(nil) (les
-        -- textures avec ancrage explicite ne disparaissent pas avec leur parent detache).
+        -- Cleanup RAM avant rebuild : ClearModel + Hide/SetParent(nil) recursif pour eviter les fuites .m2
         for _, c in pairs({fxCont:GetChildren()}) do
             local stack = { c }
             while #stack > 0 do
                 local f = table.remove(stack)
                 if f.ClearModel then pcall(f.ClearModel, f) end
-                -- Hide explicite sur les textures et fontstrings (regions du frame)
-                -- pcall(reg.Hide, reg) ne marche pas car Hide est une method, pas une
-                -- fonction libre. Il faut un wrapper closure pour invoquer la method.
                 for _, reg in pairs({f:GetRegions()}) do
                     pcall(function() if reg.Hide then reg:Hide() end end)
                 end
-                -- Hide explicite sur les enfants (Frame, Button, etc.)
                 for _, gc in pairs({f:GetChildren()}) do
                     pcall(function() if gc.Hide then gc:Hide() end end)
-                    -- Detache aussi : sans SetParent(nil) sur les enfants imbriques,
-                    -- WoW peut les re-afficher au prochain rebuild via la hierarchie.
                     pcall(function() if gc.SetParent then gc:SetParent(nil) end end)
                     table.insert(stack, gc)
                 end
@@ -128,8 +96,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         -- LEFT PANEL
         local _gdL = Theme.gold or {0.78,0.62,0.30}
         local lf=CreateFrame("Frame",nil,fxCont); lf:SetPoint("TOPLEFT"); lf:SetPoint("BOTTOMLEFT"); lf:SetWidth(LEFT_W)
-        -- Pas de fond gris fonce ici : on herite du fond du panel principal pour
-        -- coherence visuelle avec les autres menus (Debuffs, Cooldowns, etc.)
+        -- Pas de fond ici, on herite de celui du panel principal
         local lfH=lf:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lfH,FONT,10); lfH:SetPoint("TOPLEFT",10,-8); lfH:SetTextColor(_gdL[1],_gdL[2],_gdL[3]); lfH:SetText(L["AURASMENU_EFFECTS_ACTIVE_SPELLS"])
         local lfS=lf:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lfS,FONT,9); lfS:SetPoint("TOPLEFT",10,-22); lfS:SetTextColor(unpack(Theme.textDim)); lfS:SetText(L["AURASMENU_EFFECTS_AUTO_FROM_TACTICS"])
         local ly=38
@@ -137,28 +104,15 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         -- RIGHT PANEL
         local _gd = Theme.gold or {0.78,0.62,0.30}
         local rf=CreateFrame("Frame",nil,fxCont); rf:SetPoint("TOPLEFT",LEFT_W+2,0); rf:SetPoint("BOTTOMRIGHT",0,0)
-        -- Pas de fond noir/gris ici non plus : on herite du fond du panel principal.
         local rfIco=rf:CreateTexture(nil,"ARTWORK"); rfIco:SetSize(36,36); rfIco:SetPoint("TOPLEFT",8,-3); rfIco:SetTexCoord(TC,1-TC,TC,1-TC)
         rfIco:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         local rfNm=rf:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(rfNm,FONT,12); rfNm:SetPoint("TOPLEFT",50,-8)
         rfNm:SetPoint("RIGHT",rf,"RIGHT",-140,0); rfNm:SetTextColor(1,1,1); rfNm:SetText(L["AURASMENU_EFFECTS_SELECT_A_SPELL"]); rfNm:SetJustifyH("LEFT")
 
-        -- Forward declare RefreshTabVisibility : appele par le OnClick des view tabs
-        -- pour cacher/montrer les onglets ANIMS selon la matrice de compatibilite.
-        -- La fonction elle-meme est definie apres la creation des anim tabs ci-dessous.
-        local RefreshTabVisibility
+        local RefreshTabVisibility -- defini apres les anim tabs ci-dessous
 
-        -- View tabs : permettent de configurer l'animation 3D PAR RENDER.
-        -- Un meme sort peut avoir une anim 3D differente selon le render dans
-        -- lequel il s'affiche. La vue [TOUTES] est le fallback applique partout.
-        --
-        -- Matrice de compatibilite : tous les renders n'ont pas tous les layers.
-        --   - [B] BUFFS  : pas d'icone (que des barres miroir), mais a un spark
-        --   - [P] PROCS  : pas de spark (icone+barre seulement)
-        --   - [E] EQUIP  : que l'icone (pas de barre, pas de spark)
-        --
-        -- Libelles courts pour eviter le wrap sur 2 lignes (CD au lieu de COOLDOWNS,
-        -- EQUIP au lieu de EQUIPMENT). 6 onglets * 86 = 516px, tient sur la largeur.
+        -- View tabs : anim 3D configurable par render. [TOUTES] = fallback partout.
+        -- Matrice de compatibilite : BUFFS pas d'icone, PROCS pas de spark, EQUIP que l'icone.
         local viewNames={L["AURASMENU_EFFECTS_VIEW_LIST"],L["AURASMENU_EFFECTS_VIEW_CIRCLE"],L["AURASMENU_EFFECTS_VIEW_FREE"],L["AURASMENU_EFFECTS_VIEW_ICONS"],L["AURASMENU_EFFECTS_VIEW_EQUIP"],L["AURASMENU_EFFECTS_VIEW_ALL"]}
         local viewKeys={"iconlist","freebars","circlebars","icons","equipment","all"}
         local LAYER_COMPAT = {
@@ -186,17 +140,12 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
             -- Etat initial via le helper (TOUTES = actif au build)
             SetTabActive(viewBtns[vi], vi == 1)
             vt:SetScript("OnClick",function() activeView=viewKeys[vi]
-                -- Helper centralise : reset tous les onglets et active uniquement le bon.
-                -- Solution definitive contre le bug du surlignement cumule.
                 SetActiveOne(viewBtns, activeView)
-                -- Cache/montre les onglets ANIMS selon la matrice de compatibilite
                 if RefreshTabVisibility then RefreshTabVisibility() end
-                -- Mode preview (fake bar) : injecte une fausse barre dans la dest
-                -- correspondant a la vue active. Seulement si un sort est selectionne.
+                -- Injecte une fausse barre (preview) dans la vue active si un sort est selectionne
                 if selectedSpellID then
                     ns._previewBars = true
                     ns._previewMode = activeView == "all" and "all" or activeView
-                    -- Force la visibilite du container (override combatOnly hors combat)
                     if ns.UpdateAllFades then pcall(ns.UpdateAllFades) end
                     pcall(function() ns.ScanAuras() end)
                 end
@@ -208,8 +157,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         sep:SetPoint("TOPLEFT",0,-68); sep:SetPoint("TOPRIGHT",0,-68)
         sep:SetColorTexture(0.18, 0.18, 0.20, 0.6)
 
-        -- RepositionViewTabs : recompacte les onglets visibles a gauche.
-        -- Appele apres les Show/Hide WG vs sort normal pour eviter les trous.
+        -- Recompacte les onglets visibles a gauche (evite les trous)
         local function RepositionViewTabs()
             local pos = 0
             for vi, vf in ipairs(viewFrames) do
@@ -240,31 +188,21 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
             -- Etat initial via le helper (le 1er = actif au build)
             SetTabActive(tabBtns[ti], ti == 1)
             tab:SetScript("OnClick",function() activeTab=td[1]; ns._selectedFx3dTab=td[1]
-                -- Helper centralise contre le bug du surlignement cumule
                 SetActiveOne(tabBtns, activeTab)
                 RefreshInlinePreview(); RefreshLayers()
             end)
         end
 
-        -- RefreshTabVisibility : cache les onglets ANIMS qui ne s'appliquent pas
-        -- a la vue active (selon LAYER_COMPAT), repositionne les onglets visibles
-        -- cote a cote sans trous, et bascule activeTab sur le premier visible si
-        -- l'onglet courant devient incompatible.
-        --
-        -- Largeur des onglets adaptee au nombre de visibles (1=toute la largeur,
-        -- 2=moitie chacun, 3=tiers chacun) pour que la presentation reste propre.
+        -- Cache les onglets ANIMS incompatibles avec la vue active, repositionne le reste sans trous
         function RefreshTabVisibility()
             local compat = LAYER_COMPAT[activeView] or LAYER_COMPAT.all
-            -- Compte les visibles + reorganise
             local visibleTabs = {}
             for _, t in ipairs(tabBtns) do
                 if compat[t.key] then table.insert(visibleTabs, t) end
             end
             local nVis = #visibleTabs
             if nVis == 0 then nVis = 1 end  -- safety, ne devrait jamais arriver
-            -- Largeur dynamique : on prend la largeur reelle de rf et on divise.
-            -- Fallback 400 si rf:GetWidth() retourne 0 (pas encore layout-e).
-            local rfW = rf:GetWidth() or 0
+            local rfW = rf:GetWidth() or 0 -- fallback 400 si pas encore layout-e
             if rfW < 100 then rfW = 400 end
             local tabW = math.floor(rfW / nVis)
             for i, t in ipairs(visibleTabs) do
@@ -282,20 +220,13 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                 activeTab = visibleTabs[1].key
                 ns._selectedFx3dTab = activeTab
             end
-            -- Reset systematique de l'etat visuel de TOUS les tabBtns (visibles ou non).
-            -- Crucial : sans ca, un onglet temporairement cache puis reaffiche pourrait
-            -- garder son ancien etat actif/inactif, causant 2 onglets actifs en meme temps.
-            -- Iterer tabBtns (et pas visibleTabs) garantit que les onglets caches sont
-            -- aussi reset, donc quand ils redeviennent visibles ils sont propres.
+            -- Reset tous les tabBtns (visibles ou non) pour eviter 2 onglets actifs en meme temps
             SetActiveOne(tabBtns, activeTab)
             if RefreshInlinePreview then RefreshInlinePreview() end
             if RefreshLayers then RefreshLayers() end
         end
 
-        -- Premier appel : applique la visibilite selon la vue initiale (TOUTES par defaut).
-        -- ns._selectedFx3dView n'est pas persistant, donc on reste sur "all"
-        -- a chaque premier chargement du menu.
-        RefreshTabVisibility()
+        RefreshTabVisibility() -- applique la visibilite pour la vue initiale ("all" par defaut)
 
         -- Preview 3D inline (affiche le modèle de la couche sélectionnée)
         local pvArea=CreateFrame("Frame",nil,rf,"BackdropTemplate")
@@ -346,9 +277,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                 local pIco=CreateFrame("Frame",nil,pp); pIco:SetSize(120,120); pIco:SetPoint("CENTER",0,-10)
                 local pIcoTex=pIco:CreateTexture(nil,"ARTWORK"); pIcoTex:SetAllPoints(); pIcoTex:SetTexCoord(TC,1-TC,TC,1-TC)
                 local pIcoMdl=CreateFrame("PlayerModel",nil,pIco); pIcoMdl:SetAllPoints(); pIcoMdl:SetKeepModelOnHide(true); pIcoMdl:SetFrameLevel(pIco:GetFrameLevel()+2)
-                -- Supprime le plancher/fond blanc rendu par PlayerModel : désactive
-                -- l'éclairage (pas de plancher lumineux) et le fog (pas de brume blanche).
-                -- Le modèle reste visible avec son alpha propre, sans rectangle blanc autour.
+                -- Supprime le plancher/fond blanc rendu par PlayerModel (light+fog off)
                 pcall(function() pIcoMdl:SetLight(false, false) end)
                 pcall(function() if pIcoMdl.SetFogFar then pIcoMdl:SetFogFar(0) end end)
                 pp._pIco=pIco; pp._pIcoTex=pIcoTex; pp._pIcoMdl=pIcoMdl
@@ -364,9 +293,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                 pcall(function() pBarMdl:SetLight(false, false) end)
                 pcall(function() if pBarMdl.SetFogFar then pBarMdl:SetFogFar(0) end end)
                 pp._pBarWr=pBarWr; pp._pBarMdl=pBarMdl
-                -- CLEANUP RAM : quand le popup est caché (fermeture menu ou clic x),
-                -- libère les modèles 3D chargés. Sans ça, PlayerModel + SetKeepModelOnHide
-                -- retient le .m2 en mémoire indéfiniment (fuite mémoire typique de plusieurs MB).
+                -- Libère les modèles 3D à la fermeture (évite la fuite mémoire de SetKeepModelOnHide)
                 pp:SetScript("OnHide", function(self)
                     if self._pIcoMdl then pcall(self._pIcoMdl.ClearModel, self._pIcoMdl) end
                     if self._pBarMdl then pcall(self._pBarMdl.ClearModel, self._pBarMdl) end
@@ -430,8 +357,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
             if not selectedSpellID or not ns.SpellFX then pvLbl:SetText(L["AURASMENU_EFFECTS_PREVIEW_LABEL"]); return end
             local layers = ns.SpellFX:GetSpellLayers(selectedSpellID, activeView, activeTab)
             local layer
-            -- Trouve le layer actif courant : prefere le selectionne, sinon le 1er actif
-            -- Un layer est "actif" si modelID > 0 (3D) OU fillTex non vide (2D Fill)
+            -- Layer actif : le selectionne s'il l'est, sinon le 1er (modelID>0 ou fillTex non vide)
             local function IsLayerActive(l)
                 if not l then return false end
                 local m = l.mode or "front"
@@ -532,10 +458,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                     local mLbl=lf2:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(mLbl,FONT,9); mLbl:SetPoint("TOPLEFT",8,-22); mLbl:SetTextColor(unpack(Theme.textDim)); mLbl:SetText(L["AURASMENU_EFFECTS_PLANE_LABEL"])
                     local mNames, mLabels, mCols
                     if isBar then
-                        -- Plans pour les BARRES (vue ANIMS BARRE) :
-                        --   - "Remplissage 2D" = mode `mid`   : texture 2D qui suit la zone remplie
-                        --   - "Remplissage 3D" = mode `back`  : modele 3D qui suit la zone remplie (rogne par le clip)
-                        --   - "Fond"           = mode `front` : modele 3D fixe pleine largeur, ne suit pas le remplissage
+                        -- Plans barres : mid=remplissage 2D, back=remplissage 3D (rogne), front=fond fixe
                         mNames={"mid","back","front"}
                         mLabels={L["AURASMENU_EFFECTS_FILL_2D"],L["AURASMENU_EFFECTS_FILL_3D"],L["AURASMENU_EFFECTS_BACKGROUND"]}
                         mCols={{_gold[1], _gold[2], _gold[3]},
@@ -554,13 +477,11 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                         else mbBg:SetColorTexture(0.05,0.05,0.07,0.5); mbTx:SetTextColor(0.35,0.35,0.40) end
                         mb:SetScript("OnClick",function() layer.mode=mk; if ns.SpellFX and selectedSpellID then pcall(function() ns.SpellFX:SyncToSpell(selectedSpellID) end) end; pcall(RefreshInlinePreview); pcall(ns.ScanAuras); RefreshLayers() end)
                     end
-                    -- Selecteur conditionnel : selon le mode actif (Fond 3D ou Remplissage 2D),
-                    -- on affiche soit le ModelPicker classique, soit un dropdown de textures 2D.
+                    -- Selecteur conditionnel : ModelPicker 3D ou dropdown de textures 2D selon le mode
                     local pickB, idLbl
                     local isFillMode = isBar and ((layer.mode or "front") == "mid")
                     if isFillMode then
-                        -- ===== MODE REMPLISSAGE (Texture 2D) =====
-                        -- Dropdown des 15 textures Fill 2D
+                        -- Mode remplissage : dropdown des textures Fill 2D
                         local opts = {}
                         opts[#opts+1] = { value = "", text = L["AURASMENU_EFFECTS_NONE_FEM"] }
                         for _, t in ipairs(ns.FillTextures or {}) do
@@ -588,7 +509,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                             RefreshInlinePreview(); pcall(ns.ScanAuras)
                         end
                     else
-                        -- ===== MODE FOND (PlayerModel 3D) ou icon/spark/glow =====
+                        -- Mode fond (PlayerModel 3D) ou icon/spark/glow
                         pickB = SW.CreateActionBtn(lf2,L["AURASMENU_EFFECTS_CHOOSE_MODEL"],130,{0.05,0.05,0.06},{_gold[1],_gold[2],_gold[3],0.55},{_gold[1],_gold[2],_gold[3]})
                         pickB:SetPoint("TOPLEFT",8,-40); pickB:SetSize(130,18)
                         pickB:SetScript("OnClick",function()
@@ -598,12 +519,10 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                                     layer.modelID=mid; if px then layer.x=px end; if py then layer.y=py end
                                     if pscale then layer.scale=pscale end; if prot then layer.rotation=prot end
                                     if ns.SpellFX and selectedSpellID then pcall(function() ns.SpellFX:SyncToSpell(selectedSpellID) end) end
-                                    -- Flag reload : un modelID change charge un nouveau .m2 en RAM GPU.
-                                    -- Blizzard ne peut pas décharger un .m2 sans reload → on propose.
+                                    -- Modele change : propose un reload (Blizzard ne decharge pas un .m2 sans ca)
                                     if mid ~= oldMid and mid and mid > 0 then ns._fx3dDirty = true end
                                     selectedLayerIdx=li; ns._selectedFx3dLayerIdx=selectedLayerIdx; RefreshInlinePreview(); RefreshLayers(); pcall(ns.ScanAuras)
-                                    -- Refresh differe : laisse le temps au .m2 de loader en RAM GPU
-                                    -- avant de relancer le scan pour materialiser le modele dans la fake bar.
+                                    -- Refresh differe : laisse le temps au .m2 de charger avant de relancer le scan
                                     C_Timer.After(0.15, function() pcall(ns.ScanAuras) end)
                                 end, layer.modelID)
                             end end)
@@ -621,7 +540,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                     end
                     if isBar then
                         if isFillMode then
-                            -- ===== Sliders pour Fill 2D (texture qui se tronque) =====
+                            -- Sliders pour Fill 2D (texture qui se tronque)
                             local LH2 = 200; lf2:SetHeight(LH2)
                             MkSl(L["AURASMENU_EQUIPMENT_OPACITY"], 0, 1, 0.05, 0, 0, "fillAlpha")
                             MkSl(L["AURASMENU_EFFECTS_SCROLL_SPEED"], 0, 2, 0.05, 1, 0, "fillScroll")
@@ -657,7 +576,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                                 pcall(function() if ns._rebuildCurrentMenu then ns._rebuildCurrentMenu() end end) end)
                             cy=cy+LH2+8
                         else
-                            -- ===== Sliders pour Bar 3D (PlayerModel mode Fond) =====
+                            -- Sliders pour Bar 3D (PlayerModel mode Fond)
                             local LH2 = 290; lf2:SetHeight(LH2)
                             MkSl(L["AURASMENU_EFFECTS_SCALE"],0.10,5.00,0.05,0,0,"scale"); MkSl(L["AURASMENU_EFFECTS_ROTATION"],0,360,5,1,0,"rotation"); MkSl(L["AURASMENU_EQUIPMENT_OPACITY"],0,1,0.05,2,0,"alpha")
                             MkSl(L["AURASMENU_EFFECTS_FX_WIDTH"],5,400,1,0,1,"fxW"); MkSl(L["AURASMENU_EFFECTS_FX_HEIGHT"],2,100,1,1,1,"fxH"); MkSl(L["AURASMENU_EFFECTS_Z_DEPTH"],-30,30,0.5,2,1,"z")
@@ -752,10 +671,8 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         local allEntries={}
         local seenIDs={}
 
-        -- Construit d'abord un set des spellID/itemID qui correspondent à des slots
-        -- Equipment actifs (trinkets, raciales, items on-use). Utilisé pour détecter
-        -- les entrées WG même si leur info dans db.spells a perdu le flag
-        -- source="equipment" (régression possible lors d'anciennes refontes de presets).
+        -- Set des spellID/itemID des slots Equipment actifs, pour detecter les entrées WG
+        -- meme si le flag source="equipment" a été perdu dans db.spells
         local wgSidSet = {}
         local wgSlotBySid = {}  -- [sid] = slot (pour récupérer tex/name plus tard)
         if ns.Providers and ns.Providers.GetAllSlots then
@@ -770,11 +687,8 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
 
         if spells then for sid,info in pairs(spells) do if info.enabled and not seenIDs[sid] then
             seenIDs[sid]=true
-            -- isWG : vrai soit par flag source explicit, soit parce que le sid correspond
-            -- à un slot Equipment actif (couverture cas régression).
             local isWG = (info.source == "equipment") or (wgSidSet[sid] == true)
-            -- Si détecté via wgSidSet mais flag manquant, on le répare (auto-heal DB)
-            if isWG and info.source ~= "equipment" then info.source = "equipment" end
+            if isWG and info.source ~= "equipment" then info.source = "equipment" end -- auto-heal DB
             local name = info.name or (isWG and wgSlotBySid[sid] and ns.Providers:GetSlotName(wgSlotBySid[sid])) or tostring(sid)
             local tex = isWG and wgSlotBySid[sid] and ns.Providers:GetSlotTexture(wgSlotBySid[sid]) or nil
             allEntries[#allEntries+1]={id=sid, info=info, name=name, isWG=isWG, tex=tex}
@@ -791,8 +705,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                         end
                         allEntries[#allEntries+1]={id=sid,info=spells[sid],name=ns.Providers:GetSlotName(slot),isWG=true,tex=ns.Providers:GetSlotTexture(slot)}
                     end end end end
-        -- _addon.FoldAccentsLower (Core.lua) : cf. Tactics.lua -- strcmputf8i
-        -- seul ne suffisait pas pour ce client (toujours classé après Z).
+        -- FoldAccentsLower : strcmputf8i seul classait mal les accents sur ce client
         table.sort(allEntries,function(a,b) return _addon.FoldAccentsLower(a.name or"") < _addon.FoldAccentsLower(b.name or"") end)
         local spellRowBgs = {}
         for _,entry in ipairs(allEntries) do
@@ -838,13 +751,8 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                         end
                     end
                 end
-                -- Reset systematique de TOUS les tabBtns (visibles ou non) pour eviter
-                -- qu'un onglet cache garde un ancien etat actif quand il redeviendra visible.
                 SetActiveOne(tabBtns, activeTab)
-                -- Filtrage des vues selon la nature du sort selectionne :
-                --   - Equipement : SEULE [E] EQUIPMENT visible (pas de TOUTES, pas de [D]/[B]/[C]/[P])
-                --   - Sort normal : TOUTES + [D]/[B]/[C]/[P] visibles, mais PAS [E] EQUIPMENT
-                -- Si l'activeView est devenu incompatible, on bascule sur la 1ere vue visible.
+                -- Filtrage des vues : WG -> seule [E] EQUIPMENT visible, sort normal -> tout sauf [E]
                 local visibleVKeys = {}
                 for vi,vk in ipairs(viewKeys) do
                     local visible
@@ -866,13 +774,8 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                 if not found and visibleVKeys[1] then
                     activeView = visibleVKeys[1]
                 end
-                -- Recompacte les onglets visibles a gauche (evite trous)
                 RepositionViewTabs()
-                -- Helper centralise : reset toutes les vues et active uniquement la bonne.
-                -- Solution definitive contre le bug du surlignement cumule (ex : Tigre Fury
-                -- qui montrait TOUTES + DEBUFFS + COOLDOWNS allumes simultanement).
                 SetActiveOne(viewBtns, activeView)
-                -- Refresh la visibilite des onglets ANIMS selon la (nouvelle) activeView
                 if RefreshTabVisibility then RefreshTabVisibility() end
                 -- Switch entre WG (icones) et sort (rien de special)
                 pcall(function()
@@ -890,9 +793,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                         ns._equipmentPreview = false
                         ns._equipment3DPreview = false
                     end
-                    -- Mode preview (fake bar) : activer puisqu'un sort vient d'etre selectionne.
-                    -- La dest cible est determinee par activeView (deja a jour ci-dessus).
-                    -- Skip pour les WG (pas de FX bar).
+                    -- Mode preview (fake bar) : skip pour les WG (pas de FX bar)
                     if not entry.isWG then
                         ns._previewBars = true
                         ns._previewMode = activeView == "all" and "all" or activeView
@@ -903,12 +804,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                     -- Force la visibilite du container (override combatOnly hors combat)
                     if ns.UpdateAllFades then pcall(ns.UpdateAllFades) end
                     pcall(ns.ScanAuras)
-                    -- v281 : re-scan differe pour laisser le temps au .m2 du nouveau
-                    -- sort de loader en RAM GPU. Sans ca, quand on change de sort
-                    -- selectionne, l'aperçu et la fake bar peuvent rester vides
-                    -- car le scan immediat tombe avant que Blizzard ait charge le
-                    -- modele en GPU. Pattern identique au handler de modelID change
-                    -- (ligne ~629). Cf. SESSION_CHANGELOG.
+                    -- Re-scan differe : laisse le temps au .m2 du nouveau sort de charger en GPU
                     C_Timer.After(0.15, function() pcall(ns.ScanAuras) end)
                 end)
                 selectedLayerIdx=1; ns._selectedFx3dLayerIdx=selectedLayerIdx; RefreshInlinePreview(); RefreshLayers() end)
@@ -999,9 +895,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
     end
     cbFx.onChanged=function(v)
         if ns.db then ns.db.effectsEnabled=v end
-        -- FIX v269 : si on desactive, hide explicitement tous les FX 3D actifs
-        -- sur les wraps. Sinon ApplyBarModels retourne immediat (a cause du
-        -- not ns.EffectsActive()) et les FX restent visibles "fantomes".
+        -- Si on desactive, hide explicitement les FX 3D actifs (sinon ils restent visibles "fantomes")
         if not v then
             pcall(function()
                 if ns.HideAllFX3D then ns.HideAllFX3D() end
@@ -1013,19 +907,16 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
     BuildFx()
     p:SetScript("OnShow", function()
         BuildFx()
-        -- Active le mode preview : les fake bars apparaitront dans la dest de
-        -- la vue active si un sort est selectionne et la dest correspondante vide.
+        -- Active le mode preview : fake bar dans la vue active si un sort est selectionne
         if selectedSpellID then
             ns._previewBars = true
             ns._previewMode = activeView == "all" and "all" or activeView
-            -- Force la visibilite du container (override combatOnly hors combat)
             if ns.UpdateAllFades then pcall(ns.UpdateAllFades) end
             pcall(function() ns.ScanAuras() end)
         end
     end)
     p:SetScript("OnHide", function()
-        -- Desactive le mode preview a la fermeture du menu pour ne pas laisser
-        -- de fake bar trainer en jeu.
+        -- Desactive le mode preview a la fermeture (pas de fake bar qui traine en jeu)
         ns._previewBars = false
         ns._previewMode = nil
         -- Restaure les fades normaux (combatOnly redevient effectif)

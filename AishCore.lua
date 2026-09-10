@@ -22,14 +22,9 @@ local TA   = ns.Modules.TargetAuras
 local CLR  = ns.Modules.Colors
 local SR   = ns.Modules.Skyriding
 
----------------------------------------------------------------------------
--- [DEBUG 12.0.5] Diagnostic d'initialisation
--- Active un log détaillé en cas de problème silencieux (module manquant,
--- API Blizzard cassée, erreur non affichée si "Lua Errors" est off).
--- Activer / désactiver : ns._diag = true (ou /aish diag on)
----------------------------------------------------------------------------
-ns._diag = ns._diag or false  -- par défaut off ; flip à true pour logs verbeux
-ns._diagInit = {}              -- trace des appels d'init (nom → "ok" | "MISSING" | erreur)
+-- Diagnostic d'init (voir /aish diag on)
+ns._diag = ns._diag or false
+ns._diagInit = {}
 
 local function DPrint(msg)
   if ns._diag then
@@ -38,10 +33,7 @@ local function DPrint(msg)
 end
 ns.DPrint = DPrint
 
--- Exécute mod.method(...) en pcall, log l'erreur et la trace.
--- Retourne true si l'appel a réussi, false sinon.
--- CRUCIAL : sans ce wrapper, la première erreur d'un module stoppe tout le
--- reste de PLAYER_ENTERING_WORLD sans affichage si les erreurs Lua sont off.
+-- Appelle mod.method(...) en pcall pour qu'une erreur d'un module ne bloque pas les autres
 local function SafeCall(modName, methodName, ...)
   local mod = ns.Modules[modName]
   if not mod then
@@ -60,8 +52,7 @@ local function SafeCall(modName, methodName, ...)
   local ok, err = pcall(fn, ...)
   if not ok then
     ns._diagInit[modName .. "." .. methodName] = tostring(err)
-    -- Toujours afficher les erreurs d'init, même diag off : sinon on ne saurait
-    -- jamais pourquoi l'addon ne fonctionne pas après une maj Blizzard.
+    -- Toujours afficher les erreurs d'init, même diag off
     print("|cffff4444[AishCore]|r Erreur " .. modName .. "." .. methodName
           .. " : " .. tostring(err))
     return false
@@ -76,7 +67,7 @@ SLASH_AISHCORE1 = "/aish"
 SLASH_AISHCORE2 = "/aishcore"
 SlashCmdList["AISHCORE"] = function(msg)
   msg = strtrim((msg or ""):lower())
-  -- [DEBUG 12.0.5] /aish diag — dump l'état d'init complet
+  -- /aish diag — dump l'état d'init
   if msg == "diag" or msg == "diag on" or msg == "diag off" then
     if msg == "diag on"  then ns._diag = true ; print("|cff00ccff[AishCore]|r diag |cff00ff00ON|r  — /reload pour rejouer l'init avec logs") ; return end
     if msg == "diag off" then ns._diag = false; print("|cff00ccff[AishCore]|r diag |cffff0000OFF|r") ; return end
@@ -200,9 +191,7 @@ SlashCmdList["AISHCORE"] = function(msg)
       end
     end
   elseif msg:find("^charges%s+") or msg == "charges" then
-    -- [12.0.5] Diagnostic complet du tracking des charges.
-    -- Usage : /aish charges <spellID> (ex: 17364 pour Stormstrike)
-    -- À exécuter OOC puis EN COMBAT pour comparer.
+    -- Diagnostic tracking des charges (usage : /aish charges <spellID>)
     local arg = msg:match("^charges%s+(.+)") or ""
     local sid = tonumber(arg)
     if not sid then
@@ -232,7 +221,7 @@ SlashCmdList["AISHCORE"] = function(msg)
       end
     end
 
-    -- [1b] GetActionCharges (ancienne API, celle qu'utilise Blizzard dans ActionButton.lua)
+    -- [1b] GetActionCharges (API historique, utilisée par Blizzard)
     if GetActionCharges then
       local pb = ns.Modules.PriorityBar
       local actionSlot = pb and pb._GetActionSlot and pb._GetActionSlot(sid)
@@ -249,7 +238,7 @@ SlashCmdList["AISHCORE"] = function(msg)
       end
     end
 
-    -- [2] C_Spell.GetSpellChargeDuration (NOUVEAU 12.0.5)
+    -- [2] C_Spell.GetSpellChargeDuration
     if C_Spell and C_Spell.GetSpellChargeDuration then
       local ok, d = pcall(C_Spell.GetSpellChargeDuration, sid)
       if not ok then
@@ -312,7 +301,7 @@ SlashCmdList["AISHCORE"] = function(msg)
         s.eventFires or 0, s.eventWrites or 0, now - (s.lastEventTime or 0),
         s.tickerRuns or 0, s.tickerWrites or 0, now - (s.lastTickerTime or 0)))
     end
-    -- [5] Dump des slots PB : quel sort affiché, si isChargeSpell se déclenche
+    -- [5] Dump slots PB (sort affiché, isChargeSpell)
     if pb and pb._DumpSlotsForSpell then
       pb._DumpSlotsForSpell(sid)
     end
@@ -439,11 +428,7 @@ local function LoadDatabase()
   ns.Profiles.InitDB()
 end
 
--- Cache de classe/spec joueur : invariants entre deux changements de spec.
--- Mis a jour au login et sur PLAYER_SPECIALIZATION_CHANGED / UPDATE_SHAPESHIFT_FORM.
--- Remplace les appels UnitClass() / GetSpecialization() dans les tickers.
--- IMPORTANT : ne jamais écraser une valeur déjà cachée par nil (API parfois
--- indisponible brièvement lors de transitions d'instance / M+).
+-- Cache classe/spec joueur (ne jamais écraser par nil, API parfois indispo)
 local function CachePlayerSpec()
   local _, cls = UnitClass("player")
   if cls and cls ~= "" then
@@ -470,9 +455,7 @@ local function StartVisibilityTicker()
     HC.Update()
     OCRC.Update()
     OCRC.UpdateVisibility()
-    -- Watchdog : rattrape les cas où l'entrée en combat a manqué l'appel initial
-    -- (race condition quand InCombatLockdown() était déjà true au moment de l'event).
-    -- Le debounce (ubLastVisState / pbLastVisState) garantit zéro overhead si rien n'a changé.
+    -- Watchdog : rattrape la race condition si InCombatLockdown() était déjà true
     if UB then UB.UpdateAllVisibility() end
     if PB then PB.UpdateVisibility()   end
   end)
@@ -516,9 +499,7 @@ frame:RegisterEvent("PLAYER_UPDATE_RESTING")   -- zone de repos (hearthstone inn
 
 frame:SetScript("OnEvent", function(self, event, arg1, ...)
   if event == "ADDON_LOADED" and arg1 == addonName then
-    -- [DEBUG 12.0.5] wrap pour surfacer une erreur de chargement de la DB
-    -- (si ns.Profiles manque ou si une migration de profil plante, tout
-    -- l'addon tombe silencieusement sans DB ni ns.GetCfg utilisable)
+    -- Wrap pour surfacer une erreur de chargement DB (sinon échec silencieux)
     if not ns.Profiles or not ns.Profiles.InitDB then
       print("|cffff4444[AishCore]|r ns.Profiles.InitDB introuvable — "
         .. "Config/Profiles.lua n'a pas été chargé correctement.")
@@ -534,7 +515,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     self:UnregisterEvent("ADDON_LOADED")
 
   elseif event == "PLAYER_ENTERING_WORLD" then
-    -- [DEBUG 12.0.5] Snapshot des modules présents avant l'init
+    -- Snapshot des modules présents avant l'init
     if ns._diag then
       local present, missing = {}, {}
       for _, name in ipairs({ "ResourceCircle","HealthCircle","OutOfCombatResourceCircle",
@@ -551,9 +532,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
       end
     end
 
-    -- Creation des elements UI (tous via SafeCall : une erreur d'un module
-    -- n'empêche pas les autres de s'initialiser — sans ce filet, un seul
-    -- module cassé par une MAJ Blizzard fait perdre TOUT l'addon)
+    -- Création des éléments UI (via SafeCall pour isoler les erreurs par module)
     SafeCall("ResourceCircle",            "Create", UIParent)
     SafeCall("HealthCircle",              "Create", UIParent)
     SafeCall("OutOfCombatResourceCircle", "Create", UIParent)
@@ -620,17 +599,13 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     StartVisibilityTicker()
 
     -- Filet de sécurité : re-broadcast des couleurs une fois les APIs stables
-    -- (rattrape les cas où CachePlayerSpec n'avait pas encore les données
-    -- lors d'une transition d'instance / M+).
     C_Timer.After(0.5, function()
       CachePlayerSpec()
       local CLR = ns.Modules and ns.Modules.Colors
       if CLR and CLR.Broadcast then CLR.Broadcast() end
     end)
 
-    -- Libérer AishCoreModelPaths (~19 MB disque → ~60-80 MB Lua) dès le login.
-    -- On compacte la table volumineuse en un tableau plat { fileId, text } (ns._modelFlat),
-    -- puis on nil la globale et on force un GC complet. Le model picker utilise ns._modelFlat.
+    -- Compacte AishCoreModelPaths en tableau plat (ns._modelFlat) puis libère la mémoire
     if AishCoreModelPaths then
       ns._modelFlat = {}
       for _, cat in pairs(AishCoreModelPaths) do
@@ -648,11 +623,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
       collectgarbage("collect")
     end
 
-    -- Surcharge de la font des timers de debuffs Platynator avec Montserrat-Bold.
-    -- PlatynatorNameplateCooldownFont est cree lors de PLAYER_LOGIN par Platynator ;
-    -- on le redirige ici (PLAYER_ENTERING_WORLD se declenche apres PLAYER_LOGIN).
-    -- Le hooksecurefunc maintient la font meme si l'utilisateur change le design
-    -- dans les options de Platynator (ce qui appellerait SetFont sur cet objet).
+    -- Force la font des timers Platynator, avec hook pour résister à un changement de design
     if PlatynatorNameplateCooldownFont then
       local PLAT_FONT_PATH  = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat-Bold.ttf"
       local PLAT_FONT_SIZE  = 11
@@ -686,17 +657,12 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     if OCRC then OCRC.Update()      end
 
   elseif event == "UNIT_POWER_FREQUENT" and arg1 == "player" then
-    -- Ne fire que pour les ressources a regen continue (mana/energy/rage/focus/
-    -- runic power/insanity/maelstrom/lunar power/essence...) : Blizzard ne
-    -- l'emet pas pour les ressources discretes (combo points, chi, holy power,
-    -- soul shards...), pas besoin de filtrer par powerToken ici.
+    -- Ne fire que pour les ressources à regen continue, pas besoin de filtrer par powerToken
     if RC   then RC.Update()   end
     if OCRC then OCRC.Update() end
 
   elseif event == "UNIT_MAXPOWER" and arg1 == "player" then
-    -- powerToken = "HOLY_POWER", "COMBO_POINTS", "CHI", "MANA", etc.
-    -- On re-detecte les secondary dots quand le max d'une ressource trackee change
-    -- (ex: Rogue Deeper Stratagem 5→7, Pala Holy Power 3→5, Moine Chi)
+    -- Re-détecte les secondary dots si le max d'une ressource trackée change
     local powerToken = ...
     if powerToken == "HOLY_POWER" or powerToken == "COMBO_POINTS" or powerToken == "CHI" then
       if RC   then RC.DetectSecondaryDots()   end
@@ -717,6 +683,9 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
       -- Forcer la re-détection des dots secondaires même si la ressource primaire
       -- n'a pas changé (ex: Mage Feu → Mage Arcane, les deux utilisent le Mana).
       RC.DetectSecondaryDots()
+      -- Force la redétection : certaines classes gardent la même ressource primaire à toutes les spés
+      if RC.DetectSecondaryResource then RC.DetectSecondaryResource() end
+      if RC.DetectStagger then RC.DetectStagger() end
     end
     if OCRC then
       OCRC.OnResourceChanged()

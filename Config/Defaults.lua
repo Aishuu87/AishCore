@@ -52,13 +52,10 @@ ns.Defaults = {
     ignorePainArcEnabled   = true,  -- Guerrier Prot (specID 73) : Dur au mal
     dndArcEnabled          = true,  -- DK Sang (specID 250) : sort 188290
     manaTeaArcEnabled      = true,  -- Moine Mistweaver (specID 270) : Thé de Mana
-    -- Devourer (specID 1480) : defaut FALSE (contrairement aux autres arcs
-    -- ci-dessus, tous a true) -- feature toute neuve, jamais confirmee en jeu ;
-    -- rester opt-in evite qu'AutoConfigCenterArc (CenterArc.lua) s'active tout
-    -- seul pour tout le monde sur cette spe avant d'avoir pu verifier qu'elle
-    -- ne perturbe pas le texte de ressource secondaire (regression rapportee
-    -- en jeu, cause exacte pas encore confirmee -- cf. commentaire CENTER_ARC_SPELLS[1480]).
+    -- Devourer (specID 1480) : opt-in, feature neuve pas encore confirmee en jeu
     devourerArcEnabled     = false,
+    -- Evoker Augmentation (specID 1473) : idem, opt-in par defaut
+    ebonyPowerArcEnabled   = false,
     durationArcRatio        = 0.72, -- taille de l'arc de durée (identique au stagger par défaut)
     durationArcOverlayRatio = 0.76, -- épaisseur (overlay intérieur)
     durationArcColorR = nil,  -- nil = couleur par défaut du spec
@@ -181,24 +178,15 @@ ns.Defaults = {
     levelOutlineStyle = "OUTLINE",
   },
 
-  -- Fiche de personnage enrichie : agrandissement de la fiche + fond derriere
-  -- le modele, recoloration ilvl/enchant + gemmes/durabilite/alertes par
-  -- emplacement, indicateur de transmogrification.
+  -- Fiche de personnage enrichie : agrandissement + fond derriere le modele,
+  -- recoloration ilvl/enchant + gemmes/durabilite/alertes, indicateur de transmog.
   characterArmory = {
     enabled = true,
 
-    -- Disposition : zoneWidth est un DELTA (pixels ajoutes), pas une largeur absolue :
-    -- HandsSlot/MainHandSlot (colonne d'equipement droite) ET
-    -- CharacterFrameInsetRight (panneau de stats natif) sont TOUS translates
-    -- du meme delta depuis LEUR ancre d'origine -- jamais redimensionnes ni
-    -- re-ancres avec des offsets en dur -- pour que l'ecart entre la colonne
-    -- et le panneau de stats reste constant quel que soit zoneWidth.
+    -- zoneWidth = delta ajoute entre les 2 colonnes d'equipement (translate, pas resize)
     layoutEnabled = true,
     zoneWidth   = 0,    -- ecart AJOUTE entre les 2 colonnes d'equipement (0 = disposition Blizzard par defaut)
-    -- 444 = hauteur "expanded" native de Blizzard -- le chrome de la fiche
-    -- (bordures, portrait) n'est pas concu pour un redimensionnement vertical arbitraire,
-    -- d'ou le slider volontairement resserre autour de cette valeur (cf.
-    -- SETTINGS_ARMORY_FRAME_HEIGHT dans SettingsPanel.lua).
+    -- 444 = hauteur "expanded" native Blizzard, slider resserre autour de cette valeur
     frameHeight = 444,
     modelScale  = 1.0,
     hideCorners = true, -- masque les coins de fond par defaut de Blizzard
@@ -212,9 +200,7 @@ ns.Defaults = {
       font = nil, fontSize = 12, fontStyle = "OUTLINE", -- font nil = ns.Media.fontGui
     },
 
-    -- Niveau d'objet GLOBAL (texte agrege natif Blizzard, CharacterStatsPane.ItemLevelFrame.Value,
-    -- juste au-dessus de "Caracteristiques") -- distinct du ilvl par objet ci-dessus.
-    -- Desactive par defaut : ne touche rien au natif tant que non active.
+    -- Niveau d'objet GLOBAL (texte agrege natif Blizzard, distinct du ilvl par objet ci-dessus)
     globalIlvl = {
       enabled = false,
       font = nil, fontSize = 14, fontStyle = "OUTLINE", -- font/fontStyle nil = valeurs natives Blizzard
@@ -294,21 +280,25 @@ ns.Defaults = {
     oocCombos = {},
   },
 
-  -- Assistant de rotation : icones des sorts highlightes
+  -- Assistant de rotation : icone du sort highlighte, miroir du highlight Blizzard
   rotationHelper = {
-    enabled = false,
+    enabled = true,
     iconSize = 40,
-    iconSpacing = 4,
-    maxIcons = 8,
     anchor = "TOP",
     x = 0,
     y = -220,
-    growDirection = "RIGHT",  -- RIGHT ou LEFT
+    -- Glow : meme systeme que priorityBar (LOOP_GLOW_TYPES). 2="Pulse" (texture fixe,
+    -- toujours presente) car les types flipbook atlas ne sont pas garantis sur tous les clients.
+    loopGlowIndex = 2,
+    glowColor = { 1, 0.85, 0, 0.8 },
+    glowSize = 4,
+    useSpecGlowColor = false,  -- si true, utilise la couleur Glow du module Couleurs (spec active)
+    -- Visibilite : memes reglages que priorityBar
+    visibilityMode = "combat",
+    alwaysInInstance = false,
+    ignoreWhileResting = false,  -- zone de repos : meme logique que MissingBuffs.lua, opt-in
   },
 
-  -- Priority Slots : 4 icones fixes autour du cercle de ressource
-  -- Chaque slot contient une liste de spellIDs ordonnes par priorite
-  -- Le sort highlight prend la priorite d'affichage, sinon le premier est affiche
   -- Priority Bar : 4 icones fixes (2 gauche + 2 droite du cercle de ressource)
   priorityBar = {
     enabled = true,
@@ -361,10 +351,8 @@ ns.Defaults = {
     tooltipAltCombatOnly = false,
   },
 
-  -- Cooldown Manager Essentiels / Utilitaires : personnalisation des viewers
-  -- natifs Blizzard (EssentialCooldownViewer / UtilityCooldownViewer),
-  -- cf. Modules/CooldownManagerEnhanced.lua.
-  -- Meme forme pour les 2 (cdmEssential / cdmUtility), valeurs independantes.
+  -- Cooldown Manager Essentiels / Utilitaires : personnalisation des viewers natifs Blizzard
+  -- (meme forme pour cdmEssential / cdmUtility, valeurs independantes)
   cdmEssential = {
     enabled = false,  -- opt-in : evite un changement de comportement surprise a l'install
     -- Layout / grille
@@ -454,9 +442,7 @@ ns.Defaults = {
     fadeInCombat = false, fadeOnTarget = false, fadeOnCasting = false, fadeOnHover = true,
   },
 
-  -- Visibilite : reglages de transparence pour des elements tiers (ElvUI...)
-  -- que l'addon ne cree pas lui-meme mais peut ajuster via SetAlpha (jamais
-  -- bloque par le lockdown combat, contrairement a Show/Hide).
+  -- Visibilite : opacite d'elements tiers (ElvUI...) ajustee via SetAlpha (pas de lockdown combat)
   visibility = {
     -- Zone de buffs ElvUI (ElvuiPlayerBuffs)
     elvuiBuffsEnabled       = true,
@@ -575,14 +561,11 @@ ns.Defaults = {
     },
   },
 
-  -- Numero de sous-groupe de raid (1-8), affiche en overlay -- RAID
-  -- uniquement (jamais en groupe simple ni solo). cf. Modules/GroupNumber.lua.
+  -- Numero de sous-groupe de raid (1-8), overlay RAID uniquement (jamais solo/groupe simple)
   groupNumber = {
     enabled = true,
     badgeSize = 28,
-    -- Point d'ancrage sur le conteneur de groupe ElvUI (mode multi-vignettes) :
-    -- TOP/BOTTOM/LEFT/RIGHT/TOPLEFT/TOPRIGHT/BOTTOMLEFT/BOTTOMRIGHT.
-    badgePosition = "TOP",
+    badgePosition = "TOP",  -- ancrage sur le conteneur de groupe ElvUI (mode multi-vignettes)
     badgeX = -260, badgeY = -95, -- pres de la barre "player" par defaut
     badgeColor = { 0, 0, 0, 0.85 },
     font = nil, -- nil = ns.Media.font
@@ -745,14 +728,8 @@ ns.Defaults = {
     font          = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
   },
 
-  -- Mode AFK (cf. Modules/AFKMode.lua) : ecran plein ecran affiche quand le
-  -- joueur passe AFK, remplace l'ecran natif Blizzard.
-  -- "elements" : config individuelle par item affichable (texte ou blason),
-  -- lue par UI/SettingsPanel.lua:BuildAFKMode (sous-sections dynamiques) et
-  -- Modules/AFKMode.lua (ApplyTextStyle/ApplyGraphicStyle). anchor est un
-  -- point WoW standard (TOP/BOTTOM/TOPLEFT/TOPRIGHT/BOTTOMLEFT/BOTTOMRIGHT) :
-  -- l'element s'ancre sur le MEME point de l'ECRAN ENTIER (le frame plein
-  -- ecran, pas topPanel/bottomPanel), decale de x/y.
+  -- Mode AFK : ecran plein ecran affiche quand le joueur passe AFK, remplace l'ecran natif.
+  -- "elements" : config par item (texte/blason), anchor = point standard sur l'ECRAN ENTIER.
   afkMode = {
     enabled = true,
 
@@ -788,14 +765,8 @@ ns.Defaults = {
     chatShow       = true,
     exitOnKeypress = true,
 
-    -- Elements individuels (textes + blasons/logos) : chacun {enable, font,
-    -- size, color, anchor, x, y} pour un texte, {enable, style, anchor, x, y,
-    -- width, height} pour un blason/logo.
-    -- useSpecColor/specColorKey (2026-08-30) : au lieu d'imposer une couleur
-    -- fixe (ou la couleur de classe pour playerName), chaque element texte
-    -- peut piocher sa couleur dans le module Couleurs (ns.Modules.Colors,
-    -- meme systeme que ResourceCircle) -- specColorKey choisit LEQUEL parmi
-    -- Colors.ELEMENT_KEYS (powercircle, pethealthbar, xpbar...).
+    -- Elements individuels (textes + blasons/logos). useSpecColor/specColorKey : pioche la
+    -- couleur dans le module Couleurs (ELEMENT_KEYS) au lieu d'une couleur fixe.
     elements = {
       timer       = { enable = true, font = nil, size = 20, color = {1,1,1,1},       anchor = "TOP",         x = 0,   y = -8,  outlineStyle = "OUTLINE", useSpecColor = false, specColorKey = "powercircle" },
       playerName  = { enable = true, font = nil, size = 16, color = {1,1,1,1},       anchor = "BOTTOMLEFT",  x = 12,  y = 60,  outlineStyle = "OUTLINE", useSpecColor = false, specColorKey = "powercircle" },
@@ -858,11 +829,8 @@ ns.Defaults = {
     hidden = false,
   },
 
-  -- Etat de la page "Modules" (UI/SettingsPanel.lua, BuildModulesOverview) :
-  -- categoryOff[catKey] = true si la catégorie a été désactivée en bloc ;
-  -- snapshot[catKey] = { moduleId = étaitActivé } sauvegardé au moment de la
-  -- désactivation, pour restaurer l'état individuel de chaque module quand la
-  -- catégorie est réactivée (plutôt que de tout remettre à ON).
+  -- Etat de la page "Modules" : categoryOff = categories desactivees en bloc,
+  -- snapshot = etat individuel sauvegarde pour restaurer au lieu de tout remettre ON
   modulesPanel = {
     categoryOff = {},
     snapshot = {},

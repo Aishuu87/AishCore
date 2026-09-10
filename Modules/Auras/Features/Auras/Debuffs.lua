@@ -1,6 +1,4 @@
--- AishUIAura/Features/Auras/Debuffs.lua
--- Aegis (miroir) + Berserk (dual) — layouts centraux sous le cercle
-------------------------------------------------------------------------
+-- Debuffs.lua : Aegis (miroir) + Berserk (dual), layouts centraux sous le cercle
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 local Debuffs = {}
@@ -18,10 +16,7 @@ local function MakeIcon(parent, w, h)
     local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
     local ib = CreateFrame("Button", nil, parent)
     ib:SetSize(w, h)
-    -- Insets négatifs : élargit légèrement la zone de survol au-delà du cadre
-    -- visuel pour absorber les écarts d'arrondi pixel entre ib et le Cooldown
-    -- superposé (cd), qui pouvaient laisser une fine bande (1-2px) sur un bord
-    -- comme seule zone réellement réactive au tooltip.
+    -- Insets négatifs : élargit la zone de survol pour éviter une fine bande morte au tooltip
     ib:SetHitRectInsets(-1, -1, -1, -1)
     ib:SetScript("OnEnter", ns.AuraIconOnEnter)
     ib:SetScript("OnLeave", ns.AuraIconOnLeave)
@@ -57,8 +52,7 @@ local function MakeIcon(parent, w, h)
     st:Hide()
     ib._stackText = st
 
-    -- Charges text (sublevel 7, configurable font) — charges de sort (Ice Barrier, Blink, etc.)
-    -- Position et couleur indépendantes des stacks pour différencier visuellement
+    -- Charges text (sublevel 7) — charges de sort, position/couleur indépendantes des stacks
     local ct = ib:CreateFontString(nil, "OVERLAY", nil, 7)
     ns.ApplyFont(ct, cfg.chargesFont or ns.Media.font, cfg.chargesSize or 10, "OUTLINE")
     ct:SetPoint(cfg.chargesPos or "TOPLEFT", ib, cfg.chargesPos or "TOPLEFT", cfg.chargesOffX or 0, cfg.chargesOffY or 0)
@@ -111,11 +105,7 @@ local function MakeSpark(parent)
     local r, g, b = ns.sparkColor[1], ns.sparkColor[2], ns.sparkColor[3]
     local userOverride = cfg.sparkColorR ~= nil
     if userOverride then r, g, b = cfg.sparkColorR, cfg.sparkColorG or 0.5, cfg.sparkColorB or 0.5 end
-    -- CRITICAL : quand une couleur est forcée (via le color picker ou le gradient),
-    -- il faut désaturer l'atlas pour que SetVertexColor donne vraiment la couleur demandée.
-    -- Sans ça, SetVertexColor(1,0,0) sur le honor spark (jaune-doré natif) donne du rouge
-    -- très sombre car les canaux sont multipliés avec la teinte native de l'atlas.
-    -- On désature seulement si override actif pour garder le look natif par défaut.
+    -- Désature l'atlas avant teinte, sinon SetVertexColor se multiplie avec sa couleur native
     if userOverride or cfg.sparkGradient then
         pcall(function() s:SetDesaturated(true) end)
     end
@@ -133,25 +123,14 @@ local function MakeSpark(parent)
     else
         s:SetVertexColor(r, g, b, cfg.sparkAlpha or 0.9)
     end
-    -- Memorise la ref du spark 2D sur le barWrap pour que le spark FX3D
-    -- (ShowSparkModel dans SpellEffects.lua) puisse s'ancrer dessous.
+    -- Memorise la ref pour que le spark FX3D (ShowSparkModel) puisse s'ancrer dessous
     parent._spark2D = s
     return s
 end
 
-------------------------------------------------------------------------
--- GLOW (design pattern)
-------------------------------------------------------------------------
 local function EnsureGlow(ib)
     if ib._glowSetup then return end
-    -- IMPORTANT : ne marquer _glowSetup=true qu'APRES succes complet. Sur les
-    -- auraButton natifs (AuraTrackerContainer.lua, patch 12.1),
-    -- CreateFrame/CreateTexture peuvent echouer si le bouton devient
-    -- transitoirement forbidden -- si _glowSetup passait a true AVANT la
-    -- creation, un seul echec empoisonnerait le glow de ce bouton POUR
-    -- TOUJOURS (ShowGlow suivants indexeraient des champs jamais crees,
-    -- silencieusement avales par le pcall appelant) : plus aucun glow du
-    -- tout apres une premiere tentative ratee.
+    -- Ne marque _glowSetup=true qu'apres succes : un echec avant marquerait le glow mort a jamais
     local ok = pcall(function()
         local gc = CreateFrame("Frame", nil, ib)
         gc:SetFrameLevel(ib:GetFrameLevel() + 2)
@@ -179,16 +158,7 @@ local function ShowGlow(ib, idx, color, alpha, scale, sizeW, sizeH)
     color = color or ns.barColor; alpha = alpha or 0.7; scale = scale or 1.0
     EnsureGlow(ib)
 
-    -- Guard : ne pas REDEMARRER l'animation si le même type de glow tourne déjà
-    -- (sans ça, un appel répété -- chaque scan, plusieurs fois/seconde --
-    -- relance l'AnimationGroup depuis le début, ce qui provoque un reset
-    -- visible en boucle). Ce guard ne doit PAS faire un `return` immédiat,
-    -- ce qui bloquerait AUSSI toute mise à jour de couleur/opacité/échelle
-    -- tant que le TYPE ne change pas -- cas le plus courant (seul le slider
-    -- opacité/taille bouge). On calcule juste `sameTypePlaying` ici ;
-    -- couleur/opacité/échelle sont
-    -- désormais TOUJOURS réappliquées plus bas, seul le redémarrage de
-    -- l'animation (Play()) reste conditionné à ce guard.
+    -- Guard anti-redemarrage si meme type de glow deja actif (evite un reset visible a chaque scan)
     local sameTypePlaying = false
     if ib._glowActiveIdx == idx then
         if def.useAlphaPulse then
@@ -199,13 +169,7 @@ local function ShowGlow(ib, idx, color, alpha, scale, sizeW, sizeH)
     end
     ib._glowActiveIdx = idx
 
-    -- sizeW/sizeH (optionnels) : a fournir explicitement pour un auraButton
-    -- natif (AuraTrackerContainer.lua) -- une fois lie a une vraie aura, SA
-    -- PROPRE ib:GetSize() peut renvoyer une valeur SECRETE ("attempt to
-    -- perform arithmetic on ... a secret number value"), meme si le bouton
-    -- reste par ailleurs accessible. On connait
-    -- deja la taille (c'est nous qui l'avons posee via SetSize juste avant),
-    -- pas la peine de la relire sur un objet potentiellement tainted.
+    -- sizeW/sizeH optionnels : sur un auraButton natif lie, ib:GetSize() peut renvoyer une valeur secrete
     local iw, ih = sizeW, sizeH
     if not (iw and ih) then iw, ih = ib:GetSize() end
     -- Marges aware de l'aspect : proportionnelles à chaque dimension
@@ -266,25 +230,8 @@ end
 -- Expose for settings panel preview
 ns.ShowGlow = ShowGlow; ns.HideGlow = HideGlow
 
-------------------------------------------------------------------------
--- PROC START (animation d'entree, jouee UNE FOIS quand une aura/proc passe
--- de inactif -> actif). Meme moteur que ShowGlow/HideGlow ci-dessus (memes
--- champs GLOW_DEFS : atlas/texture/rows/columns/frames/duration/scale/
--- useAlphaPulse/texCoord/blendMode/fromAlpha/toAlpha), mais :
---   - AnimationGroup SANS SetLooping (donc une seule lecture, contrairement
---     a ShowGlow qui boucle en REPEAT/BOUNCE en continu tant que le glow est
---     actif) -- OnFinished cache la texture, pas besoin d'un Hide manuel.
---   - Layer/texture DEDIES (ib._procPulse/_procFlip, PAS ib._glowPulse/_glowFlip)
---     pour pouvoir jouer en meme temps que la boucle sans se marcher dessus
---     (ex: glow "Modern Glow" en continu + flourish "Proc: White Short" au
---     moment precis ou l'aura apparait), sur un FrameLevel superieur pour
---     rester visible par-dessus.
--- ns.PlayProcStart etait appele depuis 4 endroits (Tactics.lua bouton
--- "Tester Proc", Procs.lua/Debuffs.lua/Cooldowns.lua a l'apparition reelle
--- d'un proc) mais n'avait jamais ete definie nulle part -- CONFIRME EN JEU :
--- bouton test sans effet ET aucune animation d'entree jamais visible en jeu,
--- pas juste dans le popup de test.
-------------------------------------------------------------------------
+-- Animation d'entree jouee une fois (proc inactif->actif), meme moteur que ShowGlow/HideGlow
+-- mais AnimationGroup sans loop et textures dediees (_procPulse/_procFlip) pour jouer en parallele
 local function EnsureProcStart(ib)
     if ib._procSetup then return end
     ib._procSetup = true
@@ -315,8 +262,7 @@ local function PlayProcStart(ib, idx, color, scale)
     EnsureProcStart(ib)
 
     local iw, ih = ib:GetSize()
-    -- Filet : dans le popup de test (Tactics.lua), la frame preview peut ne
-    -- pas encore avoir sa taille resolue au tout premier appel.
+    -- Filet : la frame preview du popup de test peut ne pas avoir sa taille resolue au premier appel
     if not iw or iw <= 0 then iw = 32 end
     if not ih or ih <= 0 then ih = 32 end
     local mx = math.max(4, math.floor(iw * 0.3 * scale))
@@ -365,15 +311,8 @@ end
 
 ns.PlayProcStart = PlayProcStart
 
-------------------------------------------------------------------------
--- APPLY AURA  (FUSION: design + motor durObj swipe)
-------------------------------------------------------------------------
--- Helpers top-level : évitent closures pcall dans ApplyAura (appelé par aura par scan).
--- Exposés sur ns pour partage entre les 3 renders (Debuffs, Cooldowns, Procs).
--- Fallback icon (question mark) si la texture demandée est nil/invalide :
--- sinon SetTexture(nil) laisse la TEXTURE PRÉCÉDENTE de l'icône, ce qui cause
--- des "icônes fantômes" quand une row est réutilisée pour une aura dont le
--- spellID est stale (typique : données obsolètes dans la SavedVariable).
+-- Helpers top-level partagés entre Debuffs/Cooldowns/Procs, évitent des closures pcall par scan.
+-- Fallback icon si texture nil/invalide : sinon SetTexture(nil) garde l'icône fantôme précédente
 local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 local function _SetIconTexture(icon, tex) icon:SetTexture(tex or FALLBACK_ICON) end
 local function _SetIconTextureFromSpellID(icon, spellID)
@@ -385,11 +324,7 @@ ns._SetIconTexture = _SetIconTexture
 ns._SetIconTextureFromSpellID = _SetIconTextureFromSpellID
 ns._SetCDFromDurObj = _SetCDFromDurObj
 
--- Abonnement au swipe CDM (aura.useCDMSwipe, cf. Scan.lua) : en combat,
--- GetAuraDuration echoue systematiquement pour un instID CDM (donc pas de
--- durObj) -- ce canal event-driven (CDMHooks.lua, alimente par le CDM
--- Blizzard lui-meme) prend le relais. Desabonne l'ancien spellID si l'icone
--- (ib, cle stable reutilisee entre scans) change de sort affiche.
+-- Swipe CDM (aura.useCDMSwipe) : repli event-driven quand GetAuraDuration echoue en combat sans durObj
 local function ApplyCDMSwipe(ib, cd, aura)
     local newID = aura.useCDMSwipe and aura.spellID or nil
     if ib._cdmSwipeSpellID and ib._cdmSwipeSpellID ~= newID then
@@ -403,32 +338,14 @@ local function ApplyCDMSwipe(ib, cd, aura)
 end
 ns._ApplyCDMSwipe = ApplyCDMSwipe
 
--- Abonnement au clone CDM des stacks (cf. CDMHooks.lua, "ABONNEMENTS CLONE
--- STACK") : filet de secours combat-safe (joueur ET cible) pour le cas ou la
--- lecture directe (_GetPlayerAuraStackValue, joueur uniquement, echoue en
--- combat sur une aura a duree limitee) ne renvoie rien. Meme pattern
--- d'abonnement/desabonnement que ApplyCDMSwipe ci-dessus, sur le spellID
--- (contrairement au swipe, pas de garde useCDMSwipe : les stacks n'ont pas
--- d'equivalent "durObj disponible" a preferer, ce canal est toujours utile
--- en repli).
--- IMPORTANT (bug corrige) : c'est ICI, pas dans ApplyStackCharges, que le
--- "reset propre" au changement de sort doit avoir lieu -- ApplyCDMStackSwipe
--- s'execute AVANT ApplyStackCharges dans ApplyAura. Un Hide() inconditionnel
--- fait APRES coup dans ApplyStackCharges ecrasait la valeur que
--- SubscribeCDMAuraStack vient de repousser immediatement ici (cache
--- cdmAuraLastApplications, cf. CDMHooks.lua) -- symptome observe en jeu :
--- une icone qui se decale (reordonnancement par priorite quand une nouvelle
--- aura apparait) perdait son affichage de stacks jusqu'au prochain
--- changement de valeur, alors que la bonne valeur etait deja disponible en
--- cache au moment meme du changement de sort sur cette icone.
+-- Clone CDM des stacks : filet combat-safe si la lecture directe echoue. Le reset au changement
+-- de sort doit rester ICI (avant ApplyStackCharges) pour ne pas ecraser la valeur just-pushee
 local function ApplyCDMStackSwipe(ib, aura)
     local newID = aura.spellID
     if ib._cdmStackSpellID and ib._cdmStackSpellID ~= newID then
         if ns.UnsubscribeCDMAuraStack then ns.UnsubscribeCDMAuraStack(ib._cdmStackSpellID, ib) end
         ib._cdmStackSpellID = nil
-        -- Nettoyage AVANT re-abonnement : si aucune valeur en cache pour le
-        -- nouveau spellID, on part d'un etat propre plutot que de garder le
-        -- stack de l'ancienne aura affiche par erreur.
+        -- Nettoyage avant re-abonnement : part d'un etat propre plutot que garder le stack precedent
         if ib._stackText then ib._stackText:Hide() end
     end
     if newID and ib._cdmStackSpellID ~= newID and ib._stackText then
@@ -438,19 +355,8 @@ local function ApplyCDMStackSwipe(ib, aura)
 end
 ns._ApplyCDMStackSwipe = ApplyCDMStackSwipe
 
--- Abonnement au clone CDM du remplissage de BARRE (StatusBar, cf. CDMHooks.lua
--- "ABONNEMENTS CLONE BAR") : contrairement à ApplyCDMSwipe ci-dessus (Cooldown,
--- confirmé bloqué en combat pour toute valeur secrète venant d'un addon), ce
--- canal utilise StatusBar:SetValue/SetMinMaxValues, qui ACCEPTENT le relais
--- secret -- réellement combat-safe. Utilisé pour les rendus à barres
--- (circlebars) plutôt qu'à swipe d'icône.
--- statusBar sert lui-même de clé d'abonnement (chaque widget est unique) --
--- pas besoin d'un ib/row séparé, fonctionne aussi bien pour une barre seule
--- (row.bar) que pour une paire (row.barL/row.barR, chacune abonnée
--- indépendamment avec le même spellID).
--- Nécessite que le sort soit épinglé sur le viewer "Barres"
--- (BuffBarCooldownViewer) du Cooldown Manager Blizzard (Edit Mode) -- sinon
--- aucune donnée ne circule sur ce canal pour ce spellID.
+-- Clone CDM du remplissage de barre : StatusBar:SetValue accepte le relais secret, vraiment combat-safe.
+-- Requiert que le sort soit épinglé sur le viewer "Barres" du Cooldown Manager Blizzard
 local function ApplyCDMBarSwipe(statusBar, aura)
     if not statusBar then return end
     local newID = aura.spellID
@@ -466,15 +372,8 @@ local function ApplyCDMBarSwipe(statusBar, aura)
 end
 ns._ApplyCDMBarSwipe = ApplyCDMBarSwipe
 
--- Binding natif (AuraTrackerContainer.lua, AuraButton:SetDurationCooldown/
--- SetApplicationCount) : source PRIORITAIRE, plus robuste que les canaux de
--- forward manuels ci-dessus -- Blizzard anime lui-meme le widget Cooldown ET
--- ecrit le texte de stacks, sans jamais faire transiter de valeur secrete
--- par du Lua. Ne remplace pas les canaux CDM ci-dessus (garde en repli si le
--- bouton natif n'est pas encore disponible, ex. avant le premier /reload
--- suivant l'ajout d'un sort a la liste de tracking). Rebind uniquement au
--- changement de spellID sur cette icone (evite des appels redondants a
--- chaque scan).
+-- Binding natif (AuraTrackerContainer.lua) : source prioritaire, Blizzard anime Cooldown/stacks
+-- lui-meme sans valeur secrete transitant par Lua. Rebind uniquement au changement de spellID
 local function ApplyNativeAuraBindings(ib, cd, aura)
     local spellID = aura.spellID
     if ib._nativeBoundSpellID == spellID then return end
@@ -487,19 +386,8 @@ local function ApplyNativeAuraBindings(ib, cd, aura)
 end
 ns._ApplyNativeAuraBindings = ApplyNativeAuraBindings
 
--- Cherche et cache le FontString du cooldown countdown natif Blizzard.
--- Blizzard ne l'expose pas directement, on doit le retrouver par GetRegions().
--- On cache la référence sur le cd frame lui-même (cd._aishCountdownFS) pour
--- éviter de rescanner à chaque ApplyAura.
--- Style + repositionne le FontString NATIF du countdown Blizzard (le texte
--- lui-meme reste rempli par le C++, meme sur une donnee secrete -- on ne
--- touche jamais la VALEUR, seulement les proprietes visuelles du FontString,
--- qui ne sont pas secretes). anchor/relFrame/relPoint : "Position (par
--- rapport a l'icone/au conteneur)" du menu Reglages, offX/offY : "Offset X/Y".
--- relFrame par defaut = cd lui-meme si non fourni (retro-compat).
--- Cherche a la fois les regions ET les enfants (CooldownFrameTemplate ajoute
--- parfois un sous-frame CooldownDisplay contenant le FontString reel selon
--- la version du client -- meme recette que TargetAuras.lua::StyleCooldownText).
+-- Style + repositionne le FontString natif du countdown Blizzard (jamais la valeur, secrete possible).
+-- Cherche dans les regions ET les enfants (CooldownDisplay selon version client)
 local function _StyleCountdownFS(cd, font, size, r, g, b, anchor, relFrame, relPoint, offX, offY)
     local function styleFS(fs)
         if not fs or not fs.SetFont then return end
@@ -536,44 +424,14 @@ end
 local function ApplyStackCharges(ib, aura, cfg)
     if ib._stackText then
         if aura and aura._isPreview and aura.stacks and aura.stacks > 0 then
-            -- Entree preview : l'API Blizzard ne reconnait pas l'instID factice,
-            -- on affiche directement la valeur fictive stockee dans entry.stacks.
+            -- Entree preview : instID factice non reconnu par l'API, on affiche la valeur fictive
             ib._stackText:SetText(aura.stacks)
             ib._stackText:Show()
         elseif ib._nativeBoundSpellID == aura.spellID then
-            -- Des qu'un bouton AuraContainer natif est branche sur
-            -- ib._stackText (ApplyNativeAuraBindings, appele plus haut dans
-            -- ApplyAura via SetApplicationCount), Blizzard ecrit DIRECTEMENT
-            -- et en temps reel dans ce FontString, combat-safe (widget
-            -- "blessed" cote Blizzard). Si ce bloc-ci ecrit AUSSI dedans
-            -- (SetText/Show/Hide avec la valeur cachee ci-dessous), les 2
-            -- sources se battent pour le meme FontString et donnent des
-            -- stacks incorrects des que le natif est actif. Une fois le binding natif etabli
-            -- pour ce spellID, on ne touche plus JAMAIS ib._stackText ici --
-            -- Blizzard reste seul maitre (y compris pour le masquer a 0, cf.
-            -- doc officielle SetApplicationCount).
+            -- Binding natif actif pour ce spellID : Blizzard reste seul maitre de ib._stackText, ne pas y toucher
 
         elseif cfg.stackEnabled ~= false and aura.spellID and ib.unit == "player" then
-            -- Repli tant qu'aucun bouton natif n'est encore branche sur cette
-            -- ligne pour ce spellID (ex. juste apres l'ajout d'un nouveau
-            -- sort a la liste de tracking, avant le prochain /reload qui
-            -- laissera EnsureAuraTrackerContainer creer son slot -- cf.
-            -- AuraTrackerContainer.lua) : aura.stacks vient de Scan.lua/
-            -- MakeEntry, qui memorise la derniere lecture directe reussie
-            -- (ns._lastKnownAura) et la reutilise telle quelle quand la
-            -- lecture directe echoue (typiquement en combat) plutot que de
-            -- retomber a 0 -- meme source que l'icone elle-meme.
-            --
-            -- Un Hide() inconditionnel ici des que stacks<=1 ecraserait la valeur que le
-            -- canal CDM-forward event-driven (ApplyCDMStackSwipe, souscrit
-            -- AVANT nous dans ApplyAura -- cf. son commentaire, meme piege
-            -- deja corrige une fois pour ce meme fichier) vient de pousser en
-            -- temps reel via SetAuraInstanceInfo -- seul canal qui continue
-            -- de se mettre a jour PENDANT le combat, le cache ci-dessus etant
-            -- fige jusqu'a la prochaine lecture directe reussie. Meme regle
-            -- que pour la cible juste en dessous : hors combat, aura.stacks
-            -- est frais et fiable pour cacher franchement ; en combat, ne
-            -- JAMAIS toucher l'etat, laisser le canal CDM-forward garder la main.
+            -- Repli avant binding natif : en combat, ne jamais Hide() ici, laisser le canal CDM-forward decider
             local stacks = aura.stacks
             if stacks and stacks > 1 then
                 if ns.MarkStackCapable then ns.MarkStackCapable(aura.spellID) end
@@ -586,12 +444,7 @@ local function ApplyStackCharges(ib, aura, cfg)
                 ib._stackText:Hide()
             end
         elseif cfg.stackEnabled ~= false and aura.spellID and ib.unit then
-            -- Cible (pas de GetPlayerAuraBySpellID equivalent cote cible) :
-            -- pas de logique ici, on ne touche PAS a l'etat -- le canal
-            -- CDM-forward (ApplyCDMStackSwipe, souscrit dans ApplyAura,
-            -- event-driven) est la SEULE source pour ce cas et met a jour
-            -- ib._stackText lui-meme de facon asynchrone. Un Hide()
-            -- inconditionnel ici ecraserait ce qu'il vient de pousser.
+            -- Cible : seul le canal CDM-forward met a jour ib._stackText ici, ne pas y toucher
         else
             ib._lastStackSpellID = nil
             ib._stackText:Hide()
@@ -633,16 +486,10 @@ local function ApplyAura(ib, icon, cd, aura, glowOn)
     if aura.durObj then
         pcall(_SetCDFromDurObj, cd, aura.durObj)
     elseif aura.directStart and aura.directDuration then
-        -- Repli : duration/expirationTime lus directement sur l'AuraData
-        -- (cf. Scan.lua/MakeEntry) plutôt qu'un durObj -- SetCooldown classique
-        -- (pas FromDurationObject), valeurs potentiellement secrètes acceptées
-        -- brutes (même sink que le relais CDM ci-dessous).
+        -- Repli : duration/expirationTime lus directement sur l'AuraData plutot qu'un durObj
         pcall(cd.SetCooldown, cd, aura.directStart, aura.directDuration)
     elseif aura._isPreview then
-        -- Les fausses entrees de preview n'ont ni durObj ni
-        -- directStart/directDuration (rien de secret a simuler) -- sans ce
-        -- repli, le Cooldown ne serait jamais lie, texte de duree vide.
-        -- Cycle 12s synthetique, meme convention que Animation.lua::AnimateBar.
+        -- Entrees preview sans durObj ni direct* : cycle 12s synthetique pour lier le Cooldown
         pcall(cd.SetCooldown, cd, GetTime(), 12)
     end
     pcall(ApplyCDMSwipe, ib, cd, aura)
@@ -665,8 +512,7 @@ local function ApplyAura(ib, icon, cd, aura, glowOn)
     local glAlpha = aura.glowAlpha
     local glScale = aura.glowScale or 1.0
     local hasGlow = aura.spellGlow and glIdx and glIdx > 1
-    -- Override render RETIRE, desactive via `false and` -- cf.
-    -- AuraTrackerContainer.lua::ApplySpellGlow.
+    -- Override render desactive via `false and`, cf. AuraTrackerContainer.lua::ApplySpellGlow
     if false and cfg.glowOverrideIdx and cfg.glowOverrideIdx > 1 then
         glIdx = cfg.glowOverrideIdx; hasGlow = true
         if cfg.glowOverrideR then glColor = {cfg.glowOverrideR, cfg.glowOverrideG or 0.5, cfg.glowOverrideB or 0.5} end
@@ -684,11 +530,7 @@ local function SetBarColor(bar, aura)
     ns.ApplyBarColor(bar, "iconlist", aura)
 end
 
-------------------------------------------------------------------------
--- 3D MODEL APPLY (Step 4)
-------------------------------------------------------------------------
--- Scratch tables réutilisées pour ShowIconModel/ShowBarModel/ShowSparkModel.
--- Évite l'allocation d'une nouvelle table par aura par scan quand fx3d activé.
+-- Scratch tables réutilisées pour ShowIconModel/ShowBarModel/ShowSparkModel (évite alloc par scan)
 local _iconModelCfg = {}
 local _barModelCfg = {}
 local _sparkModelCfg = {}
@@ -720,13 +562,10 @@ end
 
 local function ApplyBarModels(barWrap, aura)
     if not barWrap or not ns.db or not ns.EffectsActive() or not ns.SpellFX then return end
-    -- Cache : si la meme aura est re-appliquee sur ce wrap, pas besoin de
-    -- redo Show. Evite le cycle "Show -> rien faire -> Show -> ..." a chaque
-    -- scan qui spammait avant. Le spellID est utilise comme cle stable.
+    -- Cache par spellID : evite de re-Show la meme aura a chaque scan
     local spellID = aura.spellID
     local prevID = barWrap._fxAuraID
-    -- Mode FOND (front) : PlayerModel 3D plein largeur derriere la barre
-    -- Mode REMPLISSAGE (mid) : Texture 2D qui se tronque avec la barre (pattern WA)
+    -- Mode "front"/"back" = PlayerModel 3D, "mid" = texture 2D qui se tronque avec la barre
     local mode = aura.barModelMode or "front"
     if (mode == "front" or mode == "back") and aura.barModelID and aura.barModelID ~= 0 then
         -- Cache eventuel Fill 2D si on switch vers 3D
@@ -766,10 +605,7 @@ local function ApplyBarModels(barWrap, aura)
             ns.SpellFX:ShowFill2D(barWrap._fx2dFill, _fill2DCfg)
         end
     elseif prevID ~= spellID then
-        -- L'aura courante n'a NI 3D Fond NI Fill 2D configure, ET ce n'est pas
-        -- la meme aura que la precedente sur ce wrap (changement d'aura via
-        -- recyclage de row). On cache les FX heritage de l'aura precedente
-        -- pour ne pas afficher de texture / 3D fantome.
+        -- Changement d'aura sans FX configure : on cache les FX herites de l'aura precedente
         if barWrap._fx3dBar then ns.SpellFX:HideBarModel(barWrap._fx3dBar) end
         if barWrap._fx2dFill then ns.SpellFX:HideFill2D(barWrap._fx2dFill) end
     end
@@ -802,9 +638,6 @@ local function ApplyBarModels(barWrap, aura)
     elseif barWrap._barOverlay then ns.SpellFX:HideBarOverlay(barWrap._barOverlay) end
 end
 
-------------------------------------------------------------------------
--- ROW CREATORS
-------------------------------------------------------------------------
 local function CreateAegisRow(cont, i)
     local bw, bh, iw, ih, gp = Dims()
     local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
@@ -822,10 +655,7 @@ local function CreateAegisRow(cont, i)
     row.iconBtn = ib; row.icon = icon; row.iconCD = cd
     row.barL = bL; row.barR = bR; row.wrapL = wL; row.wrapR = wR
     row.sparkL = sL; row.sparkR = sR
-    -- Callback de cleanup FX3D appele par DeferHideRow juste avant row:Hide().
-    -- Cache les PlayerModels qui ne suivent pas toujours Hide() de leur parent
-    -- (quirk Blizzard). Necessaire quand un sort est decoche de la liste de
-    -- tracking pendant que l'aura est encore active.
+    -- Cleanup FX3D avant row:Hide() : les PlayerModels ne suivent pas toujours le Hide() du parent
     row._aishHideCleanup = function()
         if not ns.SpellFX then return end
         if row.iconBtn and row.iconBtn._fx3dIcon then ns.SpellFX:HideIconModel(row.iconBtn._fx3dIcon) end
@@ -872,8 +702,7 @@ local function CreateBerserkRow(cont, i)
     row.wrapBarL = wBL; row.wrapBarR = wBR
     row.sparkL = sL; row.sparkR = sR
     row._isDual = true
-    -- Callback de cleanup FX3D appele par DeferHideRow juste avant row:Hide().
-    -- Voir commentaire du callback dans CreateRow normal.
+    -- Cleanup FX3D avant row:Hide() (meme pattern que CreateAegisRow)
     row._aishHideCleanup = function()
         if not ns.SpellFX then return end
         if ibL and ibL._fx3dIcon then ns.SpellFX:HideIconModel(ibL._fx3dIcon) end
@@ -894,9 +723,6 @@ local function CreateBerserkRow(cont, i)
     return row
 end
 
-------------------------------------------------------------------------
--- INIT
-------------------------------------------------------------------------
 function Debuffs:Init()
     local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
     if not ns.db or (not ns.db.iconlistEnabled) then return end
@@ -976,17 +802,7 @@ function Debuffs:Init()
     ns.UpdateRenderFade("iconlist")
 end
 
-------------------------------------------------------------------------
--- UPDATE : rendu REEL supprime, meme methodologie que Icons/Circle
--- Bars/Free Bars -- migre vers un rendu natif combat-safe sans pin CDM
--- (cf. AuraTrackerContainer.lua ns.EnsureIconListNativeGrid).
---
--- La logique ORIGINALE (Aegis/Berserk) est conservee telle quelle,
--- UNIQUEMENT pour l'apercu en direct dans le menu "Auras & Procs" -- cf.
--- commentaire equivalent dans Buffs.lua pour le detail complet. Le rendu
--- reel est 100% natif. Debuffs:Init() reste inchangee (rows Aegis/Berserk,
--- utilitaires Dims/MakeIcon/MakeBarWrap partages).
-------------------------------------------------------------------------
+-- Rendu reel remplace par le systeme AddAuraGroup natif ; cette fonction sert juste au preview du menu
 function Debuffs:Update(auras)
     local previewActive = ns._previewBars and (ns._previewMode == "all" or ns._previewMode == "iconlist")
     if not previewActive then
@@ -1141,10 +957,7 @@ function Debuffs:Update(auras)
         end
     end
 
-    -- SetAlpha(1) explicite (pas ns.UpdateRenderFade) : cette fonction route
-    -- desormais "iconlist" vers le conteneur NATIF (rendu reel), pas vers ce
-    -- conteneur Lua de preview -- l'appeler ici ne touchait donc jamais
-    -- l'alpha de CE conteneur, qui restait bloque a 0 (cf. lecon Buffs.lua).
+    -- SetAlpha(1) explicite : ns.UpdateRenderFade route vers le conteneur natif, pas celui-ci
     gfx.container:Show()
     gfx.container:SetAlpha(1)
 end

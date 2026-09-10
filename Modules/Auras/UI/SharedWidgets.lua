@@ -1,6 +1,5 @@
 -- AishUIAura/UI/SharedWidgets.lua
 -- Widgets — ASCII arrows (v / >) — zero encoding issues
-------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local SW = {}
 ns.SharedWidgets = SW
@@ -16,9 +15,7 @@ local function ApplyBD(f, bg, edge)
     f:SetBackdropBorderColor(edge[1],edge[2],edge[3],edge[4] or 0.8)
 end
 
-------------------------------------------------------------------------
 -- CHECKBOX (12x12)
-------------------------------------------------------------------------
 function SW.CreateCheckbox(parent, label, width)
     width = width or 260
     local row = CreateFrame("Button",nil,parent); row:SetSize(width,26)
@@ -39,9 +36,7 @@ function SW.CreateCheckbox(parent, label, width)
     return row
 end
 
-------------------------------------------------------------------------
 -- SLIDER
-------------------------------------------------------------------------
 function SW.CreateSlider(parent, label, minVal, maxVal, step, width)
     width = math.min(width or 260,300); minVal=minVal or 0; maxVal=maxVal or 100; step=step or 1
     local dec = step<1 and math.max(1,math.ceil(-math.log10(step+1e-9))) or 0; local fmt = "%."..dec.."f"
@@ -74,9 +69,7 @@ function SW.CreateSlider(parent, label, minVal, maxVal, step, width)
     eb:SetScript("OnEscapePressed",function(s) s:ClearFocus() end); return c
 end
 
-------------------------------------------------------------------------
 -- DROPDOWN
-------------------------------------------------------------------------
 function SW.CreateDropdown(parent, label, options, width)
     width = width or 260; local c = CreateFrame("Frame",nil,parent); c:SetSize(width,label and 42 or 22); c._options=options or {}
     if label then c.label=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(c.label,FONT,11); c.label:SetPoint("TOPLEFT")
@@ -127,21 +120,15 @@ function SW.CreateDropdown(parent, label, options, width)
     btn:SetScript("OnLeave",function(s) s:SetBackdropColor(0.12,0.12,0.14,1) end); Build(); return c
 end
 
-------------------------------------------------------------------------
 -- COLOR BUTTON
-------------------------------------------------------------------------
 function SW.CreateColorButton(parent, label, width)
     width = width or 260; local c=CreateFrame("Frame",nil,parent); c:SetSize(width,26)
     c.label=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(c.label,FONT,11); c.label:SetPoint("LEFT",8,0)
     c.label:SetTextColor(unpack(Theme.textNormal)); c.label:SetText(label or "")
     local sw=CreateFrame("Button",nil,c); sw:SetSize(20,20); sw:SetPoint("RIGHT",-8,0)
     c._swatch = sw  -- expose pour un tooltip custom cote appelant (cf. OnEnter/OnLeave optionnels)
-    -- Clic droit = reset (meme convention que UI/SettingsPanel.lua, grille de
-    -- couleurs Colors : clic gauche ouvre le picker, clic droit reinitialise).
-    -- CreateColorButton ne connait pas la notion de "valeur par defaut" du
-    -- champ qu'il pilote (c'est propre a chaque appelant) : c.onReset laisse
-    -- l'appelant decider quoi faire (nil'er sa valeur stockee, recalculer un
-    -- fallback...), on se contente ici de relayer le clic droit.
+    -- Clic droit = reset (meme convention que UI/SettingsPanel.lua) : c.onReset laisse l'appelant
+    -- decider quoi faire, on se contente ici de relayer le clic droit.
     sw:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     local sc=sw:CreateTexture(nil,"ARTWORK"); sc:SetAllPoints(); sc:SetColorTexture(1,1,1)
     local sb=sw:CreateTexture(nil,"BORDER"); sb:SetPoint("TOPLEFT",-1,1); sb:SetPoint("BOTTOMRIGHT",1,-1); sb:SetColorTexture(unpack(Theme.border))
@@ -160,19 +147,12 @@ function SW.CreateColorButton(parent, label, width)
     return c
 end
 
-------------------------------------------------------------------------
 -- SECTION HEADER (WoW-style: 2 class color dots + label + gradient hairline)
--- Inspired by ornate WoW addon section dividers.
-------------------------------------------------------------------------
 function SW.CreateSectionHeader(parent, text, width)
     width = width or 260
     local f = CreateFrame("Frame",nil,parent); f:SetSize(width, 24)
-    -- Theme.gold (dot+hairline, "Points de Puissance A") / Theme.accentText
-    -- (label, "Points de Puissance B") -- tenus a jour par
-    -- _addon.Auras.RefreshAccentTheme(), cf. Core/ClassColors.lua. Meme
-    -- convention que UI/SharedWidgets.lua (addon principal) -- ce fichier-ci
-    -- est une IMPLEMENTATION SEPAREE (namespace _addon.Auras), pas la meme
-    -- fonction, donc avec son propre mecanisme de refresh.
+    -- Theme.gold/accentText tenus a jour par _addon.Auras.RefreshAccentTheme() (Core/ClassColors.lua).
+    -- Implementation separee de UI/SharedWidgets.lua (addon principal), meme convention.
     local g  = Theme.gold or {0.78, 0.62, 0.30}
     local tc = Theme.accentText or Theme.textNormal or {0.92, 0.92, 0.93}
     -- Single gold dot in front
@@ -200,11 +180,8 @@ function SW.CreateSectionHeader(parent, text, width)
     end
     ApplyGradient(g)
 
-    -- Ce header peut etre construit une seule fois puis mis en cache (meme
-    -- risque que UI/SharedWidgets.lua) -- RefreshColor() + le registre
-    -- ci-dessous permettent de le retenter au changement de spe/toggle sans
-    -- reconstruire les menus (cf. SW.RefreshSectionHeaderColors, appele
-    -- depuis _addon.Auras.RefreshAccentTheme).
+    -- RefreshColor() + le registre ci-dessous permettent de recolorer au changement de spe sans
+    -- reconstruire les menus (cf. SW.RefreshSectionHeaderColors, appele depuis RefreshAccentTheme).
     function f:RefreshColor()
         local gg = Theme.gold or {0.78, 0.62, 0.30}
         local tt = Theme.accentText or Theme.textNormal or {0.92, 0.92, 0.93}
@@ -219,18 +196,14 @@ function SW.CreateSectionHeader(parent, text, width)
     return f
 end
 
--- Recolore tous les section headers Auras deja construits (cf. f:RefreshColor
--- ci-dessus) -- meme convention que SharedWidgets.RefreshSectionHeaderColors
--- dans UI/SharedWidgets.lua (addon principal).
+-- Recolore tous les section headers Auras deja construits.
 function SW.RefreshSectionHeaderColors()
     for _, f in ipairs(SW._sectionHeaders or {}) do
         if f.RefreshColor then f:RefreshColor() end
     end
 end
 
-------------------------------------------------------------------------
 -- TOGGLE (labeled ON/OFF pill in gold)
-------------------------------------------------------------------------
 function SW.CreateToggle(parent, width)
     width = width or 40; local h = 18
     local f = CreateFrame("Button",nil,parent,"BackdropTemplate"); f:SetSize(width, h)
@@ -270,10 +243,8 @@ function SW.CreateToggle(parent, width)
     return f
 end
 
-------------------------------------------------------------------------
--- SECTION ROUTER (Apple-style: minimal dropdown above swap content)
--- Replaces stacked accordions. Same input shape so call sites stay intact.
-------------------------------------------------------------------------
+-- SECTION ROUTER (Apple-style: minimal dropdown above swap content). Replaces stacked accordions,
+-- same input shape so call sites stay intact.
 function SW.CreateAccordionStack(parent, sections, cw, startY)
     startY = startY or 0
     local W = cw - 20
@@ -286,9 +257,7 @@ function SW.CreateAccordionStack(parent, sections, cw, startY)
         opts[i] = { value = i, text = (sec.name or ("SECTION "..i)) }
     end
 
-    -- Petit label en majuscules au-dessus du dropdown (style groupe Apple settings)
-    -- Le label est mis a jour dynamiquement avec la categorie de la section selectionnee.
-    -- Format : "SECTION - <CATEGORIE>" si la section a un champ `category`, sinon "SECTION".
+    -- Label au-dessus du dropdown, mis a jour avec la categorie de la section selectionnee.
     local title = wrap:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(title,FONT,10)
     title:SetPoint("TOPLEFT",2,-2); title:SetTextColor(unpack(Theme.textDim))
     title:SetText("SECTION")
@@ -346,11 +315,8 @@ function SW.CreateAccordionStack(parent, sections, cw, startY)
     return wrap
 end
 
-------------------------------------------------------------------------
--- SECTION STACK : empile toutes les sections verticalement, chacune
--- precedee d'un CreateSectionHeader (divider + titre uppercase + filet or).
+-- SECTION STACK : empile les sections verticalement, chacune precedee d'un CreateSectionHeader.
 -- Remplace CreateAccordionStack pour les menus sans selecteur deroulant.
-------------------------------------------------------------------------
 function SW.CreateSectionStack(parent, sections, cw, startY)
     startY = startY or 0
     local W = cw - 20
@@ -382,9 +348,7 @@ function SW.CreateSectionStack(parent, sections, cw, startY)
     return wrap
 end
 
-------------------------------------------------------------------------
 -- ACTION BUTTON
-------------------------------------------------------------------------
 function SW.CreateActionBtn(parent, text, width, bgColor, borderColor, textColor)
     width=width or 160; local btn=CreateFrame("Button",nil,parent,"BackdropTemplate"); btn:SetSize(width,24)
     ApplyBD(btn, bgColor or {0.08,0.08,0.12}, borderColor or Theme.border)

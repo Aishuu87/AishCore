@@ -1,6 +1,4 @@
--- AishUIAura/Features/Preview/AishUIPreview.lua
--- Preview des positions des modules — rendu visuel fidèle
-------------------------------------------------------------------------
+-- AishUIPreview.lua : preview des positions des modules, rendu visuel fidèle
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local AP = {}; ns.AishUIPreview = AP
 local frames = {}
@@ -9,9 +7,6 @@ local CIRCLE_TEX = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMaskSmall"
 local GLOW_TEX = "Interface\\AddOns\\AishCore\\GlowTex"
 local GLOW_FALLBACK = "Interface\\SpellActivationOverlay\\IconAlert"
 
-------------------------------------------------------------------------
--- HELPERS
-------------------------------------------------------------------------
 local function GlowTex()
     local t = UIParent:CreateTexture()
     local ok = pcall(function() t:SetTexture(GLOW_TEX) end)
@@ -104,9 +99,7 @@ local function MakeIcons(count, size, spacing, label)
     f:Hide(); return f
 end
 
-------------------------------------------------------------------------
--- BUILD (les ancres correspondent exactement aux positions des modules)
-------------------------------------------------------------------------
+-- Les ancres correspondent exactement aux positions des modules
 function AP:Build()
     if #frames > 0 then return end
     local db = AishaddonDB

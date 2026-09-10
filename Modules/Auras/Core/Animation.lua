@@ -1,22 +1,14 @@
--- AishUIAura/Core/Animation.lua
--- Driver de fade, boucle d'animation (60 fps), ticker du texte de timer (10 fps).
--- Contient tout le travail OnUpdate qui tourne par frame en combat.
-------------------------------------------------------------------------
+-- AishUIAura/Core/Animation.lua : driver de fade, boucle d'animation (60fps), ticker timer (10fps)
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 
 local CreateFrame, C_Timer, GetTime = CreateFrame, C_Timer, GetTime
 local pcall, ipairs, math, string = pcall, ipairs, math, string
 local HAS_ISSECRET = (type(issecretvalue) == "function")
 
--- Table pré-construite des render keys, réutilisée par toutes les boucles chaudes
--- (UpdateAllFades, animDriver OnUpdate, timerDriver OnUpdate). Évite la création
--- d'une nouvelle table à chaque tick. Ordre : debuffs / buffs / cooldowns / procs
--- (cohérent avec l'ordre des sections dans MES SORTS).
-local RENDER_KEYS = {"iconlist", "freebars", "circlebars", "icons"}
+-- Render keys pré-construits, réutilisés par les boucles chaudes (évite alloc par tick)
+local RENDER_KEYS = {"iconlist", "freebars", "circlebars", "icons", "totems"}
 
-------------------------------------------------------------------------
--- FADE (ticker 60 fps temporaire, auto-Cancel)
-------------------------------------------------------------------------
+-- FADE (ticker 60fps temporaire, auto-Cancel)
 local activeFades = {}
 local activeFadeCount = 0
 local function EaseOutCubic(t) t = t - 1; return t*t*t + 1 end
@@ -25,8 +17,7 @@ function ns.FadeTo(frame, targetAlpha, duration, delay)
     if not frame then return end
     duration = duration or 0.35; delay = delay or 0
 
-    -- En combat : SetAlpha direct, pas de fade, pour réactivité maximale au tab target.
-    -- (Le fade 60fps progressif n'est utilisé qu'hors combat.)
+    -- En combat : SetAlpha direct (pas de fade) pour réactivité au tab target
     if ns._inCombat then
         if activeFades[frame] then
             activeFades[frame]:Cancel()
@@ -37,9 +28,7 @@ function ns.FadeTo(frame, targetAlpha, duration, delay)
         return
     end
 
-    -- Anti-clignotement : si une fade est déjà en cours VERS la même target, on la
-    -- laisse continuer au lieu de la canceller/redémarrer à chaque scan. Sinon on
-    -- perdait la progression et l'alpha faisait des micro-saccades sous AoE.
+    -- Anti-clignotement : laisse continuer une fade déjà en cours vers la même target
     local existing = activeFades[frame]
     if existing and existing._target == targetAlpha then
         return  -- déjà en train de fader vers la bonne cible
@@ -76,15 +65,8 @@ end
 function ns.UpdateRenderFade(renderKey)
     local cfg = ns.db and ns.db[renderKey]; if not cfg then return end
     local frames = ns.renderFrames[renderKey]
-    -- "icons" (Procs.lua), "freebars" (Buffs.lua, onglet GUI "Circle Bars"),
-    -- "circlebars" (Cooldowns.lua, onglet GUI "Free Bars") et "iconlist" (Debuffs.lua,
-    -- onglet GUI "Liste d'icones") : le conteneur enregistre dans
-    -- ns.renderFrames est l'ANCIEN rendu manuel, definitivement cache
-    -- (alpha=0) depuis leurs migrations respectives -- fader ce cadre-la n'a
-    -- plus aucun effet visible. Le vrai conteneur affiche a l'ecran est le
-    -- groupe natif Blizzard (AuraTrackerContainer.lua), expose via
-    -- ns.GetIconsNativeContainer / ns.GetCircleBarsNativeContainer /
-    -- ns.GetFreeBarsNativeContainer / ns.GetIconListNativeContainer.
+    -- ns.renderFrames pointe l'ancien rendu manuel (caché) ; le vrai conteneur natif
+    -- vient de ns.Get*NativeContainer.
     local container
     if renderKey == "icons" and ns.GetIconsNativeContainer then
         container = ns.GetIconsNativeContainer()
@@ -97,13 +79,7 @@ function ns.UpdateRenderFade(renderKey)
     end
     container = container or (frames and frames.container)
     if not container then return end
-    -- combatOnly : si vrai, le container est totalement cache hors combat (alpha 0).
-    -- Utilise par le render Buffs notamment, pour ne pas polluer l'UI hors combat.
-    --
-    -- EXCEPTION mode preview : si la fake bar est active sur ce render, on force la
-    -- visibilite a 1.0. Sinon le combatOnly cacherait toute la barre 2D + spark
-    -- (le modele 3D bar reste visible car PlayerModel ne propage pas l'alpha parent,
-    -- ce qui creait une asymetrie visuelle entre les renders).
+    -- combatOnly : cache le container hors combat (sauf mode preview, forcé à 1.0)
     local previewActiveHere = ns._previewBars and (ns._previewMode == "all" or ns._previewMode == renderKey)
     local target
     if previewActiveHere then
@@ -114,22 +90,12 @@ function ns.UpdateRenderFade(renderKey)
         target = ns._inCombat and (cfg.fadeIC or 1.0) or (cfg.fadeOOC or 0.4)
     end
     local delay = ns._inCombat and (cfg.fadeDelayIC or 0) or (cfg.fadeDelayOOC or 0)
-    -- En combat : fade très court (0.05s) pour une réactivité maximale au
-    -- tab target, équivalent à l'instantané ElvUI. Hors combat : durée complète
-    -- (0.35s par défaut) pour garder le transitions douces du combat → OOC.
+    -- Fade court (0.05s) en combat pour réactivité tab target, complet hors combat
     local duration = ns._inCombat and 0.05 or (cfg.fadeDuration or 0.35)
     ns.FadeTo(container, target, duration, delay)
 
-    -- FIX combatOnly : quand le container est cache (target=0), il faut cacher
-    -- MANUELLEMENT les modeles 3D bar (PlayerModel) des rows actives. Le PlayerModel
-    -- ne propage pas l'alpha de son parent automatiquement (quirk Blizzard), donc il
-    -- reste visible alors que la barre 2D disparait.
-    --
-    -- Important : on NE FAIT PAS de Show() ici quand target>0. Le Show des clips
-    -- 3D est de la responsabilite de ShowBarModel (appele par les renders quand une
-    -- aura est active). Faire Show ici reviendrait a reveiller des clips orphelins
-    -- qui appartenaient a des rows non-actives -> PlayerModels visibles a l'ecran
-    -- sans barre/icone associee (bug observe a la fermeture du menu /aa).
+    -- PlayerModel ne suit pas l'alpha parent (quirk Blizzard) : cache-le manuellement.
+    -- Pas de Show() ici (géré par ShowBarModel) sinon des clips orphelins réapparaissent.
     if frames and frames.rows and target == 0 then
         for _, row in ipairs(frames.rows) do
             local function HideClip(wrap)
@@ -151,25 +117,8 @@ function ns.UpdateAllFades()
     pcall(function() if ns.Providers and ns.Providers.UpdateFade then ns.Providers:UpdateFade() end end)
 end
 
-------------------------------------------------------------------------
--- DEFER HIDE ROW — pattern anti-flicker
--- Au lieu de cacher instantanément une row vide, on programme un hide dans 100ms.
--- Si la row redevient active entre-temps (refresh de debuff rapide type Rip/Rake),
--- on annule le pending hide → aucun flash visible.
---
--- Usage côté Update(row) :
---   Row active   → ns.CancelDeferredHide(row); row:SetAlpha(1)
---   Row inactive → ns.DeferHideRow(row, 0.1)  -- ne cache que si toujours inactive dans 100ms
---
--- Note : on utilise SetAlpha au lieu de Hide() pour garder la row dans la hiérarchie
--- (comme dans nos corrections précédentes). Les rows deviennent juste transparentes.
-------------------------------------------------------------------------
-
--- Programme un Hide() différé de `delay` secondes. Si la row est rendue active
--- avant, appelle CancelDeferredHide pour annuler.
--- Pourquoi Hide() et pas SetAlpha(0) : le Hide() trigger le HookScript("OnHide")
--- sur les bars enfants qui reset _timerMode. Sans ça, la barre Blizzard continue
--- d'animer avec l'ancien durObj même après disparition de l'aura.
+-- Hide différé anti-flicker : programme un Hide() dans `delay`s, annulé si la row redevient active.
+-- Hide() (pas SetAlpha) car OnHide reset _timerMode sur les bars enfants.
 function ns.DeferHideRow(row, delay)
     if not row then return end
     if row._aishHidePending then return end
@@ -177,19 +126,10 @@ function ns.DeferHideRow(row, delay)
     C_Timer.After(delay or 0.1, function()
         if row._aishHidePending then
             row._aishHidePending = nil
-            -- Double-check : si la row a été rendue active entre-temps, on ne hide pas
             if row._aishActiveNow then return end
-            -- Cleanup pop anim : reset l'instID tracke (pour que la prochaine apparition
-            -- declenche une nouvelle anim) et stoppe l'anim en cours si elle tourne encore.
             row._popInstID = nil
             if ns.StopPopAnim then ns.StopPopAnim(row) end
-            -- Cleanup FX3D explicite : sans ca, le PlayerModel reste visible
-            -- meme apres row:Hide() (quirk Blizzard - PlayerModel ne propage pas
-            -- toujours Hide() de son parent). Cas d'usage : decochage d'un sort
-            -- dans la liste de tracking pendant que l'aura est encore active.
-            -- Chaque render (Debuffs, Cooldowns, Procs, Buffs) enregistre son
-            -- propre cleanup via row._aishHideCleanup pour garder la separation
-            -- des couches (Animation.lua ne connait pas la structure des FX3D).
+            -- Cleanup FX3D via callback : PlayerModel ne suit pas toujours Hide() du parent
             if row._aishHideCleanup then pcall(row._aishHideCleanup) end
             row:Hide()
         end
@@ -209,28 +149,7 @@ function ns.MarkRowInactive(row)
     row._aishActiveNow = false
 end
 
-------------------------------------------------------------------------
--- ANIMATION D'APPARITION ("pop") — helper generique reutilisable.
--- Animation :
---   - scale horizontal : SetWidth des wraps de 1px → targetW
---   - alpha fade-in    : SetAlpha des wraps de 0 → targetAlpha (optionnel)
---   - easing easeOutIn (lent debut/fin, vif milieu) avec strength configurable
---
--- L'ancrage des wraps determine la direction de deploiement (la frame d'ancrage
--- reste fixe, la wrap croit a partir de l'ancre). Donc :
---   - Wrap ancre LEFT a X     → deploie vers la droite depuis X
---   - Wrap ancre RIGHT a X    → deploie vers la gauche depuis X
---
--- Parametres lus dans cfg :
---   cfg.popEnabled      (default true)  : on/off de l'animation
---   cfg.popDuration     (default 1.0)   : duree en secondes
---   cfg.popEaseStrength (default 5)     : intensite easeOutIn (1-12)
---   cfg.popAlphaFade    (default true)  : on/off du fade-in alpha
---
--- Si popEnabled=false : on saute direct a l'etat final (pas d'animation).
--- Le ticker s'auto-stoppe en fin d'anim. Si la row redevient inactive avant
--- la fin, appeler ns.StopPopAnim(row) pour cleanup.
-------------------------------------------------------------------------
+-- Animation d'apparition "pop" : scale horizontal + fade-in alpha, easing configurable via cfg.pop*
 function ns.StartPopAnim(row, wraps, targetW, targetAlpha, cfg)
     if not row or not wraps or #wraps == 0 then return end
     cfg = cfg or {}
@@ -276,9 +195,7 @@ function ns.StartPopAnim(row, wraps, targetW, targetAlpha, cfg)
                 w:SetWidth(1)
             end
             if doAlpha then w:SetAlpha(0) else w:SetAlpha(tAlpha) end
-            -- Cache le PlayerModel 3D pendant l'anim pop (PlayerModel ne suit
-            -- pas le SetAlpha parent automatiquement, donc il resterait visible
-            -- alors que la barre statusbar est invisible -> visuel bizarre)
+            -- Cache le PlayerModel 3D pendant l'anim (ne suit pas SetAlpha parent)
             if w._fx3dBar and w._fx3dBar.clip then
                 w._fx3dBar.clip:Hide()
             end
@@ -309,9 +226,7 @@ function ns.StartPopAnim(row, wraps, targetW, targetAlpha, cfg)
             self:SetScript("OnUpdate", nil)
             return
         end
-        -- Easing easeOut : départ rapide, décélération douce jusqu'à 100%.
-        -- L'ancien easeOutIn créait deux phases perceptibles : expansion rapide
-        -- jusqu'à ~50%, quasi-pause au milieu, puis reprise — visuellement moche.
+        -- Easing easeOut : départ rapide, décélération douce (ancien easeOutIn faisait 2 phases visibles)
         local eased = 1 - (1 - t) ^ self._popStrength
         local nw = math.max(1, self._popTargetW * eased)
         local na = self._popDoAlpha and (self._popTargetAlpha * eased) or self._popTargetAlpha
@@ -328,9 +243,7 @@ function ns.StartPopAnim(row, wraps, targetW, targetAlpha, cfg)
     end)
 end
 
--- Stoppe une animation pop en cours et reset les wraps a l'etat final (si
--- resetW fourni). A appeler quand une row redevient inactive avant la fin
--- de l'anim, sinon le ticker continuerait jusqu'a la fin.
+-- Stoppe l'anim pop en cours, reset les wraps à l'état final si resetW fourni
 function ns.StopPopAnim(row, resetW)
     if not row or not row._popActive then return end
     row:SetScript("OnUpdate", nil)
@@ -356,39 +269,23 @@ function ns.StopPopAnim(row, resetW)
     end
 end
 
-------------------------------------------------------------------------
--- DRIVER D'ANIMATION (pattern motor : OnUpdate 20 fps, AnimateBar dual-path)
-------------------------------------------------------------------------
+-- DRIVER D'ANIMATION (OnUpdate 20fps, AnimateBar dual-path)
 local animDriver = CreateFrame("Frame")
 animDriver._t = 0
 
-------------------------------------------------------------------------
--- DÉTECTION DES APIs MODERNES (Midnight 12.x)
--- SetTimerDuration existe sur StatusBar depuis Midnight. Si présent → Blizzard
--- anime la barre en interpolation frame-perfect (60fps natif). Sinon fallback.
-------------------------------------------------------------------------
+-- SetTimerDuration (Midnight 12.x) : si dispo, Blizzard anime la barre en 60fps natif
 local HAS_TIMER_DURATION = (Enum and Enum.StatusBarInterpolation and Enum.StatusBarTimerDirection) and true or false
 local INTERP_SMOOTH    = HAS_TIMER_DURATION and Enum.StatusBarInterpolation.ExponentialEaseOut or nil
 local INTERP_IMMEDIATE = HAS_TIMER_DURATION and Enum.StatusBarInterpolation.Immediate or nil
 local TIMER_DIR_DRAIN  = HAS_TIMER_DURATION and Enum.StatusBarTimerDirection.RemainingTime or nil
 
--- Clé d'identification d'une aura. Doit CHANGER au refresh pour que SetTimerDuration
--- soit relancé avec le nouveau durObj. Combine 3 signaux :
---   1. auraInstanceID : stable, non-secret
---   2. ns._refreshCounter[instID] : incrémenté par UNIT_AURA.updatedAuraInstanceIDs
---      (événement Blizzard, 100% non-secret). C'est notre source principale de
---      détection de refresh en combat quand les valeurs d'aura sont secret.
---   3. tostring(entry.durObj) : fallback pour les cas où refreshCounter n'existe pas
---      (première fois qu'on voit l'aura, avant qu'UNIT_AURA ne fire). Peut être
---      "LuaDurationObject: 0" constant en Midnight mais reste utile comme fallback.
+-- Clé d'aura (doit changer au refresh) : combine instID + refreshCounter + durObj
 local function GetAuraKey(entry)
     if not entry then return nil end
     local inst = entry.auraInstanceID or entry.instID
     local durRef = entry.durObj and tostring(entry.durObj) or ""
     local refreshCnt = (inst and ns._refreshCounter and ns._refreshCounter[inst]) or 0
-    -- Le durRef reste dans la clé pour trigger un SetTimerDuration quand Blizzard
-    -- recrée le durObj (sinon la barre continue de pointer vers un userdata potentiellement
-    -- invalide). Mais AnimateBar distingue ces cas (voir logique _StartTimerMode).
+    -- durRef reste dans la clé pour retrigger SetTimerDuration si Blizzard recrée le durObj
     if inst then return "i:" .. tostring(inst) .. ":" .. refreshCnt .. ":" .. durRef end
     if entry.spellID then
         return "s:" .. tostring(entry.spellID) .. ":" .. tostring(entry.unit or "?") .. ":" .. refreshCnt .. ":" .. durRef
@@ -396,9 +293,7 @@ local function GetAuraKey(entry)
     return nil
 end
 
--- Helper : extrait (instID, refreshCnt) d'un auraKey format "i:<inst>:<cnt>:<ref>"
--- Utilisé pour distinguer un vrai refresh (refreshCnt change) d'une simple
--- recréation durObj Blizzard (seul durRef change) → évite l'interp parasite.
+-- Extrait (instID, refreshCnt) d'un auraKey pour distinguer refresh réel vs recréation durObj
 local function _ExtractKeyParts(auraKey)
     if not auraKey then return nil, nil end
     local inst, cnt = auraKey:match("^i:([^:]+):([^:]+):")
@@ -409,9 +304,7 @@ local function _ExtractKeyParts(auraKey)
     return nil, nil
 end
 
--- Arrête le mode timer natif Blizzard et restaure la barre en mode SetValue manuel.
--- Appelé quand l'aura change (nouveau spellID sur la même row) ou quand elle disparaît.
--- Helper top-level pour éviter la création d'une closure à chaque StopTimerMode.
+-- Arrête le mode timer natif Blizzard, restaure SetValue manuel
 local function _StopTimerApply(bar)
     bar:SetMinMaxValues(0, 1, INTERP_IMMEDIATE)
     bar:SetValue(bar:GetValue() or 0, INTERP_IMMEDIATE)
@@ -420,19 +313,14 @@ end
 local function StopTimerMode(bar)
     if not bar then return end
     if bar._timerMode then
-        -- Neutralise l'animation Blizzard : on lui donne une durée 0 terminée.
-        -- Blizzard n'offre pas de ClearTimerDuration, on doit retomber sur SetValue.
-        -- Immediate pour éviter l'interpolation implicite qui pourrait ajouter
-        -- une transition visuelle non désirée.
+        -- Pas de ClearTimerDuration Blizzard : on retombe sur SetValue Immediate
         pcall(_StopTimerApply, bar)
         bar._timerMode = false
         bar._timerKey = nil
     end
 end
 
--- Enregistre (une fois) un hook OnHide sur la barre pour que le mode timer Blizzard
--- soit automatiquement réinitialisé quand la barre devient invisible.
--- Cleanup event-driven : pas besoin de polling pour détecter les auras expirées.
+-- Hook OnHide (une fois) : reset le mode timer quand la barre devient invisible
 local function EnsureHideHook(bar)
     if not bar or bar._aishHideHooked then return end
     bar._aishHideHooked = true
@@ -445,43 +333,18 @@ local function EnsureHideHook(bar)
     end)
 end
 
-------------------------------------------------------------------------
--- COULEUR D'URGENCE — PERCENTAGE-BASED avec COLOR CURVE NATIVE BLIZZARD
-------------------------------------------------------------------------
--- Système à deux chemins :
---
---   CHEMIN PRIMAIRE (C_CurveUtil disponible + durObj) :
---     On construit une color curve Blizzard en pourcentage (0..1) par couleur de base.
---     Blizzard évalue la curve via durObj:EvaluateRemainingPercent() → ColorMixin.
---     Résultat appliqué via SetStatusBarColor qui accepte les secret values.
---     → 100% secret-safe, aucune lecture en Lua, dégradé parfait.
---
---   CHEMIN FALLBACK (pas de curve ou pas de durObj) :
---     Interpolation manuelle en secondes absolues (garde le comportement existant).
---
--- Seuils en POURCENTAGE du restant total :
---   > 50%        : couleur normale
---   50% → 20%    : dégradé normal → orange
---   20% → 0%     : dégradé orange → rouge
---
--- Ces seuils en % sont plus sensés que les seuils en secondes absolues :
---   - Un buff de 3s devient "critical" à 1.5s restant (proche de la fin)
---   - Un buff de 60s devient "critical" à 12s restant (urgence proportionnelle)
+-- Couleur d'urgence : color curve native Blizzard (secret-safe) par % de durée restante,
+-- fallback interpolation manuelle en secondes si pas de durObj/curve.
 
 local HAS_CURVE_UTIL = (C_CurveUtil and C_CurveUtil.CreateColorCurve) and true or false
 local curveCache = {}  -- [keyHex] = curve object
 
--- Wipe le cache quand l'utilisateur change les couleurs d'urgence.
--- Appelé depuis les menus Render via SharedWidgets.
+-- Wipe le cache quand l'utilisateur change les couleurs d'urgence (menus Render)
 function ns.InvalidateUrgencyCurves()
     wipe(curveCache)
 end
 
--- Construit (ou récupère du cache) une color curve Blizzard.
--- Arguments :
---   cR,cG,cB    = couleur de base (celle du sort)
---   mR,mG,mB    = couleur medium (seuil 20%) — optionnel, défaut orange
---   crR,crG,crB = couleur critical (seuil 0%) — optionnel, défaut rouge
+-- Construit (ou récupère du cache) une color curve Blizzard (base/medium/critical)
 local function GetOrBuildCurve(cR, cG, cB, mR, mG, mB, crR, crG, crB)
     if not HAS_CURVE_UTIL then return nil end
     if not cR then return nil end
@@ -490,10 +353,7 @@ local function GetOrBuildCurve(cR, cG, cB, mR, mG, mB, crR, crG, crB)
     mR = mR or 1.0;  mG = mG or 0.5;  mB = mB or 0.0
     crR = crR or 1.0; crG = crG or 0.15; crB = crB or 0.05
 
-    -- Clé de cache : packed des 3 couleurs (base + medium + critical)
-    -- Précision 1/255 suffisante. Si l'utilisateur change medium ou critical dans
-    -- les menus, InvalidateUrgencyCurves vide tout le cache, donc la clé n'a pas
-    -- besoin d'être parfaitement unique sur les très petites variations.
+    -- Clé de cache : packed des 3 couleurs (précision 1/255 suffisante)
     local key = string.format("%02x%02x%02x_%02x%02x%02x_%02x%02x%02x",
         math.floor((cR or 0) * 255 + 0.5),
         math.floor((cG or 0) * 255 + 0.5),
@@ -509,14 +369,7 @@ local function GetOrBuildCurve(cR, cG, cB, mR, mG, mB, crR, crG, crB)
     local ok, curve = pcall(function() return C_CurveUtil.CreateColorCurve() end)
     if not ok or not curve then return nil end
 
-    -- IMPORTANT : ordre CROISSANT des points (0.0 → 1.0) comme l'exemple Blizzard.
-    -- EvaluateRemainingPercent retourne 0.0 quand l'aura expire, 1.0 quand elle
-    -- vient d'être appliquée. Donc on map :
-    --   0.00 = fin d'aura    → rouge critique
-    --   0.20 = bientôt fin   → orange medium
-    --   0.50 = mi-durée      → base
-    --   1.00 = début d'aura  → base
-    -- SetType Linear : Blizzard interpole lissement entre les points.
+    -- Points croissants 0→1 : 0=critique, 0.20=medium, 0.50/1.00=couleur base
     pcall(function()
         curve:SetType(Enum.LuaCurveType.Linear)
         curve:AddPoint(0.00, CreateColor(crR, crG, crB, 1))
@@ -529,9 +382,7 @@ local function GetOrBuildCurve(cR, cG, cB, mR, mG, mB, crR, crG, crB)
     return curve
 end
 
--- Helper top-level : évalue une curve et applique la couleur sur bar.
--- Hoist pour éviter closure à chaque frame (appelé 60fps × N barres).
--- Peut lever si durObj tainted, d'où le pcall autour de l'appel.
+-- Évalue la curve et applique la couleur sur bar (pcall car durObj peut être tainted)
 local function EvaluateCurveAndApply(durObj, curve, bar)
     local colorResult = durObj:EvaluateRemainingPercent(curve)
     if colorResult then
@@ -539,27 +390,17 @@ local function EvaluateCurveAndApply(durObj, curve, bar)
     end
 end
 
--- Applique la couleur d'urgence à une barre.
--- Si durObj + curve disponibles → utilise le chemin natif Blizzard (secret-safe).
--- Sinon → fallback interpolation manuelle en secondes absolues.
--- Arguments :
---   cfg = config du render (ns.db[renderKey]) pour lire urgencyEnabled + couleurs
+-- Applique la couleur d'urgence (curve native si possible, sinon fallback manuel)
 local function ApplyUrgencyColor(bar, entry, cR, cG, cB, remSeconds, cfg)
     if not cR then return end
 
-    -- BYPASS : si la barre a un gradient par sort actif (cf. Init.lua ApplyBarColor),
-    -- on ne touche PAS sa couleur. Le SetGradient applique sur la texture serait
-    -- ecrase par SetStatusBarColor. Le gradient reste valable pendant toute la duree
-    -- de l'aura sans variation d'urgence.
+    -- Bypass si gradient par sort actif (SetStatusBarColor l'écraserait)
     if bar._spellGradientActive then return end
 
-    -- v281 Q2 FIX : meme principe pour le gradient PAR RENDER (cfg.gradientEnabled).
-    -- Sans cette garde, ApplyUrgencyColor ecrase le SetGradient a 60fps via
-    -- SetStatusBarColor et le degrade ne s'affiche jamais visuellement.
+    -- Même bypass pour le gradient par render (cfg.gradientEnabled)
     if cfg and cfg.gradientEnabled then return end
 
-    -- Si la curve d'urgence est désactivée pour ce render : on applique juste
-    -- la couleur de base du sort sans animer la teinte.
+    -- Curve désactivée : couleur de base sans variation d'urgence
     if cfg and cfg.urgencyEnabled == false then
         bar:SetStatusBarColor(cR, cG, cB)
         return
@@ -611,75 +452,27 @@ local function ApplyUrgencyColor(bar, entry, cR, cG, cB, remSeconds, cfg)
     bar:SetStatusBarColor(r, g, b)
 end
 
--- AnimateBar : moteur d'animation des barres de durée
--- Pattern "show but don't know" pour les auras dont les valeurs deviennent
--- secret en combat (Bone Shield, Frenzy, Soul Reaper, etc.) :
--- on passe les retours du Duration Object Blizzard DIRECTEMENT à SetMinMaxValues/SetValue
--- sans jamais les lire en Lua. Blizzard sait afficher ces valeurs même si l'addon
--- n'a pas le droit de les connaître.
---
--- ARCHITECTURE À 2 TIERS (ordre de priorité, CDM-only depuis v281) :
---   Tier 0 : SetTimerDuration(durObj) — Blizzard anime à 60fps, on ne touche plus la barre
---   Tier 1 : SetMinMaxValues + SetValue depuis durObj — fallback si SetTimerDuration absent
--- Helpers top-level pour AnimateBar (appelé à 60fps par barre).
--- Chaque pcall-closure qui capturait des locales est maintenant une fonction
--- top-level qui reçoit ses arguments explicitement → zéro alloc par tick.
+-- AnimateBar : moteur d'animation des barres. Pattern "show but don't know" pour
+-- les auras secret en combat — passthrough direct du durObj Blizzard, jamais lu en Lua.
+-- Tier 0 : SetTimerDuration (60fps natif). Tier 1 : SetMinMaxValues/SetValue (fallback).
 
 local function _StartTimerMode(bar, durObj, isFirstLaunch)
-    -- IMPORTANT : SetMinMaxValues accepte aussi un argument d'interpolation.
-    -- Si on ne le passe pas, Blizzard utilise Immediate par défaut, MAIS si
-    -- la barre avait une valeur précédente (ancienne aura), le passage 0→1
-    -- peut déclencher une interpolation visuelle implicite.
-    -- On force Immediate explicitement pour éliminer toute interpolation résiduelle.
+    -- Immediate au premier lancement (apparition instantanée), Smooth au refresh
     local interp = isFirstLaunch and INTERP_IMMEDIATE or INTERP_SMOOTH
     bar:SetMinMaxValues(0, 1, interp)
-    -- Interpolation Immediate au premier lancement d'une barre (apparition) :
-    -- la barre s'affiche INSTANTANÉMENT à sa valeur correcte, pas d'interpolation
-    -- depuis 0 ou depuis l'ancienne valeur. C'est ce qui donne la sensation
-    -- "instantanée" qu'ElvUI/oUF/ABE ont au tab target.
-    --
-    -- Interpolation Smooth (ExponentialEaseOut) aux changements d'aura (refresh
-    -- de DOT) : transition douce de l'ancien fill vers le nouveau, visuellement
-    -- agréable quand un DOT se refresh à pleine durée.
     bar:SetTimerDuration(durObj, interp, TIMER_DIR_DRAIN)
 end
 
 local function _ApplyTier1SetValue(bar, durObj)
-    -- Tier 1 : force Immediate pour éviter l'interpolation implicite par défaut
-    -- sur SetValue (nouvelle API Midnight 12.0 où SetValue peut interpoler).
+    -- Immediate forcé (SetValue peut interpoler par défaut en Midnight 12.0)
     bar:SetMinMaxValues(0, durObj:GetTotalDuration(), INTERP_IMMEDIATE)
     bar:SetValue(durObj:GetRemainingDuration(), INTERP_IMMEDIATE)
 end
 
-------------------------------------------------------------------------
--- DURÉE EN COMBAT PAR BINDING NATIF (Tier 2)
---
--- Toutes les pistes de forward manuel ont echoue (durObj jamais fourni par
--- Blizzard pour la duree des buffs, texte de decompte natif supprime sur un
--- SetCooldown transmis par du code addon). Solution retenue (inspiree
--- d'ElvUI) : button:SetDurationBar(statusBar), une methode de BINDING
--- native -- Blizzard anime lui-meme la StatusBar donnee, sans jamais
--- qu'aucune valeur secrete ne transite par du Lua.
---
--- CONTRAINTE CONFIRMEE EN JEU (plusieurs tests, AddAuraSlot ET AddAuraGroup) :
--- l'AuraButton natif ET tout enfant qu'on y cree deviennent "forbidden" pour
--- du code addon des que l'aura associee devient secrete (Show/SetAllPoints/
--- SetStatusBarColor plantent tous) -- SEULE la methode SetDurationBar elle-
--- meme reste utilisable apres coup. Consequence : la barre fantome doit etre
--- creee, positionnee, stylee, affichee ET bindee EN UNE FOIS dans
--- initializeFrame (AuraTrackerContainer.lua), hors combat -- plus jamais
--- retouchee ensuite. Ce fichier n'a donc plus rien a faire reactivement ici :
--- la barre fantome (position fixe, cf. AuraTrackerContainer.lua) s'anime
--- toute seule cote Blizzard des sa creation. Notre barre custom (bar) reste
--- affichee telle quelle (figee) en complement -- pas de bascule Show/Hide
--- pour l'instant, priorite donnee au fonctionnel.
-------------------------------------------------------------------------
+-- Tier 2 (combat) : button:SetDurationBar (binding natif ElvUI-like), posé une fois
+-- hors combat dans AuraTrackerContainer.lua — rien à refaire ici.
 
-------------------------------------------------------------------------
--- Diagnostic : /aishdebug bars. Dump l'etat interne des barres de duree
--- (circlebars/freebars) : voit-on un bouton natif disponible pour ce
--- spellID, le binding a-t-il ete pose, quelle est la valeur actuelle.
-------------------------------------------------------------------------
+-- Diagnostic /aishdebug bars : dump l'état interne des barres de durée
 function ns.DebugDurationBars()
     local P = function(s) print("|cff33aaff[Bars]|r " .. s) end
     for _, key in ipairs({ "circlebars", "freebars" }) do
@@ -694,9 +487,7 @@ function ns.DebugDurationBars()
                     if a and a.unit and a.spellID then
                         local nativeBtn = ns.GetNativeAuraButton and ns.GetNativeAuraButton(a.unit, a.spellID)
                         local sb = ns.GetNativeShadowBar and ns.GetNativeShadowBar(a.unit, a.spellID)
-                        -- Ne PAS appeler sb:IsShown()/GetValue() ici : confirme en jeu
-                        -- que meme la LECTURE de ces methodes plante ("forbidden object")
-                        -- une fois l'aura secrete -- on se limite a l'existence de la reference.
+                        -- Ne pas lire sb:IsShown()/GetValue() (plante en objet forbidden)
                         P(string.format(
                             "  row%d useCDMSwipe=%s spellID=%s unit=%s durObj=%s | nativeBtn=%s shadowBar=%s",
                             i, tostring(a.useCDMSwipe), tostring(a.spellID), tostring(a.unit),
@@ -712,19 +503,10 @@ end
 local function AnimateBar(bar, entry, cR, cG, cB, isReverse, cfg)
     if not bar then return end
 
-    -- Cleanup event-driven : enregistre (idempotent) un hook OnHide sur la barre
-    -- pour sortir automatiquement du mode timer quand elle devient invisible.
+    -- Hook OnHide idempotent : sort du mode timer quand la barre devient invisible
     EnsureHideHook(bar)
 
-    -- TIER PREVIEW : fake bar (mode preview du menu Effets).
-    -- Pas de durObj reel : on simule un cycle 12s en boucle pour que l'utilisateur
-    -- puisse visualiser les FX (couleur, gradient, spark, fx3d clip, etc.) sans
-    -- avoir l'aura active sur la cible.
-    --
-    -- On utilise SetMinMaxValues + SetValue en Lua (pas SetTimerDuration) car :
-    --   1. SetTimerDuration prend un durObj Blizzard, pas un timer Lua
-    --   2. La boucle se reset toutes les 12s (cycle perpetuel)
-    --   3. Le clip 3D et le spark suivent naturellement via fillTex (pixels)
+    -- Tier preview (menu Effets) : simule un cycle 12s sans durObj réel pour visualiser les FX
     if entry._isPreview then
         if bar._timerMode then StopTimerMode(bar) end
         local CYCLE = 12
@@ -744,41 +526,19 @@ local function AnimateBar(bar, entry, cR, cG, cB, isReverse, cfg)
         return
     end
 
-    -- TIER 2 : binding natif (cf. bloc de commentaires plus haut). Deja pose
-    -- une fois pour toutes hors combat (AuraTrackerContainer.lua) -- rien a
-    -- faire ici, la barre fantome s'anime toute seule cote Blizzard. On
-    -- laisse juste bar telle quelle (pas de StopTimerMode : entry.durObj
-    -- est nil par construction dans ce cas, Tier0/1 ne peuvent rien faire
-    -- de toute facon).
+    -- Tier 2 : binding natif déjà posé (AuraTrackerContainer.lua), rien à faire ici
     if entry.useCDMSwipe then
         return
     end
 
     local auraKey = GetAuraKey(entry)
 
-    -- TIER 0 : Mode timer natif Blizzard (priorité maximale si API dispo + durObj)
-    -- On ne lance SetTimerDuration qu'UNE FOIS par aura (au premier tick ou au refresh).
-    -- Aux ticks suivants, la barre s'anime toute seule et on ne fait QUE la couleur.
-    --
-    -- NOTE sur la direction : on utilise TOUJOURS RemainingTime (la barre se vide avec le
-    -- temps qui reste). L'INVERSION VISUELLE est gérée par SetReverseFill() sur la bar
-    -- elle-même, posé à la création (MakeBarWrap). Pour les debuffs en layout mirror :
-    --   - barL a SetReverseFill(true)  → se vide vers la droite (vers l'icône à droite)
-    --   - barR a SetReverseFill(false) → se vide vers la gauche (vers l'icône à gauche)
-    -- Les deux "drainent" (RemainingTime) — seule l'orientation visuelle diffère.
+    -- Tier 0 : SetTimerDuration une fois par aura, puis juste la couleur ensuite.
+    -- Direction toujours RemainingTime ; l'inversion visuelle vient de SetReverseFill (création).
     if HAS_TIMER_DURATION and entry.durObj and auraKey then
         if not bar._timerMode or bar._timerKey ~= auraKey then
-            -- 4 cas possibles :
-            -- 1. Barre jamais utilisée (pas de timer mode) → Immediate (apparition)
-            -- 2. Nouvelle aura différente (instID change, ex: tab target) → Immediate
-            -- 3. Recast de la même aura (refreshCounter++) → Smooth (refresh visuel)
-            -- 4. Recréation silencieuse du durObj (même inst, même cnt, durRef change)
-            --    → Immediate (pas un vrai refresh, juste Blizzard qui recrée l'objet)
-            --
-            -- Cas 4 arrive notamment post-tab target : Blizzard peut fire
-            -- plusieurs UNIT_AURA avec de nouveaux durObj pour la même aura,
-            -- sans incrémenter ses propres compteurs. Sans ce fix, la barre
-            -- re-interpolait 200ms après le tab → délai visuel perçu.
+            -- Cas : 1=jamais utilisée, 2=nouvelle aura, 3=refresh (Smooth), 4=recréation
+            -- silencieuse du durObj (Immediate) — évite un délai visuel post-tab target.
             local isFirstLaunch
             if not bar._timerMode then
                 isFirstLaunch = true  -- cas 1
@@ -801,8 +561,7 @@ local function AnimateBar(bar, entry, cR, cG, cB, isReverse, cfg)
             end
         end
 
-        -- Couleur d'urgence via color curve native (100% secret-safe).
-        -- Plus besoin de lire r/t en Lua : Blizzard évalue la curve à partir du durObj.
+        -- Couleur via curve native (secret-safe, pas de lecture Lua)
         if bar._timerMode then
             ApplyUrgencyColor(bar, entry, cR, cG, cB, nil, cfg)
             return
@@ -824,42 +583,19 @@ local function AnimateBar(bar, entry, cR, cG, cB, isReverse, cfg)
         end
     end
 
-    -- Aucun chemin Tier 0/1 n'a fonctionne : la barre n'a ni durObj utilisable
-    -- ni Duration Object animable. On sort proprement du mode timer si on y etait.
-    -- En CDM-only, ce cas n'arrive normalement pas (toutes les auras passent par
-    -- GetAuraDuration qui fournit un durObj), mais on garde le filet de securite.
+    -- Aucun tier n'a fonctionné : sort du mode timer par sécurité (ne devrait pas arriver)
     if bar._timerMode then StopTimerMode(bar) end
 end
 
--- Helper top-level : positionne le clip 3D barre selon le mode utilisateur.
---
--- PATTERN COMBAT-AWARE :
--- On utilise SetAllPoints sur la cible appropriee selon le mode. Le clip suit
--- automatiquement, sans aucun calcul Lua sur les pixels. Fonctionne meme en
--- combat sur sorts CDM ou bar:GetWidth() peut etre secret.
---
--- Mode "front" (Fond) :
---   Clip ancre sur barWrap (taille fixe pleine largeur).
---
--- Mode "back" (Remplissage 3D) :
---   Clip ancre sur bar:GetStatusBarTexture() (le rectangle anime nativement
---   par Blizzard via SetTimerDuration). Le clip retrecit avec la barre, le
---   modele 3D ancre sur barWrap est progressivement rogne par le clip.
---
--- On re-pose les ancres si necessaire (cout quasi nul) pour gerer les cas
--- ou Blizzard recreerait la statusbar texture en cours de combat.
+-- Positionne le clip 3D via SetAllPoints (combat-safe, aucun calcul pixel Lua).
+-- Mode "front" : ancré sur barWrap. Mode "back" : ancré sur la texture de remplissage.
 local function UpdateClip3DPart(bar, barWrap, clip, mode)
     if not clip then return end
     if mode == "front" then
-        -- Mode Fond : clip suit barWrap (taille fixe), modele visible derriere
         clip:ClearAllPoints()
         clip:SetAllPoints(barWrap)
     elseif mode == "back" and bar and bar.GetStatusBarTexture then
-        -- Mode Remplissage 3D : clip ancre sur fillRect (rectangle de remplissage
-        -- de la statusbar, anime par SetTimerDuration cote C++). Le modele 3D
-        -- enfant du clip est rogne par les bords du clip via SetClipsChildren.
-        -- Ancrage SetPoint = pas de calcul, pas de lecture secret, suit
-        -- pixel-precis. Combat-safe.
+        -- Ancré sur le rectangle de remplissage (anime par SetTimerDuration côté C++)
         local fillRect = bar:GetStatusBarTexture()
         if fillRect and clip._anchoredFillRect ~= fillRect then
             clip:ClearAllPoints()
@@ -869,22 +605,10 @@ local function UpdateClip3DPart(bar, barWrap, clip, mode)
     end
 end
 
--- Helper top-level : applique le scrolling temporel sur une texture Fill 2D.
---
--- La GEOMETRIE (largeur, position, hauteur) est entierement geree par l'ancrage
--- SetAllPoints(bar:GetStatusBarTexture()) fait dans ShowFill2D. Ce rectangle
--- de remplissage est anime cote C++ Blizzard via SetTimerDuration : la texture
--- ancree dessus suit naturellement le retrecissement de la barre.
---
--- Pattern combat-aware : ZERO calcul Lua sur des valeurs potentiellement secret.
--- C'est Blizzard qui anime tout cote moteur natif.
---
--- Cette fonction ne sert qu'au scrolling temporel pour les textures animees
--- (FillFlamme, FillEau, FillPlasma, etc.). Si scrollSpeed = 0, elle ne fait
--- rien (return immediat) → cout CPU quasi nul pour les textures statiques.
+-- Scrolling temporel des textures Fill 2D animées (FillFlamme, etc.). Géométrie
+-- déjà gérée par l'ancrage dans ShowFill2D ; no-op si scrollSpeed=0.
 local function UpdateFill2DPart(fill2d)
     if not fill2d or not fill2d.tex then return end
-    -- Pas de scroll demande : skip total (texture statique, rien a animer)
     if not fill2d._scrollSpeed or fill2d._scrollSpeed <= 0 then return end
     -- Decale _scrollX au fil du temps
     local now = GetTime()
@@ -897,16 +621,7 @@ local function UpdateFill2DPart(fill2d)
     fill2d.tex:SetTexCoord(s, s + 1, 0, 1)
 end
 
--- Variante allegee : appelle UNIQUEMENT UpdateClip3DPart pour les barres dont
--- l'aura n'est plus visible cote scan (combat, valeur secret) mais dont le
--- fx3d barre est encore actif. Permet au modele 3D de continuer a suivre le
--- remplissage que Blizzard anime cote C++ via SetTimerDuration.
---
--- Pas d'AnimateBar (couleur, urgence) car sans entry on n'a pas de durObj.
--- Helper top-level : positionne le modele 3D du spark sur le bord de la barre.
--- Pattern "show but don't know" applique a la geometrie : on lit fillTex:GetWidth()
--- (mesure pixels en C++ Blizzard, NON-secret) au lieu d'un pct calcule depuis
--- expirationTime (secret en combat sur sorts CDM Midnight 12.0).
+-- Positionne le spark 3D sur le bord de la barre via fillTex:GetWidth() (non-secret)
 local function UpdateSpark3DPos(bar, barWrap, sm, isReverse)
     if not sm or not sm.active then return end
     -- Si le spark 3D est ancre sur le spark 2D (cf. ShowSparkModel), il suit
@@ -931,13 +646,7 @@ local function UpdateSpark3DPos(bar, barWrap, sm, isReverse)
     sm.model:SetPoint("CENTER", barWrap, "LEFT", xOff, 0)
 end
 
--- Variante allegee : appelle UNIQUEMENT UpdateClip3DPart pour les barres dont
--- l'aura n'est plus visible cote scan (combat, valeur secret) mais dont le
--- fx3d barre est encore actif. Permet au modele 3D de continuer a suivre le
--- remplissage que Blizzard anime cote C++ via SetTimerDuration.
---
--- Pas d'AnimateBar (couleur, urgence) car sans entry on n'a pas de durObj.
--- Juste le clip 3D et le spark 3D qui doivent suivre la geometrie.
+-- Fait suivre clip 3D + spark 3D quand l'aura n'est plus visible côté scan (combat secret)
 local function UpdateBarFX3DOnly(bar, barWrap, isReverse)
     if not (barWrap and bar) then return end
     -- Modes 3D barre (front et back) : maintenir l'ancrage du clip
@@ -958,14 +667,9 @@ local function UpdateBarFX3DOnly(bar, barWrap, isReverse)
     end
 end
 
--- Anime la barre + le spark + le clip 3D pour une barre unique.
--- Hoist en top-level pour éviter l'allocation de closure à chaque tick du
--- animDriver (60fps × 3 renders). Reçoit cfg et fx3dOn en paramètres.
+-- Anime la barre + spark + clip 3D pour une barre unique (top-level, évite alloc/tick)
 
--- Helper expose : ancre le spark 2D sur le bord de la statusbar fill.
--- Idempotent : skip si deja ancre dans la meme orientation/offset (cache).
--- Extracte de AnimateOne pour pouvoir etre appele en dehors du animDriver
--- si besoin (par exemple pre-positionnement avant ShowSparkModel).
+-- Ancre le spark 2D sur le bord de la statusbar fill (idempotent)
 function ns.AnchorSpark2D(spark, bar, isReverse, offY)
     if not spark or not bar then return end
     local fill = bar:GetStatusBarTexture()
@@ -984,16 +688,9 @@ function ns.AnchorSpark2D(spark, bar, isReverse, offY)
 end
 
 local function AnimateOne(bar, spark, barWrap, entry, cR, cG, cB, isReverse, cfg, fx3dOn)
-    -- AnimateBar peut crash silencieusement sur des sorts CDM en combat (lecture
-    -- de durObj qui devient secret value). On l'enveloppe dans un pcall pour que
-    -- son crash n'empeche pas la suite (spark anchor, FX3D, Fill 2D, etc.).
+    -- pcall : AnimateBar peut crash sur durObj secret en combat (CDM)
     pcall(AnimateBar, bar, entry, cR, cG, cB, isReverse, cfg)
-    -- Étape 2 : le spark suit le remplissage de la barre.
-    -- Ancrage maintenu par ns.AnchorSpark2D (idempotent - skip si deja ancre).
     ns.AnchorSpark2D(spark, bar, isReverse, cfg.sparkOffY or 0)
-    -- Étape 4 : modes 3D barre (front et back).
-    -- Pour les deux modes, UpdateClip3DPart maintient l'ancrage du clip selon
-    -- la cible appropriee (barWrap pour front, fillRect pour back).
     if fx3dOn and barWrap and barWrap._fx3dBar and barWrap._fx3dBar.active and barWrap._fx3dBar.clip and bar then
         local bm = barWrap._fx3dBar
         local mode = bm._mode or "front"
@@ -1001,15 +698,11 @@ local function AnimateOne(bar, spark, barWrap, entry, cR, cG, cB, isReverse, cfg
             pcall(UpdateClip3DPart, bar, barWrap, bm.clip, mode)
         end
     end
-    -- Étape 4b : Mode REMPLISSAGE (mid) — texture 2D qui se tronque avec la barre.
-    -- L'ancrage SetAllPoints fait dans ShowFill2D fait suivre la texture
-    -- automatiquement. UpdateFill2DPart ne sert que pour le scrolling temporel
-    -- des textures animees (FillFlamme, etc.).
+    -- Mode Remplissage (mid) : UpdateFill2DPart gère seulement le scrolling temporel
     if fx3dOn and barWrap and barWrap._fx2dFill and barWrap._fx2dFill.active and bar then
         pcall(UpdateFill2DPart, barWrap._fx2dFill)
     end
-    -- Étape 5 : modèle 3D du spark suit le bord de la barre (en combat aussi).
-    -- Meme pattern que le clip 3D : lecture pixels via fillTex:GetWidth() (non-secret).
+    -- Spark 3D suit le bord de la barre (même pattern pixel non-secret que le clip)
     if fx3dOn and barWrap and barWrap._fx3dSpark and barWrap._fx3dSpark.active and bar then
         pcall(UpdateSpark3DPos, bar, barWrap, barWrap._fx3dSpark, isReverse)
     end
@@ -1018,12 +711,8 @@ end
 local function AnimateRender(renderKey)
     local gfx = ns.renderFrames[renderKey]; if not gfx or not gfx.rows then return end
     local auras = ns.auraData and ns.auraData[renderKey] or {}
-    -- IMPORTANT : on ne peut PAS early-exit sur #auras == 0, car en combat le scan
-    -- peut ne plus voir l'aura (devenue secret value sur sorts CDM Midnight 12.0).
-    -- Si on retourne ici, UpdateClip3DPart n'est jamais appele et le 3D barre ne
-    -- suit pas le remplissage. On continue la boucle, mais on early-exit dans
-    -- AnimateOne lui-meme si la row n'a pas de fx3d barre actif (cas frequent
-    -- pour les sorts sans 3D ou hors combat sans aura).
+    -- Pas d'early-exit sur #auras==0 : en combat l'aura peut être secret côté scan
+    -- mais le 3D doit continuer à suivre le remplissage (early-exit géré dans AnimateOne)
     local cfg = ns.db and ns.db[renderKey]; if not cfg then return end
     local hasAuras = (#auras > 0)
     -- Si aucune aura ET aucun fx3d barre actif sur ce render : skip vraiment.
@@ -1035,9 +724,7 @@ local function AnimateRender(renderKey)
     -- Pré-extraction : évite de relire ns.db/ns.barColor pour chaque barre à chaque tick.
     local useSpellColors = ns.db and ns.db.useSpellColors
     local defaultR, defaultG, defaultB = ns.barColor[1], ns.barColor[2], ns.barColor[3]
-    -- Override couleur par render : si l'utilisateur a defini cfg.barColorR/G/B
-    -- via le menu BARRE (COULEUR & TEXTURE), on l'applique a toutes les barres
-    -- de ce render. Permet de differencier visuellement Debuffs / Buffs / Cooldowns / Procs.
+    -- Override couleur par render (menu BARRE) : appliqué à toutes les barres de ce render
     local overrideR, overrideG, overrideB
     if cfg.barColorR then
         overrideR = cfg.barColorR
@@ -1055,9 +742,7 @@ local function AnimateRender(renderKey)
                 if useSpellColors and aL.spellColor then cR, cG, cB = aL.spellColor[1], aL.spellColor[2], aL.spellColor[3] end
                 AnimateOne(row.barL, row.sparkL, row.wrapBarL, aL, cR, cG, cB, true, cfg, fx3dOn)
             elseif fx3dOn and row.barL and row.wrapBarL then
-                -- Combat secret : pas d'aura visible cote scan mais la barre est animee
-                -- par SetTimerDuration cote C++ Blizzard. UpdateBarFX3DOnly continue
-                -- a faire suivre les FX (3D Fond et Fill 2D scrolling) au remplissage.
+                -- Combat secret : barre animée côté C++, FX3D doit suivre quand même
                 UpdateBarFX3DOnly(row.barL, row.wrapBarL, true)
             end
             local aR = auras[aIdx + 1]
@@ -1071,8 +756,7 @@ local function AnimateRender(renderKey)
             aIdx = aIdx + 2
         end
     else
-        -- Pre-extraction : les overrides par sort (uniquement Buffs) sont lus dans la boucle
-        -- via cfg.spellGradients[a.spellID]. Voir Init.lua ApplyBarColor pour la priorite.
+        -- Overrides par sort (Buffs uniquement) via cfg.spellGradients — priorité: Init.lua ApplyBarColor
         local sgTable = (renderKey == "freebars") and cfg.spellGradients or nil
         for i, row in ipairs(gfx.rows) do
             if not row:IsShown() then break end
@@ -1095,10 +779,7 @@ local function AnimateRender(renderKey)
                     AnimateOne(row.barL, row.sparkL, row.wrapL, a, cR, cG, cB, false, cfg, fx3dOn)
                 end
             elseif fx3dOn then
-                -- Pas d'aura visible (scan secret en combat) MAIS la barre est animee
-                -- par SetTimerDuration cote C++ Blizzard. On doit quand meme continuer
-                -- a appeler UpdateClip3DPart pour que le 3D suive le remplissage.
-                -- Solution A pour Midnight 12.0 : pattern "show but don't know" sur la geometrie.
+                -- Aura secret en combat mais barre animée côté C++ : le 3D doit suivre
                 if row.barL and row.barR and row.barL ~= row.barR then
                     UpdateBarFX3DOnly(row.barL, row.wrapL, true)
                     UpdateBarFX3DOnly(row.barR, row.wrapR, false)
@@ -1112,12 +793,8 @@ local function AnimateRender(renderKey)
     end
 end
 
-------------------------------------------------------------------------
--- TEXTE DE TIMER (A1+A2+A3+C2 : ticker séparé 10 fps, détaint, cache, dual)
-------------------------------------------------------------------------
--- Helper top-level : lit uniquement remaining duration depuis durObj (pour timer text)
--- Combat sur sort CDM : GetRemainingDuration retourne secret -> r + 0 plante.
--- On verifie issecretvalue avant l'arithmetique pour eviter le crash silencieux.
+-- TEXTE DE TIMER (ticker séparé 10fps, détaint, cache, dual)
+-- Lit remaining duration ; vérifie issecretvalue avant l'arithmétique (CDM secret en combat)
 local function ReadRemainingOnly(durObj)
     local r = durObj:GetRemainingDuration()
     if r ~= nil and not (HAS_ISSECRET and issecretvalue(r)) then
@@ -1145,12 +822,10 @@ local function FormatTimerVal(rem, decimals)
     return string.format("%d:%02d", math.floor(rem/60), math.floor(rem%60))
 end
 
--- Contexte timer icône réutilisé entre ticks (évite alloc table à 10fps × 3 renders).
--- Les champs sont simplement mis à jour avant chaque UpdateTimersForRender.
+-- Contexte timer réutilisé entre ticks (évite alloc à 10fps × 3 renders)
 local _ctxIcon = { tR=1, tG=1, tB=1, decimals=1 }
 
--- Helper top-level : texte + couleur d'urgence du timer pour un FontString.
--- Utilise ns.URGENCY (CRITICAL, MEDIUM) qui change rarement → lu globalement.
+-- Texte + couleur d'urgence du timer pour un FontString
 local function UpdTimer(fs, entry, ctx)
     if not fs then return end
     if not entry then
@@ -1186,9 +861,7 @@ local function UpdTimer(fs, entry, ctx)
     end
 end
 
--- Helper top-level : met à jour le timer d'une row simple (non-dual).
--- L'icône (iconlist/circlebars/icons) porte le FontString sur le bouton (ib._durText) ;
--- freebars n'a pas d'icône, le FontString est directement sur la row (row._durText).
+-- Met à jour le timer d'une row simple (FontString sur icône ou directement sur la row)
 local function UpdRow(row, entry, timerIconOn, ctx)
     local ib = row._isDual and nil or row.iconBtn
     local fs = (ib and ib._durText) or row._durText
@@ -1249,34 +922,19 @@ local function UpdateTimersForRender(renderKey)
     end
 end
 
--- Barres à 60 fps (OnUpdate) avec auto-détachement (pattern identique à timerDriver).
--- Quand aucune aura active, le OnUpdate est DÉTACHÉ (SetScript nil) au lieu de
--- juste early-exit. Blizzard n'appelle plus la closure → zéro overhead CPU idle.
--- Réveillé par ns.WakeAnimDriver() depuis ScanAuras quand des auras apparaissent.
+-- OnUpdate 60fps auto-détaché quand inactif (zéro overhead idle), réveillé par ns.WakeAnimDriver()
 animDriver._running = false
 
 local function AnimDriverTick(self, elapsed)
     self._t = self._t + elapsed
     if self._t < 0.0166 then return end  -- 60fps
     self._t = 0
-    -- Check direct _activeAuraCount : le animDriver ne gère QUE les color curves
-    -- des bars visibles. Les fades alpha ont leur propre ticker (C_Timer.NewTicker)
-    -- qui s'auto-cancel. Pas besoin d'animDriver pour eux.
-    --
-    -- IMPORTANT pour Solution A FX3D Bar : meme si _activeAuraCount=0 (le scan ne
-    -- voit plus l'aura car secret en combat), on doit CONTINUER a animer si au
-    -- moins une barre a un fx3d barre 3D actif. Sans ca, UpdateClip3DPart n'est
-    -- appele qu'a la frame d'apparition (frame=1) et le 3D ne suit jamais le
-    -- remplissage. ns._fx3dBarActiveCount est incremente/decremente par
-    -- ShowBarModel/HideBarModel dans SpellEffects.lua.
+    -- Continue d'animer si un fx3d barre actif même sans aura visible (secret en combat) ;
+    -- ns._fx3dBarActiveCount géré par ShowBarModel/HideBarModel (SpellEffects.lua)
     local hasActiveAuras = (ns._activeAuraCount or 0) > 0
     local hasActiveFx3d = (ns._fx3dBarActiveCount or 0) > 0
-    -- BUG CORRIGE (2026-08-16) : le mode apercu (fausses barres injectees par
-    -- Procs.lua/Cooldowns.lua/Debuffs.lua/Buffs.lua quand ns._previewBars est
-    -- actif, menu Reglages) ne passe jamais par Scan.lua -- ns._activeAuraCount
-    -- reste a 0 pendant tout l'apercu. Sans ce garde, le driver s'arretait
-    -- immediatement et AnimateOne/ns.AnchorSpark2D n'etaient jamais appeles :
-    -- le spark de la fausse barre restait cree mais JAMAIS ancre, donc invisible.
+    -- Mode preview (ns._previewBars) ne passe pas par Scan.lua : garde nécessaire
+    -- sinon le driver s'arrête et le spark de la fausse barre reste invisible.
     local hasPreview = ns._previewBars == true
     if not hasActiveAuras and not hasActiveFx3d and not hasPreview then
         self._running = false
@@ -1294,11 +952,7 @@ function ns.WakeAnimDriver()
     end
 end
 
--- Timer texte à 10 fps : OnUpdate arrêtable (via SetScript nil) au lieu d'un
--- C_Timer.NewTicker qui tourne en permanence. Quand aucune aura n'est active,
--- le OnUpdate lui-même est détaché → zéro overhead CPU idle.
--- Réactivation événementielle : ns.WakeTimerDriver() depuis ScanAuras quand
--- _activeAuraCount passe de 0 à >0.
+-- Timer texte 10fps, OnUpdate auto-détaché quand inactif, réveillé par ns.WakeTimerDriver()
 local timerDriver = CreateFrame("Frame")
 timerDriver._t = 0
 timerDriver._running = false
@@ -1309,12 +963,8 @@ local function TimerDriverTick(self, elapsed)
     self._t = 0
     for i = 1, #RENDER_KEYS do pcall(UpdateTimersForRender, RENDER_KEYS[i]) end
 
-    -- Pas de double-check expiry via GetRemainingDuration : cette API retourne
-    -- un secret value en combat sur les DOTs du joueur, ce qui fait crasher la
-    -- comparaison `rem <= 0` (la variable rem est tainted, même dans un pcall).
-    -- SetTimerDuration natif Blizzard gère l'expiration côté C++. Quand l'aura
-    -- expire, Blizzard fire UNIT_AURA avec removedAuraInstanceIDs et notre scan
-    -- supprime la bar normalement.
+    -- Pas de check expiry manuel (GetRemainingDuration secret en combat) : Blizzard
+    -- gère l'expiration côté C++, notre scan réagit à UNIT_AURA.removedAuraInstanceIDs
 end
 
 function ns.WakeTimerDriver()
@@ -1325,5 +975,4 @@ function ns.WakeTimerDriver()
     end
 end
 
--- Démarrage initial : on laisse dormir tant qu'aucune aura n'est détectée.
--- Le premier ns.ScanAuras() qui trouve des auras appellera WakeAnimDriver() et WakeTimerDriver().
+-- Démarre endormi ; ScanAuras() réveille via WakeAnimDriver()/WakeTimerDriver()

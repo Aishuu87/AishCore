@@ -1,6 +1,5 @@
 -- AishUIAura/UI/Menus/Equipment.lua
 -- Equipment menu: layout cards (Shield Wall / Ronin) + equipment list + position/borders
-------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
@@ -37,8 +36,7 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
     end
     for i,c in ipairs(cards) do
         local isAct=(al==c.key)
-        -- Card sans encadré : juste Button transparent + icône + label.
-        -- Le halo doré apparaît uniquement au survol (hover feedback).
+        -- Card transparente, halo doré au survol seulement
         local card=CreateFrame("Button",nil,p,"BackdropTemplate"); card:SetSize(140,110); card:SetPoint("TOPLEFT",sx+(i-1)*155,-(y+10))
 
         -- Halo de survol (caché par défaut)
@@ -159,8 +157,7 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
                     dBtn:SetScript("OnClick",function() sd.desat=not sd.desat; RD(); onSlotChg() end)
                     dBtn:SetScript("OnEnter",function() dIco:SetAlpha(1); GameTooltip:SetOwner(dBtn,"ANCHOR_TOP"); GameTooltip:SetText(L["AURASMENU_EQUIPMENT_DESATURATE_TOOLTIP"],1,1,1); GameTooltip:Show() end)
                     dBtn:SetScript("OnLeave",function() RD(); GameTooltip:Hide() end)
-                    -- Bouton glow fusionné : affiche le type + on/off. Clic gauche = toggle, clic droit = picker
-                    -- Style harmonisé avec le menu Sorts (Tactics)
+                    -- Bouton glow fusionné : clic gauche = toggle, clic droit = picker
                     local gFus = CreateFrame("Button",nil,row,"BackdropTemplate"); gFus:SetSize(70,16); gFus:SetPoint("RIGHT",dBtn,"LEFT",-6,0)
                     gFus:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
                     local gFusTx = gFus:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(gFusTx,FONT,8,"OUTLINE"); gFusTx:SetAllPoints(); gFusTx:SetJustifyH("CENTER")

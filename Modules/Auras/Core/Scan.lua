@@ -1,33 +1,12 @@
 -- AishUIAura/Core/Scan.lua
---
--- Scanner d'auras CDM-only (Midnight 12.0+).
---
--- ARCHITECTURE :
---   Source unique de verite = ns.cdmData[unit][spellID] = { spellId, name, instID }
---   maintenu par CDMHooks.lua via les hooks SetAuraInstanceInfo des 4 viewers
---   Blizzard (Essential, Utility, BuffIcon, BuffBar).
---
---   Cle = spellID (PAS auraInstanceID) : depuis Secret Values (12.0+), un
---   auraInstanceID peut etre secret et ne peut alors plus servir de cle de
---   table (crash "cannot be indexed with secret keys"), alors que spellID
---   reste TOUJOURS clean sur ce hook (Blizzard le donne en clair via
---   frame.cooldownInfo.spellID, un champ CDM interne distinct des AuraData
---   secretisables). instID reste indispensable pour GetAuraDuration/
---   GetAuraApplicationDisplayCount, mais stocke comme VALEUR de table -- ce
---   qui reste toujours autorise, secret ou non, seul son usage comme CLE ou
---   dans une comparaison (==) est interdit.
---
--- POURQUOI CDM EXCLUSIVEMENT :
---   - Combat-safe : Blizzard nous donne le spellID en clair (pas de taint)
---   - Pas de slot recycle (bug observe sur GetAuraSlots ou Numbing partage inst=8 avec Rupture)
---   - Pas de cache obsolete (tout est event-driven)
---   - Marche pour toutes les classes (les 4 viewers couvrent tout)
---
--- PIPELINE :
---   ns.cdmData -> Scan:CollectAuras / CollectPlayerBuffs -> _allScratch
---             -> Scan:FilterAllDests (split par debuffs/cooldowns/procs/buffs + tri)
---             -> ns.auraData -> renders
-------------------------------------------------------------------------
+-- Scanner d'auras CDM-only (Midnight 12.0+). Source unique de verite : ns.cdmData[unit][spellID] =
+-- { spellId, name, instID }, maintenu par CDMHooks.lua via SetAuraInstanceInfo des 4 viewers Blizzard.
+-- Cle = spellID (pas auraInstanceID, potentiellement secret et donc inutilisable comme cle de table) ;
+-- instID reste stocke comme valeur (usage cle/comparaison interdit s'il est secret).
+-- CDM exclusivement : combat-safe (spellID toujours clean), pas de slot recycle, pas de cache obsolete,
+-- couvre toutes les classes.
+-- Pipeline : ns.cdmData -> Scan:CollectAuras/CollectPlayerBuffs -> _allScratch -> Scan:FilterAllDests
+-- (split debuffs/cooldowns/procs/buffs + tri) -> ns.auraData -> renders.
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 ns.Scan = {}
@@ -41,15 +20,10 @@ local HAS_ISSECRET = (type(issecretvalue) == "function")
 local GetAuraDuration              = C_UnitAuras and C_UnitAuras.GetAuraDuration
 local GetAuraApplicationDisplayCount = C_UnitAuras and C_UnitAuras.GetAuraApplicationDisplayCount
 
-------------------------------------------------------------------------
--- ACCESSEURS COMBAT-SAFE (pattern "show but don't know")
-------------------------------------------------------------------------
+-- Accesseurs combat-safe (pattern "show but don't know")
 
--- Lecture safe du spellID depuis une AuraData brute (aura.spellId, avec
--- protection issecret). cdmData est desormais cle par spellID (voir plus
--- haut) donc ne peut plus servir a "deviner" un spellID a partir d'un
--- auraInstanceID inconnu -- ce cas (aura non identifiee) retombe sur ce
--- seul fallback, comme avant.
+-- Lecture safe du spellID depuis une AuraData brute, avec protection issecret. Seul fallback pour une
+-- aura non identifiee (cdmData etant cle par spellID, il ne peut plus servir a deviner un spellID inconnu).
 function ns.SafeSpellID(aura, unit)
     if not aura then return nil end
     local v = aura.spellId
@@ -69,11 +43,8 @@ function ns.SafeStacks(aura, unit, instID)
             stacks = aura.applications
         end
     end)
-    -- Tentative 2 : API display count (souvent dispo meme quand applications est secret).
-    -- Signature : GetAuraApplicationDisplayCount(auraInstanceID, min, max)
-    -- -- PAS de parametre "unit" (contrairement a ce que suggere la documentation
-    -- generale de cette API). Un appel avec "unit" en argument #1 leve "bad argument #1" des que
-    -- l'instID n'est pas secret (masque sinon par l'erreur de taint sur un instID secret).
+    -- Tentative 2 : GetAuraApplicationDisplayCount(auraInstanceID, min, max), souvent dispo meme quand
+    -- applications est secret. Pas de parametre "unit" malgre la doc generale de cette API.
     if stacks == 0 and instID and GetAuraApplicationDisplayCount then
         pcall(function()
             local c = GetAuraApplicationDisplayCount(instID, 1, 999)
@@ -85,47 +56,17 @@ function ns.SafeStacks(aura, unit, instID)
     return stacks
 end
 
-------------------------------------------------------------------------
--- RÉCUPÉRATION DE L'AURADATA POUR UN SPELLID CONNU
---
--- IMPORTANT (patch 12.1) : L'auraInstanceID fourni par le
--- hook CDM (cdmAura.auraInstanceID dans SetAuraInstanceInfo, CDMHooks.lua)
--- est refusé par TOUTES les API qui en dépendent -- pas seulement
--- GetAuraDataByAuraInstanceID, mais AUSSI GetAuraApplicationDisplayCount et
--- GetAuraDuration, qui étaient supposées "blessed"/sûres avec un secret.
--- Les trois lèvent la même exception ("Auras cannot be accessed when secret
--- while tainted by 'AishCore'"). cdmData ne peut donc plus servir QUE de
--- liste "quels spellID sont actifs actuellement" (les clés, toujours
--- propres) -- toute donnée doit être re-obtenue par un canal INDÉPENDANT du
--- hook CDM.
---
--- DEUX repêchages nécessaires :
---  1) GetPlayerAuraBySpellID(spellID) marche pour le joueur ET renvoie des
---     données intégralement propres -- mais ÉCHOUE (renvoie nil, sans
---     erreur) pour une partie des sorts pourtant actifs et visibles dans le
---     CDM (ex: totems élémentaires, enchant d'arme). Le spellID que le hook
---     CDM expose (frame.cooldownInfo.spellID, potentiellement un ID de
---     variante/rang lié) ne correspond alors pas au spellID réel de
---     l'AuraData appliquée.
---  2) Dans ce cas on retombe sur une énumération (GetAuraDataByIndex) et on
---     matche par NOM plutôt que par spellID -- le nom (cdmEntry.name, déjà
---     lu proprement par CDMHooks.lua) correspond même quand l'ID diffère.
---     La comparaison spellId reste tentée en second (repli historique),
---     protégée par pcall (peut échouer si spellId est secret).
-------------------------------------------------------------------------
+-- L'auraInstanceID du hook CDM est refuse par toutes les API qui en dependent (GetAuraDataByAuraInstanceID,
+-- GetAuraApplicationDisplayCount, GetAuraDuration) : cdmData ne sert qu'a lister les spellID actifs, la
+-- donnee reelle vient de GetPlayerAuraBySpellID (joueur, echoue pour totems/enchant d'arme) ou en repli
+-- de GetAuraDataByIndex matche par nom (plus fiable que spellID ici).
 local function FindAuraInList(unit, filter, spellID, name)
     if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return nil end
     for i = 1, 40 do
         local ok, d = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, filter)
-        -- IMPORTANT : ok=false à un index donné signifie que
-        -- CETTE aura précise (celle à cette position) est secrète -- pas que la
-        -- liste est terminée. Blizzard lève "Auras cannot be accessed when
-        -- secret" pour cette position sans que les positions SUIVANTES soient
-        -- forcément concernées. Un `break` ici arrêterait l'énumération dès la
-        -- 1ère aura secrète rencontrée (souvent en position #1), ratant TOUTES
-        -- les auras lisibles situées après (l'énumération s'arrêtant
-        -- systématiquement à l'index #1 en combat). Seule une fin de
-        -- liste CONFIRMÉE (ok=true, d=nil) doit arrêter la boucle.
+        -- ok=false signifie que CETTE position est secrete, pas que la liste est finie (Blizzard leve
+        -- "Auras cannot be accessed when secret" par position). Un break ici raterait toutes les auras
+        -- lisibles situees apres la 1ere secrete. Seule une fin CONFIRMEE (ok=true, d=nil) arrete la boucle.
         if ok and not d then break end
         if ok and d then
             if name then
@@ -140,14 +81,10 @@ local function FindAuraInList(unit, filter, spellID, name)
     return nil
 end
 
--- En combat, TOUTES les auras à durée limitée
--- sont refusées par C_UnitAuras (GetPlayerAuraBySpellID ET GetAuraDataByIndex,
--- sans exception, toutes positions confondues) -- cette fonction ne renvoie
--- donc quelque chose d'utilisable QUE hors combat, ou pour une ressource
--- persistante sans minuteur (ex: Maelstrom Weapon, lu via applications).
--- Pour la vivacité/le swipe EN combat, voir ns.cdmAuraSwipePresence /
--- ns.SubscribeCDMAuraSwipe (CDMHooks.lua) -- canal event-driven alimenté par
--- le CDM lui-même (code Blizzard non tainté), indépendant de C_UnitAuras.
+-- En combat, C_UnitAuras refuse toutes les auras a duree limitee (GetPlayerAuraBySpellID et
+-- GetAuraDataByIndex) : utilisable seulement hors combat, ou pour une ressource persistante sans minuteur
+-- (ex. Maelstrom Weapon via applications). En combat, voir ns.cdmAuraSwipePresence / ns.SubscribeCDMAuraSwipe
+-- (CDMHooks.lua), canal event-driven alimente par le CDM lui-meme, independant de C_UnitAuras.
 local function GetAuraDataForSpell(unit, spellID, name)
     if unit == "player" and C_UnitAuras.GetPlayerAuraBySpellID then
         local ok, auraData = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
@@ -157,44 +94,17 @@ local function GetAuraDataForSpell(unit, spellID, name)
     return FindAuraInList(unit, filter, spellID, name)
 end
 
-------------------------------------------------------------------------
--- CACHE "DERNIÈRE DONNÉE CONNUE" (présence + stacks). Après plusieurs
--- tentatives de re-confirmer activement la présence/les stacks en combat via
--- divers canaux CDM (swipe/bar/GetAuraApplicationDisplayCount sur l'instID),
--- toutes se sont révélées non-fiables en combat pour certains sorts
--- (Précurseur du Vide, Fragments d'âme -- /aishdebug auratrace), quelle que
--- soit la méthode. Plutôt que de continuer à chercher un signal de reconfirmation
--- combat-safe qui n'existe pas pour ces sorts, on adopte le principe qui
--- fonctionnait avant le passage au CDM pour la durée : la lecture directe
--- (GetAuraDataForSpell) reste la SEULE source de vérité pour la présence et
--- les stacks -- mais quand elle échoue (typiquement en combat), on NE
--- RÉINITIALISE PAS l'état à "absent"/"0 stacks" : on réutilise la DERNIÈRE
--- entrée confirmée par une lecture directe réussie, telle quelle, jusqu'à
--- ce qu'une nouvelle lecture directe réussisse (fin de combat, ou tout
--- moment où C_UnitAuras redevient lisible) ou que le CDM confirme
--- explicitement le contraire (frame.Cooldown Clear() ou hi=0 après une
--- vraie plage positive -- cf. swipePresent/barPresent ci-dessous, qui
--- restent utilisés comme signal d'ABSENCE, pas de présence).
---
--- La DURÉE (barres) reste entièrement gérée par le CDM (durObj/
--- directDuration/useCDMSwipe plus bas) -- ce cache ne concerne QUE la
--- présence et les stacks, pas les champs de durée.
+-- Cache "derniere donnee connue" (presence + stacks) : aucun canal CDM (swipe/bar/instID) ne s'est revele
+-- fiable en combat pour certains sorts (Precurseur du Vide, Fragments d'ame). En cas d'echec de lecture en
+-- combat on reutilise la derniere entree confirmee plutot que "absent"/"0 stacks", jusqu'a la prochaine
+-- lecture reussie ou une disparition confirmee explicitement par le CDM. Ne concerne pas la duree (barres).
 ns._lastKnownAura = ns._lastKnownAura or { player = {}, target = {} }
 
--- [spellID] = true des qu'un VRAI signal positif (timestamp actif, pas juste
--- "pas encore perime") a ete observe sur le swipe OU la bar CDM pour ce
--- spellID. Necessaire pour la garde d'invalidation du cache ci-dessous :
--- pour Precurseur du Vide/Fragments d'ame, ns.cdmAuraBarPresence[spellID]
--- vaut EN PERMANENCE false (jamais un vrai timestamp -- Blizzard n'envoie
--- que hi=0 pour ce type de sort, cf. CDMHooks.lua) -- sans cette garde,
--- "== false" y serait interprete a tort comme une confirmation de
--- disparition a CHAQUE scan, videant le cache avant meme qu'il ait pu
--- servir (l'aura redeviendrait invisible en combat malgre le cache).
+-- [spellID] = true des qu'un vrai signal positif a ete observe sur swipe/bar CDM. Necessaire car pour
+-- certains sorts, cdmAuraBarPresence vaut en permanence false (jamais de vrai timestamp) : sans cette
+-- garde, "== false" serait pris a tort pour une confirmation de disparition des le premier scan.
 local everConfirmedByCDM = { player = {}, target = {} }
 
-------------------------------------------------------------------------
--- CRÉATION D'ENTRÉE
-------------------------------------------------------------------------
 local function MakeEntry(unit, spellID, cdmName)
     if not spellID then return nil end
     local swipePresent = (ns.IsCDMAuraSwipePresent and ns.IsCDMAuraSwipePresent(spellID))
@@ -202,41 +112,20 @@ local function MakeEntry(unit, spellID, cdmName)
     if swipePresent then everConfirmedByCDM[unit][spellID] = true end
     local cache = ns._lastKnownAura[unit]
 
-    -- NOTE : une tentative de presence combat-safe via AuraContainer natif
-    -- (hooks OnShow/OnHide poses depuis initializeFrame) a ete tentee et
-    -- abandonnee : Blizzard rejette explicitement
-    -- auraButton:HookScript("OnShow"/"OnHide", ...) avec "blocked by secret
-    -- aspects", contrairement au pattern hooksecurefunc qui fonctionne pour
-    -- le CDM (CDMHooks.lua). Restriction plateforme, pas contournable par du
-    -- code -- cf. AuraTrackerContainer.lua pour le detail complet. Le cache
-    -- ci-dessous reste donc la seule approximation disponible pour la
-    -- presence.
+    -- Hooks OnShow/OnHide sur AuraContainer natif rejetes par Blizzard ("blocked by secret aspects",
+    -- contrairement a hooksecurefunc pour le CDM, cf. AuraTrackerContainer.lua) : le cache ci-dessous
+    -- reste la seule approximation disponible.
     local auraData = GetAuraDataForSpell(unit, spellID, cdmName)
 
     if not auraData then
         local cached = cache[spellID]
         if cached then
-            -- Hors combat, GetAuraDataForSpell EST fiable (c'est justement
-            -- l'hypothese de base de tout ce cache) -- un resultat nil hors
-            -- combat signifie donc VRAIMENT "l'aura a disparu", pas juste
-            -- "pas encore relu". Vider le cache UNIQUEMENT sur un signal CDM
-            -- explicite (jamais declenche pour ces sorts, cf.
-            -- everConfirmedByCDM) laisserait l'icone affichee indefiniment
-            -- meme hors combat, avec le dernier stacks connu (y compris un
-            -- badge "0" figé). En combat en revanche, ce nil est indetermine
-            -- (lecture bloquee) -- on continue a faire confiance au cache
-            -- dans ce cas.
+            -- Hors combat, un nil de GetAuraDataForSpell signifie vraiment "aura disparue". En combat, ce
+            -- nil est indetermine (lecture bloquee) : on garde le cache sauf disparition confirmee par le
+            -- CDM (swipe/bar passe a false sur un spellID ou ce canal a deja fonctionne, cf. everConfirmedByCDM).
             if not ns._inCombat then
                 cache[spellID] = nil
             else
-                -- Invalide quand meme le cache si le CDM confirme
-                -- EXPLICITEMENT une disparition (Clear() reel sur le
-                -- Cooldown, ou hi=0 sur la Bar apres une vraie plage
-                -- positive -- cf. HookCDMCooldownChild/HookCDMBarChild,
-                -- CDMHooks.lua) : signal fiable UNIQUEMENT pour un spellID
-                -- dont on a deja vu ce canal fonctionner (cf.
-                -- everConfirmedByCDM ci-dessus) -- sinon son "false"
-                -- permanent n'a jamais rien confirmé du tout.
                 local swipeGone = everConfirmedByCDM[unit][spellID]
                                and ns.cdmAuraSwipePresence and ns.cdmAuraSwipePresence[spellID] == false
                 local barGone   = everConfirmedByCDM[unit][spellID]
@@ -248,12 +137,8 @@ local function MakeEntry(unit, spellID, cdmName)
                 end
             end
         end
-        -- Jamais lu directement avec succès pour ce spellID cette session (ou
-        -- cache invalidé ci-dessus) : seul le CDM peut encore confirmer une
-        -- présence brute (sans stacks ni durée exploitables) -- UNIQUEMENT en
-        -- combat (hors combat, l'absence de auraData est déjà la réponse
-        -- définitive, cf. ci-dessus -- ne pas laisser un swipe/bar périmé la
-        -- contredire).
+        -- Rien en cache : seul le CDM peut encore confirmer une presence brute, et uniquement en combat
+        -- (hors combat, l'absence de auraData est deja la reponse definitive).
         if not swipePresent or not ns._inCombat then return nil end
     end
 
@@ -264,19 +149,8 @@ local function MakeEntry(unit, spellID, cdmName)
         local okDur, d = pcall(GetAuraDuration, unit, instID)
         durObj = okDur and d or nil
     end
-    -- Repli direct duration/expirationTime (pas durObj) : GetAuraDuration
-    -- échoue silencieusement (ok=true, val=nil) pour certaines auras
-    -- pourtant lisibles autrement (ex: Glaçons/205473). auraData.duration/
-    -- expirationTime se sont montrés NON secrets pour ce type d'aura (ressource perso).
-    -- Arithmétique protégée par pcall : si secrète, échoue proprement et on
-    -- retombe sur le relais CDM (useCDMSwipe) plus bas -- SetCooldown lui
-    -- accepte une valeur secrète brute sans problème une fois calculée.
-    -- IMPORTANT (régression confirmée en jeu) : ne JAMAIS soustraire des
-    -- valeurs dont on n'a pas explicitement vérifié via issecretvalue()
-    -- qu'elles sont non secrètes -- ça a cassé tout MakeEntry (stacks
-    -- compris) la première fois. On vérifie donc AVANT tout calcul, dans le
-    -- même pcall que la lecture, plutôt que d'espérer que l'arithmétique
-    -- échoue proprement toute seule.
+    -- Repli direct duration/expirationTime : GetAuraDuration echoue silencieusement pour certaines auras
+    -- pourtant lisibles autrement (ex. Glacons/205473). issecretvalue() verifie dans le meme pcall que le calcul.
     local directStart, directDuration
     if not durObj and auraData then
         local okCalc, start, dur = pcall(function()
@@ -298,28 +172,18 @@ local function MakeEntry(unit, spellID, cdmName)
         stacks   = ns.SafeStacks(auraData, unit, instID),
         unit     = unit,
         name     = cdmName,
-        -- Pas de durObj NI de directStart/directDuration (combat, aura sans
-        -- expirationTime lisible) : les renders doivent piloter leur widget
-        -- Cooldown via ns.SubscribeCDMAuraSwipe(spellID, key, cd) plutôt que
-        -- d'attendre une donnée qui ne viendra jamais en combat pour ce sort.
+        -- Sans durObj ni directStart/directDuration, les renders doivent piloter leur Cooldown via
+        -- ns.SubscribeCDMAuraSwipe plutot que d'attendre une donnee qui ne viendra jamais en combat.
         useCDMSwipe = swipePresent and not durObj and not directStart,
     }
-    -- Ne memorise QUE les entrees issues d'une lecture directe reussie
-    -- (auraData non nil) -- pas celles construites uniquement via le repli
-    -- swipePresent (presence/stacks non exploitables), qui ne doivent jamais
-    -- ecraser une derniere bonne donnee deja en cache.
+    -- Ne memorise que les entrees issues d'une lecture directe reussie, jamais celles construites via le
+    -- seul repli swipePresent (presence/stacks non exploitables), pour ne pas ecraser une bonne donnee en cache.
     if auraData then cache[spellID] = entry end
     return entry
 end
 
-------------------------------------------------------------------------
--- DIAGNOSTIC : /aishdebug auratrace <spellID> -- dump pas-a-pas de tout ce
--- que MakeEntry voit pour ce spellID (les 2 unites), sans filtre whitelist.
--- Sert a comprendre POURQUOI une aura n'apparait pas en combat : quel(s)
--- signal(aux) de presence sont a true/false, ce que GetAuraDataForSpell
--- renvoie exactement (succes/echec/nil), et l'etat du cache "derniere
--- donnee connue" (ns._lastKnownAura) pour ce sort.
-------------------------------------------------------------------------
+-- /aishdebug auratrace <spellID> : dump pas-a-pas de tout ce que MakeEntry voit pour ce sort (2 unites,
+-- sans filtre whitelist), pour comprendre pourquoi une aura n'apparait pas en combat.
 function ns.DebugTraceAura(spellID)
     local P = function(s) print("|cff33aaff[AuraTrace]|r " .. s) end
     if not spellID then P("usage : /aishdebug auratrace <spellID>"); return end
@@ -330,13 +194,20 @@ function ns.DebugTraceAura(spellID)
         local cdmEntry = cdmDataU and cdmDataU[spellID]
         P(string.format("-- unit=%s -- cdmData present=%s%s", unit, tostring(cdmEntry ~= nil),
             cdmEntry and string.format(" (name=%s instID=%s)", tostring(cdmEntry.name), tostring(cdmEntry.instID)) or ""))
+        -- Canal "presence pure" (SetAuraInstanceInfo) : valeur brute et ce que le tier en fait reellement.
+        -- Hors du `if cdmEntry` car ce canal peut repondre pour des sorts dont cdmData ne dit rien d'utile.
+        do
+            local raw = ns.cdmAuraInstancePresence and ns.cdmAuraInstancePresence[unit]
+                        and ns.cdmAuraInstancePresence[unit][spellID]
+            local eff = ns.IsCDMAuraInstancePresent and ns.IsCDMAuraInstancePresent(unit, spellID)
+            P(string.format("   instancePresence brute=%s | tier autoritaire=%s",
+                tostring(raw), tostring(eff)))
+        end
         if cdmEntry then
             local swipeOk = ns.IsCDMAuraSwipePresent and ns.IsCDMAuraSwipePresent(spellID)
             local barOk   = ns.IsCDMAuraBarPresent and ns.IsCDMAuraBarPresent(spellID)
             P(string.format("   swipePresent=%s  barPresent=%s", tostring(swipeOk), tostring(barOk)))
-            -- Detail brut : timestamp jamais vu (nil) vs vu-mais-perime (age > seuil) --
-            -- distingue "Blizzard n'appelle jamais SetCooldown/SetValue pour ce sort"
-            -- de "il appelle, mais pas assez souvent pour le seuil de peremption actuel".
+            -- Distingue timestamp jamais vu (nil) de vu-mais-perime (age > seuil).
             local swipeT = ns.cdmAuraSwipePresence and ns.cdmAuraSwipePresence[spellID]
             local barT   = ns.cdmAuraBarPresence and ns.cdmAuraBarPresence[spellID]
             P(string.format("   swipeTimestamp=%s%s  barTimestamp=%s%s",
@@ -345,9 +216,7 @@ function ns.DebugTraceAura(spellID)
                 tostring(barT),
                 (type(barT) == "number") and string.format(" (age=%.1fs)", GetTime() - barT) or ""))
 
-            -- Etat du cache "derniere donnee connue" (ns._lastKnownAura) : LE
-            -- mecanisme reellement utilise desormais pour la presence/stacks
-            -- quand la lecture directe echoue (cf. MakeEntry).
+            -- Etat du cache "derniere donnee connue", utilise pour la presence/stacks quand la lecture directe echoue.
             local cached = ns._lastKnownAura and ns._lastKnownAura[unit] and ns._lastKnownAura[unit][spellID]
             P(string.format("   cache derniere donnee connue : present=%s%s",
                 tostring(cached ~= nil),
@@ -356,9 +225,7 @@ function ns.DebugTraceAura(spellID)
             local okData, auraData = pcall(GetAuraDataForSpell, unit, spellID, cdmEntry.name)
             P(string.format("   GetAuraDataForSpell : pcall_ok=%s result_nil=%s", tostring(okData), tostring(auraData == nil)))
             if okData and auraData then
-                -- ATTENTION : comparer une valeur potentiellement secrete (d == nil)
-                -- HORS d'un pcall dedie peut planter silencieusement tout le print --
-                -- lecture ET comparaison protegees ENSEMBLE, un seul pcall.
+                -- Comparer une valeur potentiellement secrete hors pcall dedie planterait silencieusement le print.
                 local okCalc, nilD, secD, nilE, secE = pcall(function()
                     local d, e = auraData.duration, auraData.expirationTime
                     local isNilD, isNilE = (d == nil), (e == nil)
@@ -386,13 +253,9 @@ function ns.DebugTraceAura(spellID)
     end
 end
 
-------------------------------------------------------------------------
--- COLLECTE — itere sur ns.cdmData[unit] (cle = spellID) uniquement
-------------------------------------------------------------------------
--- Scratch reutilisee entre les 2 appels de CollectFromCDM par scan ("target"
--- puis "player", cf. Scan:Run) -- sans risque : le premier appel est
--- entierement consomme (copie dans _allScratch via tinsert) AVANT que le
--- second ne demarre, jamais les deux vivants simultanement.
+-- Collecte : itere sur ns.cdmData[unit] (cle = spellID) uniquement.
+-- Scratch reutilisee entre les 2 appels de CollectFromCDM par scan (target puis player) : sans risque, le
+-- premier appel est entierement consomme avant que le second ne demarre.
 local _collectScratch = {}
 
 local function CollectFromCDM(unit)
@@ -415,33 +278,14 @@ end
 function Scan:CollectAuras(unit)        return CollectFromCDM(unit) end
 function Scan:CollectPlayerBuffs()      return CollectFromCDM("player") end
 
-------------------------------------------------------------------------
--- IsInWhitelist (helper hoiste)
-------------------------------------------------------------------------
 function ns.IsInWhitelist(wl, sid)
     if not wl or sid == nil then return false end
     return wl[sid] ~= nil
 end
 
-------------------------------------------------------------------------
--- CONSTRUCTION D'UNE OUTPUT ENTRY
--- Extrait les metadonnees du sort (couleurs, modeles 3D, etc.) et construit
--- la table finale envoyee aux renders.
-------------------------------------------------------------------------
--- POOL D'ENTRIES REUTILISABLES (checkup memoire/perf combat) :
--- _BuildOutputEntry etait appelee une fois PAR AURA TRACKEE PAR DESTINATION
--- ET PAR SCAN, allouant a chaque fois une table fraiche de ~50 champs -- en
--- combat, avec plusieurs scans par seconde (cf. CDMHooks.lua), ca fait
--- beaucoup de garbage genere pour rien. SANS RISQUE de reutiliser le meme
--- objet table d'un scan a l'autre ICI (contrairement a MakeEntry plus haut,
--- dont le resultat EST mis en cache longue duree -- surtout pas touche) :
--- personne ne conserve de reference longue duree vers CES entries --
--- ns.auraData[dest] est integralement remplace a chaque scan (Scan:Run), et
--- Animation.lua relit toujours ns.auraData[dest] a la volee a chaque tick,
--- jamais de reference gardee entre 2 ticks. Un pool PAR DESTINATION, indexe
--- par position dans le tableau de sortie de cette destination pour ce scan,
--- suffit -- les slots au-dela du nombre d'auras de ce scan restent
--- simplement inutilises (pas liberes, cout negligeable, jamais retournes).
+-- Construction d'une output entry : extrait les metadonnees du sort (couleurs, modeles 3D...) et construit
+-- la table finale envoyee aux renders. Pool d'entries reutilisables sans risque (contrairement a MakeEntry) :
+-- ns.auraData[dest] est integralement remplace a chaque scan, personne n'en garde de reference entre 2 ticks.
 local _entryPools = { iconlist = {}, circlebars = {}, icons = {}, freebars = {}, centerArc = {} }
 
 local function _BuildOutputEntry(e, sid, si, dest, poolIdx)
@@ -525,21 +369,12 @@ local function _BuildOutputEntry(e, sid, si, dest, poolIdx)
     return t
 end
 
--- Scratch tables de dispatch, reutilisees a chaque appel (perf
--- combat) -- purement transitoires (construites puis integralement
--- consommees DANS ce meme appel, jamais retournees ni conservees), donc
--- sans aucun risque a wipe()+reutiliser plutot que reallouer 5 tables a
--- chaque scan.
+-- Scratch tables de dispatch, reutilisees a chaque appel (perf combat) : purement transitoires,
+-- consommees dans ce meme appel, donc sans risque a wipe()+reutiliser plutot que reallouer.
 local _bySpellD, _bySpellC, _bySpellP, _bySpellB, _bySpellR = {}, {}, {}, {}, {}
 
-------------------------------------------------------------------------
--- FILTRAGE PAR DESTINATION (split debuffs/cooldowns/procs/buffs + tri)
---
--- Une aura peut appartenir a plusieurs destinations (si l'utilisateur l'a
--- coche dans plusieurs categories dans "Sorts a tracker").
--- Pas de dedup par expiry : avec le CDM source, il n'y a JAMAIS deux entries
--- pour le meme spellID (chaque aura est unique cote Blizzard).
-------------------------------------------------------------------------
+-- Filtrage par destination (split debuffs/cooldowns/procs/buffs + tri). Une aura peut appartenir a
+-- plusieurs destinations. Pas de dedup par expiry : avec le CDM source, jamais deux entries pour le meme spellID.
 function Scan:FilterAllDests(allAuras)
     local wlD = ns.whitelistByDest and ns.whitelistByDest.iconlist
     local wlC = ns.whitelistByDest and ns.whitelistByDest.circlebars
@@ -587,44 +422,25 @@ function Scan:FilterAllDests(allAuras)
     return sA, fA, iA, bA, rA
 end
 
-------------------------------------------------------------------------
--- PREVIEW LIVE (menus Liste d'icones / Barres de cercle / Icones / Barres
--- libres)
---
--- Pendant qu'un de ces menus est ouvert, ns._previewBars == true et
--- ns._previewMode contient la dest concernee ("iconlist"/"circlebars"/
--- "icons"/"freebars", ou "all"). Scan:Run REMPLACE alors le contenu de
--- cette dest par PREVIEW_COUNT fausses entrees "_isPreview" pour que
--- l'utilisateur visualise taille/position/couleurs en direct — meme si
--- aucune vraie aura n'est active, et meme si une vraie aura l'est (on
--- remplace volontairement : cacher les vraies auras pendant l'edition
--- du menu n'est pas genant).
---
--- Source des icones : en priorite les sorts reellement configures par
--- l'utilisateur pour cette dest (ns.slotOrderByDest[dest], dans l'ordre
--- de priorite) -> preview "fidele" avec les vraies couleurs/glow/FX.
--- S'il en manque, on complete avec des icones generiques (pas de couleur
--- specifique -> fallback ns.barColor / couleur de classe).
---
--- Chaque entree porte le flag _isPreview = true, detecte par
--- Animation.lua pour animer la barre en boucle 12s sans durObj reel.
-------------------------------------------------------------------------
+-- Preview live (menus Liste d'icones / Barres de cercle / Icones / Barres libres) : pendant qu'un de ces
+-- menus est ouvert, ns._previewBars == true et ns._previewMode contient la dest concernee. Scan:Run
+-- remplace alors le contenu de cette dest par PREVIEW_COUNT fausses entrees "_isPreview" pour visualiser
+-- taille/position/couleurs en direct, meme sans aura reelle active (et en masquant volontairement les
+-- vraies auras le temps de l'edition). Source des icones : en priorite les sorts reellement configures
+-- (ns.slotOrderByDest[dest]) pour une preview fidele, complete par des icones generiques sinon. Chaque
+-- entree porte _isPreview = true, detecte par Animation.lua pour animer la barre en boucle 12s sans durObj.
 local PREVIEW_COUNT = 3
 local PREVIEW_FALLBACK_ICONS = {
     "Interface\\Icons\\Spell_Holy_HolyBolt",
     "Interface\\Icons\\Spell_Nature_Rejuvenation",
     "Interface\\Icons\\Spell_Fire_Fireball02",
 }
--- Stacks fictifs : 0/3/2 pour qu'une ou deux icones de preview montrent
--- le compteur de stacks (cf. ApplyStackCharges dans Debuffs.lua qui lit
--- entry.stacks directement pour les entrees _isPreview).
+-- Stacks fictifs 0/3/2 pour qu'une ou deux icones de preview montrent le compteur (cf. ApplyStackCharges
+-- dans Debuffs.lua, qui lit entry.stacks directement pour les entrees _isPreview).
 local PREVIEW_STACKS = {0, 3, 2}
 
--- noFallback : n'affiche que les sorts reellement coches/assignes a cette
--- dest (pas d'icones generiques de remplissage). Utilise par le menu "Auras
--- a tracker" (Tactics.lua) pour previsualiser fidelement l'etat de la liste,
--- contrairement aux menus de rendu par emplacement qui remplissent toujours
--- a PREVIEW_COUNT pour donner un aperçu meme sans sort assigne.
+-- noFallback : n'affiche que les sorts reellement assignes a cette dest (pas d'icones generiques de
+-- remplissage). Utilise par le menu "Auras a tracker" pour previsualiser fidelement l'etat de la liste.
 local function BuildPreviewEntries(dest, noFallback)
     local out = {}
     local spells = ns.GetSpecSpells()
@@ -655,10 +471,7 @@ local function BuildPreviewEntries(dest, noFallback)
     return out
 end
 
-------------------------------------------------------------------------
--- RUN — point d'entree principal du scan
--- Recycle des tables scratch pour eviter le GC pressure en combat.
-------------------------------------------------------------------------
+-- Run : point d'entree principal du scan. Recycle des tables scratch pour eviter le GC pressure en combat.
 local _allScratch = {}
 local _auraDataScratch = { iconlist = {}, freebars = {}, circlebars = {}, icons = {}, centerArc = {} }
 

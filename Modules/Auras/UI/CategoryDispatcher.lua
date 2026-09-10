@@ -1,16 +1,5 @@
 -- AishUIAura/UI/CategoryDispatcher.lua
--- ============================================================================
--- Routeur qui prend (catId, sectionId) et appelle le bon builder de menu existant.
---
--- Le dispatcher ne crée PAS les menus lui-même, il se contente de :
---   1. Trouver la section dans ns.CATEGORIES
---   2. Regarder son champ `builder` (+ éventuel `builderArg`)
---   3. Appeler la fonction ns.SettingsPanel.BuildXxxMenu(parent, width, arg)
---      ou afficher un placeholder "À venir" si `builder` est nil
---
--- Les builders existants (dans UI/Menus/*.lua) sont réutilisés tels quels,
--- aucune modification n'est nécessaire côté menus.
--- ============================================================================
+-- Routeur (catId, sectionId) -> builder de menu existant, ou placeholder "À venir" si pas de builder.
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
@@ -19,9 +8,7 @@ ns.CategoryDispatcher = {}
 
 local CreateFrame, pcall = CreateFrame, pcall
 
--- ============================================================================
--- Placeholder "À venir" pour sections non-encore-branchées (AishCore futur)
--- ============================================================================
+-- Placeholder "À venir" pour sections non-encore-branchées
 local function BuildPlaceholder(parent, contentW, section)
     local FONT = ns.Media.font
     local Theme = ns.THEME
@@ -75,17 +62,7 @@ local function BuildPlaceholder(parent, contentW, section)
     return card
 end
 
--- ============================================================================
--- Dispatch principal
--- ============================================================================
--- Appelé par le UnifiedPanel quand l'utilisateur clique une section dans la sidebar.
--- Retourne la frame créée (pour que le panel puisse la gérer).
---
--- @param parent   Frame parente (zone de contenu)
--- @param contentW Largeur de la zone de contenu
--- @param catId    ID de la catégorie active (ex: "mesSorts")
--- @param sectionId ID de la section à afficher (ex: "debuffs")
--- @return frame   La frame qui contient le menu, ou nil en cas d'erreur
+-- Appelé par le UnifiedPanel au clic d'une section dans la sidebar. Retourne la frame créée.
 function ns.CategoryDispatcher.ShowSection(parent, contentW, catId, sectionId)
     if not parent or not catId or not sectionId then return nil end
 
@@ -101,19 +78,11 @@ function ns.CategoryDispatcher.ShowSection(parent, contentW, catId, sectionId)
         return err
     end
 
-    -- Pas d'en-tête orné ici : les menus internes ont déjà leurs propres SectionHeader
-    -- (● DISPOSITION, ● SECTION, etc.) qui jouent ce rôle. Mettre un ● DEBUFFS en plus
-    -- au-dessus ferait 2 dots rapprochés = trop redondant visuellement.
-    -- Le titre de la section est déjà visible dans la sidebar (or) et dans le tab rouge.
+    -- Pas d'en-tête ici : les menus internes ont déjà leur propre SectionHeader (redondant sinon)
 
-    -- Si la section a un builder défini, on l'appelle
     if section.builder and ns.SettingsPanel[section.builder] then
         local fn = ns.SettingsPanel[section.builder]
-        -- Wrapper centré : on réserve une largeur généreuse pour que les menus
-        -- existants (codés autour de 470px de large) aient toute la place, et on
-        -- centre horizontalement le wrapper dans le parent.
-        -- On permet maintenant jusqu'à 700px de large pour mieux occuper l'espace
-        -- quand la preview est cachée (zone contenu peut atteindre ~780px).
+        -- Largeur du wrapper : jusqu'à 700px pour occuper l'espace quand la preview est cachée
         local wrapperW = math.max(440, math.min(contentW - 20, 700))
         local wrapper = CreateFrame("Frame", nil, parent)
         wrapper:SetWidth(wrapperW)
@@ -142,19 +111,13 @@ function ns.CategoryDispatcher.ShowSection(parent, contentW, catId, sectionId)
     return ph
 end
 
--- ============================================================================
--- Helper pour l'info-bulle (?) d'une section
--- ============================================================================
--- Retourne le texte de tooltip si défini, sinon nil
+-- Retourne le texte de tooltip (?) d'une section si défini, sinon nil
 function ns.CategoryDispatcher.GetTooltip(catId, sectionId)
     local section = ns.GetSection(catId, sectionId)
     return section and section.tooltip or nil
 end
 
--- ============================================================================
--- Debug helper : liste toutes les sections et leur état (branchée ou placeholder)
--- Utilisation : /run ns.CategoryDispatcher.PrintStatus()
--- ============================================================================
+-- Debug : liste les sections et leur état. Usage : /run ns.CategoryDispatcher.PrintStatus()
 function ns.CategoryDispatcher.PrintStatus()
     print(L["AURASMENU_CATDISP_DEBUG_HEADER"])
     for _, cat in ipairs(ns.CATEGORIES) do

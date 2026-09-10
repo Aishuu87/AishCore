@@ -1,7 +1,5 @@
 -- AishUIAura/UI/Menus/MissingBuffs.lua
--- Ecran de reglages "Buffs manquants". Un onglet General + une section par
--- classe listant ses buffs de groupe (case a cocher = trace / ignore).
-------------------------------------------------------------------------
+-- Ecran de reglages "Buffs manquants" : onglet General + une section par classe (buffs de groupe)
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
@@ -10,9 +8,7 @@ local function Cfg()
     return ns.MissingBuffs and ns.MissingBuffs.Cfg() or {}
 end
 
-------------------------------------------------------------------------
 -- Ligne "buff a ignorer" : case a cocher (coche = trace) + icone + nom
-------------------------------------------------------------------------
 local function CreateBuffRow(parent, entry, y, W)
     local Theme = ns.THEME
     local row = CreateFrame("Button", nil, parent)
@@ -62,9 +58,7 @@ local function CreateBuffRow(parent, entry, y, W)
     return row
 end
 
-------------------------------------------------------------------------
 -- Case a cocher generique liee a une cle de ns.db.missingBuffs
-------------------------------------------------------------------------
 local function AddDbCheckbox(sub, y, W, label, key, invert)
     local SW = ns.SharedWidgets
     local cb = SW.CreateCheckbox(sub, label, W)
@@ -80,10 +74,7 @@ local function AddDbCheckbox(sub, y, W, label, key, invert)
     return cb, y + 26
 end
 
-------------------------------------------------------------------------
--- Sections par classe : buffs de groupe (ns.MISSING_CLASS_BUFFS) + toggles
--- specifiques (stances/auras/attunements/pets/poisons).
-------------------------------------------------------------------------
+-- Sections par classe : buffs de groupe + toggles specifiques (stances/auras/attunements/pets/poisons)
 local function BuildGenericClassSection(entries)
     return function(sub, W)
         local y = 0
@@ -136,7 +127,38 @@ local function BuildWarlockSection(sub, W)
     local y = 0
     local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_PET"] or "Ignorer le familier", "ignoreWarlockPets")
     y = y2
+
+    -- Cas special "presence" (inverse) : resynchronise SpellEffects immediatement au clic
+    local SW = ns.SharedWidgets
+    local cbBurningRush = SW.CreateCheckbox(sub, L["MISSINGBUFFS_BURNING_RUSH_ALERT"] or "Alerte Ruée Ardente", W)
+    cbBurningRush:SetPoint("TOPLEFT", 0, -y)
+    cbBurningRush:SetChecked(Cfg().burningRushAlert and true or false)
+    cbBurningRush.onChanged = function(checked)
+        Cfg().burningRushAlert = checked
+        -- Epingle au CDM : sans ca, la detection retombe sur GetPlayerAuraBySpellID (nil en combat)
+        if checked and ns.PinAuraToCDM and ns.MISSING_WARLOCK_BURNING_RUSH then
+            local ok = ns.PinAuraToCDM(ns.MISSING_WARLOCK_BURNING_RUSH, true)
+            if not ok then ns.PinAuraToCDM(ns.MISSING_WARLOCK_BURNING_RUSH, false) end
+        end
+        -- Ancre le combo tout de suite : action protegee, impossible en combat
+        if checked and ns.MissingBuffs and ns.MissingBuffs.PrepareBurningRushAnchor then
+            ns.MissingBuffs.PrepareBurningRushAnchor()
+        end
+        if ns.MissingBuffs and ns.MissingBuffs.SyncBurningRush then ns.MissingBuffs.SyncBurningRush() end
+    end
+    y = y + 26
+
     for _, entry in ipairs(ns.MISSING_CLASS_BUFFS.WARLOCK) do
+        CreateBuffRow(sub, entry, y, W); y = y + 24
+    end
+    sub:SetHeight(math.max(y, 1))
+end
+
+local function BuildDruidSection(sub, W)
+    local y = 0
+    local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_FORMS"] or "Ignorer le changement de forme", "ignoreDruidForms")
+    y = y2
+    for _, entry in ipairs(ns.MISSING_CLASS_BUFFS.DRUID) do
         CreateBuffRow(sub, entry, y, W); y = y + 24
     end
     sub:SetHeight(math.max(y, 1))
@@ -151,9 +173,7 @@ local function BuildRogueSection(sub, W)
     sub:SetHeight(math.max(y, 1))
 end
 
-------------------------------------------------------------------------
 -- Ordre d'affichage des classes + leur builder de section
-------------------------------------------------------------------------
 local CLASS_SECTIONS = {
     { class = "WARRIOR", build = BuildWarriorSection },
     { class = "PALADIN", build = BuildPaladinSection },
@@ -163,7 +183,7 @@ local CLASS_SECTIONS = {
     { class = "SHAMAN",  build = BuildGenericClassSection(ns.MISSING_CLASS_BUFFS.SHAMAN) },
     { class = "MAGE",    build = BuildGenericClassSection(ns.MISSING_CLASS_BUFFS.MAGE) },
     { class = "WARLOCK", build = BuildWarlockSection },
-    { class = "DRUID",   build = BuildGenericClassSection(ns.MISSING_CLASS_BUFFS.DRUID) },
+    { class = "DRUID",   build = BuildDruidSection },
     { class = "EVOKER",  build = BuildEvokerSection },
 }
 
@@ -172,9 +192,7 @@ local function ClassLabel(token)
     return name or token
 end
 
-------------------------------------------------------------------------
 -- Builder principal
-------------------------------------------------------------------------
 function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     local SW = ns.SharedWidgets
     local Theme = ns.THEME
@@ -191,6 +209,10 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     cbEnable.onChanged = function(v)
         Cfg().enabled = v
         if ns.MissingBuffs then ns.MissingBuffs.RequestCheck() end
+        -- Reflete l'etat sur la ligne miroir de la page "Modules"
+        if ns.SettingsPanel and ns.SettingsPanel.InvalidateCategory then
+            ns.SettingsPanel.InvalidateCategory("modulesOverview")
+        end
     end
     y = y - 26
 
@@ -236,10 +258,7 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     slider.onChanged = function(v) Cfg().debounceThrottle = v end
     y = y - 62
 
-    -- Rappel "bientot expire" (2026-08-30) : hors combat uniquement (lecture
-    -- de expirationTime, cf. GetSelfBuffExpiringSoon) -- desactive par
-    -- defaut, seuil desormais en MINUTES (converti en secondes au point
-    -- d'usage, cf. CheckForMissings * 60).
+    -- Rappel "bientot expire" : desactive par defaut, seuil en minutes (converti en secondes a l'usage)
     local cbExpiring = SW.CreateCheckbox(p, L["MISSINGBUFFS_EXPIRING_ENABLE"] or "Rappel avant expiration", cw - 30)
     cbExpiring:SetPoint("TOPLEFT", 15, y)
     cbExpiring:SetChecked(cfg.expiringSoonEnabled and true or false)
@@ -258,13 +277,7 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     end
     y = y - 62
 
-    ------------------------------------------------------------------------
-    -- Apparence icone : taille / bordure / masque de forme (dont "Adouci",
-    -- un degrade alpha radial genere sur mesure -- cf. Core/MissingBuffs.lua
-    -- RefreshAppearance et Media/UI/IconFeatherMask.png). Chaque onChanged
-    -- ecrit dans Cfg() puis rafraichit l'icone en direct (la page a deja
-    -- lance un preview via SetPreview(true) a l'ouverture).
-    ------------------------------------------------------------------------
+    -- Apparence icone : taille / bordure / masque de forme. Chaque onChanged rafraichit en direct.
     local function Refresh()
         if ns.MissingBuffs then ns.MissingBuffs.RefreshAppearance() end
     end
@@ -308,9 +321,7 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     ddMask.onChanged = function(v) Cfg().iconMaskIndex = v; Refresh() end
     y = y - 48
 
-    ------------------------------------------------------------------------
     -- Apparence texte : police / taille / couleur / position / animation
-    ------------------------------------------------------------------------
     local hdrText = SW.CreateSectionHeader(p, L["MISSINGBUFFS_TEXT_HEADER"] or "Apparence du texte", cw - 20)
     hdrText:SetPoint("TOPLEFT", 10, y)
     y = y - 30
@@ -344,9 +355,7 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     slOffY.onChanged = function(v) Cfg().textOffsetY = v; Refresh() end
     y = y - 62
 
-    -- Toggles combinables (pas un dropdown exclusif) : on peut cumuler par
-    -- exemple rebond + clignotement en meme temps. Sur une seule ligne (3
-    -- colonnes) pour gagner de la place.
+    -- Toggles combinables (pas un dropdown exclusif), sur 3 colonnes
     local w3 = math.floor((cw - 30 - 16) / 3)
     local cbPulse = SW.CreateCheckbox(p, L["MISSINGBUFFS_TEXT_ANIM_PULSE"] or "Pulsation", w3)
     cbPulse:SetPoint("TOPLEFT", 15, y)

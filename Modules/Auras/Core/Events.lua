@@ -1,35 +1,17 @@
 -- AishUIAura/Core/Events.lua
 -- Dispatcher d'events Blizzard : ADDON_LOADED, PLAYER_*, UNIT_AURA, etc.
 -- Déclenche l'init, les rebuilds, scans, fades et re-hooks CDM selon les events.
-------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 
 local wipe, pcall = wipe, pcall
 local CreateFrame, C_Timer, InCombatLockdown = CreateFrame, C_Timer, InCombatLockdown
 local ipairs, pairs = ipairs, pairs
 
--- Compteur de refresh par auraInstanceID. Incrémenté par UNIT_AURA.updatedAuraInstanceIDs
--- quand le payload n'est PAS secret (cf. guard issecretvalue(info.isFullUpdate) dans le
--- handler UNIT_AURA plus bas -- depuis le patch 12.1, ce payload peut lui-même devenir
--- intégralement secret, y compris isFullUpdate).
--- Utilisé par GetAuraKey pour forcer le relancement de SetTimerDuration au recast,
--- sans JAMAIS lire les valeurs potentiellement secret des auras.
+-- Compteur de refresh par auraInstanceID (utilisé par GetAuraKey pour forcer SetTimerDuration au recast,
+-- sans jamais lire les valeurs potentiellement secret des auras).
 ns._refreshCounter = ns._refreshCounter or {}
 
-------------------------------------------------------------------------
--- IDLE WIPE : purge des caches après inactivité prolongée hors combat.
---
--- Objectif : en fin de session longue (raid de 3h, quête prolongée), les caches
--- internes peuvent accumuler des entrées orphelines (instIDs d'auras vues sur
--- d'anciennes cibles, refreshCounters obsolètes). Ces caches sont auto-cleanés
--- par scan, mais seulement pour les instIDs vus récemment. Les orphelins y
--- restent potentiellement des heures.
---
--- Solution : timer qui se déclenche 5 min après la fin du dernier combat. Si
--- l'user est toujours hors combat à ce moment → wipe des caches + collectgarbage.
--- Si l'user re-rentre en combat avant → on annule le timer (pas de wipe pendant
--- l'action).
-------------------------------------------------------------------------
+-- Idle wipe : purge les caches (instIDs, refreshCounters orphelins) 5 min après la fin du dernier combat.
 local IDLE_WIPE_DELAY = 300  -- 5 minutes
 local idleWipeTimer = nil
 
@@ -41,30 +23,18 @@ local function ScheduleIdleWipe()
     CancelIdleWipe()
     idleWipeTimer = C_Timer.NewTimer(IDLE_WIPE_DELAY, function()
         idleWipeTimer = nil
-        -- Double-check : si l'user est re-rentré en combat entre-temps, skip.
         if ns._inCombat then return end
-        -- Wipe les caches volumineux qui ont pu accumuler des orphelins.
         if ns._refreshCounter then wipe(ns._refreshCounter) end
         if ns.cdmData then
             if ns.cdmData.target then wipe(ns.cdmData.target) end
             if ns.cdmData.player then wipe(ns.cdmData.player) end
         end
-        -- Force GC Lua : libère les tables déréférencées.
         collectgarbage("collect")
-        -- Rescan léger pour repeupler les auras actuellement visibles (sinon
-        -- la prochaine barre qui change devra tout recalculer).
         if ns.ScanAuras then pcall(ns.ScanAuras) end
     end)
 end
 
-------------------------------------------------------------------------
--- DEBOUNCE HELPERS HOIST : utilisés par UNIT_AURA, SPELL_UPDATE_CHARGES,
--- UNIT_SPELLCAST_SUCCEEDED, PLAYER_REGEN_DISABLED, PLAYER_TARGET_CHANGED.
---
--- Ces fonctions sont passées à C_Timer.After en remplacement de closures
--- inline. Gain : zéro allocation de closure à chaque event (UNIT_AURA peut
--- firer 10+ fois par seconde en raid). Fonctions minuscules → coût nul.
-------------------------------------------------------------------------
+-- Helpers debounce hoistés (évite l'allocation de closure à chaque event UNIT_AURA/etc.)
 local function _TargetScanDebounced()
     ns._targetScanPending = false
     pcall(ns.ScanAuras)
@@ -81,37 +51,15 @@ local function _ScanAurasSafe()
     pcall(ns.ScanAuras)
 end
 local function _InitCombatScans()
-    -- Rebuild + rescan au début du combat (plusieurs retries rapprochés pour
-    -- attraper les DOTs appliqués juste avant/pendant l'entrée en combat).
+    -- Rebuild + rescan au début du combat (retries rapprochés pour attraper les DOTs déjà appliqués).
     pcall(ns.BuildWhitelist)
     pcall(ns.InitCDMHooks)
     pcall(ns.ScanAuras)
 end
 
-------------------------------------------------------------------------
--- SCAN ADAPTATIF PLAYER_TARGET_CHANGED
---
--- Ancien système : 7 C_Timer.After en série (0.03, 0.06, 0.1, 0.15, 0.22, 0.3, 0.5)
--- → 7 scans TOUS exécutés, même si le premier a déjà trouvé les auras.
---
--- Nouveau système : on programme la série mais on annule les timers restants dès
--- qu'un scan retourne _activeAuraCount > 0 (= on a trouvé les DOTs). Dans le cas
--- commun (Blizzard répond en <50ms), on ne fait que 1-2 scans au lieu de 7.
---
--- En pire cas (Blizzard lent), on fait quand même les 7 scans → filet de sécurité
--- identique. En cas favorable (90%+ des tab targets), on économise 5-6 scans.
---
--- ATTENTION — POURQUOI ON WIPE cdmData.target À CHAQUE TAB TARGET :
--- Ne PAS céder à la tentation de garder cdmData.target persistant entre cibles
--- (comme ElvUI). Les auraInstanceID peuvent être réutilisés par Blizzard entre
--- cibles différentes, et un cache persistant introduit des FAUX POSITIFS :
--- on affiche un Rip sur mob B alors qu'il a juste une aura avec le même instID
--- que notre ancien Rip sur mob A. ElvUI accepte ce bug car ils n'ont pas de
--- whitelist stricte. Nous, avec une whitelist, ça se voit direct → sorts
--- fantômes affichés. Le wipe + retries = prix à payer pour la CORRECTION.
--- Le délai de 30-50ms au tab target est VOLONTAIRE : il laisse GetAuraSlots
--- retourner les données authoritatives fraîches de la nouvelle cible.
-------------------------------------------------------------------------
+-- Scan adaptatif au tab target : série de retries annulée dès qu'un scan trouve les DOTs (au lieu de tous les exécuter).
+-- cdmData.target est wipé à chaque tab target : les auraInstanceID sont réutilisables entre cibles par Blizzard,
+-- et avec notre whitelist stricte un cache persistant afficherait des sorts fantômes (faux positifs d'instID).
 local _targetRetryTimers = {}
 local _targetRetryGen = 0  -- génération : incrémentée à chaque nouveau tab target
 
@@ -122,22 +70,17 @@ local function _CancelTargetRetries()
     end
 end
 
--- Callback d'un retry : scan, check si on a trouvé, si oui cancel le reste.
+-- Callback d'un retry : scan, cancel le reste si trouvé, ignore si un autre tab target est passé entre-temps.
 local function _TargetRetryScan(gen)
-    -- Si un autre tab target est passé entre-temps, ce retry est obsolète.
     if gen ~= _targetRetryGen then return end
     pcall(ns.ScanAuras)
-    -- Si on a trouvé au moins une aura, cancel les retries restants + reset le flag
-    -- (plus besoin d'attendre l'UNIT_AURA fast-path, c'est trouvé).
     if (ns._activeAuraCount or 0) > 0 then
         _CancelTargetRetries()
         ns._awaitingTargetFullUpdate = false
     end
 end
 
-------------------------------------------------------------------------
--- EVENTS (dispatcher principal)
-------------------------------------------------------------------------
+-- Events (dispatcher principal)
 local ef = CreateFrame("Frame")
 ef:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then

@@ -1,22 +1,14 @@
 -- UI/ModuleHoverOverlay.lua
--- Survol GUI -> lien direct vers la section de reglages : pendant que le
--- panneau d'options (AishCoreSettingsPanel) est ouvert, survoler un module
--- affiche a l'ecran (cercle de ressource, barres, auras...) l'encadre d'un
--- highlight bleu translucide avec une roue crantee dans le coin -- cliquer
--- dessus saute directement dans la section de reglages correspondante
--- (MainFrame:SelectCategory, cf. UI/SettingsPanel.lua).
+-- Survol GUI -> lien direct vers la section de reglages : survoler un module a l'ecran affiche un
+-- highlight avec une roue crantee, cliquer (ou clic droit sur le highlight) saute vers sa section.
 local addonName, ns = ...
 local L = ns.L
 
 local Hover = {}
 ns.ModuleHoverOverlay = Hover
 
-------------------------------------------------------------------------
--- REGISTRE des frames "module" survolables.
--- getFrame() est relu a chaque tick (certaines frames sont creees tardivement,
--- ou n'existent que par instants -- ex: TopTargetBar sans cible) et peut
--- renvoyer nil : l'entree est alors simplement ignoree pour ce tick.
-------------------------------------------------------------------------
+-- REGISTRE des frames "module" survolables. getFrame() est relu a chaque tick (certaines frames
+-- sont creees tardivement ou temporaires) et peut renvoyer nil : l'entree est alors ignoree.
 local function G(name) return _G[name] end
 
 local STATIC_ENTRIES = {
@@ -25,26 +17,37 @@ local STATIC_ENTRIES = {
   { category = "outOfCombat",    getFrame = function() return G("AishCoreOCResourceRing") end },
   { category = "castBar",        getFrame = function() return G("AishCoreCastBar") end },
   { category = "targetCastBar",  getFrame = function() return G("AishCoreTargetCastBar") end },
-  -- TopTargetBar : la roue par defaut (coin haut-droit) tombe hors d'atteinte
-  -- pour ce module (positionne pres du haut de l'ecran) -- coin bas-droit ici.
-  -- 2 entrees distinctes : la barre de cible principale (AishCoreTopTarget)
-  -- ET la barre "cible de la cible" (AishCoreTopTargetTarget), une frame
-  -- separee positionnee ailleurs a l'ecran -- sans sa propre entree, la
-  -- survoler ne declenchait rien du tout (aucune entree du registre ne la
-  -- couvrait). Meme categorie (topTargetBar) : les reglages ToT vivent dans
-  -- la meme section que la barre principale.
+  { category = "rotationHelper", getFrame = function() return G("AishCoreRotationHelperBar") end },
+  -- TopTargetBar : roue en bas-droite (le haut-droit tombe hors d'atteinte pres du haut d'ecran).
+  -- 2 entrees (barre cible + barre "cible de la cible", frame separee) sous la meme categorie.
   { category = "topTargetBar",   gearAnchor = "BOTTOMRIGHT", getFrame = function() return G("AishCoreTopTarget") end },
   { category = "topTargetBar",   gearAnchor = "BOTTOMRIGHT", getFrame = function() return G("AishCoreTopTargetTarget") end },
-  -- XPBar : hoverFrame (zone de survol autour du badge de niveau), PAS le
-  -- container de la barre elle-meme -- celle-ci reste cachee/alpha 0 tant
-  -- qu'on ne survole pas justement hoverFrame (cf. XPBar.GetHoverFrame),
-  -- donc cibler container rendait cette hitbox quasi inaccessible.
+  -- XPBar : hoverFrame (zone autour du badge de niveau), pas le container qui reste alpha 0
+  -- tant qu'on ne survole pas justement hoverFrame.
   { category = "xpBar", getFrame = function()
       local XB = ns.Modules and ns.Modules.XPBar
       return XB and XB.GetHoverFrame and XB.GetHoverFrame()
     end },
-  { category = "skyriding",      getFrame = function() return G("AishCoreSkyridingFrame") end },
-  { category = "targetAuras",    getFrame = function() return G("AishCoreTargetAuras") end },
+  -- Skyriding : AishCoreSkyridingFrame n'est qu'une ancre technique, sans rapport avec le cercle
+  -- visible, donc GetHoverFrame() cible ce cercle directement.
+  { category = "skyriding", getFrame = function()
+      local SR = ns.Modules and ns.Modules.Skyriding
+      return SR and SR.GetHoverFrame and SR.GetHoverFrame()
+    end },
+  -- TargetAuras : buffRow et debuffRow sont positionnees independamment (offsetX/offsetY), donc
+  -- potentiellement hors du rectangle englobant : 2 entrees distinctes via GetHoverRows().
+  { category = "targetAuras", getFrame = function()
+      local TA = ns.Modules and ns.Modules.TargetAuras
+      if not (TA and TA.GetHoverRows) then return nil end
+      local buffRow = TA.GetHoverRows()
+      return buffRow
+    end },
+  { category = "targetAuras", getFrame = function()
+      local TA = ns.Modules and ns.Modules.TargetAuras
+      if not (TA and TA.GetHoverRows) then return nil end
+      local _, debuffRow = TA.GetHoverRows()
+      return debuffRow
+    end },
   -- PriorityBar : leftContainer/rightContainer sont locales au module (jamais
   -- de nom global), cf. PriorityBar.GetContainers() ajoute pour ce besoin.
   { category = "priorityBar", getFrame = function()
@@ -67,6 +70,10 @@ local AURAS_RENDER_CATEGORY = {
   freebars   = "aurasFreebars",
   icons      = "aurasIcons",
   circlebars = "aurasCirclebars",
+  -- Totems : rendu 100% manuel (pas d'AddAuraGroup, cf. Core/Totems.lua),
+  -- mais enregistre son container dans ns.Auras.renderFrames comme les 4
+  -- autres (EnsureTotemsContainer) -- meme mecanisme generique suffit.
+  totems     = "aurasTotems",
 }
 for renderKey, catId in pairs(AURAS_RENDER_CATEGORY) do
   STATIC_ENTRIES[#STATIC_ENTRIES + 1] = { category = catId, getFrame = function()
@@ -96,30 +103,44 @@ local function BuildEntries()
   return list
 end
 
-------------------------------------------------------------------------
--- WIDGETS : un seul highlight + une seule roue crantee, repositionnes sur
--- la frame survolee (pas un jeu de widgets par module).
-------------------------------------------------------------------------
+-- WIDGETS : un seul highlight + une seule roue crantee, repositionnes sur la frame survolee.
 local highlight, gearBtn
 local hoveredFrame, hoveredCategory
 local HL_PAD   = 6
 local ICON_TC  = 0.08
 
--- Coin d'ancrage de la roue sur le highlight : "TOPRIGHT" par defaut, mais
--- certains modules (ex: topTargetBar, positionne pres du haut de l'ecran)
--- ont besoin d'un autre coin pour rester atteignable -- cf. e.gearAnchor
--- dans le registre plus haut.
+-- Coin d'ancrage de la roue : "TOPRIGHT" par defaut, override via e.gearAnchor pour rester atteignable.
 local GEAR_ANCHORS = {
   TOPRIGHT    = { point = "TOPRIGHT",    dx = 3, dy = 3  },
   BOTTOMRIGHT = { point = "BOTTOMRIGHT", dx = 3, dy = -3 },
 }
 
+-- Saut vers la section de reglages du module survole, utilise par la roue et le clic droit.
+local function GoToSettings()
+  if not hoveredCategory then return end
+  local panel = ns.SettingsPanel
+  if panel and panel.SelectCategory then
+    if not panel:IsShown() then panel:ShowUI() end
+    panel:SelectCategory(hoveredCategory)
+  end
+end
+
 local function EnsureWidgets()
   if highlight then return end
 
-  highlight = CreateFrame("Frame", "AishCoreModuleHoverHighlight", UIParent, "BackdropTemplate")
+  -- "Button" (pas "Frame") pour capter le clic droit sur tout le highlight, cible plus large que la roue.
+  highlight = CreateFrame("Button", "AishCoreModuleHoverHighlight", UIParent, "BackdropTemplate")
   highlight:SetFrameStrata("TOOLTIP")
-  highlight:EnableMouse(false)
+  highlight:EnableMouse(true)
+  highlight:RegisterForClicks("RightButtonUp")
+  highlight:SetScript("OnClick", function(_, button)
+    if button == "RightButton" then GoToSettings() end
+  end)
+  -- Le highlight au-dessus de tout capterait aussi le clic gauche du drag natif du module en
+  -- dessous : SetPropagateMouseClicks laisse passer le clic gauche, garde le droit pour nous.
+  highlight:SetScript("OnMouseDown", function(self, button)
+    self:SetPropagateMouseClicks(button == "LeftButton")
+  end)
   highlight:SetBackdrop({
     bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -132,9 +153,7 @@ local function EnsureWidgets()
 
   gearBtn = CreateFrame("Button", "AishCoreModuleHoverGearButton", highlight)
   gearBtn:SetSize(22, 22)
-  -- Point initial (sera repositionne par ShowHighlight selon e.gearAnchor a
-  -- chaque survol -- necessaire quand meme ici pour eviter un frame sans
-  -- ancrage entre la creation et le tout premier ShowHighlight).
+  -- Point initial, repositionne par ShowHighlight selon e.gearAnchor a chaque survol.
   gearBtn:SetPoint("TOPRIGHT", highlight, "TOPRIGHT", 3, 3)
   gearBtn:SetFrameStrata("TOOLTIP")
   gearBtn:SetFrameLevel(highlight:GetFrameLevel() + 5)
@@ -159,14 +178,7 @@ local function EnsureWidgets()
     gIcon:SetVertexColor(1, 1, 1)
     GameTooltip:Hide()
   end)
-  gearBtn:SetScript("OnClick", function()
-    if not hoveredCategory then return end
-    local panel = ns.SettingsPanel
-    if panel and panel.SelectCategory then
-      if not panel:IsShown() then panel:ShowUI() end
-      panel:SelectCategory(hoveredCategory)
-    end
-  end)
+  gearBtn:SetScript("OnClick", GoToSettings)
 end
 
 local function ShowHighlight(frame, category, gearAnchor)
@@ -189,9 +201,7 @@ local function HideHighlight()
   if highlight then highlight:Hide() end
 end
 
-------------------------------------------------------------------------
 -- DRIVER : ticker leger, actif uniquement pendant que le panneau est ouvert.
-------------------------------------------------------------------------
 local TICK_INTERVAL = 0.05
 local ticker
 
@@ -213,14 +223,8 @@ local function Tick()
     return
   end
 
-  -- Quand 2 frames survolables se chevauchent a l'ecran (ex: la barre de
-  -- cible principale et la barre "cible de la cible" positionnees proches
-  -- l'une de l'autre), prendre le PREMIER match trouve dans le registre
-  -- verrouillait arbitrairement sur la plus grosse/la premiere listee, meme
-  -- en survolant visuellement l'autre. On scanne donc TOUTES les entrees et
-  -- on garde celle avec la plus PETITE aire -- la plus specifique/imbriquee
-  -- gagne, ce qui correspond a l'intuition visuelle (survoler une petite
-  -- barre a l'interieur d'une plus grande doit cibler la petite).
+  -- Quand 2 frames survolables se chevauchent, on garde celle avec la plus petite aire :
+  -- la plus specifique/imbriquee gagne, conforme a l'intuition visuelle.
   local best, bestArea, bestE
   for _, e in ipairs(BuildEntries()) do
     local ok, frame = pcall(e.getFrame)
@@ -252,10 +256,7 @@ local function Stop()
   HideHighlight()
 end
 
--- Le panneau d'options (UI/SettingsPanel.lua) est charge avant ce fichier
--- (cf. AishCore.toc) et cree son frame global des le chargement du fichier
--- (pas au login) -- C_Timer.After(0, ...) reste une garde defensive minimale,
--- meme convention que UnitBars.lua/TopTargetBar.lua pour ce genre de hook.
+-- Le panneau d'options est charge avant ce fichier ; C_Timer.After(0, ...) reste une garde defensive.
 C_Timer.After(0, function()
   local panel = ns.SettingsPanel or _G["AishCoreSettingsPanel"]
   if not panel then return end

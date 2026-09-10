@@ -1,9 +1,5 @@
--- Modules/AFKMode.lua : Ecran AFK personnalise. Frame plein ecran maison qui
--- prend le dessus sur l'AFK natif de Blizzard des que le joueur passe AFK,
--- avec modele 3D, timer, textes, blasons classe/faction/race et rotation
--- camera lente. Chaque texte/blason est un "element" configurable
--- individuellement (font, couleur, ancrage, position, taille) depuis
--- ns.DB.afkMode.elements[cle] -- cf. UI/SettingsPanel.lua:BuildAFKMode.
+-- Modules/AFKMode.lua : ecran AFK personnalise (modele 3D, timer, blasons, camera).
+-- Elements configurables via ns.DB.afkMode.elements[cle], cf. UI/SettingsPanel.lua:BuildAFKMode.
 local addonName, ns = ...
 local L = ns.L
 
@@ -18,28 +14,22 @@ local MoveViewLeftStart, MoveViewLeftStop = MoveViewLeftStart, MoveViewLeftStop
 local CloseAllWindows, GetBattlefieldStatus = CloseAllWindows, GetBattlefieldStatus
 local C_Timer, CreateFrame = C_Timer, CreateFrame
 
----------------------------------------------------------------------------
 -- Textures : blasons classe / faction / race / extension (Media/AFK/)
----------------------------------------------------------------------------
 local AFK_TEX_BASE = "Interface\\AddOns\\AishCore\\Media\\AFK\\"
 
--- Extension de fichier par catégorie/style (constatée sur le disque — les
--- fichiers "blizzard" de race/factioncrest sont en .blp, tout le reste en .tga)
+-- Extension par categorie/style : race/factioncrest "blizzard" en .blp, le reste en .tga
 local AFK_TEX_EXT = {
-  classes      = { benikui = "tga", ["releaf-flat"] = "tga", sltheme = "tga" },
+  classes      = { ["releaf-flat"] = "tga", sltheme = "tga" },
   race         = { blizzard = "blp", ["releaf-flat"] = "tga", sltheme = "tga" },
   factioncrest = { blizzard = "blp", ["releaf-flat"] = "tga", sltheme = "tga" },
   factionlogo  = { blizzard = "tga", ["releaf-flat"] = "tga", sltheme = "tga" },
   expansion    = { blizzard = "tga", ["releaf-flat"] = "tga", sltheme = "tga" },
 }
 
--- Le jeton race non localise ("Mechagnome") ne correspond pas toujours au nom
--- de fichier ("MechaGnome.blp") — seule divergence connue dans le set copié.
+-- Mechagnome -> fichier MechaGnome.blp (seule divergence connue du set)
 local RACE_FILE_OVERRIDE = { Mechagnome = "MechaGnome" }
 
--- Jetons disponibles par extension WoW (LE_EXPANSION_*) — seul le style
--- "blizzard" a un fichier par extension, "releaf-flat"/"sltheme" n'ont qu'un
--- visuel générique unique ("sl.tga").
+-- Jetons par extension WoW : seul "blizzard" a un fichier par extension
 local EXPANSION_TOKENS = {
   [LE_EXPANSION_CLASSIC]                 = "classic",
   [LE_EXPANSION_BURNING_CRUSADE]         = "tbc",
@@ -75,15 +65,8 @@ local function ResolveExpansionTexture(style)
   return AFK_TEX_BASE .. "expansion\\" .. style .. "\\" .. token .. ".tga"
 end
 
----------------------------------------------------------------------------
--- Animations du modele 3D — identifiants d'animation natifs Blizzard
----------------------------------------------------------------------------
--- "wait" = pause avant de REJOUER l'animation une fois finie. Garde a 0 pour
--- toutes les animations finies -- avec un wait > duration (ex. wave: 2.3s de
--- jeu pour 40s d'attente), le perso passait l'ecrasante majorite du temps en
--- idle au lieu de boucler, ce qui donnait l'impression que la boucle ne
--- marchait pas du tout (cf. plainte utilisateur : perso en idle au retour
--- d'AFK, quelle que soit l'animation choisie dans les reglages).
+-- Animations du modele 3D (id natifs Blizzard). "wait" = pause avant de rejouer
+-- une fois finie ; garder a 0 pour toutes (sinon le perso reste en idle trop longtemps).
 local MODEL_ANIMATIONS = {
   wave   = { id = 67,   facing = 6,   wait = 0,  duration = 2.3 },
   lean   = { id = 1260, facing = 5.8, wait = 0,  duration = 600 },
@@ -92,10 +75,7 @@ local MODEL_ANIMATIONS = {
   talk   = { id = 60,   facing = 6.2, wait = 0,  duration = 10 },
   shy    = { id = 83,   facing = 6.2, wait = 0,  duration = 10 },
   roar   = { id = 74,   facing = 6,   wait = 0,  duration = 5 },
-  -- Animations bouclees (marche/course/stance de combat) : id AnimationData
-  -- standard (4=Walk, 5=Run, 25=ReadyUnarmed -- pose de combat "prete a
-  -- degainer"). duration tres longue = ne redeclenche jamais le repli en
-  -- idle de ModelOnUpdate, la pose/le mouvement reste affiche en continu.
+  -- Bouclees (4=Walk, 5=Run, 25=ReadyUnarmed) : duration longue = jamais de repli idle
   walk         = { id = 4,  facing = 6, wait = 0, duration = 999999 },
   run          = { id = 5,  facing = 6, wait = 0, duration = 999999 },
   battlestance = { id = 25, facing = 6, wait = 0, duration = 999999 },
@@ -116,12 +96,8 @@ local ignoreKeys = { LALT = true, LSHIFT = true, RSHIFT = true }
 local printKeys  = { PRINTSCREEN = true }
 if IsMacClient and IsMacClient() then printKeys[_G.KEY_PRINTSCREEN_MAC] = true end
 
----------------------------------------------------------------------------
--- Elements configurables (textes + blasons/logos) — definition statique :
--- quel panneau les accueille, point d'ancrage par defaut, categorie de
--- texture pour les blasons. cf. Config/Defaults.lua:afkMode.elements pour
--- les valeurs par defaut (font/size/color/anchor/x/y/width/height).
----------------------------------------------------------------------------
+-- Elements configurables (textes + blasons) : panneau, ancrage par defaut, categorie de texture.
+-- Valeurs par defaut (font/size/color/anchor/x/y/width/height) : Config/Defaults.lua:afkMode.elements
 local TEXT_ELEMENTS = {
   { key = "timer",       panel = "top",    anchor = "TOP" },
   { key = "playerName",  panel = "bottom", anchor = "BOTTOMLEFT" },
@@ -139,15 +115,12 @@ local GRAPHIC_ELEMENTS = {
   { key = "logoExpansion", panel = "top",    anchor = "TOPLEFT",     category = "expansion" },
   { key = "aishLogo",      panel = "top",    anchor = "TOPRIGHT",    category = nil }, -- texture fixe, pas de style
 }
--- Logo AishCore (meme fichier que l'en-tete du panneau de reglages, cf.
--- UI/SettingsPanel.lua _logoTex) -- 512x512, pas de variante de style.
+-- Logo AishCore (meme fichier que l'en-tete du panneau de reglages)
 local AISH_LOGO_PATH = "Interface\\AddOns\\AishCore\\Media\\Logo\\AishUILogo"
 AFKMode.TEXT_ELEMENTS    = TEXT_ELEMENTS
 AFKMode.GRAPHIC_ELEMENTS = GRAPHIC_ELEMENTS
 
----------------------------------------------------------------------------
 -- Etat interne
----------------------------------------------------------------------------
 local frame          -- overlay plein ecran
 local topPanel, bottomPanel
 local modelHolder, model
@@ -163,11 +136,7 @@ local function Cfg()
   return ns.GetCfg("afkMode") or {}
 end
 
--- ns.GetCfg ne fusionne qu'au premier niveau (cf. Core.lua) : des que
--- ns.DB.afkMode existe (un seul reglage modifie suffit), ns.Defaults.afkMode
--- n'est plus consulte DU TOUT, meme pour les sous-champs jamais touches --
--- donc ns.DB.afkMode.elements[cle] peut manquer entierement. On fusionne
--- explicitement Defaults (base) + DB (surcharge) pour chaque element.
+-- ns.GetCfg ne fusionne qu'au 1er niveau : on fusionne Defaults + DB explicitement par element
 local function ElemCfg(key)
   local defCfg = ns.Defaults and ns.Defaults.afkMode and ns.Defaults.afkMode.elements and ns.Defaults.afkMode.elements[key]
   local dbCfg  = ns.DB and ns.DB.afkMode and ns.DB.afkMode.elements and ns.DB.afkMode.elements[key]
@@ -180,9 +149,7 @@ local function ElemCfg(key)
 end
 AFKMode.ElemCfg = ElemCfg
 
----------------------------------------------------------------------------
 -- Modele 3D : animation d'entree + boucle idle
----------------------------------------------------------------------------
 local function SetModelAnimation(key)
   if not model then return end
   local cfg = Cfg()
@@ -199,9 +166,7 @@ end
 local function ModelOnUpdate(self)
   if self.isIdle then return end
   if (GetTime() - self.startTime) >= self.duration then
-    -- wait <= 0 : boucle immediate, sans repasser par l'idle (0) entre deux
-    -- -- sinon un flash d'idle d'une frame se produirait a chaque relance,
-    -- perceptible sur les animations courtes rejouees en continu (wave...).
+    -- wait <= 0 : boucle immediate (evite un flash d'idle sur les anims courtes)
     if self.idleDuration and self.idleDuration > 0 then
       self:SetAnimation(0)
       self.isIdle = true
@@ -216,50 +181,25 @@ local function ModelOnUpdate(self)
   end
 end
 
----------------------------------------------------------------------------
--- Style commun texte/blason : ancrage sur le MEME point que le panneau
--- parent (4 coins + TOP/BOTTOM), decale de x/y -- cf. ec.anchor.
----------------------------------------------------------------------------
--- IMPORTANT : ancre toujours au frame PLEIN ECRAN, jamais a topPanel/bottomPanel.
--- Les panneaux ne font que 60-100px de haut, colles au bord haut/bas -- y
--- ancrer un point "BOTTOM"/"TOPRIGHT" le positionne dans le petit panneau,
--- pas dans le coin de l'ECRAN attendu par l'utilisateur (bug initial : les
--- 6 choix d'ancrage semblaient n'avoir aucun sens, "TOP" tombait pres du
--- centre, "TOPRIGHT" finissait en bas a droite -- parce que l'ancrage se
--- faisait a l'interieur d'un panneau colle au bord, pas de l'ecran entier).
+-- Style commun texte/blason : ancrage sur le MEME point que le panneau parent, decale de x/y.
+-- Toujours ancre au frame plein ecran (jamais topPanel/bottomPanel, trop petits pour les coins).
 local function AnchorElement(widget, panelKey, def, ec)
   local anchor = ec.anchor or def.anchor
   widget:ClearAllPoints()
   widget:SetPoint(anchor, frame, anchor, ec.x or 0, ec.y or 0)
 end
 
--- Justification deduite du point d'ancrage : gauche/droite pour les coins,
--- centre pour TOP/BOTTOM -- coherent avec le sens de croissance naturel du
--- texte a cet ancrage (utile des qu'un texte est assez long pour retourner
--- a la ligne, ex. un long nom de guilde).
+-- Justification deduite du point d'ancrage : gauche/droite pour les coins, centre pour TOP/BOTTOM
 local JUSTIFY_BY_ANCHOR = {
   TOPLEFT = "LEFT", BOTTOMLEFT = "LEFT",
   TOP = "CENTER", BOTTOM = "CENTER",
   TOPRIGHT = "RIGHT", BOTTOMRIGHT = "RIGHT",
 }
 
--- Largeur donnee a CHAQUE FontString pour que SetJustifyH ait un effet
--- visible. Sans ca, un FontString ancre par un seul point s'auto-dimensionne
--- pile a son texte (pas de "boite" plus large dans laquelle justifier) --
--- SetJustifyH ne fait alors strictement rien a l'oeil, meme si l'appel est
--- correct. Une largeur large et fixe donne la marge necessaire ; comme le
--- point d'ancrage utilise reste le MEME cote que la justification (ex.
--- BOTTOMLEFT + LEFT), le bord visible du texte ne bouge pas pour du texte
--- court -- ca ne fait que rendre la justification reelle des qu'un texte
--- est plus long ou retourne a la ligne.
+-- Largeur fixe requise pour que SetJustifyH ait un effet (sinon le FontString s'auto-dimensionne au texte)
 local TEXT_ELEMENT_WIDTH = 400
 
--- Couleur d'un element configurable (2026-08-30) : si useSpecColor est coche,
--- pioche dans le module Couleurs (ns.Modules.Colors, meme systeme que
--- ResourceCircle/HealthCircle) l'entree choisie par specColorKey
--- (powercircle, pethealthbar, xpbar... cf. Colors.ELEMENT_KEYS) au lieu
--- d'imposer une seule couleur -- retombe sur ec.color/fallback si le module
--- Couleurs est indisponible ou si useSpecColor est decoche.
+-- Si useSpecColor est coche, pioche la couleur dans ns.Modules.Colors (specColorKey) sinon ec.color/fallback
 local function ResolveElementColor(ec, fallback)
   if ec.useSpecColor then
     local CLR = ns.Modules and ns.Modules.Colors
@@ -283,14 +223,8 @@ local function ApplyTextStyle(key, def)
   AnchorElement(fs, def.panel, def, ec)
 end
 
----------------------------------------------------------------------------
--- Textes dynamiques (contenu recalcule a chaque appel, style reapplique a
--- chaque fois aussi -- cout negligeable, appele 1x/seconde max)
----------------------------------------------------------------------------
--- Couleur d'accent (date, ":" de l'heure, chevrons de guilde) : soit la
--- couleur configuree (cfg.accentColor), soit -- si "utiliser les couleurs
--- thematiques" est coche -- la couleur "texte de puissance" de la spe
--- active (meme source que ResourceCircle, cf. Modules/Colors.lua:Get).
+-- Textes dynamiques : contenu + style recalcules a chaque appel (1x/seconde max)
+-- Couleur d'accent (date, heure, guilde) : cfg.accentColor, ou couleur theme de la spe si coche
 local function AccentColor()
   local cfg = Cfg()
   if cfg.useThemeColors then
@@ -306,12 +240,7 @@ local function AccentHex()
   return format("%02x%02x%02x", (c[1] or 0) * 255, (c[2] or 0) * 255, (c[3] or 0) * 255)
 end
 
--- Date/heure dans la langue du CLIENT WoW (pas la locale systeme comme le
--- ferait date("%B")/date("%A")) : tables de libelles propres a AishCore
--- (L["AFKMODE_MONTHS"]/L["AFKMODE_WEEKDAYS"], cf. Locales/*.lua), deja
--- selectionnees selon GetLocale() comme tout le reste de l'addon --
--- CALENDAR_MONTH_NAMES/CALENDAR_WEEKDAY_NAMES (globales Blizzard) ne sont
--- fiables que si Blizzard_Calendar est charge, pas garanti.
+-- Date/heure dans la langue du CLIENT WoW via les tables L["AFKMODE_MONTHS"/"AFKMODE_WEEKDAYS"]
 local function LocalizedDateString()
   local hex = AccentHex()
   local t = date("*t")
@@ -366,9 +295,7 @@ local function RefreshTimerText()
   end
 end
 
----------------------------------------------------------------------------
 -- Astuces defilantes
----------------------------------------------------------------------------
 local lastTipIndex
 local function ShowNextTip()
   local tips = L["AFKMODE_TIPS"]
@@ -382,10 +309,7 @@ local function ShowNextTip()
   tipsFrame:AddMessage(tips[idx], c[1], c[2], c[3])
 end
 
----------------------------------------------------------------------------
--- Textes statiques (nom/classe/niveau/guilde) : recalcules a chaque
--- affichage (SetAFKState/SetPreview/ApplySettings), pas a chaque tick.
----------------------------------------------------------------------------
+-- Textes statiques (nom/classe/niveau/guilde) : recalcules a chaque affichage, pas a chaque tick
 local function RefreshTextStrings()
   local classColor = RAID_CLASS_COLORS and RAID_CLASS_COLORS[select(2, UnitClass("player"))]
   local r, g, b = 1, 1, 1
@@ -393,9 +317,7 @@ local function RefreshTextStrings()
 
   ApplyTextStyle("playerName", TEXT_ELEMENTS[2])
   if ElemCfg("playerName").enable then
-    -- "Couleur de specialisation" : force l'element du module Couleurs
-    -- choisi (specColorKey -- powercircle par defaut, meme comportement
-    -- qu'avant cette option) au lieu de la couleur de classe habituelle.
+    -- useSpecColor : couleur du module Couleurs (specColorKey) au lieu de la couleur de classe
     local nameEc = ElemCfg("playerName")
     local specColor = nameEc.useSpecColor and ns.Modules.Colors and ns.Modules.Colors.Get
       and ns.Modules.Colors.Get(nameEc.specColorKey or "powercircle")
@@ -434,26 +356,17 @@ local function RefreshTextStrings()
   if tipsEc.enable then
     tipsFrame:SetFont(tipsEc.font or ns.Media.fontGui, tipsEc.size or 11, "")
     tipsFrame:SetWidth(tipsEc.lineWidth or 500) -- largeur de retour a la ligne
-    -- BUG CONFIRME : SetJustifyH("CENTER") etait fige en dur a la creation
-    -- (CreateChatAndTips) et jamais remis a jour -- changer l'ancrage de
-    -- l'element "tips" dans les reglages n'avait donc aucun effet sur sa
-    -- justification.
     tipsFrame:SetJustifyH(JUSTIFY_BY_ANCHOR[tipsEc.anchor] or "CENTER")
     AnchorElement(tipsFrame, "bottom", { panel = "bottom", anchor = "BOTTOM" }, tipsEc)
     tipsFrame:Clear()
-    -- Sans cet appel, la 1ere astuce n'apparaissait qu'au bout de tipThrottle
-    -- (12s par defaut) via OnFrameUpdate -- invisible en apercu si on ne
-    -- reste pas assez longtemps. On en montre une tout de suite.
-    ShowNextTip()
+    ShowNextTip() -- affiche la 1ere tout de suite, sans attendre tipThrottle
   end
 
   RefreshDateTime()
   RefreshTimerText()
 end
 
----------------------------------------------------------------------------
 -- Blasons / logos
----------------------------------------------------------------------------
 local function ApplyGraphicStyle(key, def, texturePath)
   local ec = ElemCfg(key)
   local tex = graphics[key]
@@ -499,9 +412,7 @@ local function RefreshGraphics()
   end
 end
 
----------------------------------------------------------------------------
--- Animation d'entree des panneaux (Slide) — AnimationGroup natif
----------------------------------------------------------------------------
+-- Animation d'entree des panneaux (Slide) via AnimationGroup natif
 local function AnchorTopNatural()
   topPanel:ClearAllPoints()
   topPanel:SetPoint("TOP", frame, "TOP", 0, 0)
@@ -525,10 +436,7 @@ local function PlayPanelAnimations()
   if not topPanel.anim then
     topPanel.anim  = topPanel:CreateAnimationGroup()
     topPanel.slide = topPanel.anim:CreateAnimation("Translation")
-    -- IMPORTANT : une fois l'animation terminee, WoW peut faire revenir
-    -- l'affichage a l'ancrage REEL du frame (celui pose hors ecran juste en
-    -- dessous pour amorcer le slide) au lieu de garder le rendu translate.
-    -- Sans ce OnFinished, le panneau "flashe" puis redisparait hors ecran.
+    -- OnFinished requis : sinon le panneau flashe puis redisparait hors ecran
     topPanel.anim:SetScript("OnFinished", AnchorTopNatural)
 
     bottomPanel.anim  = bottomPanel:CreateAnimationGroup()
@@ -561,9 +469,7 @@ local function PlayPanelAnimations()
   bottomPanel.anim:Play()
 end
 
----------------------------------------------------------------------------
 -- OnUpdate : timer, astuces, boucle du modele
----------------------------------------------------------------------------
 local function OnFrameUpdate(_, elapsed)
   if not (AFKMode.isAFK or isPreview) then return end
   local cfg = Cfg()
@@ -586,9 +492,7 @@ local function OnFrameUpdate(_, elapsed)
   end
 end
 
----------------------------------------------------------------------------
 -- Bascule visuelle (affichage plein ecran + camera + chat)
----------------------------------------------------------------------------
 function AFKMode:SetAFKState(status)
   if not frame then
     print("|cffff4444[AishCore AFKMode]|r SetAFKState appele avant Create() -- module non initialise (voir /aish diag on)")
@@ -600,10 +504,7 @@ function AFKMode:SetAFKState(status)
   if status then
     if AFKMode.isAFK then return end
 
-    -- Protege : sans ce pcall, une erreur ici (hors du filet SafeCall utilise
-    -- uniquement au chargement) serait totalement silencieuse ET laisserait
-    -- potentiellement UIParent masque en permanence si l'erreur survient
-    -- apres UIParent:Hide().
+    -- pcall : evite qu'une erreur laisse UIParent masque en permanence
     local ok, err = pcall(function()
       CloseAllWindows()
       if cfg.cameraSpin then MoveViewLeftStart(0.035) end
@@ -661,16 +562,8 @@ function AFKMode:SetAFKState(status)
   end
 end
 
----------------------------------------------------------------------------
--- Apercu GUI (section "Mode AFK" du panneau de reglages) : meme convention
--- que les autres modules (RC.SetPreview, HC.SetPreview, TCB.SetPreview...
--- cf. UI/SettingsPanel.lua:MainFrame:SelectCategory). Contrairement au vrai
--- AFK (SetAFKState), NE masque PAS UIParent -- le panneau de reglages doit
--- rester utilisable pendant qu'on regarde l'apercu -- et ne joue ni la
--- rotation camera ni la capture de chat (juste le rendu visuel). Reste actif
--- sans limite de temps tant que la section AFK Mode est ouverte ; coupe via
--- SelectCategory (changement de section) ou MainFrame OnHide (fermeture GUI).
----------------------------------------------------------------------------
+-- Apercu GUI (section "Mode AFK") : contrairement a SetAFKState, ne masque pas UIParent
+-- ni ne joue camera/chat -- juste le rendu visuel, actif tant que la section est ouverte.
 function AFKMode.SetPreview(status)
   if not frame then return end
 
@@ -695,9 +588,7 @@ function AFKMode.SetPreview(status)
       elapsedSeconds, timerElapsed, tipsElapsed = 0, 0, 0
       frame:SetFrameStrata("HIGH") -- sous le panneau de reglages (DIALOG), au-dessus du jeu normal
       frame:Show()
-      -- Pas d'animation d'entree ici : affichage direct a la position
-      -- naturelle (rejouer un slide a chaque refresh de widget serait du bruit
-      -- visuel pendant qu'on regle des curseurs).
+      -- Pas d'animation d'entree ici : eviterait du bruit visuel a chaque refresh de reglage
       AnchorTopNatural();    topPanel:SetAlpha(1)
       AnchorBottomNatural(); bottomPanel:SetAlpha(1)
     end)
@@ -719,9 +610,7 @@ function AFKMode.SetPreview(status)
   end
 end
 
----------------------------------------------------------------------------
 -- Garde d'activation — 100% API Blizzard native
----------------------------------------------------------------------------
 local function OnAFKEvent(event, arg1)
   if event == "PLAYER_REGEN_ENABLED" then
     eventFrame:UnregisterEvent(event)
@@ -766,9 +655,7 @@ local function OnKeyDown(_, key)
   end
 end
 
----------------------------------------------------------------------------
 -- Construction des frames
----------------------------------------------------------------------------
 local function CreateTexts()
   for _, def in ipairs(TEXT_ELEMENTS) do
     local panel = (def.panel == "top") and topPanel or bottomPanel
@@ -800,9 +687,7 @@ end
 
 local function CreatePanels()
   local cfg = Cfg()
-  -- Ancrage a un seul point (pas TOPLEFT+TOPRIGHT) : necessaire pour que
-  -- PlayPanelAnimations() puisse repositionner le panneau hors ecran avant
-  -- de jouer l'animation d'entree (ClearAllPoints + SetPoint a un seul point).
+  -- Ancrage a un seul point (pas TOPLEFT+TOPRIGHT) : requis pour repositionner hors ecran dans PlayPanelAnimations()
   local screenW = GetScreenWidth()
 
   topPanel = CreateFrame("Frame", nil, frame, "BackdropTemplate")
@@ -833,10 +718,7 @@ local function CreateChatAndTips()
   end)
 
   tipsFrame = CreateFrame("ScrollingMessageFrame", "AishCoreAFKTips", bottomPanel)
-  -- Hauteur genereuse (fixe, pas exposee en reglage) : une astuce peut faire
-  -- plusieurs lignes une fois retournee a la ligne (cf. lineWidth) -- avec
-  -- les 20px d'origine, tout ce qui depassait la 1ere ligne etait rogne.
-  tipsFrame:SetSize(500, 120)
+  tipsFrame:SetSize(500, 120) -- genereux : une astuce peut faire plusieurs lignes une fois wrappee
   tipsFrame:SetPoint("BOTTOM", bottomPanel, "BOTTOM", 0, 8)
   tipsFrame:SetFont(ns.Media.fontGui, 11, "")
   tipsFrame:SetJustifyH("CENTER")
@@ -845,20 +727,12 @@ local function CreateChatAndTips()
   tipsFrame:SetTimeVisible(1)
 end
 
----------------------------------------------------------------------------
 -- API publique du module
----------------------------------------------------------------------------
 function AFKMode.Create(parent)
   if frame then return end
 
-  -- IMPORTANT : AUCUN parent (pas UIParent, pas WorldFrame) — CreateFrame
-  -- avec seulement 2 arguments, sans parent. SetAFKState() masque UIParent pour repliquer
-  -- l'ecran AFK natif ; un frame parente a UIParent (ou descendant de lui)
-  -- serait masque avec lui via la cascade de visibilite. Un frame SANS
-  -- parent est immunise nativement. Contrepartie : son echelle par defaut
-  -- n'est PAS celle d'UIParent, d'ou le SetScale explicite ci-dessous —
-  -- sans lui, toutes les tailles/positions en pixels des enfants (modele,
-  -- blasons, textes excentres) sont mal interpretees et finissent hors-champ.
+  -- Aucun parent (SetAFKState masque UIParent, un enfant d'UIParent serait masque avec lui)
+  -- SetScale requis car un frame sans parent n'a pas l'echelle d'UIParent par defaut.
   frame = CreateFrame("Frame", "AishCoreAFKFrame")
   frame:SetScale(UIParent:GetEffectiveScale())
   frame:SetAllPoints(parent or UIParent)
@@ -905,17 +779,10 @@ function AFKMode.ApplySettings()
   modelHolder:ClearAllPoints()
   modelHolder:SetPoint("BOTTOMRIGHT", bottomPanel, "BOTTOMRIGHT", cfg.modelXOffset or -60, cfg.modelYOffset or 0)
   if (AFKMode.isAFK or isPreview) and cfg.modelEnabled then
-    -- IMPORTANT : relit cfg.modelAnim (via ResolveAnimKey, gere aussi
-    -- "random") a chaque appel -- rejouer model.curAnimation ici rejouait
-    -- juste l'ancienne animation en cache, donc changer le choix dans les
-    -- reglages ne se voyait jamais dans l'apercu tant qu'on ne sortait pas
-    -- et rerentrait dans la section.
-    SetModelAnimation(ResolveAnimKey(cfg))
+    SetModelAnimation(ResolveAnimKey(cfg)) -- relit cfg.modelAnim a chaque appel, pas le cache
   end
 
-  -- Repercute en direct les toggles/textes/blasons si l'ecran (ou l'apercu
-  -- GUI) est deja affiche, pour que les reglages se voient sans re-declencher
-  -- -- c'est justement l'usage principal de l'apercu GUI (regler en direct).
+  -- Repercute en direct si l'ecran ou l'apercu GUI est deja affiche
   if AFKMode.isAFK or isPreview then
     RefreshTextStrings()
     RefreshGraphics()
