@@ -2,11 +2,7 @@
 -- Inspire du fonctionnement de SenseiClassResourceBar (PrimaryResourceBar.lua)
 local addonName, ns = ...
 
----------------------------------------------------------------------------
--- Ressource primaire par classe
--- Classes simples : Enum.PowerType directement
--- Classes avec variation par spec : table { [specID] = Enum.PowerType }
----------------------------------------------------------------------------
+-- Ressource primaire par classe (table { [specID] = ... } si variation par spec)
 local classPrimaryResource = {
   DEATHKNIGHT = Enum.PowerType.RunicPower,
   DEMONHUNTER = Enum.PowerType.Fury,
@@ -43,10 +39,7 @@ local classPrimaryResource = {
   },
 }
 
----------------------------------------------------------------------------
--- Druide : la ressource depend de la forme (GetShapeshiftFormID)
--- Construit au premier appel quand les constantes Blizzard sont dispo
----------------------------------------------------------------------------
+-- Druide : la ressource depend de la forme (GetShapeshiftFormID), construit au 1er appel
 local druidFormResources
 
 local function BuildDruidTable()
@@ -72,9 +65,7 @@ local function BuildDruidTable()
   druidFormResources[36] = Enum.PowerType.Mana
 end
 
----------------------------------------------------------------------------
 -- Utilitaire : recup le specID courant
----------------------------------------------------------------------------
 local function GetCurrentSpecID()
   local getSpec = (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) or GetSpecialization
   local getInfo = (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo) or GetSpecializationInfo
@@ -85,10 +76,7 @@ local function GetCurrentSpecID()
   return specID
 end
 
----------------------------------------------------------------------------
--- Ressources speciales trackees par aura (buff/debuff)
--- Cle = identifiant string, valeur = { spellID, maxStacks }
----------------------------------------------------------------------------
+-- Ressources speciales trackees par aura : cle = identifiant string, valeur = { spellID, maxStacks }
 ns.AuraResources = {
   MAELSTROM_WEAPON = { spellID = 344179, maxStacks = 10 },
   ICICLES          = { spellID = 205473, maxStacks = 5 },
@@ -99,14 +87,8 @@ ns.AuraStacks = {}     -- key -> number (0-N)
 ns.AuraText   = {}     -- key -> string ("0"-"N")
 ns.AuraPct    = {}     -- key -> number (0-100) pour l'arc
 
--- Lookup inverse spellID -> key, et instanceID -> key (pour tracked auras)
-local spellToKey = {}
-for key, def in pairs(ns.AuraResources) do
-  spellToKey[def.spellID] = key
-end
-local trackedInstances = {}  -- auraInstanceID -> key
-
 local pctMap = { [0]=0,[1]=10,[2]=20,[3]=30,[4]=40,[5]=50,[6]=60,[7]=70,[8]=80,[9]=90,[10]=100 }
+local HAS_ISSECRET = (type(issecretvalue) == "function")
 
 local function SetAuraStacks(key, stacks)
   ns.AuraStacks[key] = stacks
@@ -114,95 +96,56 @@ local function SetAuraStacks(key, stacks)
   ns.AuraPct[key]    = pctMap[stacks] or 100
 end
 
--- Scan initial (hors combat, utilise l'API classique)
+-- LECTURE DES STACKS (Secret Values, patch 12.1+) : le payload UNIT_AURA et les AuraData
+-- (GetPlayerAuraBySpellID etc) sont désormais toujours secrets, illisibles directement.
+-- On utilise le pattern "show but don't know" : le CDM donne le spellID en clair via le
+-- hook SetAuraInstanceInfo, et GetAuraApplicationDisplayCount lit le compte affichable
+-- sans exposer la donnée secrète.
+-- Tier 1 : CDM (cdmData cle par spellID -> lookup O(1)). tonumber() car
+-- GetAuraApplicationDisplayCount peut renvoyer une string formatee (ex: "10+").
+local function GetCDMStackCount(spellID)
+  local cdmPlayer = ns.Auras and ns.Auras.cdmData and ns.Auras.cdmData.player
+  local cdmEntry = cdmPlayer and cdmPlayer[spellID]
+  if not (cdmEntry and cdmEntry.instID) then return nil end
+  local ok, disp = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, cdmEntry.instID, 1, 999)
+  if ok and disp ~= nil then return tonumber(disp) end
+  return nil
+end
+
+-- Tier 2 : GetPlayerAuraBySpellID -- lookup direct par spellID (spellID est un paramètre
+-- d'entrée, pas une valeur à lire puis comparer, donc pas de plantage secret comme avec
+-- GetAuraDataByIndex + comparaison manuelle qui échouait toujours en combat).
+local function GetPlayerAuraStackCount(spellID)
+  local ok, auraData = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
+  if not ok or not auraData then return nil end
+  local okApp, app = pcall(function() return auraData.applications end)
+  if okApp and app ~= nil and not (HAS_ISSECRET and issecretvalue(app)) and tonumber(app) then
+    return tonumber(app)
+  end
+  -- Fallback : applications illisible (secret en combat) -> compte affichable via l'instanceID
+  local okInst, instID = pcall(function() return auraData.auraInstanceID end)
+  if okInst and instID then
+    local okDisp, disp = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, instID, 1, 999)
+    if okDisp and disp ~= nil and tonumber(disp) then return tonumber(disp) end
+  end
+  return 1  -- aura confirmee presente (auraData non-nil), compte illisible : au moins 1
+end
+
+-- Scan complet : stacks de toutes les ressources trackees via le CDM, repli sur GetPlayerAuraBySpellID
 function ns.ScanAuraStacks()
   for key, def in pairs(ns.AuraResources) do
-    local ok, auraData = pcall(C_UnitAuras.GetPlayerAuraBySpellID, def.spellID)
-    if ok and auraData then
-      local stacks = auraData.applications or 0
-      if stacks == 0 then stacks = 1 end
-      SetAuraStacks(key, stacks)
-      -- Tracker l'instanceID pour les updates futures
-      if auraData.auraInstanceID then
-        trackedInstances[auraData.auraInstanceID] = key
-      end
-    else
-      SetAuraStacks(key, 0)
-    end
+    local disp = GetCDMStackCount(def.spellID) or GetPlayerAuraStackCount(def.spellID)
+    SetAuraStacks(key, disp or 0)
   end
 end
 
--- Traite le payload de UNIT_AURA (pas d'appel API, donnees directes)
+-- UNIT_AURA : payload illisible (cf. ci-dessus), on redeclenche juste un scan CDM
 function ns.HandleUnitAura(updateInfo)
-  if not updateInfo then return false end
-  local changed = false
-
-  -- Full update : re-scan complet
-  if updateInfo.isFullUpdate then
-    ns.ScanAuraStacks()
-    return true
-  end
-
-  -- Nouvelles auras ajoutees (donnees completes dans le payload)
-  if updateInfo.addedAuras then
-    for _, aura in ipairs(updateInfo.addedAuras) do
-      -- Certains champs d'aura sont marques "secret" par Blizzard
-      -- pcall sur tout le bloc pour eviter les erreurs d'acces
-      local ok, key, stacks, instID = pcall(function()
-        local sid = aura.spellId
-        if not sid or type(sid) ~= "number" then return nil end
-        local k = spellToKey[sid]
-        if not k then return nil end
-        local s = aura.applications or 0
-        if s == 0 then s = 1 end
-        return k, s, aura.auraInstanceID
-      end)
-      if ok and key then
-        SetAuraStacks(key, stacks)
-        if instID then
-          trackedInstances[instID] = key
-        end
-        changed = true
-      end
-    end
-  end
-
-  -- Auras mises a jour (stacks change)
-  if updateInfo.updatedAuraInstanceIDs then
-    for _, instanceID in ipairs(updateInfo.updatedAuraInstanceIDs) do
-      local key = trackedInstances[instanceID]
-      if key then
-        -- Essayer de lire les donnees mises a jour
-        local ok, aura = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", instanceID)
-        if ok and aura then
-          local stacks = aura.applications or 0
-          if stacks == 0 then stacks = 1 end
-          SetAuraStacks(key, stacks)
-        end
-        changed = true
-      end
-    end
-  end
-
-  -- Auras retirees
-  if updateInfo.removedAuraInstanceIDs then
-    for _, instanceID in ipairs(updateInfo.removedAuraInstanceIDs) do
-      local key = trackedInstances[instanceID]
-      if key then
-        SetAuraStacks(key, 0)
-        trackedInstances[instanceID] = nil
-        changed = true
-      end
-    end
-  end
-
-  return changed
+  ns.ScanAuraStacks()
+  return true
 end
 
----------------------------------------------------------------------------
--- API publique : detecte la ressource primaire du joueur
--- Retourne un Enum.PowerType ou un string pour les ressources aura
----------------------------------------------------------------------------
+-- API publique : detecte la ressource primaire du joueur (Enum.PowerType ou string pour aura)
 function ns.GetPlayerResource()
   local _, playerClass = UnitClass("player")
   if not playerClass then return Enum.PowerType.Mana end
@@ -230,10 +173,7 @@ function ns.GetPlayerResource()
   return resource or Enum.PowerType.Mana
 end
 
----------------------------------------------------------------------------
--- Couleurs par type de ressource
--- Utilisees pour colorer les arcs, le texte et les dots du cercle
----------------------------------------------------------------------------
+-- Couleurs par type de ressource (arcs, texte, dots du cercle)
 ns.ResourceTypeColors = {
   [Enum.PowerType.Mana] = {
     bar  = { 0, 0.55, 1, 1 },
@@ -409,12 +349,7 @@ function ns.GetResourceColors(powerType)
   return ns.ResourceTypeColors[powerType] or fallbackColors
 end
 
----------------------------------------------------------------------------
--- PowerTypes qui affichent la valeur brute au lieu du %
--- fmt      = format string pour l'affichage
--- maxValue = si present, on derive la valeur depuis le pourcentage (evite secret numbers)
---            sinon on formate UnitPower directement (pas d'arithmetique)
----------------------------------------------------------------------------
+-- PowerTypes qui affichent la valeur brute au lieu du % (maxValue = derive du % pour eviter les secret numbers)
 ns.RawDisplayResources = {
   [Enum.PowerType.Insanity]   = { fmt = "%d" },  -- valeur brute (100 ou 150 selon talent)
   [Enum.PowerType.Essence]    = { fmt = "%d" },
@@ -427,17 +362,26 @@ ns.RawDisplayResources = {
   [Enum.PowerType.LunarPower] = { fmt = "%d" },
 }
 
----------------------------------------------------------------------------
--- Ressources secondaires affichées sous le texte du cercle de ressource.
--- Clé = specID, valeur = { spellID, label, color, maxStacks }
--- Trackées via C_UnitAuras.GetPlayerAuraBySpellID (aura buff).
----------------------------------------------------------------------------
+-- Ressources secondaires affichées sous le texte du cercle. Clé = specID,
+-- valeur = { spellID, label, color, maxStacks }. Trackées via GetPlayerAuraBySpellID.
 ns.SecondaryResourceDefs = {
-  -- Death Knight Blood (spec 250) : Bone Shield (aura stackable)
-  [250] = { spellID  = 195181, color = { 0.75, 0.88, 1.00, 1 }, maxStacks = 10 },
-  -- Demon Hunter Vengeance (spec 581) : Soul Fragments via UnitPower (powerType 7)
-  [581] = { powerType = 7,     color = { 0.70, 0.30, 1.00, 1 }, maxStacks = 5  },
-  -- Demon Hunter Devourer (spec 1480, hero spec 12.0) : stacks de l'aura 1225789
-  -- altSpellID = fragments de vide (1227702) affichés sous Métamorphose du vide
-  [1480] = { spellID = 1225789, useStacks = true, altSpellID = 1227702 },
+  -- Death Knight Blood (250) : Bone Shield (aura stackable)
+  [250] = { spellID  = 195181, useStacks = true, color = { 0.75, 0.88, 1.00, 1 }, maxStacks = 10 },
+  -- Demon Hunter Vengeance (581) : Soul Fragments. spellID=203981 n'est pas une aura a stacks
+  -- classique (introuvable via GetPlayerAuraBySpellID) -- castCountSpellID (Spirit Bomb, 247454)
+  -- sert de repli, son compteur de charges reflete le nombre de fragments.
+  [581] = { spellID = 203981, useStacks = true, castCountSpellID = 247454,
+            color = { 0.70, 0.30, 1.00, 1 }, maxStacks = 5 },
+  -- Demon Hunter Devourer (1480) : stacks de l'aura 1225789, altSpellID = fragments de vide (1227702)
+  [1480] = { spellID = 1225789, useStacks = true, altSpellID = 1227702, maxStacks = 50 },
+  -- Warrior Protection (73) : Dur Au Mal (190456), montant d'absorption restant
+  [73] = { spellID = 190456, useAbsorb = true, color = { 0.78, 0.25, 0.25, 1 } },
+  -- Monk Mistweaver (270) : Thé de Mana (115867) introuvable en combat -- castCountSpellID
+  -- (115294, sort activable) sert de repli via ApplyCastCountToText
+  [270] = { spellID = 115867, useStacks = true, castCountSpellID = 115294,
+            color = { 0.25, 0.85, 0.55, 1 }, maxStacks = 20 },
+  -- Mage Givre (64) : debuff de la CIBLE (useTargetDebuff bascule sur ApplyTargetStacksToText)
+  [64] = { spellID = 1221389, useTargetDebuff = true, color = { 0.55, 0.85, 1.00, 1 } },
+  -- Warlock Démonologie (266) : stacks de Cœur Démoniaque (264173, buff joueur stackable)
+  [266] = { spellID = 264173, useStacks = true, color = { 0.53, 0.53, 0.93, 1 } },
 }

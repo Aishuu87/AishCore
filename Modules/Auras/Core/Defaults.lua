@@ -1,6 +1,4 @@
--- AishUIAura/Core/Defaults.lua
--- SPEC_MAP + valeurs par défaut structurées par render
-------------------------------------------------------------------------
+-- AishUIAura/Core/Defaults.lua : SPEC_MAP + valeurs par défaut structurées par render
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 
 ns.SPEC_MAP = {
@@ -35,12 +33,15 @@ ns.SPEC_MAP = {
 ns.Defaults = {
     addonVersion = "0.0.0", enabled = true, useSpellColors = true,
     hideCDMBuffFrames = true, useNativeCDM = false,
+    -- Tooltip survol buff/debuff : si true, en combat visible seulement sous ALT (indépendant de priorityBar)
+    tooltipAltCombatOnly = false,
+    -- Glow par défaut appliqué aux auras cochées sans glow perso (cf. info._glowCustom, Tactics.lua)
+    defaultGlowIdx = 2, defaultGlowColorR = nil, defaultGlowColorG = nil, defaultGlowColorB = nil,
+    defaultGlowAlpha = 0.7, defaultGlowScale = 1.0, defaultProcGlowIdx = 1,
     iconlistEnabled = true, circlebarsEnabled = true, iconsEnabled = true,
-    freebarsEnabled = true,
+    freebarsEnabled = true, totemsEnabled = true,
     equipmentEnabled = true, effectsEnabled = false,
-    -- Auto-désactivation des effets 3D en raid (goulot GPU potentiel).
-    -- Si true : dès l'entrée en raid, les modèles 3D sont masqués. Sortir du raid
-    -- les réactive automatiquement. Laisse l'utilisateur contrôler.
+    -- Si true, masque les modèles 3D en raid (goulot GPU), réactivés à la sortie
     effects3DAutoDisableInRaid = false,
 
     iconlist = {
@@ -54,19 +55,17 @@ ns.Defaults = {
         swipeEnabled=false,
         sparkEnabled=true, sparkW=17, sparkH=6, sparkAlpha=1.0, sparkOffY=0, sparkGradient=false, sparkGradR2=nil, sparkGradG2=nil, sparkGradB2=nil, sparkTexture="atlas:honorsystem-bar-spark", sparkLayer="front",
         sparkColorR=nil, sparkColorG=nil, sparkColorB=nil,
-        timerIconEnabled=false, timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
+        timerIconEnabled=false, timerPos="CENTER", timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
         timerSize=12,
         timerColorR=1, timerColorG=1, timerColorB=1,
         timerIconOffX=0, timerIconOffY=0,
         stackEnabled=true, stackFont=nil, stackPos="BOTTOMRIGHT", stackOffX=0, stackOffY=0, stackSize=10, stackColorR=1, stackColorG=1, stackColorB=1,
         chargesEnabled=true, chargesFont=nil, chargesPos="TOPLEFT", chargesOffX=0, chargesOffY=0, chargesSize=10, chargesColorR=0.4, chargesColorG=0.7, chargesColorB=1.0,
-        -- Couleurs d'urgence : curve native Blizzard qui teinte la bar selon le % restant
+        -- Couleurs d'urgence : curve native Blizzard, teinte selon le % restant (20%=orange, 0%=rouge)
         urgencyEnabled=true,
-        urgencyMediumR=1.0, urgencyMediumG=0.5, urgencyMediumB=0.0,    -- 20% restant = orange
-        urgencyCriticalR=1.0, urgencyCriticalG=0.15, urgencyCriticalB=0.05, -- 0% restant = rouge
-        -- ANIMATION D'APPARITION : reproduit la WA d'origine (Tiger Fury / RtB / Totems)
-        --   - scale horizontal 0→barW + alpha 0→1 sur 1s avec easeOutIn strength 5
-        -- ON par defaut (comme dans la WA originale).
+        urgencyMediumR=1.0, urgencyMediumG=0.5, urgencyMediumB=0.0,
+        urgencyCriticalR=1.0, urgencyCriticalG=0.15, urgencyCriticalB=0.05,
+        -- Animation d'apparition : scale horizontal + fade alpha sur 1s, ON par défaut
         popEnabled=true, popDuration=1.0, popEaseStrength=5, popAlphaFade=true,
         iconAnimStyle="standard", iconAnimDuration=0.4, iconAnimOut=true,
     },
@@ -77,26 +76,50 @@ ns.Defaults = {
         fadeIC=1.0, fadeOOC=0.4, fadeDelayIC=0, fadeDelayOOC=0, fadeDuration=0.35,
         iconBorder="square", desatOverride=nil, glowEnabled=true,
         glowOverrideIdx=nil, glowOverrideR=nil, glowOverrideG=nil, glowOverrideB=nil, glowOverrideScale=nil,
-        iconPos="RIGHT", reverse=true,
+        iconPos="RIGHT", reverse=true, hideIcon=false,
         barBgR=0, barBgG=0, barBgB=0, barBgAlpha=0,
         barColorR=nil, barColorG=nil, barColorB=nil,
         swipeEnabled=false, bannerGrowth="RIGHT",
         sparkEnabled=true, sparkW=17, sparkH=6, sparkAlpha=1.0, sparkOffY=0, sparkGradient=false, sparkGradR2=nil, sparkGradG2=nil, sparkGradB2=nil, sparkTexture="atlas:honorsystem-bar-spark", sparkLayer="front",
         sparkColorR=nil, sparkColorG=nil, sparkColorB=nil,
-        timerIconEnabled=false, timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
+        timerIconEnabled=false, timerPos="CENTER", timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
         timerSize=11,
         timerColorR=1, timerColorG=1, timerColorB=1,
         timerIconOffX=0, timerIconOffY=0,
         stackEnabled=true, stackPos="BOTTOMRIGHT", stackOffX=0, stackOffY=0, stackSize=10, stackColorR=1, stackColorG=1, stackColorB=1,
         chargesEnabled=true, chargesFont=nil, chargesPos="TOPLEFT", chargesOffX=0, chargesOffY=0, chargesSize=10, chargesColorR=0.4, chargesColorG=0.7, chargesColorB=1.0,
-        -- Couleurs d'urgence : curve native Blizzard qui teinte la bar selon le % restant
+        -- Couleurs d'urgence : curve native Blizzard, teinte selon le % restant
         urgencyEnabled=true,
         urgencyMediumR=1.0, urgencyMediumG=0.5, urgencyMediumB=0.0,
         urgencyCriticalR=1.0, urgencyCriticalG=0.15, urgencyCriticalB=0.05,
-        -- ANIMATION D'APPARITION : reproduit la WA d'origine (Fiend & Rifts / Totems)
-        --   - scale horizontal 0→barW + alpha 0→1 sur 1s avec easeOutIn strength 5
-        -- ON par defaut. Pour la disposition Vanguard (icone+barre simple), le sens
-        -- de deploiement suit la position de l'icone (cf. CreateVanguardRow).
+        -- Animation d'apparition : scale + fade sur 1s ; en Vanguard le sens suit l'icône (CreateVanguardRow)
+        popEnabled=true, popDuration=1.0, popEaseStrength=5, popAlphaFade=true,
+        iconAnimStyle="standard", iconAnimDuration=0.4, iconAnimOut=true,
+    },
+    -- Totems : mêmes réglages que circlebars (Free Bars), position différente pour ne pas
+    -- se superposer. Rendu manuel (pas d'AddAuraGroup, cf. Totems.lua) : pas une vraie aura Blizzard.
+    totems = {
+        layout="side_large", x=-502, y=-120, growth="DOWN", maxBars=8,
+        barW=147, barH=4, iconW=28, iconH=19, gap=3, rowGap=1,
+        texture="aish_grad3", alpha=1.0, iconAlpha=1.0, barAlpha=1.0, barAlphaWith3D=1.0, gradientEnabled=false, gradientR2=nil, gradientG2=nil, gradientB2=nil,
+        fadeIC=1.0, fadeOOC=0.4, fadeDelayIC=0, fadeDelayOOC=0, fadeDuration=0.35,
+        iconBorder="square", desatOverride=nil, glowEnabled=true,
+        glowOverrideIdx=nil, glowOverrideR=nil, glowOverrideG=nil, glowOverrideB=nil, glowOverrideScale=nil,
+        iconPos="RIGHT", reverse=true, hideIcon=false,
+        barBgR=0, barBgG=0, barBgB=0, barBgAlpha=0,
+        barColorR=nil, barColorG=nil, barColorB=nil,
+        swipeEnabled=false, bannerGrowth="RIGHT",
+        sparkEnabled=true, sparkW=17, sparkH=6, sparkAlpha=1.0, sparkOffY=0, sparkGradient=false, sparkGradR2=nil, sparkGradG2=nil, sparkGradB2=nil, sparkTexture="atlas:honorsystem-bar-spark", sparkLayer="front",
+        sparkColorR=nil, sparkColorG=nil, sparkColorB=nil,
+        timerIconEnabled=false, timerPos="CENTER", timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
+        timerSize=11,
+        timerColorR=1, timerColorG=1, timerColorB=1,
+        timerIconOffX=0, timerIconOffY=0,
+        stackEnabled=true, stackPos="BOTTOMRIGHT", stackOffX=0, stackOffY=0, stackSize=10, stackColorR=1, stackColorG=1, stackColorB=1,
+        chargesEnabled=true, chargesFont=nil, chargesPos="TOPLEFT", chargesOffX=0, chargesOffY=0, chargesSize=10, chargesColorR=0.4, chargesColorG=0.7, chargesColorB=1.0,
+        urgencyEnabled=true,
+        urgencyMediumR=1.0, urgencyMediumG=0.5, urgencyMediumB=0.0,
+        urgencyCriticalR=1.0, urgencyCriticalG=0.15, urgencyCriticalB=0.05,
         popEnabled=true, popDuration=1.0, popEaseStrength=5, popAlphaFade=true,
         iconAnimStyle="standard", iconAnimDuration=0.4, iconAnimOut=true,
     },
@@ -109,39 +132,28 @@ ns.Defaults = {
         showBarUnderIcon=true, barUnderHeight=3, barPosition="BOTTOM", barReverseFill=false, swipeEnabled=false, barBgR=0, barBgG=0, barBgB=0, barBgAlpha=0,
         sparkEnabled=true, sparkW=12, sparkH=5, sparkAlpha=1.0, sparkOffY=0, sparkGradient=false, sparkGradR2=nil, sparkGradG2=nil, sparkGradB2=nil, sparkTexture="atlas:honorsystem-bar-spark", sparkLayer="front",
         sparkColorR=nil, sparkColorG=nil, sparkColorB=nil,
-        timerIconEnabled=false, timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
+        timerIconEnabled=false, timerPos="CENTER", timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
         timerSize=10,
         timerColorR=1, timerColorG=1, timerColorB=1,
         timerIconOffX=0, timerIconOffY=0,
         stackEnabled=true, stackPos="BOTTOMRIGHT", stackOffX=0, stackOffY=0, stackSize=10, stackColorR=1, stackColorG=1, stackColorB=1,
         chargesEnabled=true, chargesFont=nil, chargesPos="TOPLEFT", chargesOffX=0, chargesOffY=0, chargesSize=10, chargesColorR=0.4, chargesColorG=0.7, chargesColorB=1.0,
-        -- Couleurs d'urgence : curve native Blizzard qui teinte la bar selon le % restant
+        -- Couleurs d'urgence : curve native Blizzard, teinte selon le % restant
         urgencyEnabled=true,
         urgencyMediumR=1.0, urgencyMediumG=0.5, urgencyMediumB=0.0,
         urgencyCriticalR=1.0, urgencyCriticalG=0.15, urgencyCriticalB=0.05,
     },
     freebars = {
-        -- Layout "Buff autour du cercle" : 2 barres miroir sans icone,
-        -- positionnees a l'emplacement standard du Resource Circle d'Aishaddon.
-        -- L'utilisateur peut deplacer via Alt+clic gauche sur les barres.
-        --
-        -- NOTE : ce render n'a ni icone, ni glow, ni stacks, ni charges.
-        -- Les champs correspondants (iconW/H, glow*, stack*, charges*, etc.)
-        -- ne figurent PAS dans cette table. S'ils sont reintroduits plus tard, ajouter
-        -- aussi les sections correspondantes dans UI/Menus/Render.lua (cf. SECTIONS_BY_RENDER).
+        -- Layout "Buff autour du cercle" : 2 barres miroir sans icône, déplaçables via Alt+clic.
+        -- Pas d'icône/glow/stacks/charges ici ; si réintroduits, ajouter aussi dans
+        -- UI/Menus/Render.lua (SECTIONS_BY_RENDER).
         layout="resource_circle", x=0, y=-218, maxBars=8,
-        -- Duree (texte centre sur la row, dans l'espace entre les 2 barres miroir).
-        -- Reutilise les memes cles que timerIcon (iconlist/circlebars/icons) pour
-        -- beneficier du meme code de rendu (UpdateTimersForRender / UpdRow).
-        timerIconEnabled=false, timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
+        -- Durée (texte centré entre les 2 barres) : réutilise les clés timerIcon pour le rendu commun
+        timerIconEnabled=false, timerPos="CENTER", timerFont="Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
         timerSize=11, timerColorR=1, timerColorG=1, timerColorB=1,
         timerIconOffX=0, timerIconOffY=0, timerDecimals=1,
-        -- Note : pas de champ 'growth' (placement auto-alterne haut/bas geré par Buffs.lua)
-        -- combatOnly : les barres sont cachees hors combat (UpdateRenderFade target=0).
-        combatOnly=true,
-        -- v281 : barH passe de 2 a 3 (un poil plus epais, plus lisible).
-        -- gap passe de 44 a 50 (espacement par defaut plus aere).
-        -- Ajustables via les sliders du menu Buffs.
+        -- Pas de champ 'growth' (placement auto-alterné géré par Buffs.lua)
+        combatOnly=true, -- barres cachées hors combat (UpdateRenderFade target=0)
         barW=45, barH=3, gap=50, rowGap=6,
         -- Barre (couleur & texture)
         texture="aish_grad3", alpha=1.0, barAlpha=1.0, barAlphaWith3D=1.0,
@@ -158,21 +170,14 @@ ns.Defaults = {
         urgencyEnabled=true,
         urgencyMediumR=1.0, urgencyMediumG=0.5, urgencyMediumB=0.0,
         urgencyCriticalR=1.0, urgencyCriticalG=0.15, urgencyCriticalB=0.05,
-        -- DEGRADE PAR SORT (specifique a Buffs) : table indexee par spellID,
-        -- chaque entree = {r1, g1, b1, r2, g2, b2} avec couleur debut + couleur fin.
-        -- Si un sort a une entree, son gradient custom override tout (couleur render,
-        -- gradient render, couleur globale). Si aucune entree pour le sort,
-        -- comportement standard (cf. ApplyBarColor priorite 2/3).
+        -- Dégradé par sort (Buffs uniquement) : {r1,g1,b1,r2,g2,b2} indexé par spellID,
+        -- override toute autre couleur si présent (cf. ApplyBarColor priorité 2/3)
         spellGradients = {},
-        -- ANIMATION D'APPARITION (specifique a Buffs) : effet "pop" quand un buff
-        -- apparait. Reproduit l'animation de la WA Tiger Fury d'origine :
-        --   - scale horizontal : largeur 0 → barW depuis le centre vers l'exterieur
-        --   - alpha fade-in : 0 → 1 en parallele du scale
-        --   - easing easeOutIn : lent debut, vif milieu, lent fin
-        popEnabled=true,           -- on/off de l'animation
-        popDuration=1.0,           -- duree en secondes (slider 0.1-2.5, pas 0.05)
-        popEaseStrength=5,         -- intensite easeOutIn (slider 1-12, pas 1)
-        popAlphaFade=true,         -- fade-in alpha en parallele (sinon scale seul)
+        -- Animation "pop" à l'apparition : scale horizontal + fade alpha, easeOutIn
+        popEnabled=true,
+        popDuration=1.0,
+        popEaseStrength=5,
+        popAlphaFade=true,
     },
     equipment = {
         layout="grid_fixed", combatOnly=true,
@@ -180,6 +185,60 @@ ns.Defaults = {
         groupW=31, groupH=24, groupAlpha=1.0,
         borderStyle="square", borderWidth=1,
         borderColor={0.055, 0.055, 0.055, 1},
+    },
+    -- "Buffs manquants" (cf. Modules/Auras/Core/MissingBuffs.lua)
+    missingBuffs = {
+        enabled = true,
+        makeIconClickable = true,
+        ignoreBuffsWhileMounted = true,
+        ignoreWhileResting = false,
+        debounceThrottle = 0.25,
+        showBuffsInCombat = false,
+        hideText = false,
+        locked = false,
+        framePoint = nil, -- {point, relPoint, x, y}, defini au premier drag
+        ignoredSettingsIds = {}, -- [settingsId] = true
+        -- Par classe
+        ignoreWarriorStances = false, overrideWarriorStance = nil,
+        ignorePaladinAuras = false, overridePaladinAura = nil,
+        ignoreEvokerAttunements = false, overrideEvokerAttunement = nil,
+        ignoreDruidForms = false,
+        ignoreHunterPets = false, overrideHunterPet = nil,
+        ignoreWarlockPets = false, overrideWarlockPet = nil,
+        -- Alerte "Ruee Ardente" (Demoniste, spellId 111400) : cas "buff
+        -- manquant" inverse -- alerte (combo uniquement, jamais d'icone/
+        -- texte) tant que ce buff EST present, cf. MissingBuffs.lua
+        -- IsBurningRushActive. Opt-in (false), specifique au Demoniste.
+        burningRushAlert = false,
+        ignoreLethalPoisons = false, overrideLethalPoison = nil,
+        ignoreNonlethalPoisons = false, overrideNonlethalPoison = nil,
+        -- Rappel "bientot expire" (2026-08-30) : affiche l'alerte native
+        -- (texte "RAFRAICHIR") quand un buff suivi sur SOI est encore actif
+        -- mais expire dans moins de expiringSoonThreshold MINUTES -- cf.
+        -- Modules/Auras/Core/MissingBuffs.lua::GetSelfBuffExpiringSoon
+        -- (converti en secondes au point d'usage).
+        expiringSoonEnabled = false,
+        expiringSoonThreshold = 5,
+        -- Apparence icone (valeurs par defaut = rendu identique a avant
+        -- l'ajout de la personnalisation, cf. Modules/Auras/Core/MissingBuffs.lua)
+        iconSize = 64,
+        iconMaskIndex = 1,
+        borderEnabled = true,
+        borderColor = {1, 0.15, 0.15, 0.9},
+        borderThickness = 2,
+        -- Apparence texte
+        textFont = nil, -- nil = ns.Media.font
+        textSize = 12,
+        textColor = {1, 0.9, 0.3},
+        textOffsetX = 0,
+        textOffsetY = -2,
+        -- Toggles independants (combinables, ex: rebond + clignotement en meme temps)
+        textAnimPulse = false,
+        textAnimBounce = false,
+        textAnimBlink = false,
+        -- Style de contour du texte : "OUTLINE" (fin), "THICKOUTLINE" (epais)
+        -- ou "SLUG" (anneau de copies noires, cf. Core.lua ApplyTextOutlineStyle).
+        textOutlineStyle = "OUTLINE",
     },
 }
 
@@ -192,9 +251,12 @@ ns.SlotDefaults = {
 
 ns.SpellDefaults = {
     enabled=false, priority=99,
-    destinations = { iconlist=false, circlebars=false, icons=false, freebars=false },
+    destinations = { iconlist=false, circlebars=false, icons=false, freebars=false, totems=false },
     color=nil, glowColor=nil, glow=false, glowIdx=2, glowAlpha=0.7,
     desat=false, procGlowIdx=1, procGlowScale=1.0,
+    -- _glowCustom=false : suit le glow par defaut (voir GLOW PAR DEFAUT dans Auras a tracker).
+    -- Passe a true des que l'utilisateur touche manuellement au glow de ce sort.
+    _glowCustom=false,
     -- 3D models (0 = off)
     barModelID=0, barModelA=0.5, barModelRot=0,
     barModelX=0, barModelY=0, barModelZ=0, barModelS=1.0,

@@ -6,9 +6,7 @@ ns.Modules = ns.Modules or {}
 local TargetCastBar = {}
 ns.Modules.TargetCastBar = TargetCastBar
 
--- Wrapper taint-safe pour les "secret values" (même approche qu'ElvUI/oUF).
--- issecretvalue est un global WoW (11.0.5+) qui retourne true si la valeur
--- est un "secret" inaccessible par le code addon.
+-- Wrapper taint-safe pour secret values (issecretvalue, WoW 11.0.5+, même approche qu'ElvUI/oUF).
 local _issecretvalue = issecretvalue
 local function IsSafeValue(value)
     if _issecretvalue then
@@ -17,9 +15,7 @@ local function IsSafeValue(value)
     return true  -- pas de système de secrets → toujours safe
 end
 
----------------------------------------------------------------------------
 -- Constantes visuelles
----------------------------------------------------------------------------
 local BAR_TEXTURE   = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga"
 local BEBAS_FONT    = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\BebasNeue-Regular.ttf"
 local DARK          = 14/255
@@ -30,9 +26,7 @@ local COLOR_IMPORTANT        = { 0.855, 0.239, 1, 1 }  -- #DA3DFF
 local COLOR_NOT_INTERRUPTIBLE = { 0.765, 0.294, 0.290, 1 } -- #C34B4A
 local COLOR_CHANNELING       = { 0.506, 0.788, 0.243, 1 } -- #81C93E
 
----------------------------------------------------------------------------
 -- Helpers
----------------------------------------------------------------------------
 local frame = nil
 local dragUnlocked = false
 
@@ -65,27 +59,14 @@ local function FormatTime(t)
     end
 end
 
----------------------------------------------------------------------------
 -- Texte : ancre selon justify
----------------------------------------------------------------------------
 local function TextAnchor(justify)
     if justify == "LEFT"  then return "BOTTOMLEFT",  "TOPLEFT"  end
     if justify == "RIGHT" then return "BOTTOMRIGHT", "TOPRIGHT" end
     return "BOTTOM", "TOP"
 end
 
----------------------------------------------------------------------------
--- Couleur de la barre selon le type de cast
----------------------------------------------------------------------------
-
----------------------------------------------------------------------------
--- Approche "overlay" pour les secret booleans TWW.
--- On ne peut PAS lire un secret boolean/number ; même GetAlpha() renvoie
--- un secret. On utilise donc une 2e StatusBar (overlay) colorée en rouge,
--- dont l'alpha est piloté directement par SetAlphaFromBoolean(secretBool).
--- La barre de base affiche la couleur interruptible/channeling,
--- l'overlay rouge est visible si et seulement si notInterruptible == true.
----------------------------------------------------------------------------
+-- Couleur selon type de cast : secret booleans TWW illisibles -> overlay StatusBar pilotée par SetAlphaFromBoolean.
 
 -- Récupère la valeur brute de C_Spell.IsSpellImportant (possiblement secret boolean)
 local function GetRawImportant(spellId)
@@ -107,9 +88,7 @@ local function GetBaseBarColor(channeling)
     end
 end
 
--- Applique l'alpha du notInterruptible overlay.
--- rawNI peut être : nil, true/false (lua), ou un secret boolean TWW.
--- Applique l'alpha sur un frame/fontstring selon la valeur brute de notInterruptible.
+-- Applique l'alpha overlay selon rawNI (nil / bool lua / secret boolean TWW).
 local function SetOverlayAlpha(widget, rawNI)
     if not widget then return end
     if rawNI == nil then
@@ -162,9 +141,7 @@ local function ApplyBarColor()
     end
 end
 
----------------------------------------------------------------------------
 -- Icône du sort
----------------------------------------------------------------------------
 local function UpdateIcon()
     if not frame or not frame.icon then return end
     local cfg = Cfg()
@@ -184,22 +161,15 @@ local function UpdateIcon()
     frame.icon:Hide()
 end
 
----------------------------------------------------------------------------
 -- Mise à jour du progrès (OnUpdate)
----------------------------------------------------------------------------
 local function UpdateProgress()
     if not frame then return end
     local now = GetTime()
 
     if state.active then
-        -- Quand SetTimerDuration est utilisé, le progrès de la barre
-        -- est géré automatiquement par Blizzard. On met à jour le timer texte
-        -- et le spark manuellement.
+        -- SetTimerDuration : Blizzard gère le progrès, on met juste à jour texte/spark.
         if state.useTimerDuration and state.durationObj then
-            -- Timer texte : GetRemainingDuration() renvoie un secret number,
-            -- mais on peut le passer à StatusBar:SetValue puis lire la
-            -- valeur affichée... Non, c'est trop compliqué. On recalcule
-            -- à partir de startTime/endTime qu'on estime au mieux.
+            -- Timer texte recalculé depuis startTime/endTime (GetRemainingDuration est secret).
             local total = state.endTime - state.startTime
             if total <= 0 then total = 1 end
             local elapsed = now - state.startTime
@@ -270,18 +240,9 @@ local function UpdateProgress()
     end
 end
 
----------------------------------------------------------------------------
--- Démarrage / arrêt
----------------------------------------------------------------------------
----------------------------------------------------------------------------
--- En TWW, startTime/endTime de UnitCastingInfo sont des "secret numbers".
--- UnitCastingDuration / UnitChannelDuration retournent un objet duration avec
--- :GetTotalDuration() et :GetElapsedDuration() qui sont des valeurs propres.
--- C'est l'API TWW correcte (même approche que Platynator).
----------------------------------------------------------------------------
+-- Démarrage/arrêt : cast times secrets, recalculés via UnitCastingDuration/UnitChannelDuration (comme Platynator).
 
--- Retourne (cs, ce) en secondes GetTime() pour le cast/channel en cours.
--- + stocke l'objet duration TWW dans state.durationObj pour SetTimerDuration.
+-- Retourne (cs, ce) en secondes GetTime() et stocke l'objet duration TWW pour SetTimerDuration.
 local function GetCastTimeBounds(spellId, isChannel)
     local now = GetTime()
     state.durationObj = nil
@@ -302,8 +263,7 @@ local function GetCastTimeBounds(spellId, isChannel)
                 local e = (elapOk and type(elapsed) == "number") and elapsed or 0
                 return now - e, now - e + total
             end
-            -- total/elapsed sont des secrets : fallback durée C_Spell
-            -- mais on garde durationObj pour SetTimerDuration
+            -- Secrets : fallback durée C_Spell, mais on garde durationObj pour SetTimerDuration
         end
     end
     -- Fallback : durée de base depuis C_Spell.GetSpellInfo (sans haste)
@@ -460,9 +420,7 @@ local function InterruptCast()
     end)
 end
 
----------------------------------------------------------------------------
 -- Détection de cast/channel en cours (TARGET_CHANGED)
----------------------------------------------------------------------------
 local function CheckTargetCast()
     if not frame then return end
     local cfg = Cfg()
@@ -486,20 +444,20 @@ local function CheckTargetCast()
     StopCast()
 end
 
----------------------------------------------------------------------------
 -- Création de la barre
----------------------------------------------------------------------------
 function TargetCastBar.Create(parent)
     if frame then return end
 
     local cfg = Cfg()
     local w   = cfg.width  or 260
     local h   = cfg.height or 3
+    local pt  = cfg.point         or "BOTTOM"
+    local rpt = cfg.relativePoint or "CENTER"
     local x   = cfg.x      or 260
     local y   = cfg.y      or -120
 
     -- Frame racine
-    frame = CreateFrame("Frame", "AishaddonTargetCastBar", UIParent)
+    frame = CreateFrame("Frame", "AishCoreTargetCastBar", UIParent)
     frame:SetSize(w, h + 30)
     frame:SetFrameStrata("HIGH")
     frame:SetMovable(true)
@@ -514,11 +472,14 @@ function TargetCastBar.Create(parent)
         self:StopMovingOrSizing()
         if not ns.DB             then ns.DB = {} end
         if not ns.DB.targetCastBar then ns.DB.targetCastBar = {} end
-        local _, _, _, ox, oy = self:GetPoint(1)
+        -- Sauvegarder point+relativePoint (pas juste x/y) : StopMovingOrSizing peut re-ancrer ailleurs (cf. CastBar.lua).
+        local point, _, relativePoint, ox, oy = self:GetPoint(1)
+        ns.DB.targetCastBar.point         = point
+        ns.DB.targetCastBar.relativePoint = relativePoint
         ns.DB.targetCastBar.x = ox
         ns.DB.targetCastBar.y = oy
     end)
-    frame:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
+    frame:SetPoint(pt, UIParent, rpt, x, y)
     frame:Hide()
 
     -- Fond
@@ -545,8 +506,7 @@ function TargetCastBar.Create(parent)
     sb:SetStatusBarColor(unpack(COLOR_INTERRUPTIBLE))
     frame.bar = sb
 
-    -- Overlay StatusBar pour les casts non-interruptibles
-    -- (même taille/position que sb, superposée, alpha 0 par défaut)
+    -- Overlay StatusBar pour casts non-interruptibles (même taille/position que sb, alpha 0 par défaut)
     local niBar = CreateFrame("StatusBar", nil, frame)
     niBar:SetSize(w, h)
     niBar:SetPoint("TOPLEFT", bgTex)
@@ -585,27 +545,25 @@ function TargetCastBar.Create(parent)
     local nJustify = cfg.nameJustify or "CENTER"
     local nSelf, nRel = TextAnchor(nJustify)
     local nameTxt = frame:CreateFontString(nil, "OVERLAY")
-    nameTxt:SetFont(cfg.font or BEBAS_FONT, nSize, "")
+    frame.nameTxtSlug = ns.CreateSlugRing(frame, nameTxt)
+    ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
     nameTxt:SetJustifyH(nJustify)
-    nameTxt:SetShadowColor(0, 0, 0, 1)
-    nameTxt:SetShadowOffset(1, -1)
     nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
     nameTxt:SetWidth(w)
     nameTxt:SetPoint(nSelf, bgTex, nRel, nOffX, nOffY)
     nameTxt:SetText("")
     frame.nameTxt = nameTxt
 
-    -- Overlay texte nom (rouge non-interruptible, wrappé dans un Frame
-    -- car SetAlphaFromBoolean n'existe que sur Frame, pas FontString)
+    -- Overlay texte nom (rouge non-interruptible), wrappé dans un Frame car SetAlphaFromBoolean n'existe que sur Frame
     local niNameFrame = CreateFrame("Frame", nil, frame)
     niNameFrame:SetAllPoints(frame)
     niNameFrame:SetFrameLevel(sb:GetFrameLevel() + 2)
     niNameFrame:SetAlpha(0)
     local niNameTxt = niNameFrame:CreateFontString(nil, "OVERLAY")
-    niNameTxt:SetFont(cfg.font or BEBAS_FONT, nSize, "")
+    -- Meme anneau SLUG que nameTxt (evite l'ombre directionnelle asymetrique), parente a niNameFrame pour suivre son fondu d'alpha.
+    frame.notIntNameTxtSlug = ns.CreateSlugRing(niNameFrame, niNameTxt)
+    ns.ApplyTextOutlineStyle(niNameTxt, frame.notIntNameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
     niNameTxt:SetJustifyH(nJustify)
-    niNameTxt:SetShadowColor(0, 0, 0, 1)
-    niNameTxt:SetShadowOffset(1, -1)
     niNameTxt:SetTextColor(COLOR_NOT_INTERRUPTIBLE[1], COLOR_NOT_INTERRUPTIBLE[2], COLOR_NOT_INTERRUPTIBLE[3], 1)
     niNameTxt:SetWidth(w)
     niNameTxt:SetPoint(nSelf, bgTex, nRel, nOffX, nOffY)
@@ -619,10 +577,10 @@ function TargetCastBar.Create(parent)
     impNameFrame:SetFrameLevel(sb:GetFrameLevel() + 3)
     impNameFrame:SetAlpha(0)
     local impNameTxt = impNameFrame:CreateFontString(nil, "OVERLAY")
-    impNameTxt:SetFont(cfg.font or BEBAS_FONT, nSize, "")
+    -- Meme anneau SLUG que nameTxt, meme raison que notIntNameTxtSlug (evite l'ombre directionnelle fixe)
+    frame.impNameTxtSlug = ns.CreateSlugRing(impNameFrame, impNameTxt)
+    ns.ApplyTextOutlineStyle(impNameTxt, frame.impNameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
     impNameTxt:SetJustifyH(nJustify)
-    impNameTxt:SetShadowColor(0, 0, 0, 1)
-    impNameTxt:SetShadowOffset(1, -1)
     impNameTxt:SetTextColor(COLOR_IMPORTANT[1], COLOR_IMPORTANT[2], COLOR_IMPORTANT[3], 1)
     impNameTxt:SetWidth(w)
     impNameTxt:SetPoint(nSelf, bgTex, nRel, nOffX, nOffY)
@@ -637,10 +595,9 @@ function TargetCastBar.Create(parent)
     local tJustify = cfg.timerJustify or "RIGHT"
     local tSelf, tRel = TextAnchor(tJustify)
     local timerTxt = frame:CreateFontString(nil, "OVERLAY")
-    timerTxt:SetFont(cfg.timerFont or ns.Media.font, tSize, "")
+    frame.timerTxtSlug = ns.CreateSlugRing(frame, timerTxt)
+    ns.ApplyTextOutlineStyle(timerTxt, frame.timerTxtSlug, cfg.timerFont or ns.Media.font, tSize, cfg.timerOutlineStyle, true)
     timerTxt:SetJustifyH(tJustify)
-    timerTxt:SetShadowColor(0, 0, 0, 1)
-    timerTxt:SetShadowOffset(1, -1)
     timerTxt:SetTextColor(0.847, 0.627, 0.380, 1)
     timerTxt:SetWidth(w)
     timerTxt:SetPoint(tSelf, bgTex, tRel, tOffX, tOffY)
@@ -653,10 +610,9 @@ function TargetCastBar.Create(parent)
     niTimerFrame:SetFrameLevel(sb:GetFrameLevel() + 2)
     niTimerFrame:SetAlpha(0)
     local niTimerTxt = niTimerFrame:CreateFontString(nil, "OVERLAY")
-    niTimerTxt:SetFont(cfg.timerFont or ns.Media.font, tSize, "")
+    frame.notIntTimerTxtSlug = ns.CreateSlugRing(niTimerFrame, niTimerTxt)
+    ns.ApplyTextOutlineStyle(niTimerTxt, frame.notIntTimerTxtSlug, cfg.timerFont or ns.Media.font, tSize, cfg.timerOutlineStyle, true)
     niTimerTxt:SetJustifyH(tJustify)
-    niTimerTxt:SetShadowColor(0, 0, 0, 1)
-    niTimerTxt:SetShadowOffset(1, -1)
     niTimerTxt:SetTextColor(COLOR_NOT_INTERRUPTIBLE[1], COLOR_NOT_INTERRUPTIBLE[2], COLOR_NOT_INTERRUPTIBLE[3], 1)
     niTimerTxt:SetWidth(w)
     niTimerTxt:SetPoint(tSelf, bgTex, tRel, tOffX, tOffY)
@@ -671,10 +627,9 @@ function TargetCastBar.Create(parent)
     impTimerFrame:SetFrameLevel(sb:GetFrameLevel() + 3)
     impTimerFrame:SetAlpha(0)
     local impTimerTxt = impTimerFrame:CreateFontString(nil, "OVERLAY")
-    impTimerTxt:SetFont(cfg.timerFont or ns.Media.font, tSize, "")
+    frame.impTimerTxtSlug = ns.CreateSlugRing(impTimerFrame, impTimerTxt)
+    ns.ApplyTextOutlineStyle(impTimerTxt, frame.impTimerTxtSlug, cfg.timerFont or ns.Media.font, tSize, cfg.timerOutlineStyle, true)
     impTimerTxt:SetJustifyH(tJustify)
-    impTimerTxt:SetShadowColor(0, 0, 0, 1)
-    impTimerTxt:SetShadowOffset(1, -1)
     impTimerTxt:SetTextColor(COLOR_IMPORTANT[1], COLOR_IMPORTANT[2], COLOR_IMPORTANT[3], 1)
     impTimerTxt:SetWidth(w)
     impTimerTxt:SetPoint(tSelf, bgTex, tRel, tOffX, tOffY)
@@ -739,15 +694,15 @@ function TargetCastBar.SetDragUnlocked(val)
     dragUnlocked = val and true or false
 end
 
----------------------------------------------------------------------------
 -- ApplySettings
----------------------------------------------------------------------------
 function TargetCastBar.ApplySettings()
     if not frame then return end
 
     local cfg = Cfg()
     local w   = cfg.width  or 260
     local h   = cfg.height or 3
+    local pt  = cfg.point         or "BOTTOM"
+    local rpt = cfg.relativePoint or "CENTER"
     local x   = cfg.x      or 260
     local y   = cfg.y      or -120
 
@@ -789,14 +744,14 @@ function TargetCastBar.ApplySettings()
     local nOffY    = cfg.nameOffY    or 9
     local nJustify = cfg.nameJustify or "CENTER"
     local nSelf, nRel = TextAnchor(nJustify)
-    frame.nameTxt:SetFont(cfg.font or BEBAS_FONT, nSize, "")
+    ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
     frame.nameTxt:SetJustifyH(nJustify)
     frame.nameTxt:SetWidth(w)
     frame.nameTxt:ClearAllPoints()
     frame.nameTxt:SetPoint(nSelf, frame.bgTex, nRel, nOffX, nOffY)
 
     if frame.notIntNameTxt then
-        frame.notIntNameTxt:SetFont(cfg.font or BEBAS_FONT, nSize, "")
+        ns.ApplyTextOutlineStyle(frame.notIntNameTxt, frame.notIntNameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
         frame.notIntNameTxt:SetJustifyH(nJustify)
         frame.notIntNameTxt:SetWidth(w)
         frame.notIntNameTxt:ClearAllPoints()
@@ -804,7 +759,7 @@ function TargetCastBar.ApplySettings()
     end
 
     if frame.impNameTxt then
-        frame.impNameTxt:SetFont(cfg.font or BEBAS_FONT, nSize, "")
+        ns.ApplyTextOutlineStyle(frame.impNameTxt, frame.impNameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
         frame.impNameTxt:SetJustifyH(nJustify)
         frame.impNameTxt:SetWidth(w)
         frame.impNameTxt:ClearAllPoints()
@@ -817,14 +772,14 @@ function TargetCastBar.ApplySettings()
     local tOffY    = cfg.timerOffY    or 2
     local tJustify = cfg.timerJustify or "RIGHT"
     local tSelf, tRel = TextAnchor(tJustify)
-    frame.timerTxt:SetFont(cfg.timerFont or ns.Media.font, tSize, "")
+    ns.ApplyTextOutlineStyle(frame.timerTxt, frame.timerTxtSlug, cfg.timerFont or ns.Media.font, tSize, cfg.timerOutlineStyle, true)
     frame.timerTxt:SetJustifyH(tJustify)
     frame.timerTxt:SetWidth(w)
     frame.timerTxt:ClearAllPoints()
     frame.timerTxt:SetPoint(tSelf, frame.bgTex, tRel, tOffX, tOffY)
 
     if frame.notIntTimerTxt then
-        frame.notIntTimerTxt:SetFont(cfg.timerFont or ns.Media.font, tSize, "")
+        ns.ApplyTextOutlineStyle(frame.notIntTimerTxt, frame.notIntTimerTxtSlug, cfg.timerFont or ns.Media.font, tSize, cfg.timerOutlineStyle, true)
         frame.notIntTimerTxt:SetJustifyH(tJustify)
         frame.notIntTimerTxt:SetWidth(w)
         frame.notIntTimerTxt:ClearAllPoints()
@@ -832,7 +787,7 @@ function TargetCastBar.ApplySettings()
     end
 
     if frame.impTimerTxt then
-        frame.impTimerTxt:SetFont(cfg.timerFont or ns.Media.font, tSize, "")
+        ns.ApplyTextOutlineStyle(frame.impTimerTxt, frame.impTimerTxtSlug, cfg.timerFont or ns.Media.font, tSize, cfg.timerOutlineStyle, true)
         frame.impTimerTxt:SetJustifyH(tJustify)
         frame.impTimerTxt:SetWidth(w)
         frame.impTimerTxt:ClearAllPoints()
@@ -841,21 +796,25 @@ function TargetCastBar.ApplySettings()
 
     -- Position
     frame:ClearAllPoints()
-    frame:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
+    frame:SetPoint(pt, UIParent, rpt, x, y)
 
-    -- Preview
+    -- Preview sauf si module desactive (LiveApply peut rappeler ApplySettings pendant la preview, cf. CastBar.lua).
     if state.preview then
-        frame:Show()
-        frame.nameTxt:SetText(state.name or L["CASTBAR_PREVIEW_SPELL_NAME"])
-        frame.timerTxt:SetText(FormatTime(math.max(0, state.endTime - GetTime())))
+        if cfg.enabled == false then
+            frame:Hide()
+        else
+            frame:Show()
+            frame.nameTxt:SetText(state.name or L["CASTBAR_PREVIEW_SPELL_NAME"])
+            frame.timerTxt:SetText(FormatTime(math.max(0, state.endTime - GetTime())))
+        end
     end
 end
 
----------------------------------------------------------------------------
 -- Preview
----------------------------------------------------------------------------
 function TargetCastBar.SetPreview(on)
     if not frame then return end
+    -- Meme garde que CastBar.SetPreview : module desactive = jamais de preview.
+    if on and ns.GetCfg("targetCastBar").enabled == false then return end
     state.preview = on
     if on then
         state.active           = true

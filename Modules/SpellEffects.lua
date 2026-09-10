@@ -2,16 +2,14 @@
 -- Système complet :
 --   • Combos : 1 sort → N animations (chacune avec delay, position, rotation, scale)
 --   • Pool de PlayerModel frames réutilisables
---   • Ancrage au cercle de ressource central (AishaddonRingBar)
+--   • Ancrage au cercle de ressource central (AishCoreRingBar)
 --   • Preview depuis le panneau Settings
 local addonName, ns = ...
 
 local SpellEffects = {}
 ns.Modules.SpellEffects = SpellEffects
 
----------------------------------------------------------------------------
 -- Helper nom de sort (C_Spell.GetSpellName est la seule API propre en TWW)
----------------------------------------------------------------------------
 local function GetSpellName(spellID)
   if C_Spell and C_Spell.GetSpellName then
     local ok, name = pcall(C_Spell.GetSpellName, spellID)
@@ -21,22 +19,27 @@ local function GetSpellName(spellID)
   return ok2 and name2 or nil
 end
 
----------------------------------------------------------------------------
--- Constantes
----------------------------------------------------------------------------
 local MAX_POOL     = 8         -- modèles simultanés max
 local DEFAULT_DUR  = 0.8       -- durée par défaut (sec)
 local DEFAULT_FADE = 0.25      -- durée de fadeout (sec)
-local RING_FRAME   = "AishaddonRingBar"
+local RING_FRAME   = "AishCoreRingBar"
 
----------------------------------------------------------------------------
 -- Pool de PlayerModel frames
----------------------------------------------------------------------------
 local pool       = {}   -- { frame, inUse, timer }
 local poolSize   = 0
 
 local function GetAnchor()
   return _G[RING_FRAME] or UIParent
+end
+
+--- Vrai si les toggles "Desactiver en Raid/Groupe" bloquent les animations reelles (jamais les previews GUI).
+local function AnimationsBlockedByGroupState()
+  local cfg = ns.GetCfg("spellEffects")
+  if not cfg then return false end
+  local inRaid = IsInRaid and IsInRaid()
+  if cfg.disableAnimsInRaid and inRaid then return true end
+  if cfg.disableAnimsInGroup and not inRaid and IsInGroup and IsInGroup() then return true end
+  return false
 end
 
 local function AcquireModel()
@@ -48,7 +51,7 @@ local function AcquireModel()
   end
   if poolSize >= MAX_POOL then return nil end
   poolSize = poolSize + 1
-  local f = CreateFrame("PlayerModel", "AishaddonFxPool" .. poolSize, UIParent)
+  local f = CreateFrame("PlayerModel", "AishCoreFxPool" .. poolSize, UIParent)
   f:SetSize(200, 200)
   f:SetKeepModelOnHide(true)
   f:Hide()
@@ -66,17 +69,14 @@ local function ReleaseModel(entry)
   entry.inUse = false
 end
 
----------------------------------------------------------------------------
--- Positionnement d'un modèle
----------------------------------------------------------------------------
---- `overrideAnchor` : parent du frame (contrôle la visibilité hiérarchique).
---- `pointAnchor` (optionnel) : référence de positionnement pour SetPoint —
---- distincte du parent. Utile pour parenter à UIParent (toujours visible)
---- tout en conservant les offsets anchorX/anchorY configurés/prévisualisés
---- relativement à l'anneau de ressource (sinon l'anim apparaît décalée de
---- toute la distance entre le centre de l'écran et le centre de l'anneau).
---- SetPoint fonctionne correctement contre une frame masquée : sa position
---- de layout reste valide même si :IsShown() == false.
+-- Base 500x500 pour "Buffs manquants" (vs 200x200 ailleurs) : partagee par ApplyAnimConfig
+-- et les tickers de refresh live, pour eviter un retrecissement brutal au 1er tick.
+local function GetBaseSizeForAnchor(anchor)
+  local anchorName = anchor and anchor.GetName and anchor:GetName() or ""
+  return (anchorName == "AishCoreMissingBuffFrame") and 500 or 200
+end
+
+-- overrideAnchor = parent (visibilite hierarchique) ; pointAnchor optionnel = reference de position pour SetPoint.
 local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor)
   local anchor = overrideAnchor or GetAnchor()
   local pAnchor = pointAnchor or anchor
@@ -85,15 +85,29 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor)
   f:ClearAllPoints()
   f:SetPoint("CENTER", pAnchor, "CENTER", anim.anchorX or 0, anim.anchorY or 0)
 
-  local sz = (anim.scale or 1) * 200
+  local strata = anim.strata or "BACKGROUND"
+  -- Profil visuel (taille/strate) derive de pAnchor (reference de position), pas du parent.
+  local anchorName = pAnchor.GetName and pAnchor:GetName() or ""
+  local isOoc = (anchorName == "AishCoreHealthRing")
+  local isOrb = anchorName:find("^AishCoreSecDot") or anchorName:find("^AishCoreOCSecDot")
+  local isMissingBuff = (anchorName == "AishCoreMissingBuffFrame")
+
+  local baseSize = GetBaseSizeForAnchor(pAnchor)
+  local sz = (anim.scale or 1) * baseSize
   f:SetSize(sz, sz)
 
-  local strata = anim.strata or "BACKGROUND"
-  local anchorName = anchor.GetName and anchor:GetName() or ""
-  local isOoc = (anchorName == "AishaddonHealthRing")
-  local isOrb = anchorName:find("^AishaddonSecDot") or anchorName:find("^AishaddonOCSecDot")
-
-  if isOrb then
+  if isMissingBuff then
+    -- Icone d'alerte "Buffs manquants" : mêmes 3 niveaux (fond/moyen/premier plan), relatifs à l'icône.
+    if strata == "FOREGROUND" then
+      f:SetFrameStrata("HIGH")
+      f:SetFrameLevel(anchor:GetFrameLevel() + 10)
+    elseif strata == "HIGH" or strata == "MEDIUM" then
+      f:SetFrameStrata("HIGH")
+      f:SetFrameLevel(anchor:GetFrameLevel() + 1)
+    else
+      f:SetFrameStrata("BACKGROUND")
+    end
+  elseif isOrb then
     -- Globes externes : 2 niveaux seulement
     if strata == "FOREGROUND" then
       f:SetFrameStrata(anchor:GetFrameStrata())
@@ -148,16 +162,15 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor)
   f:SetAlpha(anim.alpha or 1)
 end
 
----------------------------------------------------------------------------
--- Jouer une animation unique
----------------------------------------------------------------------------
-local function PlaySingleAnim(anim, overrideAnchor)
+-- onSpawn(entry, anchor) optionnel : notifie l'appelant (utilisé par PreviewComboLoop pour le refresh live).
+local function PlaySingleAnim(anim, overrideAnchor, onSpawn)
   local entry = AcquireModel()
   if not entry then return end
 
   local f = entry.frame
   ApplyAnimConfig(f, anim, overrideAnchor)
   f:Show()
+  if onSpawn then onSpawn(entry, overrideAnchor) end
 
   local duration = anim.duration or DEFAULT_DUR
   local fadeTime = math.min(DEFAULT_FADE, duration * 0.4)
@@ -180,31 +193,24 @@ local function PlaySingleAnim(anim, overrideAnchor)
   end)
 end
 
----------------------------------------------------------------------------
 -- Jouer un combo (N animations avec delays)
----------------------------------------------------------------------------
-local function PlayCombo(combo, overrideAnchor)
+local function PlayCombo(combo, overrideAnchor, onSpawn)
   if not combo or #combo == 0 then return end
   for _, anim in ipairs(combo) do
     if anim.enabled ~= false then
       local delay = anim.delay or 0
       if delay > 0 then
-        C_Timer.After(delay, function() PlaySingleAnim(anim, overrideAnchor) end)
+        C_Timer.After(delay, function() PlaySingleAnim(anim, overrideAnchor, onSpawn and function(entry, anchor) onSpawn(anim, entry, anchor) end) end)
       else
-        PlaySingleAnim(anim, overrideAnchor)
+        PlaySingleAnim(anim, overrideAnchor, onSpawn and function(entry, anchor) onSpawn(anim, entry, anchor) end)
       end
     end
   end
 end
 
----------------------------------------------------------------------------
 -- API publique
----------------------------------------------------------------------------
 
---- Résout le spellID configuré correspondant à un cast.
---- Cas courants : sort avec IDs différents selon la source (talent tree vs barre d'action).
---- Ex: Ruée rugissante 106898 (talent) vs 77764 (barre). Même nom → même sort.
---- Priorité : 1) match direct  2) match par nom de sort
+--- Résout le spellID configuré pour un cast (alias, ID direct, ou fallback par nom si talent/override).
 local function ResolveComboSpellID(spellID, combos)
   if not combos then return nil end
   -- 1) Vérifier les alias explicites en priorité (peut pointer vers un autre entry même si spellID existe directement)
@@ -217,9 +223,7 @@ local function ResolveComboSpellID(spellID, combos)
   end
   -- 2) Match direct
   if combos[spellID] then return spellID end
-  -- 3) Fallback par nom — uniquement si le sort est une variante (override/talent)
-  --    du sort configuré. Évite les faux positifs (ex: Fracture 467283 du proc Hot Hand
-  --    ≠ Fracture 197214 du sort configuré, même nom mais sorts différents).
+  -- 3) Fallback par nom, seulement si variante/override du sort configuré (évite les faux positifs)
   local name = GetSpellName(spellID)
   if not name then return nil end
   for configID in pairs(combos) do
@@ -240,6 +244,7 @@ end
 function SpellEffects.Play(spellID)
   local cfg = ns.GetCfg("spellEffects")
   if not cfg or not cfg.enabled then return end
+  if AnimationsBlockedByGroupState() then return end
 
   -- Nouveau format : combos (filtre per-anim trigger)
   local combos = cfg.combos
@@ -289,22 +294,18 @@ function SpellEffects.Play(spellID)
   end
 end
 
----------------------------------------------------------------------------
 -- Casting animations : jouées pendant le cast/channel d'un sort
----------------------------------------------------------------------------
 local castingEntries   = {}   -- pool entries en cours pour un cast
 local castingTicker    = nil  -- auto-stop timer
 local castingSpellID   = nil  -- pour détecter le même channel
 local castingGen       = 0    -- compteur de génération (incrémenté à chaque PlayCasting)
 
--- État des sorts augmentés (Evoker empower) : SUCCEEDED fire au début
--- du cast, donc on doit reporter le onhit à la fin (EMPOWER_STOP).
+-- Evoker empower : SUCCEEDED fire au début du cast, le onhit est donc différé à EMPOWER_STOP.
 local empowerSpellID       = nil   -- spellID du sort augmenté en cours
 local empowerPendingOnhit  = nil   -- timer handle pour le onhit différé
 
 --- Joue les animations "casting" d'un combo pendant toute la durée du cast.
---- isChannel : true si appelé depuis CHANNEL_START (permet de garder les anims
----             en place quand WoW re-fire START pour le même channel).
+--- isChannel : true si appelé depuis CHANNEL_START (garde les anims en place si WoW re-fire START).
 local function PlayCasting(spellID, castDuration, isChannel)
   if SpellEffects._debugNext or SpellEffects._debugAll then
     if SpellEffects._debugNext then SpellEffects._debugNext = false end
@@ -369,9 +370,7 @@ local function PlayCasting(spellID, castDuration, isChannel)
   end
   local combos = cfg.combos
   local resolvedID = ResolveComboSpellID(spellID, combos)
-  -- Fallback par nom : les canalisations utilisent souvent un spellID différent
-  -- du sort de base (ex: Penance 47758 vs 47540). Sûr car PlayCasting ne se
-  -- déclenche que sur le cast actif du joueur.
+  -- Fallback par nom : les canalisations utilisent souvent un spellID différent (ex: Penance 47758 vs 47540).
   if not resolvedID then
     local castName = GetSpellName(spellID)
     if castName then
@@ -464,19 +463,25 @@ function SpellEffects.PreviewCombo(combo)
   PlayCombo(combo)
 end
 
--- Déclarée ici (avant StopAll) car les modèles d'animations soutenues d'auras
--- partagent le même pool, mais ne doivent PAS être coupés quand l'anneau de
--- ressource se masque : une aura peut rester active hors combat.
+-- Déclarée ici (avant StopAll) : partage le pool, mais protégée du nettoyage (aura active hors combat).
 local sustainedAuraEntries = {}  -- [auraID] = { entry, ... }
+-- Miroir pour "Buffs manquants" (Modules/Auras/Core/MissingBuffs.lua), même protection.
+local sustainedMissingBuffEntries = {}  -- [spellID] = { entry, ... }
+-- Miroir pour Ruée Ardente, déclaré ici pour être visible depuis StopAll.
+local sustainedBurningRushEntries = {}  -- [spellID] = { entry, ... }
 
---- Stoppe toutes les animations en cours (sauf les modèles tenus par des
---- combos d'auras actuellement actifs : ils sont ancrés sur UIParent et
---- vivent indépendamment du cercle de ressource / du combat).
+--- Stoppe toutes les animations en cours (protège les combos d'auras actifs, ancrés sur UIParent).
 function SpellEffects.StopAll()
   StopCasting()
   SpellEffects.StopAllSustained()
   local protectedAura = {}
   for _, entries in pairs(sustainedAuraEntries) do
+    for _, entry in ipairs(entries) do protectedAura[entry] = true end
+  end
+  for _, entries in pairs(sustainedMissingBuffEntries) do
+    for _, entry in ipairs(entries) do protectedAura[entry] = true end
+  end
+  for _, entries in pairs(sustainedBurningRushEntries) do
     for _, entry in ipairs(entries) do protectedAura[entry] = true end
   end
   for i = 1, poolSize do
@@ -486,15 +491,14 @@ function SpellEffects.StopAll()
   end
 end
 
----------------------------------------------------------------------------
 -- Animations soutenues : démarrées/arrêtées explicitement (procs, buffs…)
----------------------------------------------------------------------------
 local sustainedEntries = {}  -- [spellID] = { entry, ... }
 
 --- Démarre une animation soutenue pour spellID (reste visible jusqu'à StopSustained).
 function SpellEffects.StartSustained(spellID)
   local cfg = ns.GetCfg("spellEffects")
   if not cfg or not cfg.enabled then return end
+  if AnimationsBlockedByGroupState() then return end
   local combos = cfg.combos
   local resolvedID = ResolveComboSpellID(spellID, combos)
   if not resolvedID then return end
@@ -543,18 +547,13 @@ function SpellEffects.StopAllSustained()
   end
 end
 
----------------------------------------------------------------------------
--- Animations soutenues déclenchées par une aura (joueur ou cible) :
--- tournent en continu tant que l'aura est présente, sans distinction
--- onhit/casting (un seul type de déclenchement).
--- (sustainedAuraEntries est déclarée plus haut, avant StopAll, pour pouvoir
--- protéger ces entrées du nettoyage global du pool.)
----------------------------------------------------------------------------
+-- Animations soutenues déclenchées par une aura (joueur ou cible) : tournent tant que l'aura est présente.
 
 --- Démarre l'animation soutenue associée à l'apparition d'une aura.
 function SpellEffects.StartAuraSustained(auraID)
   local cfg = ns.GetCfg("spellEffects")
   if not cfg or not cfg.enabled then return end
+  if AnimationsBlockedByGroupState() then return end
   local combo = cfg.auraCombos and cfg.auraCombos[auraID]
   if not combo then return end
 
@@ -581,17 +580,12 @@ function SpellEffects.StartAuraSustained(auraID)
             .. " attempt=" .. tostring(attempt))
         end
         if not entry then
-          -- Pool saturé (combos onhit/casting très actifs en combat) : on
-          -- retente un peu plus tard au lieu d'abandonner — sans ça, l'anim
-          -- soutenue ne s'affiche jamais tant qu'aucune nouvelle transition
-          -- de présence ne se reproduit (_auraPresence reste déjà à true).
+          -- Pool saturé : retente plus tard plutôt que d'abandonner l'anim soutenue.
           if attempt < 20 then
             C_Timer.After(0.25, function() spawn(attempt + 1) end)
           end
           return
         end
-        -- Parenté sur GetAnchor() (= AishaddonRingBar) comme les combos de sorts :
-        -- le modèle hérite de la visibilité du cercle et se cache avec lui.
         ApplyAnimConfig(entry.frame, anim)
         entry.frame:Show()
         if SpellEffects._debugAll then
@@ -644,9 +638,120 @@ function SpellEffects.StopAllAuraSustained()
   end
 end
 
----------------------------------------------------------------------------
+-- Animations soutenues du module "Buffs manquants" : miroir de StartAuraSustained mais sans scan
+-- d'aura (présence lue depuis MissingBuffs), ancré sur AishCoreMissingBuffFrame (l'icône d'alerte).
+
+--- Démarre l'animation soutenue associée à l'affichage d'un spellID par le
+--- module "Buffs manquants".
+function SpellEffects.StartMissingBuffSustained(spellID)
+  local cfg = ns.GetCfg("spellEffects")
+  if not cfg or not cfg.enabled then return end
+  if AnimationsBlockedByGroupState() then return end
+  local combo = cfg.missingBuffsCombos and cfg.missingBuffsCombos[spellID]
+  if not combo then return end
+
+  SpellEffects.StopMissingBuffSustained(spellID)
+
+  local entries = {}
+  sustainedMissingBuffEntries[spellID] = entries
+  local anchor = _G["AishCoreMissingBuffFrame"] or UIParent
+
+  for _, anim in ipairs(combo) do
+    if anim.enabled ~= false then
+      local function spawn(attempt)
+        attempt = attempt or 1
+        if sustainedMissingBuffEntries[spellID] ~= entries then return end
+        local entry = AcquireModel()
+        if not entry then
+          if attempt < 20 then
+            C_Timer.After(0.25, function() spawn(attempt + 1) end)
+          end
+          return
+        end
+        ApplyAnimConfig(entry.frame, anim, anchor)
+        entry.frame:Show()
+        entries[#entries + 1] = entry
+      end
+      local delay = anim.delay or 0
+      if delay > 0 then
+        C_Timer.After(delay, spawn)
+      else
+        spawn()
+      end
+    end
+  end
+end
+
+--- Arrête immédiatement l'animation soutenue d'un spellID "buff manquant".
+function SpellEffects.StopMissingBuffSustained(spellID)
+  local entries = sustainedMissingBuffEntries[spellID]
+  if entries then
+    for _, entry in ipairs(entries) do
+      ReleaseModel(entry)
+    end
+    sustainedMissingBuffEntries[spellID] = nil
+  end
+end
+
+--- Arrête toutes les animations soutenues "buff manquant" en cours.
+function SpellEffects.StopAllMissingBuffSustained()
+  for spellID in pairs(sustainedMissingBuffEntries) do
+    SpellEffects.StopMissingBuffSustained(spellID)
+  end
+end
+
+-- Ruée Ardente : comme StartMissingBuffSustained mais parenté sur UIParent (jamais caché), AishCoreMissingBuffFrame sert juste de repère de position
+function SpellEffects.StartBurningRushSustained(spellID)
+  local cfg = ns.GetCfg("spellEffects")
+  if not cfg or not cfg.enabled then return end
+  if AnimationsBlockedByGroupState() then return end
+  local combo = cfg.missingBuffsCombos and cfg.missingBuffsCombos[spellID]
+  if not combo then return end
+
+  SpellEffects.StopBurningRushSustained(spellID)
+
+  local entries = {}
+  sustainedBurningRushEntries[spellID] = entries
+  local posRef = _G["AishCoreMissingBuffFrame"] or UIParent
+
+  for _, anim in ipairs(combo) do
+    if anim.enabled ~= false then
+      local function spawn(attempt)
+        attempt = attempt or 1
+        if sustainedBurningRushEntries[spellID] ~= entries then return end
+        local entry = AcquireModel()
+        if not entry then
+          if attempt < 20 then
+            C_Timer.After(0.25, function() spawn(attempt + 1) end)
+          end
+          return
+        end
+        ApplyAnimConfig(entry.frame, anim, UIParent, posRef)
+        entry.frame:Show()
+        entries[#entries + 1] = entry
+      end
+      local delay = anim.delay or 0
+      if delay > 0 then
+        C_Timer.After(delay, spawn)
+      else
+        spawn()
+      end
+    end
+  end
+end
+
+--- Arrête immédiatement l'animation soutenue de Ruée Ardente.
+function SpellEffects.StopBurningRushSustained(spellID)
+  local entries = sustainedBurningRushEntries[spellID]
+  if entries then
+    for _, entry in ipairs(entries) do
+      ReleaseModel(entry)
+    end
+    sustainedBurningRushEntries[spellID] = nil
+  end
+end
+
 -- Preview en boucle (pour le panneau settings)
----------------------------------------------------------------------------
 local loopEntries    = {}    -- { {entry, anchor}, ... } pour multi-orb
 local loopTicker     = nil   -- ticker lent : relance le modèle à chaque cycle
 local loopUpdateTick = nil   -- ticker rapide : applique position/scale/alpha en continu
@@ -714,7 +819,7 @@ function SpellEffects.PreviewLoop(anim, overrideAnchors)
       pcall(function() ef:SetFacing(math.rad(a.rotation or 0)) end)
 
       -- Scale
-      local sz = (a.scale or 1) * 200
+      local sz = (a.scale or 1) * GetBaseSizeForAnchor(anchor)
       ef:SetSize(sz, sz)
 
       -- Alpha
@@ -727,8 +832,8 @@ function SpellEffects.PreviewLoop(anim, overrideAnchors)
       -- Strata (même logique que ApplyAnimConfig — détection par anchor)
       local strata = a.strata or "BACKGROUND"
       local anchorName = anchor.GetName and anchor:GetName() or ""
-      local isOoc = (anchorName == "AishaddonHealthRing")
-      local isOrb = anchorName:find("^AishaddonSecDot") or anchorName:find("^AishaddonOCSecDot")
+      local isOoc = (anchorName == "AishCoreHealthRing")
+      local isOrb = anchorName:find("^AishCoreSecDot") or anchorName:find("^AishCoreOCSecDot")
 
       if isOrb then
         if strata == "FOREGROUND" then
@@ -795,12 +900,12 @@ function SpellEffects.IsPreviewLooping()
   return #loopEntries > 0
 end
 
----------------------------------------------------------------------------
 -- Preview Combo en boucle
----------------------------------------------------------------------------
-local comboLoopTicker = nil   -- ticker qui relance le combo
-local comboLoopCombo  = nil   -- référence vers le combo DB
-local comboLoopAnchor = nil   -- ancre alternative
+local comboLoopTicker     = nil   -- ticker qui relance le combo
+local comboLoopUpdateTick = nil   -- ticker rapide : reapplique position/scale/alpha en continu
+local comboLoopCombo      = nil   -- référence vers le combo DB
+local comboLoopAnchor     = nil   -- ancre alternative
+local comboLoopLiveEntries = {}   -- { {anim=, entry=, anchor=}, ... } modeles actuellement affiches
 
 --- Démarre un preview combo en boucle.
 --- overrideAnchors : frame unique, table de frames, ou nil.
@@ -820,9 +925,13 @@ function SpellEffects.PreviewComboLoop(combo, overrideAnchors)
   end
   comboLoopAnchor = anchors
 
+  local function onSpawn(anim, entry, anchor)
+    comboLoopLiveEntries[#comboLoopLiveEntries + 1] = { anim = anim, entry = entry, anchor = anchor }
+  end
+
   -- Jouer une première fois sur toutes les ancres
   for _, anchor in ipairs(anchors) do
-    PlayCombo(combo, anchor or nil)
+    PlayCombo(combo, anchor or nil, onSpawn)
   end
 
   -- Calculer la durée totale du combo (max delay + duration)
@@ -841,7 +950,7 @@ function SpellEffects.PreviewComboLoop(combo, overrideAnchors)
     if not comboLoopCombo then return end
     local newDur = CalcTotalDur()
     for _, anchor in ipairs(anchors) do
-      PlayCombo(comboLoopCombo, anchor or nil)
+      PlayCombo(comboLoopCombo, anchor or nil, onSpawn)
     end
     if math.abs(newDur - totalDur) > 0.05 then
       totalDur = newDur
@@ -849,9 +958,31 @@ function SpellEffects.PreviewComboLoop(combo, overrideAnchors)
       comboLoopTicker = C_Timer.NewTicker(totalDur, function()
         if not comboLoopCombo then return end
         for _, anchor in ipairs(anchors) do
-          PlayCombo(comboLoopCombo, anchor or nil)
+          PlayCombo(comboLoopCombo, anchor or nil, onSpawn)
         end
       end)
+    end
+  end)
+
+  -- Ticker rapide (~15 fps) : réapplique position/rotation/échelle/alpha en direct sur les modèles
+  -- déjà affichés, sans rappeler SetModel, pour que les sliders soient visibles avant le prochain cycle.
+  comboLoopUpdateTick = C_Timer.NewTicker(0.066, function()
+    for i = #comboLoopLiveEntries, 1, -1 do
+      local le = comboLoopLiveEntries[i]
+      if not le.entry.inUse then
+        table.remove(comboLoopLiveEntries, i)
+      else
+        local ef = le.entry.frame
+        local a = le.anim
+        local anchor = le.anchor or GetAnchor()
+        pcall(function() ef:SetPosition(a.z or 0, a.x or 0, a.y or 0) end)
+        pcall(function() ef:SetFacing(math.rad(a.rotation or 0)) end)
+        local sz = (a.scale or 1) * GetBaseSizeForAnchor(anchor)
+        ef:SetSize(sz, sz)
+        ef:SetAlpha(a.alpha or 1)
+        ef:ClearAllPoints()
+        ef:SetPoint("CENTER", anchor, "CENTER", a.anchorX or 0, a.anchorY or 0)
+      end
     end
   end)
 end
@@ -859,6 +990,8 @@ end
 --- Stoppe le preview combo en boucle.
 function SpellEffects.StopComboPreview()
   if comboLoopTicker then comboLoopTicker:Cancel(); comboLoopTicker = nil end
+  if comboLoopUpdateTick then comboLoopUpdateTick:Cancel(); comboLoopUpdateTick = nil end
+  wipe(comboLoopLiveEntries)
   comboLoopCombo = nil
   comboLoopAnchor = nil
   -- Libérer tous les modèles en cours
@@ -885,25 +1018,24 @@ end
 
 --- Retourne le frame du cercle de vie OOC.
 function SpellEffects.GetOocAnchor()
-  return _G["AishaddonHealthRing"]
+  return _G["AishCoreHealthRing"]
 end
 
 --- Retourne le frame d'un globe externe par index.
 function SpellEffects.GetSecDotAnchor(idx)
-  return _G["AishaddonSecDot" .. (idx or 1)]
+  return _G["AishCoreSecDot" .. (idx or 1)]
 end
 
 --- Applique les settings.
 function SpellEffects.ApplySettings()
-  -- Les prochaines anims utiliseront la nouvelle config
-  -- Re-déclencher les décorations si nécessaire
+  -- Coupure immédiate si le toggle Raid/Groupe bloque désormais les animations réelles.
+  if AnimationsBlockedByGroupState() then
+    SpellEffects.StopAll()
+  end
   SpellEffects.RefreshDecorations()
 end
 
----------------------------------------------------------------------------
--- Animations décoratives soutenues (OOC cercle, globes externes)
--- Tournent en boucle tant que le frame ancre est visible.
----------------------------------------------------------------------------
+-- Animations décoratives soutenues (OOC cercle, globes externes) : tournent tant que l'ancre est visible.
 local decoPool     = {}   -- { frame, inUse, tag }
 local decoPoolSize = 0
 local MAX_DECO     = 24
@@ -923,9 +1055,7 @@ function SpellEffects.SetGuiMode(on)
   end
 end
 
----------------------------------------------------------------------------
 -- Mapping clé d'orbe → type de pouvoir (pour logique « max »)
----------------------------------------------------------------------------
 local KEY_TO_POWER = {
   combo     = Enum.PowerType.ComboPoints,
   holypower = Enum.PowerType.HolyPower,
@@ -968,7 +1098,7 @@ local function AcquireDecoModel(tag)
   end
   if decoPoolSize >= MAX_DECO then return nil end
   decoPoolSize = decoPoolSize + 1
-  local f = CreateFrame("PlayerModel", "AishaddonDecoPool" .. decoPoolSize, UIParent)
+  local f = CreateFrame("PlayerModel", "AishCoreDecoPool" .. decoPoolSize, UIParent)
   f:SetSize(200, 200)
   f:SetKeepModelOnHide(true)
   f:Hide()
@@ -1104,9 +1234,10 @@ end
 function SpellEffects.StartOocDeco()
   if decoOocActive then return end
   if guiSuppressDeco or #decoPreviewEntries > 0 then return end
+  if AnimationsBlockedByGroupState() then return end
   local combo = ResolveOocCombo()
   if not combo then return end
-  local anchor = _G["AishaddonHealthRing"]
+  local anchor = _G["AishCoreHealthRing"]
   if not anchor then return end
   decoOocActive = true
   StartDecoLoop(combo, anchor, "ooc")
@@ -1119,10 +1250,7 @@ function SpellEffects.StopOocDeco()
   ReleaseDecoByTag("ooc")
 end
 
---- Synchronise le fade des décorations OOC avec l'animation du cercle de vie.
---- shouldShow=true : fade-in depuis alpha 0 ; shouldShow=false : fade-out vers alpha 0.
---- Appelé depuis HealthCircle.AnimateVisibility pour que les modèles 3D
---- apparaissent/disparaissent en même temps que le cercle.
+--- Synchronise le fade des décorations OOC avec l'animation du cercle de vie (HealthCircle.AnimateVisibility).
 function SpellEffects.AnimateOocDeco(shouldShow, duration)
   for i = 1, decoPoolSize do
     local entry = decoPool[i]
@@ -1152,7 +1280,7 @@ end
 local function GetVisibleDotCount()
   local n = 0
   for i = 1, 10 do
-    local dot = _G["AishaddonSecDot" .. i] or _G["AishaddonOCSecDot" .. i]
+    local dot = _G["AishCoreSecDot" .. i] or _G["AishCoreOCSecDot" .. i]
     if dot and dot:IsShown() then n = n + 1 end
   end
   return n
@@ -1176,6 +1304,7 @@ end
 local function GetValidOrbKeys()
   local cfg = ns.GetCfg("spellEffects")
   if not cfg or not cfg.orbCombos then return {}, nil end
+  if cfg.orbsEnabled == false then return {}, nil end
   local orbCombos = cfg.orbCombos
   local _, cls = UnitClass("player")
   cls = cls or ""
@@ -1227,10 +1356,7 @@ local function GetValidOrbKeys()
         if specRune ~= root then include = false end
       end
 
-      -- Règles Evoker : essence_burst uniquement si le proc est actif ;
-      -- masquer essence de base si essence_burst est configuré (et actif).
-      -- Les variantes de spé (_specN_CLASS) ne s'activent que pour la spé courante ;
-      -- elles prennent la priorité sur la clé globale si elles ont du contenu.
+      -- Règles Evoker : essence_burst seulement si le proc est actif ; variantes de spé prioritaires sur la clé globale.
       if include and cls == "EVOKER" then
         local RC = ns.Modules and ns.Modules.ResourceCircle
         local burstActive = RC and RC.IsEssenceBurstActive and RC.IsEssenceBurstActive()
@@ -1280,20 +1406,9 @@ local function GetValidOrbKeys()
         end
       end
 
-      -- Règles Warlock Démonologie : demonic_core_max uniquement si 2 charges dispo ;
-      -- masquer demonic_core de base si _max est configuré ET à 2/2
-      if include and cls == "WARLOCK" then
-        local RC_wl = ns.Modules and ns.Modules.ResourceCircle
-        local coreStacks = RC_wl and RC_wl.GetDemonicCoreStacks and RC_wl.GetDemonicCoreStacks() or 0
-        local maxKey = "demonic_core_max_" .. cls
-        local maxConfigured = orbCombos[maxKey] and #orbCombos[maxKey] > 0
-        if root == "demonic_core_max" then
-          -- N'afficher que si les 4 charges sont disponibles
-          if coreStacks < 4 then include = false end
-        elseif root == "demonic_core" then
-          -- Masquer si _max est configuré ET les 4 charges sont dispo
-          if maxConfigured and coreStacks >= 4 then include = false end
-        end
+      -- Warlock Demonologie : orbes Coeur demoniaque désactivées (lecture des charges peu fiable en combat).
+      if include and cls == "WARLOCK" and (root == "demonic_core" or root == "demonic_core_max") then
+        include = false
       end
 
       if include then validKeys[#validKeys + 1] = key end
@@ -1317,7 +1432,7 @@ local function OrbDecoAddNewDots()
   local validKeys, orbCombos = GetValidOrbKeys()
   if not orbCombos then return end
   for i = 1, 10 do
-    local dot = _G["AishaddonSecDot" .. i] or _G["AishaddonOCSecDot" .. i]
+    local dot = _G["AishCoreSecDot" .. i] or _G["AishCoreOCSecDot" .. i]
     if dot and dot:IsShown() and not animated[i] then
       for _, key in ipairs(validKeys) do
         if not IsRuneKey(key) or IsRuneReady(i) then
@@ -1362,7 +1477,7 @@ local function StartOrbRefreshTicker()
     -- Gestion dots apparaissant / disparaissant (count changed)
     if dotCountChanged then
       for i = 1, 10 do
-        local dot = _G["AishaddonSecDot" .. i] or _G["AishaddonOCSecDot" .. i]
+        local dot = _G["AishCoreSecDot" .. i] or _G["AishCoreOCSecDot" .. i]
         local visible = dot and dot:IsShown()
         if visible and not animated[i] then
           for _, key in ipairs(validKeys) do
@@ -1388,7 +1503,7 @@ local function StartOrbRefreshTicker()
         local ready = IsRuneReady(i)
         if ready ~= _lastRuneReadyStates[i] then
           _lastRuneReadyStates[i] = ready
-          local dot = _G["AishaddonSecDot" .. i] or _G["AishaddonOCSecDot" .. i]
+          local dot = _G["AishCoreSecDot" .. i] or _G["AishCoreOCSecDot" .. i]
           if dot and dot:IsShown() then
             if ready then
               -- Rune rechargée : démarrer l'animation sur ce dot
@@ -1438,11 +1553,12 @@ function SpellEffects.StartOrbDeco()
   if guiSuppressDeco or #decoPreviewEntries > 0 then return end
   local cfg = ns.GetCfg("spellEffects")
   if not cfg or not cfg.enabled then return end
+  if AnimationsBlockedByGroupState() then return end
   local validKeys, orbCombos = GetValidOrbKeys()
   if not orbCombos or #validKeys == 0 then return end
   decoOrbActive = true
   for i = 1, 10 do
-    local dot = _G["AishaddonSecDot" .. i] or _G["AishaddonOCSecDot" .. i]
+    local dot = _G["AishCoreSecDot" .. i] or _G["AishCoreOCSecDot" .. i]
     if dot and dot:IsShown() then
       for _, key in ipairs(validKeys) do
         -- Pour les runes DK : n'animer que si la rune est prête
@@ -1510,7 +1626,7 @@ end
 function SpellEffects.RefreshDecorations()
   SpellEffects.StopAllDeco()
   -- OOC
-  local oocRing = _G["AishaddonHealthRing"]
+  local oocRing = _G["AishCoreHealthRing"]
   if oocRing and oocRing:IsShown() then
     SpellEffects.StartOocDeco()
   end
@@ -1520,11 +1636,7 @@ function SpellEffects.RefreshDecorations()
   end
 end
 
----------------------------------------------------------------------------
--- Deco Preview : modèles persistants avec mise à jour 30 fps
--- Utilisé pour la preview des sections OOC et Orbes dans le panneau Settings.
--- Les modèles restent affichés en permanence (comme le model picker).
----------------------------------------------------------------------------
+-- Deco Preview : modèles persistants 30 fps pour la preview OOC/Orbes du panneau Settings.
 
 --- Démarre une preview décorative persistante.
 --- combo : table d'animations ; overrideAnchors : frame, table de frames, ou nil.
@@ -1587,7 +1699,7 @@ function SpellEffects.StartDecoPreview(combo, overrideAnchors)
       pcall(function() ef:SetFacing(math.rad(a.rotation or 0)) end)
 
       -- Scale
-      local sz = (a.scale or 1) * 200
+      local sz = (a.scale or 1) * GetBaseSizeForAnchor(anchor)
       ef:SetSize(sz, sz)
 
       -- Alpha
@@ -1600,8 +1712,8 @@ function SpellEffects.StartDecoPreview(combo, overrideAnchors)
       -- Strata
       local strata = a.strata or "BACKGROUND"
       local anchorName = anchor.GetName and anchor:GetName() or ""
-      local isOoc = (anchorName == "AishaddonHealthRing")
-      local isOrb = anchorName:find("^AishaddonSecDot") or anchorName:find("^AishaddonOCSecDot")
+      local isOoc = (anchorName == "AishCoreHealthRing")
+      local isOrb = anchorName:find("^AishCoreSecDot") or anchorName:find("^AishCoreOCSecDot")
 
       if isOrb then
         if strata == "FOREGROUND" then
@@ -1653,47 +1765,181 @@ function SpellEffects.IsDecoPreviewActive()
   return #decoPreviewEntries > 0
 end
 
----------------------------------------------------------------------------
 -- Boucle GUI (conservée pour compat — alias vers deco preview)
----------------------------------------------------------------------------
 function SpellEffects.StartGuiLoop() end
 function SpellEffects.StopGuiLoop() end
 
----------------------------------------------------------------------------
--- Détection de présence d'aura (combos "Auras") : joueur pour les buffs,
--- cible pour les debuffs — même logique de classement que Tactics.lua.
----------------------------------------------------------------------------
+-- Détection de présence d'aura (combos "Auras") : joueur pour les buffs, cible pour les debuffs.
 local _auraPresence = {}  -- [auraID] = true si actuellement présente
+local _missingBuffActive = {}  -- [spellID] = true si actuellement affiché par le module "Buffs manquants"
 
---- Source → unité trackée, comme dans Tactics.lua (groupes "buf"/"deb").
+--- Source → unité trackée. Un source non renseigné est traité comme buff joueur (cohérent avec RefreshAuraList).
 local function AuraSourceIsPlayerBuff(source)
-  return source == "buff" or source == "enhancement"
+  return source ~= "debuff" and source ~= "equipment"
 end
 
---- Présence d'une aura, en réutilisant EXACTEMENT le pattern déjà éprouvé par
---- le tracker (Modules/Auras/Core/Scan.lua:CollectFromCDM) qui affiche/masque
---- déjà des icônes avec succès :
----   1) ns.Auras.cdmData[unit][instID].spellId : identité PROPRE de l'aura
----      (clean, fournie par le hook CDM — la même source que GetSpecSpells/
----      le picker, donc aucun risque de mismatch d'ID de variante/rang).
----   2) C_UnitAuras.GetAuraDataByAuraInstanceID(unit, instID) : confirme que
----      CETTE INSTANCE est encore active MAINTENANT — Blizzard renvoie nil dès
----      qu'elle expire, ce qui est précisément ce qui permet au tracker de
----      faire disparaître une icône (cdmData, lui, ne purge jamais ses entrées).
---- Sans l'étape 2, une correspondance dans cdmData seule ne prouve PAS que
---- l'aura est encore là (cf. bug précédent : l'anim restait affichée en boucle).
-local function IsAuraActiveViaCDM(unit, spellID)
-  local cdmU = ns.Auras and ns.Auras.cdmData and ns.Auras.cdmData[unit]
-  local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
-  if not cdmU or not GetAuraDataByAuraInstanceID then return false end
-  for instID, entry in pairs(cdmU) do
-    if entry.spellId == spellID then
-      local ok, aura = pcall(GetAuraDataByAuraInstanceID, unit, instID)
-      if ok and aura then return true end
+--- Présence d'une aura : croise plusieurs sources (hook CDM, ApplyStacksTo, caches...), aucune n'étant fiable seule.
+
+-- Sentinelle native désactivée (SENTINEL_ENABLED=false) : Blizzard n'appelle jamais Show/Hide sur ces boutons ici (cause non identifiée) ; code gardé si ça change un jour.
+local SENTINEL_ENABLED = false
+
+local sentinelContainers = {}    -- [unit] = AuraContainer natif
+local sentinelButtons = {}       -- [unit][spellID] = auraButton natif
+local sentinelGroupCreated = {}  -- [unit][spellID] = true des qu'un groupe dedie existe
+local sentinelPresence = {}      -- [unit][spellID] = true/false, alimenté uniquement par les hooks Show/Hide
+
+local function EnsureSentinelContainer(unit)
+  if not SENTINEL_ENABLED then return nil end
+  if sentinelContainers[unit] then return sentinelContainers[unit] end
+  -- Réutilise le conteneur de la destination "Icons" pour unit="player" plutôt que d'en créer un nouveau.
+  if unit == "player" and ns.Auras and ns.Auras.GetIconsNativeContainer then
+    local shared = ns.Auras.GetIconsNativeContainer()
+    if shared then
+      sentinelContainers[unit] = shared
+      return shared
     end
   end
-  return false
+  if InCombatLockdown and InCombatLockdown() then return nil end
+  local ok, result = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+  if not ok or not result then return nil end
+  sentinelContainers[unit] = result
+  result:SetSize(8, 8)
+  result:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+  pcall(result.SetEnabled, result, true)
+  pcall(result.SetUnit, result, unit)
+  result:Show()
+  -- Flow layout requis même pour un groupe dédié à 1 spellID sans besoin visuel.
+  pcall(result.SetFlowLayoutAnchorPoint, result, "TOP")
+  pcall(result.SetFlowLayoutAxis, result, 1)
+  pcall(result.SetFlowLayoutGrowthDirection, result, 1, -1)
+  pcall(result.SetFlowLayoutMaximumLineSize, result, 900)
+  return result
 end
+
+local function EnsureSentinelGroup(unit, spellID)
+  sentinelGroupCreated[unit] = sentinelGroupCreated[unit] or {}
+  if sentinelGroupCreated[unit][spellID] then return end
+  local c = EnsureSentinelContainer(unit)
+  if not c then return end
+  local groupKey = "aishSentinel_" .. unit .. "_" .. tostring(spellID)
+  local filterStr = (unit == "player") and "HELPFUL" or "HARMFUL"
+  local okAdd = pcall(function()
+    c:AddAuraGroup(groupKey, filterStr, {
+      maxFrameCount = 1,
+      candidateFilters = { includeSpellIDs = { [spellID] = true } },
+      -- layout requis pour que plusieurs groupes dédiés cohabitent sur le même conteneur.
+      layout = { elementSpacing = 0, lineSpacing = 0, elementWidth = 1, elementHeight = 1, layoutIndex = 1 },
+      initializeFrame = function(auraButton)
+        local okCheck, canAccess = pcall(function()
+          return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
+        end)
+        if not (okCheck and canAccess) then return end
+        pcall(auraButton.SetSize, auraButton, 1, 1)
+        -- SetIcon minimal (transparent) : requis par toutes les destinations natives.
+        pcall(function()
+          local icon = auraButton:CreateTexture(nil, "ARTWORK")
+          icon:SetAllPoints(auraButton)
+          icon:SetAlpha(0)
+          auraButton:SetIcon(icon)
+        end)
+        sentinelButtons[unit] = sentinelButtons[unit] or {}
+        sentinelButtons[unit][spellID] = auraButton
+        sentinelPresence[unit] = sentinelPresence[unit] or {}
+        -- btn:IsShown() lève une erreur "secret value" une fois lié à une vraie aura : on hooke les
+        -- MÉTHODES Show/Hide (HookScript sur OnShow/OnHide est bloqué pour la même raison) sans rien lire.
+        pcall(hooksecurefunc, auraButton, "Show", function()
+          sentinelPresence[unit][spellID] = true
+          if SpellEffects._debugAll then
+            print(string.format("|cff00ffff[SE-DEBUG]|r sentinel SHOW unit=%s spellID=%d (%s) inCombat=%s",
+              unit, spellID, tostring(GetSpellName(spellID)), tostring(InCombatLockdown and InCombatLockdown())))
+          end
+        end)
+        pcall(hooksecurefunc, auraButton, "Hide", function()
+          sentinelPresence[unit][spellID] = false
+          if SpellEffects._debugAll then
+            print(string.format("|cff00ffff[SE-DEBUG]|r sentinel HIDE unit=%s spellID=%d (%s) inCombat=%s",
+              unit, spellID, tostring(GetSpellName(spellID)), tostring(InCombatLockdown and InCombatLockdown())))
+          end
+        end)
+        -- Pas d'état initial forcé : sentinelPresence reste nil jusqu'au premier Show/Hide réellement observé.
+      end,
+    })
+  end)
+  if okAdd then
+    sentinelGroupCreated[unit][spellID] = true
+  end
+end
+
+-- true/false = réponse de la sentinelle native ; nil = pas encore disponible (l'appelant retombe sur les tiers Lua).
+local function IsAuraActiveViaSentinel(unit, spellID)
+  EnsureSentinelGroup(unit, spellID)
+  if not (sentinelGroupCreated[unit] and sentinelGroupCreated[unit][spellID]) then return nil end
+  return sentinelPresence[unit] and sentinelPresence[unit][spellID]
+end
+
+-- dbg (optionnel) : tier qui a répondu true, pour /sedebugcombos. Sentinelle native en premier, puis chaîne Lua de repli.
+local function IsAuraActiveViaCDM(unit, spellID, dbg)
+  local sentinel = IsAuraActiveViaSentinel(unit, spellID)
+  if sentinel ~= nil then
+    if dbg then dbg.tier = sentinel and "sentinel-true" or "sentinel-false" end
+    return sentinel
+  end
+  -- TIER "itemFrame Buffs" : lisible en combat (contrairement aux auraButton, bloqués par le taint),
+  -- seul canal fiable pour une aura sans durée ni stacks (ex: Ruée Ardente).
+  if unit == "player" and ns.Auras and ns.Auras.IsCDMBuffFramePresent then
+    local framePresent = ns.Auras.IsCDMBuffFramePresent(spellID)
+    if framePresent ~= nil then
+      if dbg then dbg.tier = framePresent and "cdmBuffFrame-true" or "cdmBuffFrame-false" end
+      return framePresent
+    end
+  end
+  -- TIER "instance pure" : combat-safe et indépendant des stacks/durée, seul canal pour un buff
+  -- "simple présence" pin sans durée ni stacks réels. Consulté pour les deux unités.
+  if ns.Auras and ns.Auras.IsCDMAuraInstancePresent then
+    local instPresent = ns.Auras.IsCDMAuraInstancePresent(unit, spellID)
+    if instPresent ~= nil then
+      if dbg then dbg.tier = instPresent and "cdmInstance-true" or "cdmInstance-false" end
+      return instPresent
+    end
+  end
+  local cdmU = ns.Auras and ns.Auras.cdmData and ns.Auras.cdmData[unit]
+  local entry = cdmU and cdmU[spellID]
+  if not entry then if dbg then dbg.tier = "no-cdm-entry" end; return false end
+  if unit == "player" then
+    -- Tier 1 : présence directe, peu importe le stack count (capte les auras de simple présence
+    -- que le tier 2 rejetterait à tort, ex: Main Brûlante/215785).
+    local okDirect, auraDirect = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
+    if okDirect and auraDirect ~= nil then if dbg then dbg.tier = "direct" end; return true end
+
+    -- Tier 2 : ApplyStacksTo, capte les cas où le tier 1 échoue mais une vraie lecture de stacks réussit.
+    local RC = ns.Modules and ns.Modules.ResourceCircle
+    if RC and RC.ApplyStacksTo then
+      local found = false
+      pcall(RC.ApplyStacksTo, function() found = true; return true end, spellID)
+      if found then if dbg then dbg.tier = "applystacksto" end; return true end
+    end
+
+    -- Tier 3 : cache "dernière donnée confirmée" (Scan.lua), seulement peuplé si suivi dans "Auras à tracker".
+    local cached = ns.Auras and ns.Auras._lastKnownAura and ns.Auras._lastKnownAura.player and ns.Auras._lastKnownAura.player[spellID]
+    if cached then if dbg then dbg.tier = "lastKnownAura" end; return true end
+
+    -- Tier 4 : canal clone SWIPE, event-driven dès qu'un viewer CDM affiche ce spellID.
+    if ns.Auras and ns.Auras.IsCDMAuraSwipePresent and ns.Auras.IsCDMAuraSwipePresent(spellID) then
+      if dbg then dbg.tier = "cdmSwipePresent" end; return true
+    end
+
+    -- Tier 5 : canal clone BAR (durée/swipe sur un viewer "Barres" spécifiquement pin).
+    if ns.Auras and ns.Auras.IsCDMAuraBarPresent and ns.Auras.IsCDMAuraBarPresent(spellID) then
+      if dbg then dbg.tier = "cdmBarPresent" end; return true
+    end
+    if dbg then dbg.tier = "none" end
+    return false
+  end
+  if dbg then dbg.tier = "non-player-unit" end
+  return true
+end
+-- Exposée pour MissingBuffs.lua (Ruée Ardente) : même résolveur multi-tiers que ScanAuraCombos.
+SpellEffects.IsAuraActiveViaCDM = IsAuraActiveViaCDM
 
 --- Scanne tous les combos d'auras configurés et démarre/arrête les
 --- animations soutenues sur transition de présence (apparition/disparition).
@@ -1712,7 +1958,8 @@ local function ScanAuraCombos()
   for auraID, combo in pairs(auraCombos) do
     if type(auraID) == "number" and combo and #combo > 0 then
       local info = specSpells and specSpells[auraID]
-      local source = info and info.source or "debuff"
+      -- Ne pas forcer un source manquant à "debuff" (cf. AuraSourceIsPlayerBuff).
+      local source = info and info.source
       local present
       if AuraSourceIsPlayerBuff(source) then
         present = IsAuraActiveViaCDM("player", auraID)
@@ -1748,16 +1995,221 @@ local function ScanAuraCombos()
   end
 end
 
----------------------------------------------------------------------------
--- Initialisation
----------------------------------------------------------------------------
+--- Scanne les combos "Buffs manquants" : présence lue directement depuis MissingBuffs, pas de scan d'aura.
+local function ScanMissingBuffCombos()
+  local cfg = ns.GetCfg("spellEffects")
+  local missingBuffsCombos = cfg and cfg.enabled and cfg.missingBuffsCombos
+  -- Ruee Ardente : cas spécial piloté par IsBurningRushActive (jamais d'icône d'alerte pour ce spellID).
+  local burningRushID = ns.Auras and ns.Auras.MISSING_WARLOCK_BURNING_RUSH
+  if not missingBuffsCombos then
+    for spellID in pairs(_missingBuffActive) do
+      _missingBuffActive[spellID] = nil
+      if burningRushID and spellID == burningRushID then SpellEffects.StopBurningRushSustained(spellID)
+      else SpellEffects.StopMissingBuffSustained(spellID) end
+    end
+    return
+  end
+
+  local MB = ns.Auras and ns.Auras.MissingBuffs
+  local currentSpellID = MB and MB.GetCurrentAlertSpell and MB.GetCurrentAlertSpell()
+
+  for spellID, combo in pairs(missingBuffsCombos) do
+    if type(spellID) == "number" and combo and #combo > 0 then
+      local isBurningRush = burningRushID and spellID == burningRushID
+      local active
+      if isBurningRush then
+        active = MB and MB.IsBurningRushActive and MB.IsBurningRushActive() or false
+      else
+        active = (currentSpellID == spellID)
+      end
+      if active and not _missingBuffActive[spellID] then
+        _missingBuffActive[spellID] = true
+        if isBurningRush then SpellEffects.StartBurningRushSustained(spellID)
+        else SpellEffects.StartMissingBuffSustained(spellID) end
+      elseif not active and _missingBuffActive[spellID] then
+        _missingBuffActive[spellID] = nil
+        if isBurningRush then SpellEffects.StopBurningRushSustained(spellID)
+        else SpellEffects.StopMissingBuffSustained(spellID) end
+      end
+    end
+  end
+
+  for spellID in pairs(_missingBuffActive) do
+    local combo = missingBuffsCombos[spellID]
+    if not (combo and #combo > 0) then
+      _missingBuffActive[spellID] = nil
+      if burningRushID and spellID == burningRushID then SpellEffects.StopBurningRushSustained(spellID)
+      else SpellEffects.StopMissingBuffSustained(spellID) end
+    end
+  end
+end
+-- Exposée pour MissingBuffs.lua : permet un scan immédiat sur changement, sans attendre le ticker de 2s.
+SpellEffects.ScanMissingBuffCombos = ScanMissingBuffCombos
+
+-- /sedebugcombos : snapshot instantané de toute la chaîne (sans limite de temps, contrairement à /sedebug all).
+function SpellEffects.DebugDumpAuraCombos()
+  local P = "|cff00ffff[SE-DEBUG]|r "
+  local cfg = ns.GetCfg("spellEffects")
+  print(P .. string.format("cfg present=%s enabled=%s", tostring(cfg ~= nil), tostring(cfg and cfg.enabled)))
+  local auraCombos = cfg and cfg.auraCombos
+  if not auraCombos then
+    print(P .. "|cffff4444cfg.auraCombos est nil/absent -- aucun combo d'aura configure, ou config non chargee.|r")
+    return
+  end
+  local n = 0
+  for _ in pairs(auraCombos) do n = n + 1 end
+  print(P .. string.format("cfg.auraCombos : %d entree(s)", n))
+  if n == 0 then
+    print(P .. "|cffff4444Aucune entree dans auraCombos -- rien a scanner.|r")
+    return
+  end
+
+  local specSpells = ns.Auras and ns.Auras.GetSpecSpells and ns.Auras.GetSpecSpells()
+  print(P .. string.format("ns.Auras.GetSpecSpells() disponible=%s", tostring(specSpells ~= nil)))
+
+  for auraID, combo in pairs(auraCombos) do
+    print(P .. string.format("--- auraID=%s (%s) ---", tostring(auraID), tostring(GetSpellName(auraID))))
+    if type(auraID) ~= "number" then
+      print(P .. "  |cffff4444auraID n'est PAS un nombre -- ignore par ScanAuraCombos.|r")
+    elseif not (combo and #combo > 0) then
+      print(P .. "  |cffff4444combo vide ou absent -- ignore par ScanAuraCombos.|r")
+    else
+      local info = specSpells and specSpells[auraID]
+      print(P .. string.format("  info (discoveredSpells) present=%s source=%s", tostring(info ~= nil), tostring(info and info.source)))
+      local source = info and info.source
+      local isBuff = AuraSourceIsPlayerBuff(source)
+      local checkUnit = isBuff and "player" or "target"
+      print(P .. string.format("  AuraSourceIsPlayerBuff=%s -> unite verifiee=%s", tostring(isBuff), checkUnit))
+      if checkUnit == "target" and not UnitExists("target") then
+        print(P .. "  |cffff4444pas de cible actuelle -- present sera force a false.|r")
+      end
+      local cdmU = ns.Auras and ns.Auras.cdmData and ns.Auras.cdmData[checkUnit]
+      local entry = cdmU and cdmU[auraID]
+      print(P .. string.format("  ns.Auras.cdmData[%s][%s] present=%s%s", checkUnit, tostring(auraID), tostring(entry ~= nil),
+        entry and string.format(" (instID=%s)", tostring(entry.instID)) or ""))
+      if checkUnit == "player" and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+        local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, auraID)
+        print(P .. string.format("  GetPlayerAuraBySpellID(%s) : pcall_ok=%s trouve=%s", tostring(auraID), tostring(ok), tostring(ok and aura ~= nil)))
+      end
+      print(P .. string.format("  Sentinelle native [%s] : groupe cree=%s bouton existe=%s presence(via hooks Show/Hide)=%s",
+        checkUnit,
+        tostring(sentinelGroupCreated[checkUnit] and sentinelGroupCreated[checkUnit][auraID] == true),
+        tostring(sentinelButtons[checkUnit] and sentinelButtons[checkUnit][auraID] ~= nil),
+        tostring(sentinelPresence[checkUnit] and sentinelPresence[checkUnit][auraID])))
+      local dbg = {}
+      local present = (checkUnit == "target" and not UnitExists("target")) and false or IsAuraActiveViaCDM(checkUnit, auraID, dbg)
+      print(P .. string.format("  => present (live, maintenant)=%s tier=%s | _auraPresence (cache)=%s | anim soutenue active=%s",
+        tostring(present), tostring(dbg.tier), tostring(_auraPresence[auraID] or false), tostring(sustainedAuraEntries[auraID] ~= nil)))
+      if ns.Auras and ns.Auras.IsCDMAuraSwipePresent then
+        print(P .. string.format("  IsCDMAuraSwipePresent(%s)=%s | IsCDMAuraBarPresent=%s",
+          tostring(auraID), tostring(ns.Auras.IsCDMAuraSwipePresent(auraID)),
+          tostring(ns.Auras.IsCDMAuraBarPresent and ns.Auras.IsCDMAuraBarPresent(auraID))))
+      end
+    end
+  end
+end
+
+SLASH_SEDEBUGCOMBOS1 = "/sedebugcombos"
+SlashCmdList["SEDEBUGCOMBOS"] = function() SpellEffects.DebugDumpAuraCombos() end
+
+-- /sepincombos : épingle rétroactivement au CDM natif les combos "Auras" créés avant l'auto-épinglage.
+-- À lancer une fois après mise à jour, hors combat (suivi d'un reload si des sorts ont été épinglés).
+SLASH_SEPINCOMBOS1 = "/sepincombos"
+SlashCmdList["SEPINCOMBOS"] = function()
+  local P = "|cff00ffff[SE-DEBUG]|r "
+  local Auras = ns.Auras
+  if not (Auras and Auras.PinAuraToCDM) then
+    print(P .. "ns.Auras.PinAuraToCDM indisponible.")
+    return
+  end
+  local cfg = ns.GetCfg("spellEffects")
+  local auraCombos = cfg and cfg.auraCombos
+  -- Ruée Ardente : vit dans missingBuffsCombos mais dépend du même pin CDM que les combos "Auras".
+  local burningRushID = ns.Auras and ns.Auras.MISSING_WARLOCK_BURNING_RUSH
+  local brCombo = burningRushID and cfg and cfg.missingBuffsCombos
+                  and cfg.missingBuffsCombos[burningRushID]
+  local hasBR = brCombo and #brCombo > 0
+  if not auraCombos and not hasBR then
+    print(P .. "Aucun combo d'aura configure.")
+    return
+  end
+  local pinned, failed = 0, 0
+  local function PinOne(spellID)
+    local ok, msg = Auras.PinAuraToCDM(spellID, true)
+    if not ok then ok, msg = Auras.PinAuraToCDM(spellID, false) end
+    if ok then
+      pinned = pinned + 1
+      print(P .. string.format("  epingle : %s (%d)", tostring(GetSpellName(spellID)), spellID))
+    else
+      failed = failed + 1
+      print(P .. string.format("  echec : %s (%d) -- %s", tostring(GetSpellName(spellID)), spellID, tostring(msg)))
+    end
+  end
+  for auraID, combo in pairs(auraCombos or {}) do
+    if type(auraID) == "number" and combo and #combo > 0 then
+      PinOne(auraID)
+    end
+  end
+  if hasBR then PinOne(burningRushID) end
+  print(P .. string.format("Termine : %d epingle(s), %d echec(s)/deja bon.", pinned, failed))
+  if pinned > 0 then
+    -- Immédiat (pas différé) : chaque épinglage réussi tainte le CDM natif jusqu'au reload.
+    if Auras.PromptCDMReloadIfPending then Auras.PromptCDMReloadIfPending() end
+  end
+end
+
+-- /sedebugbuffs : liste tous les buffs actifs sur le joueur (nom + vrai spellId), pour vérifier
+-- qu'un spellID configuré correspond bien à l'aura réelle (certains sorts castent un ID différent).
+SLASH_SEDEBUGBUFFS1 = "/sedebugbuffs"
+SlashCmdList["SEDEBUGBUFFS"] = function()
+  local P = "|cff00ffff[SE-DEBUG]|r "
+  if not (AuraUtil and AuraUtil.ForEachAura) then
+    print(P .. "AuraUtil.ForEachAura indisponible.")
+    return
+  end
+  print(P .. "Buffs (HELPFUL) actuellement actifs sur le joueur :")
+  local count = 0
+  local ok, err = pcall(AuraUtil.ForEachAura, "player", "HELPFUL", nil, function(aura)
+    if not aura then return false end
+    local sid = aura.spellId
+    local name = aura.name
+    if sid ~= nil and not issecretvalue(sid) then
+      count = count + 1
+      local sidOk, sidStr = pcall(string.format, "%d", sid)
+      print(P .. string.format("  %s (spellId=%s)", tostring(name), sidOk and sidStr or "?"))
+    else
+      count = count + 1
+      print(P .. "  (aura secrete/illisible)")
+    end
+    return false
+  end, true)
+  if not ok then
+    print(P .. "  |cffff4444SCAN ECHOUE : " .. tostring(err) .. "|r")
+  elseif count == 0 then
+    print(P .. "  aucun buff trouve (scan reussi, 0 resultat).")
+  end
+end
+
 local _initialized = false
 
 function SpellEffects.Init()
   if _initialized then return end
   _initialized = true
-  -- Migration unique des anciennes clés OOC non qualifiées
   MigrateOocLegacyKeys()
+
+  -- Crée le conteneur sentinelle dès que possible, hors combat (échoue silencieusement en combat ;
+  -- PLAYER_REGEN_ENABLED ci-dessous rattrape un reload en plein pull).
+  EnsureSentinelContainer("player")
+  EnsureSentinelContainer("target")
+  do
+    local sentinelRetryFrame = CreateFrame("Frame")
+    sentinelRetryFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    sentinelRetryFrame:SetScript("OnEvent", function()
+      EnsureSentinelContainer("player")
+      EnsureSentinelContainer("target")
+    end)
+  end
+
   local evFrame = CreateFrame("Frame")
   evFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
   evFrame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
@@ -1776,10 +2228,7 @@ function SpellEffects.Init()
     end
 
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
-      -- Pour les sorts augmentés (empower), SUCCEEDED fire au début du
-      -- cast. On diffère d'un frame pour laisser EMPOWER_START poser le
-      -- flag empowerSpellID, et on skip le onhit dans ce cas (il sera
-      -- joué à la fin via EMPOWER_STOP).
+      -- Empower : SUCCEEDED fire au début du cast, on diffère d'un frame pour laisser EMPOWER_START poser empowerSpellID et skip le onhit ici.
       local sid = spellID
       C_Timer.After(0, function()
         if empowerSpellID == sid then return end
@@ -1874,7 +2323,7 @@ function SpellEffects.Init()
     end
 
     -- Hook OOC cercle de vie : décorations soutenues
-    local oocRing = _G["AishaddonHealthRing"]
+    local oocRing = _G["AishCoreHealthRing"]
     if oocRing then
       oocRing:HookScript("OnShow", function()
         SpellEffects.StartOocDeco()
@@ -1943,7 +2392,9 @@ function SpellEffects.Init()
       if auraCombos then
         for auraID in pairs(_auraPresence) do
           local info = specSpells and specSpells[auraID]
-          local source = info and info.source or "debuff"
+          -- Meme correction que ScanAuraCombos -- ne pas forcer un source
+          -- manquant a "debuff".
+          local source = info and info.source
           if not AuraSourceIsPlayerBuff(source) then
             _auraPresence[auraID] = nil
             SpellEffects.StopAuraSustained(auraID)
@@ -1954,12 +2405,19 @@ function SpellEffects.Init()
     ScanAuraCombos()
   end)
 
-  -- Filet de sécurité : UNIT_AURA ne se déclenche qu'au CHANGEMENT d'auras,
-  -- pas pour celles déjà présentes au login, au changement de spec/cible ou
-  -- juste après la création d'un combo sur une aura déjà active. Un scan
-  -- périodique léger (cfg.auraCombos est généralement petit) garantit que
-  -- l'animation démarre même si aucun event pertinent ne se reproduit.
+  -- Filet de sécurité : UNIT_AURA ne se déclenche qu'au changement, un poll périodique garantit le démarrage sinon.
   C_Timer.NewTicker(2, ScanAuraCombos)
+  -- Buffs manquants : présence lue via MissingBuffs.GetCurrentAlertSpell(), poll périodique suffit (pas de UNIT_AURA).
+  C_Timer.NewTicker(2, ScanMissingBuffCombos)
+
+  -- Coupe les anims en cours si le toggle Raid/Groupe s'active ; pas de symétrique nécessaire au retrait du groupe.
+  local groupGateFrame = CreateFrame("Frame")
+  groupGateFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+  groupGateFrame:SetScript("OnEvent", function()
+    if AnimationsBlockedByGroupState() then
+      SpellEffects.StopAll()
+    end
+  end)
 
   -- /sedebug : active le mode trace pour le PROCHAIN cast détecté
   SLASH_SEDEBUG1 = "/sedebug"

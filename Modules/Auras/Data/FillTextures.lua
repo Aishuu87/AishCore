@@ -1,21 +1,10 @@
--- AishUIAura/Data/FillTextures.lua
--- ============================================================================
--- Catalogue des 15 textures de remplissage disponibles pour le mode "Remplissage"
--- (pattern LinearProgressTexture).
---
--- Chaque entree definit :
---   - id        : cle unique (servira aussi de path)
---   - label     : texte affiche dans le dropdown
---   - scrollDef : vitesse de scroll par defaut (0 = statique, 0.3-1.0 anime)
---
--- Les textures sont en 256x64 dans Media/UI/FillTextures/, generees
--- proceduralement (Python + seed 4242 pour reproductibilite).
--- ============================================================================
+-- FillTextures.lua : catalogue des textures de remplissage (mode "Remplissage", LinearProgressTexture)
+-- id = cle/path, label = texte dropdown, scrollDef = vitesse de scroll (0 = statique)
 
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 
-local TEX_BASE = "Interface\\AddOns\\Aishaddon\\Media\\UI\\FillTextures\\"
+local TEX_BASE = "Interface\\AddOns\\AishCore\\Media\\UI\\FillTextures\\"
 
 ns.FillTextures = {
     { id="FillBrique",          label=L["AURASDATA_FILLTEX_BRICK"],            scrollDef=0   },

@@ -1,30 +1,21 @@
--- Modules/TargetAuras.lua : Buffs & Debuffs de la cible, affichés sous la TopTargetBar
--- Technique identique à ElvUI/oUF : C_UnitAuras.GetAuraSlots + GetAuraDataBySlot
--- avec gestion des secret values (instances, rated content).
+-- Modules/TargetAuras.lua : Buffs & Debuffs de la cible, affichés sous la TopTargetBar.
+-- Rendu natif obligatoire (AuraContainer) car GetAuraSlots plante en combat sur aura secrète ; preview reste en Lua manuel.
 local addonName, ns = ...
 
 ns.Modules = ns.Modules or {}
 local TargetAuras = {}
 ns.Modules.TargetAuras = TargetAuras
 
----------------------------------------------------------------------------
--- Raccourcis API (cache local)
----------------------------------------------------------------------------
-local GetAuraSlots                  = C_UnitAuras and C_UnitAuras.GetAuraSlots
-local GetAuraDataBySlot             = C_UnitAuras and C_UnitAuras.GetAuraDataBySlot
-local GetAuraDuration               = C_UnitAuras and C_UnitAuras.GetAuraDuration
-local GetAuraApplicationDisplayCount = C_UnitAuras and C_UnitAuras.GetAuraApplicationDisplayCount
-local _issecretvalue                = issecretvalue
+-- Raccourcis API (cache local) -- conservés uniquement pour /tadebug
+local GetAuraSlots       = C_UnitAuras and C_UnitAuras.GetAuraSlots
+local GetAuraDataBySlot  = C_UnitAuras and C_UnitAuras.GetAuraDataBySlot
+local _issecretvalue     = issecretvalue
 
-local GetTime     = GetTime
-local pcall       = pcall
-local ipairs      = ipairs
-local math_floor  = math.floor
-local wipe        = wipe
+local GetTime = GetTime
+local pcall   = pcall
+local ipairs  = ipairs
 
----------------------------------------------------------------------------
 -- Helpers secret-value
----------------------------------------------------------------------------
 local function IsSecret(value)
   return _issecretvalue and _issecretvalue(value) or false
 end
@@ -35,9 +26,7 @@ local function SafeNum(value, fallback)
   return value
 end
 
----------------------------------------------------------------------------
 -- Constantes / Textures
----------------------------------------------------------------------------
 local DARK        = 14 / 255
 local FONT_BOLD   = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Bold.ttf"
 local FONT_FILE   = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf"
@@ -49,20 +38,16 @@ local DEBUFF_TYPE_COLORS = {
   none    = { 0.80, 0.00, 0.00 },
 }
 
----------------------------------------------------------------------------
 -- Etat du module
----------------------------------------------------------------------------
 local frame         = nil
-local buffIcons     = {}
-local debuffIcons   = {}
+local buffIcons     = {}   -- pool preview uniquement (pas de vraie cible)
+local debuffIcons   = {}   -- idem
 local buffRow       = nil
 local debuffRow     = nil
 local previewMode   = false
 local lastUnit      = "target"
 
----------------------------------------------------------------------------
 -- Configuration helpers
----------------------------------------------------------------------------
 local function Cfg()
   return ns.GetCfg("targetAuras")
 end
@@ -78,17 +63,16 @@ local function GrpCfg(group)
   return db or def or {}
 end
 
-local function GrpGet(group, key)
-  local cfg  = Cfg()
-  local db   = cfg and cfg[group]
-  local def  = ns.Defaults and ns.Defaults.targetAuras and ns.Defaults.targetAuras[group]
-  if db  and db[key]  ~= nil then return db[key] end
-  if def and def[key] ~= nil then return def[key] end
+local function IsPlayer(aura)
+  return (not IsSecret(aura.sourceUnit)) and (aura.sourceUnit == "player") or false
 end
 
----------------------------------------------------------------------------
--- Tooltip handlers (style ElvUI/oUF)
----------------------------------------------------------------------------
+local function SafeName(aura)
+  if aura.name and not IsSecret(aura.name) then return aura.name end
+  return ""
+end
+
+-- Tooltip handlers (preview uniquement, les auraButton natifs affichent déjà leur tooltip -- cf. ApplyNativeButtonStyle)
 local function Aura_OnEnter(self)
   if not self.auraInstanceID then return end
   if not self._unit then return end
@@ -98,6 +82,9 @@ local function Aura_OnEnter(self)
   else
     GameTooltip:SetUnitDebuffByAuraInstanceID(self._unit, self.auraInstanceID)
   end
+  if IsAltKeyDown() and self.spellId then
+    pcall(GameTooltip.AddDoubleLine, GameTooltip, "Spell ID", self.spellId, 1, 1, 1, 0.7, 0.7, 0.7)
+  end
   GameTooltip:Show()
 end
 
@@ -105,18 +92,16 @@ local function Aura_OnLeave(self)
   GameTooltip:Hide()
 end
 
----------------------------------------------------------------------------
--- Création d'une icône réutilisable
----------------------------------------------------------------------------
+-- Création d'une icône réutilisable (PREVIEW uniquement)
 local function CreateAuraIcon(parent, index, namePrefix)
-  local f = CreateFrame("Frame", "Aishaddon" .. namePrefix .. index, parent)
+  local f = CreateFrame("Frame", "AishCore" .. namePrefix .. index, parent)
   f:SetSize(26, 26)
   f:EnableMouse(true)
   f:SetScript("OnEnter", Aura_OnEnter)
   f:SetScript("OnLeave", Aura_OnLeave)
 
-  f._unit   = nil   -- unit for tooltip
-  f._filter = nil   -- "HELPFUL" or "HARMFUL"
+  f._unit   = nil
+  f._filter = nil
 
   f.bg = f:CreateTexture(nil, "BACKGROUND")
   f.bg:SetAllPoints()
@@ -136,7 +121,6 @@ local function CreateAuraIcon(parent, index, namePrefix)
   f.cooldown = CreateFrame("Cooldown", "$parentCooldown", f, "CooldownFrameTemplate")
   f.cooldown:SetAllPoints(f.icon)
   f.cooldown:SetDrawEdge(false)
-  -- Le moteur C++ gère le texte de countdown (secret values incluses)
   f.cooldown:SetHideCountdownNumbers(false)
 
   local raised = CreateFrame("Frame", nil, f)
@@ -144,7 +128,8 @@ local function CreateAuraIcon(parent, index, namePrefix)
   raised:SetFrameLevel(f.cooldown:GetFrameLevel() + 1)
 
   f.count = raised:CreateFontString(nil, "OVERLAY")
-  f.count:SetFont(FONT_BOLD, 10, "OUTLINE")
+  f.countSlug = ns.CreateSlugRing(raised, f.count)
+  ns.ApplyTextOutlineStyle(f.count, f.countSlug, FONT_BOLD, 10, nil)
   f.count:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -1, 1)
   f.count:SetJustifyH("RIGHT")
 
@@ -155,28 +140,19 @@ local function CreateAuraIcon(parent, index, namePrefix)
   return f
 end
 
----------------------------------------------------------------------------
--- Pool management
----------------------------------------------------------------------------
 local function EnsureIcons(pool, parent, count, prefix)
   for i = #pool + 1, count do
     pool[i] = CreateAuraIcon(parent, i, prefix)
   end
 end
 
----------------------------------------------------------------------------
--- Layout : positionne les icônes visibles en grille (multi-ligne)
----------------------------------------------------------------------------
 local function LayoutRow(pool, activeCount, rowFrame, grp)
   local size      = grp.iconSize or 26
   local spacing   = grp.iconSpacing or 2
   local growLeft  = grp.growDirection == "LEFT"
   local growUp    = grp.growUpward == true
-  local numRows   = grp.numRows or 1
   local rowSpace  = grp.rowSpacing or 2
-
-  -- Nombre d'icônes par ligne (explicite via config)
-  local perRow = grp.maxAuras or 16
+  local perRow    = grp.maxAuras or 16
 
   for i = 1, activeCount do
     local icon = pool[i]
@@ -189,7 +165,7 @@ local function LayoutRow(pool, activeCount, rowFrame, grp)
     local row  = math.floor((i - 1) / perRow)
     local col  = (i - 1) - row * perRow
     local yOff = row * (size + rowSpace)
-    if growUp then yOff = yOff else yOff = -yOff end
+    if not growUp then yOff = -yOff end
 
     local vAnchor = growUp and "BOTTOMLEFT" or "TOPLEFT"
     local vAnchorR = growUp and "BOTTOMRIGHT" or "TOPRIGHT"
@@ -207,49 +183,13 @@ local function LayoutRow(pool, activeCount, rowFrame, grp)
   end
 end
 
-
----------------------------------------------------------------------------
--- Collecte des auras via C_UnitAuras
----------------------------------------------------------------------------
-local _auraCache = {}
-
-local function CollectAuras(unit, filter)
-  wipe(_auraCache)
-  if not GetAuraSlots then return _auraCache end
-
-  local ok, token, s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,
-        s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,
-        s21,s22,s23,s24,s25,s26,s27,s28,s29,s30,
-        s31,s32,s33,s34,s35,s36,s37,s38,s39,s40
-        = pcall(GetAuraSlots, unit, filter)
-  if not ok then return _auraCache end
-
-  local allSlots = { s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,
-                     s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,
-                     s21,s22,s23,s24,s25,s26,s27,s28,s29,s30,
-                     s31,s32,s33,s34,s35,s36,s37,s38,s39,s40 }
-
-  for _, slot in ipairs(allSlots) do
-    if slot then
-      local okD, aura = pcall(GetAuraDataBySlot, unit, slot)
-      if okD and aura then
-        _auraCache[#_auraCache + 1] = aura
-      end
-    end
-  end
-  return _auraCache
-end
-
----------------------------------------------------------------------------
--- Applique une aura sur une icône (avec config par groupe)
----------------------------------------------------------------------------
 local function ApplyAuraToIcon(icon, aura, unit, isDebuff, grp)
   icon:Show()
   icon.auraInstanceID = aura.auraInstanceID
   icon._unit   = unit
-  icon._filter  = isDebuff and "HARMFUL" or "HELPFUL"
+  icon._filter = isDebuff and "HARMFUL" or "HELPFUL"
+  icon.spellId = aura.spellId
 
-  -- Texture
   if aura.icon and not IsSecret(aura.icon) then
     icon.icon:SetTexture(aura.icon)
   elseif aura.spellId and C_Spell and C_Spell.GetSpellTexture then
@@ -259,24 +199,13 @@ local function ApplyAuraToIcon(icon, aura, unit, isDebuff, grp)
     icon.icon:SetTexture(134400)
   end
 
-  -- Stacks
   local apps = aura.applications or 0
   if IsSecret(apps) then
-    if GetAuraApplicationDisplayCount and aura.auraInstanceID then
-      local okC, countText = pcall(GetAuraApplicationDisplayCount, unit, aura.auraInstanceID, 2, 99)
-      if okC and countText then
-        icon.count:SetText(countText)
-      else
-        icon.count:SetText("")
-      end
-    else
-      icon.count:SetText("")
-    end
+    icon.count:SetText("")
   else
     icon.count:SetText(apps > 1 and apps or "")
   end
 
-  -- Bordure
   local showBorder = grp.showBorder ~= false
   if showBorder then
     if isDebuff then
@@ -293,10 +222,6 @@ local function ApplyAuraToIcon(icon, aura, unit, isDebuff, grp)
     icon.border:Hide()
   end
 
-  -- Cooldown swipe + countdown natif
-  -- On garde TOUJOURS le cooldown actif pour que le moteur C++ affiche
-  -- le timer.  Si showSwipe est désactivé, on rend le swipe invisible
-  -- via SetSwipeColor alpha 0 au lieu de Clear()/Hide().
   local showSwipe = grp.showSwipe ~= false
   icon.cooldown:SetReverse(grp.reverseSwipe == true)
   if showSwipe then
@@ -304,22 +229,12 @@ local function ApplyAuraToIcon(icon, aura, unit, isDebuff, grp)
   else
     icon.cooldown:SetSwipeColor(0, 0, 0, 0)
   end
-  if GetAuraDuration and aura.auraInstanceID then
-    local okDur, durObj = pcall(GetAuraDuration, unit, aura.auraInstanceID)
-    if okDur and durObj then
-      local okSet = pcall(icon.cooldown.SetCooldownFromDurationObject, icon.cooldown, durObj)
-      if not okSet then icon.cooldown:Clear() end
-    else
-      icon.cooldown:Clear()
-    end
+  local dur = SafeNum(aura.duration, 0)
+  local exp = SafeNum(aura.expirationTime, 0)
+  if dur > 0 and exp > 0 then
+    icon.cooldown:SetCooldown(exp - dur, dur)
   else
-    local dur = SafeNum(aura.duration, 0)
-    local exp = SafeNum(aura.expirationTime, 0)
-    if dur > 0 and exp > 0 then
-      icon.cooldown:SetCooldown(exp - dur, dur)
-    else
-      icon.cooldown:Clear()
-    end
+    icon.cooldown:Clear()
   end
   icon.cooldown:Show()
 
@@ -327,31 +242,22 @@ local function ApplyAuraToIcon(icon, aura, unit, isDebuff, grp)
   icon.totalDuration  = SafeNum(aura.duration, 0)
 end
 
----------------------------------------------------------------------------
--- Applique le style (font, couleur, position) aux icônes d'un pool.
--- Le texte de countdown est rendu par le moteur C++ (gère les secrets).
--- On stylise ET repositionne le FontString natif du cooldown.
----------------------------------------------------------------------------
+-- Style d'un FontString de countdown natif (widget Cooldown), utilisé par la preview et le rendu natif (auraButton).
 local function StyleCooldownText(cd, iconFrame, font, fontSize, color, anchor, relPoint, offX, offY)
-  -- Le CooldownFrameTemplate crée un FontString enfant pour le countdown.
-  -- On le cherche dans les régions et les enfants du frame.
   local function styleFS(fs)
     if not fs or not fs.SetFont then return end
     pcall(fs.SetFont, fs, font, fontSize, "OUTLINE")
     pcall(fs.SetTextColor, fs, color[1], color[2], color[3], color[4] or 1)
-    -- Repositionner : détacher du centre par défaut, ancrer sur l'icône
     fs:ClearAllPoints()
-    fs:SetPoint(anchor, iconFrame, relPoint, offX, offY)
+    pcall(fs.SetPoint, fs, anchor, iconFrame, relPoint, offX, offY)
     fs:SetJustifyH("CENTER")
   end
-  -- Vérifier les régions directes
   for i = 1, cd:GetNumRegions() do
     local region = select(i, cd:GetRegions())
     if region and region:IsObjectType("FontString") then
       styleFS(region)
     end
   end
-  -- Vérifier les enfants (Blizzard ajoute parfois un frame CooldownDisplay)
   for i = 1, cd:GetNumChildren() do
     local child = select(i, cd:GetChildren())
     if child then
@@ -370,9 +276,9 @@ local function StyleIcons(pool, grp)
   local dFont = grp.durationFont or FONT_FILE
   local dSize = grp.durationFontSize or 9
   local dCol  = grp.durationColor or { 1, 1, 1, 1 }
-  local dAnc  = grp.durationAnchor   or "CENTER"
-  local dOX   = grp.durationOffX     or 0
-  local dOY   = grp.durationOffY     or 0
+  local dAnc  = grp.durationAnchor or "CENTER"
+  local dOX   = grp.durationOffX or 0
+  local dOY   = grp.durationOffY or 0
   local cFont = grp.countFont or FONT_BOLD
   local cSize = grp.countFontSize or 10
   local cCol  = grp.countColor or { 1, 1, 1, 1 }
@@ -382,17 +288,14 @@ local function StyleIcons(pool, grp)
   for _, icon in ipairs(pool) do
     icon:SetSize(size, size)
 
-    -- Border size
     icon.border:ClearAllPoints()
     icon.border:SetPoint("TOPLEFT", icon, "TOPLEFT", -bSz, bSz)
     icon.border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", bSz, -bSz)
 
-    -- Style + position du texte countdown natif (C++)
-    StyleCooldownText(icon.cooldown, icon, dFont, dSize, dCol, dAnc, dOX, dOY)
+    StyleCooldownText(icon.cooldown, icon, dFont, dSize, dCol, dAnc, dAnc, dOX, dOY)
 
-    -- Count text
     icon.count:ClearAllPoints()
-    icon.count:SetFont(cFont, cSize, "OUTLINE")
+    ns.ApplyTextOutlineStyle(icon.count, icon.countSlug, cFont, cSize, grp.countOutlineStyle)
     icon.count:SetTextColor(cCol[1], cCol[2], cCol[3], cCol[4] or 1)
     icon.count:SetPoint(
       grp.countAnchor   or "BOTTOMRIGHT",
@@ -404,21 +307,8 @@ local function StyleIcons(pool, grp)
   end
 end
 
----------------------------------------------------------------------------
--- Tri des auras (configurable par groupe)
--- Modes : playerFirst, shortFirst, longFirst, alpha, index
----------------------------------------------------------------------------
-local function IsPlayer(aura)
-  return (not IsSecret(aura.sourceUnit)) and (aura.sourceUnit == "player") or false
-end
-
-local function SafeName(aura)
-  if aura.name and not IsSecret(aura.name) then return aura.name end
-  return ""
-end
-
+-- Tri (PREVIEW uniquement -- le rendu natif utilise TASortParams plus bas)
 local SORT_COMPARATORS = {
-  -- Joueur d'abord, puis durée restante croissante
   playerFirst = function(a, b)
     local ap, bp = IsPlayer(a), IsPlayer(b)
     if ap ~= bp then return ap end
@@ -428,7 +318,6 @@ local SORT_COMPARATORS = {
     if bExp == 0 and aExp ~= 0 then return true end
     return aExp < bExp
   end,
-  -- Durée restante la plus courte d'abord
   shortFirst = function(a, b)
     local aExp = SafeNum(a.expirationTime, 0)
     local bExp = SafeNum(b.expirationTime, 0)
@@ -436,7 +325,6 @@ local SORT_COMPARATORS = {
     if bExp == 0 and aExp ~= 0 then return true end
     return aExp < bExp
   end,
-  -- Durée restante la plus longue d'abord
   longFirst = function(a, b)
     local aExp = SafeNum(a.expirationTime, 0)
     local bExp = SafeNum(b.expirationTime, 0)
@@ -444,11 +332,9 @@ local SORT_COMPARATORS = {
     if bExp == 0 and aExp ~= 0 then return true end
     return aExp > bExp
   end,
-  -- Alphabétique par nom
   alpha = function(a, b)
-    return SafeName(a) < SafeName(b)
+    return ns.FoldAccentsLower(SafeName(a)) < ns.FoldAccentsLower(SafeName(b))
   end,
-  -- Ordre d'index Blizzard (pas de tri)
   index = function() return false end,
 }
 
@@ -468,9 +354,7 @@ local function SortAuras(list, mode, reverse)
   end
 end
 
----------------------------------------------------------------------------
 -- Données de preview (faux buffs/debuffs quand pas de cible)
----------------------------------------------------------------------------
 local PREVIEW_BUFF_TEMPLATES = {
   { icon = 135932, name = "Fortitude",      duration = 3600, remaining = 2880, applications = 0, sourceUnit = "player" },
   { icon = 135987, name = "Renew",          duration = 15,   remaining = 11,   applications = 0, sourceUnit = "player" },
@@ -503,9 +387,7 @@ local function MakePreviewAuras(templates)
   return out
 end
 
----------------------------------------------------------------------------
--- Scan complet et rafraîchissement visuel
----------------------------------------------------------------------------
+-- Rafraîchissement PREVIEW (pas de vraie cible) -- le rendu réel passe par les AuraContainer natifs (ConfigureNativeRow).
 local function RefreshAuras()
   if not frame then return end
   local cfg = Cfg()
@@ -514,7 +396,7 @@ local function RefreshAuras()
   local unit = lastUnit
   local usePreview = previewMode and not UnitExists(unit)
 
-  if not UnitExists(unit) and not usePreview then
+  if not usePreview then
     for _, icon in ipairs(buffIcons)  do icon:Hide() end
     for _, icon in ipairs(debuffIcons) do icon:Hide() end
     return
@@ -526,7 +408,7 @@ local function RefreshAuras()
   -- === BUFFS ===
   local perRowB = bGrp.maxAuras or 16
   local maxBuffs = perRowB * (bGrp.numRows or 1)
-  local buffs = usePreview and MakePreviewAuras(PREVIEW_BUFF_TEMPLATES) or CollectAuras(unit, "HELPFUL")
+  local buffs = MakePreviewAuras(PREVIEW_BUFF_TEMPLATES)
   SortAuras(buffs, bGrp.sortMode, bGrp.reverseSort)
   local buffCount = math.min(#buffs, maxBuffs)
   EnsureIcons(buffIcons, buffRow, buffCount, "TargetBuff")
@@ -540,19 +422,7 @@ local function RefreshAuras()
   -- === DEBUFFS ===
   local perRowD = dGrp.maxAuras or 16
   local maxDebuffs = perRowD * (dGrp.numRows or 1)
-  local debuffs = usePreview and MakePreviewAuras(PREVIEW_DEBUFF_TEMPLATES) or CollectAuras(unit, "HARMFUL")
-
-  -- Filtre "debuffs du joueur uniquement"
-  if dGrp.onlyPlayer and not usePreview then
-    local filtered = {}
-    for _, aura in ipairs(debuffs) do
-      if IsPlayer(aura) then
-        filtered[#filtered + 1] = aura
-      end
-    end
-    debuffs = filtered
-  end
-
+  local debuffs = MakePreviewAuras(PREVIEW_DEBUFF_TEMPLATES)
   SortAuras(debuffs, dGrp.sortMode, dGrp.reverseSort)
   local debuffCount = math.min(#debuffs, maxDebuffs)
   EnsureIcons(debuffIcons, debuffRow, debuffCount, "TargetDebuff")
@@ -564,25 +434,319 @@ local function RefreshAuras()
   LayoutRow(debuffIcons, debuffCount, debuffRow, dGrp)
 end
 
----------------------------------------------------------------------------
+-- Rendu natif (AddAuraGroup, unit="target"), combat-safe : widgets créés une fois dans initializeFrame, jamais retouchés après.
+-- candidateFilters = {} : aucune liste blanche, Blizzard montre tout ce qui matche HELPFUL/HARMFUL.
+local SORTMETHOD    = _G.AuraContainerSortMethod
+local SORTDIRECTION = _G.AuraContainerSortDirection
+local AURA_BORDER_STYLE = _G.AuraButtonBorderStyle
+
+local buffState   = { container = nil, pool = {}, groupCreated = false, key = "aishTABuffs" }
+local debuffState = { container = nil, pool = {}, groupCreated = false, key = "aishTADebuffs" }
+
+-- growDirection/growUpward -> flow layout natif horizontal (multi-lignes via SetFlowLayoutMaximumLineSize).
+local function TAFlowParams(growDirection, growUpward)
+  local growLeft = growDirection == "LEFT"
+  local hDir = growLeft and -1 or 1
+  local vDir = growUpward and 1 or -1
+  local anchorPoint
+  if growUpward then
+    anchorPoint = growLeft and "BOTTOMRIGHT" or "BOTTOMLEFT"
+  else
+    anchorPoint = growLeft and "TOPRIGHT" or "TOPLEFT"
+  end
+  return anchorPoint, hDir, vDir
+end
+
+-- sortMode/reverseSort -> équivalent natif le plus proche ("playerFirst" approxime via UnitFrameDebuff, le tri natif n'a pas de notion de source du buff).
+local function TASortParams(sortMode, reverseSort)
+  if not SORTMETHOD then return nil, nil end
+  local method
+  if sortMode == "shortFirst" or sortMode == "longFirst" then
+    method = SORTMETHOD.Expiration
+  elseif sortMode == "alpha" then
+    method = SORTMETHOD.Name
+  elseif sortMode == "index" then
+    method = SORTMETHOD.AuraInstanceIDOnly or SORTMETHOD.Default
+  else -- playerFirst (défaut)
+    method = SORTMETHOD.UnitFrameDebuff or SORTMETHOD.Default
+  end
+  local reverse = (sortMode == "longFirst") ~= (reverseSort == true)
+  local direction = SORTDIRECTION and (reverse and SORTDIRECTION.Reverse or SORTDIRECTION.Normal)
+  return method, direction
+end
+
+-- Créé une seule fois dans initializeFrame (icône, bordure, cooldown, stacks) ; jamais retouché ailleurs.
+local function CreateNativeButtonWidgets(auraButton, isDebuff)
+  local icon = auraButton:CreateTexture(nil, "ARTWORK")
+  icon:SetAllPoints(auraButton)
+  icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  -- NE PAS remplir icon:SetTexture() -- Blizzard le fait via SetIcon() dès qu'un vrai candidat est lié.
+  auraButton:SetIcon(icon)
+
+  local border = auraButton:CreateTexture(nil, "BACKGROUND")
+  border:SetPoint("TOPLEFT", auraButton, "TOPLEFT", -1, 1)
+  border:SetPoint("BOTTOMRIGHT", auraButton, "BOTTOMRIGHT", 1, -1)
+  border:SetColorTexture(DARK, DARK, DARK, 1)
+  auraButton._aishBorder = border
+
+  -- Bordure debuff colorée par Blizzard (SetAuraBorder) : aura.dispelName n'est jamais lisible pour une aura cible.
+  local dispelBorder = auraButton:CreateTexture(nil, "BACKGROUND", nil, -1)
+  dispelBorder:SetPoint("TOPLEFT", auraButton, "TOPLEFT", -1, 1)
+  dispelBorder:SetPoint("BOTTOMRIGHT", auraButton, "BOTTOMRIGHT", 1, -1)
+  dispelBorder:SetColorTexture(1, 1, 1, 1)
+  auraButton._aishDispelBorder = dispelBorder
+  if isDebuff and AURA_BORDER_STYLE and AURA_BORDER_STYLE.Color then
+    pcall(auraButton.SetAuraBorder, auraButton, dispelBorder, {
+      style = AURA_BORDER_STYLE.Color,
+      showWhenHarmful = true,
+      showWhenHelpful = false,
+      showWithoutDispelType = true,
+    })
+  end
+
+  local cd = CreateFrame("Cooldown", nil, auraButton, "CooldownFrameTemplate")
+  cd:SetAllPoints(auraButton)
+  cd:SetDrawEdge(false)
+  cd:SetHideCountdownNumbers(false)
+  auraButton:SetDurationCooldown(cd)
+  auraButton._aishCD = cd
+
+  -- Le FONT doit être posé AVANT SetApplicationCount, sinon erreur "Font not set".
+  local countFS = auraButton:CreateFontString(nil, "OVERLAY", nil, 7)
+  auraButton._aishCountSlug = ns.CreateSlugRing(auraButton, countFS)
+  ns.ApplyTextOutlineStyle(countFS, auraButton._aishCountSlug, FONT_BOLD, 10, nil)
+  countFS:SetJustifyH("RIGHT")
+  auraButton:SetApplicationCount(countFS, {})
+  auraButton._aishCount = countFS
+end
+
+-- Réapplique le style courant à un auraButton déjà créé -- AddAuraGroup ne rappelle initializeFrame qu'une fois par bouton.
+local function ApplyNativeButtonStyle(auraButton, grp, isDebuff)
+  local okCheck, canAccess = pcall(function()
+    return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
+  end)
+  if not (okCheck and canAccess) then return end
+  pcall(function()
+    local size = grp.iconSize or 26
+    auraButton:SetSize(size, size)
+
+    local showBorder = grp.showBorder ~= false
+    local bSz = grp.borderSize or 1
+    if auraButton._aishBorder then
+      auraButton._aishBorder:ClearAllPoints()
+      auraButton._aishBorder:SetPoint("TOPLEFT", auraButton, "TOPLEFT", -bSz, bSz)
+      auraButton._aishBorder:SetPoint("BOTTOMRIGHT", auraButton, "BOTTOMRIGHT", bSz, -bSz)
+      if isDebuff then
+        -- Le debuff utilise dispelBorder (couleur native SetAuraBorder) à la place.
+        auraButton._aishBorder:Hide()
+      else
+        local bc = grp.borderColor or { 1, 1, 1, 0.15 }
+        auraButton._aishBorder:SetVertexColor(bc[1], bc[2], bc[3], bc[4] or 1)
+        if showBorder then auraButton._aishBorder:Show() else auraButton._aishBorder:Hide() end
+      end
+    end
+    if auraButton._aishDispelBorder then
+      if isDebuff and showBorder then
+        auraButton._aishDispelBorder:ClearAllPoints()
+        auraButton._aishDispelBorder:SetPoint("TOPLEFT", auraButton, "TOPLEFT", -bSz, bSz)
+        auraButton._aishDispelBorder:SetPoint("BOTTOMRIGHT", auraButton, "BOTTOMRIGHT", bSz, -bSz)
+        auraButton._aishDispelBorder:Show()
+      else
+        auraButton._aishDispelBorder:Hide()
+      end
+    end
+
+    if auraButton._aishCD then
+      local cd = auraButton._aishCD
+      cd:SetReverse(grp.reverseSwipe == true)
+      if grp.showSwipe ~= false then
+        cd:SetSwipeColor(0, 0, 0, 0.8)
+      else
+        cd:SetSwipeColor(0, 0, 0, 0)
+      end
+      local dAnc = grp.durationAnchor or "CENTER"
+      StyleCooldownText(cd, auraButton,
+        grp.durationFont or FONT_FILE, grp.durationFontSize or 9,
+        grp.durationColor or { 1, 1, 1, 1 },
+        dAnc, dAnc, grp.durationOffX or 0, grp.durationOffY or 0)
+    end
+
+    if auraButton._aishCount then
+      local cnt = auraButton._aishCount
+      ns.ApplyTextOutlineStyle(cnt, auraButton._aishCountSlug, grp.countFont or FONT_BOLD, grp.countFontSize or 10, grp.countOutlineStyle)
+      local cc = grp.countColor or { 1, 1, 1, 1 }
+      cnt:SetTextColor(cc[1], cc[2], cc[3], cc[4] or 1)
+      cnt:ClearAllPoints()
+      cnt:SetPoint(grp.countAnchor or "BOTTOMRIGHT", auraButton,
+        grp.countRelPoint or "BOTTOMRIGHT", grp.countOffX or -1, grp.countOffY or 1)
+    end
+  end)
+end
+
+local function EnsureNativeContainer(state, rowFrame)
+  if state.container then return state.container end
+  if InCombatLockdown and InCombatLockdown() then return nil end
+  local ok, result = pcall(CreateFrame, "AuraContainer", nil, rowFrame, "CustomAuraContainerTemplate")
+  if not ok or not result then return nil end
+  state.container = result
+  result:SetSize(8, 8) -- redimensionné par le flow layout lui-même
+  -- Ordre requis : SetEnabled/SetUnit/Show avant AddAuraGroup, jamais après.
+  pcall(result.SetEnabled, result, true)
+  pcall(result.SetUnit, result, "target")
+  result:Show()
+  return result
+end
+
+-- Crée une fois ou reconfigure (setters Set* natifs) le groupe partagé d'une ligne -- AddAuraGroup n'est appelable qu'une fois par clé.
+local function ConfigureNativeRow(state, rowFrame, filterBase, grp, isDebuff)
+  local c = EnsureNativeContainer(state, rowFrame)
+  if not c then return end
+
+  local size    = grp.iconSize or 26
+  local spacing = grp.iconSpacing or 2
+  local rowGap  = grp.rowSpacing or 2
+  local perRow  = grp.maxAuras or 16
+  local numRows = grp.numRows or 1
+
+  local filter = filterBase
+  if isDebuff and grp.onlyPlayer then
+    filter = filter .. "|PLAYER"
+  end
+
+  local sortMethod, sortDirection = TASortParams(grp.sortMode, grp.reverseSort)
+  local anchorPoint, hDir, vDir = TAFlowParams(grp.growDirection, grp.growUpward == true)
+
+  local layout = {
+    elementSpacing = spacing,
+    lineSpacing = rowGap,
+    elementWidth = size,
+    elementHeight = size,
+    layoutIndex = 1,
+  }
+
+  if not state.groupCreated then
+    local okAdd = pcall(function()
+      c:AddAuraGroup(state.key, filter, {
+        maxFrameCount = perRow * numRows,
+        candidateFilters = {},
+        sortMethod = sortMethod,
+        sortDirection = sortDirection,
+        layout = layout,
+        initializeFrame = function(auraButton)
+          local okCheck, canAccess = pcall(function()
+            return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
+          end)
+          if not (okCheck and canAccess) then return end
+          local okBuild = pcall(CreateNativeButtonWidgets, auraButton, isDebuff)
+          if okBuild then
+            state.pool[#state.pool + 1] = auraButton
+          end
+          ApplyNativeButtonStyle(auraButton, GrpCfg(isDebuff and "debuffs" or "buffs"), isDebuff)
+        end,
+      })
+    end)
+    if okAdd then state.groupCreated = true end
+  else
+    pcall(c.SetAuraGroupFilterString, c, state.key, filter)
+    pcall(c.SetAuraGroupCandidateFilters, c, state.key, {})
+    pcall(c.SetAuraGroupMaxFrameCount, c, state.key, perRow * numRows)
+    pcall(c.SetAuraGroupSortMethod, c, state.key, sortMethod, sortDirection)
+    pcall(c.SetAuraGroupLayout, c, state.key, layout)
+  end
+
+  pcall(c.SetFlowLayoutAnchorPoint, c, anchorPoint)
+  pcall(c.SetFlowLayoutAxis, c, 0) -- 0 = horizontal (numérique obligatoire, cf. AuraTrackerContainer.lua)
+  pcall(c.SetFlowLayoutGrowthDirection, c, hDir, vDir)
+  pcall(c.SetFlowLayoutMaximumLineSize, c, (size + spacing) * perRow - spacing + 1)
+
+  c:ClearAllPoints()
+  c:SetPoint(anchorPoint, rowFrame, anchorPoint, 0, 0)
+
+  for _, btn in ipairs(state.pool) do
+    ApplyNativeButtonStyle(btn, grp, isDebuff)
+  end
+end
+
+-- /tadebug : diagnostic API brute (GetAuraSlots + énumération legacy), gardé pour référence -- le rendu réel passe désormais par le natif.
+local function DebugDumpTargetAuras(filter)
+  filter = filter == "debuff" and "HARMFUL" or "HELPFUL"
+  local unit = "target"
+  local P = "|cff00ffff[TA-DEBUG]|r "
+  print(P .. string.format("unit=%s filter=%s UnitExists=%s InCombat=%s",
+    unit, filter, tostring(UnitExists(unit)), tostring(InCombatLockdown and InCombatLockdown())))
+  if not GetAuraSlots then
+    print(P .. "|cffff4444C_UnitAuras.GetAuraSlots indisponible sur ce client.|r")
+    return
+  end
+  local ok, token, s1,s2,s3,s4,s5,s6,s7,s8,s9,s10 = pcall(GetAuraSlots, unit, filter)
+  print(P .. string.format("GetAuraSlots : pcall_ok=%s token=%s (10 premiers slots) %s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
+    tostring(ok), tostring(token), tostring(s1),tostring(s2),tostring(s3),tostring(s4),tostring(s5),
+    tostring(s6),tostring(s7),tostring(s8),tostring(s9),tostring(s10)))
+  local slots = {}
+  if ok then
+    local allSlots = { s1,s2,s3,s4,s5,s6,s7,s8,s9,s10 }
+    for _, slot in ipairs(allSlots) do
+      if slot then
+        local okD, aura = pcall(GetAuraDataBySlot, unit, slot)
+        if okD and aura then slots[#slots + 1] = aura end
+      end
+    end
+  else
+    print(P .. "|cffffaa00GetAuraSlots a echoue -- test de l'enumeration legacy (GetAuraDataByIndex, 1 slot a la fois).|r")
+    local GetAuraDataByIndex = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
+    if not GetAuraDataByIndex then
+      print(P .. "|cffff4444C_UnitAuras.GetAuraDataByIndex indisponible sur ce client.|r")
+    else
+      for i = 1, 10 do
+        local okI, errOrAura = pcall(GetAuraDataByIndex, unit, i, filter)
+        print(P .. string.format("  legacy #%d : pcall_ok=%s %s", i, tostring(okI),
+          okI and ("aura=" .. tostring(errOrAura ~= nil)) or ("err=" .. tostring(errOrAura))))
+      end
+    end
+  end
+  print(P .. string.format("%d aura(s) lisible(s) via l'API brute -- le rendu reel passe desormais par l'AuraContainer natif (unit=target), immunise a cet echec.", #slots))
+end
+
+SLASH_TADEBUG1 = "/tadebug"
+SlashCmdList["TADEBUG"] = function(msg)
+  msg = (msg or ""):lower():match("^%s*(.-)%s*$")
+  DebugDumpTargetAuras(msg == "debuff" and "debuff" or "buff")
+end
+
+-- /tanative : état des conteneurs/groupes natifs (creation, taille du pool, filtre courant).
+SLASH_TANATIVE1 = "/tanative"
+SlashCmdList["TANATIVE"] = function()
+  local P = "|cff00ffff[TA-NATIVE]|r "
+  local function dump(label, state)
+    print(P .. string.format("%s : container=%s groupCreated=%s poolSize=%d",
+      label, tostring(state.container ~= nil), tostring(state.groupCreated), #state.pool))
+    if state.container then
+      print(P .. string.format("  IsShown=%s", tostring(state.container:IsShown())))
+    end
+  end
+  dump("Buffs", buffState)
+  dump("Debuffs", debuffState)
+  print(P .. string.format("SORTMETHOD present=%s SORTDIRECTION present=%s AuraButtonBorderStyle present=%s",
+    tostring(SORTMETHOD ~= nil), tostring(SORTDIRECTION ~= nil), tostring(AURA_BORDER_STYLE ~= nil)))
+end
+
 -- Événements
----------------------------------------------------------------------------
 local eventFrame = CreateFrame("Frame")
 
-local function OnEvent(self, event, unit, updateInfo)
-  if event == "UNIT_AURA" then
-    if unit == lastUnit then
-      RefreshAuras()
+local function OnEvent(self, event)
+  if event == "PLAYER_TARGET_CHANGED" then
+    if buffState.container and buffState.container.UpdateAllAuras then
+      pcall(buffState.container.UpdateAllAuras, buffState.container)
     end
-  elseif event == "PLAYER_TARGET_CHANGED" then
+    if debuffState.container and debuffState.container.UpdateAllAuras then
+      pcall(debuffState.container.UpdateAllAuras, debuffState.container)
+    end
     TargetAuras.UpdateVisibility()
     RefreshAuras()
   end
 end
 
----------------------------------------------------------------------------
 -- ShouldShow
----------------------------------------------------------------------------
 function TargetAuras.ShouldShow()
   if ns.IsInBlockedState and ns.IsInBlockedState() then return false end
   local cfg = Cfg()
@@ -590,16 +754,14 @@ function TargetAuras.ShouldShow()
   return UnitExists(lastUnit)
 end
 
----------------------------------------------------------------------------
 -- Create
----------------------------------------------------------------------------
 function TargetAuras.Create(parent)
   if frame then return frame end
   local cfg = Cfg()
   local bGrp = GrpCfg("buffs")
   local dGrp = GrpCfg("debuffs")
 
-  frame = CreateFrame("Frame", "AishaddonTargetAuras", parent or UIParent)
+  frame = CreateFrame("Frame", "AishCoreTargetAuras", parent or UIParent)
   frame:SetFrameStrata("MEDIUM")
   frame:SetSize(530, 80)
 
@@ -613,15 +775,17 @@ function TargetAuras.Create(parent)
 
   eventFrame:SetScript("OnEvent", OnEvent)
   eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
-  eventFrame:RegisterUnitEvent("UNIT_AURA", "target")
 
   TargetAuras.ApplySettings()
   return frame
 end
 
----------------------------------------------------------------------------
+-- Rangées à utiliser pour la détection de survol (ModuleHoverOverlay.lua) : buffRow/debuffRow, pas "frame" (ancre fixe sans rapport avec leur position réelle).
+function TargetAuras.GetHoverRows()
+  return buffRow, debuffRow
+end
+
 -- ApplySettings
----------------------------------------------------------------------------
 function TargetAuras.ApplySettings()
   if not frame then return end
   local cfg = Cfg()
@@ -648,32 +812,31 @@ function TargetAuras.ApplySettings()
   local dRowH = dRows * (dSize + (dGrp.rowSpacing or 2)) - (dGrp.rowSpacing or 2)
   local maxRowW = math.max(bRowW, dRowW)
 
-  -- Container positionné en haut-centre de l'écran
   frame:ClearAllPoints()
   frame:SetPoint("TOP", UIParent, "TOP", 0, 0)
   frame:SetSize(maxRowW, bRowH + dRowH + 10)
 
-  -- Buffs : ancrés au top center de l'écran (via frame)
   buffRow:ClearAllPoints()
   buffRow:SetSize(bRowW, bRowH)
   buffRow:SetPoint("TOP", UIParent, "TOP", bGrp.offsetX or 0, bGrp.offsetY or -40)
 
-  -- Debuffs : ancrés indépendamment au top center de l'écran
   debuffRow:ClearAllPoints()
   debuffRow:SetSize(dRowW, dRowH)
   debuffRow:SetPoint("TOP", UIParent, "TOP", dGrp.offsetX or 0, dGrp.offsetY or -70)
 
-  -- Style des icônes existantes
+  -- Style des icônes de preview existantes
   StyleIcons(buffIcons, bGrp)
   StyleIcons(debuffIcons, dGrp)
+
+  -- Rendu réel (natif, combat-safe)
+  ConfigureNativeRow(buffState, buffRow, "HELPFUL", bGrp, false)
+  ConfigureNativeRow(debuffState, debuffRow, "HARMFUL", dGrp, true)
 
   TargetAuras.UpdateVisibility()
   RefreshAuras()
 end
 
----------------------------------------------------------------------------
 -- Visibilité
----------------------------------------------------------------------------
 function TargetAuras.UpdateVisibility()
   if not frame then return end
   if previewMode then frame:Show(); return end
@@ -684,9 +847,7 @@ function TargetAuras.UpdateVisibility()
   end
 end
 
----------------------------------------------------------------------------
 -- Preview
----------------------------------------------------------------------------
 function TargetAuras.SetPreview(on)
   previewMode = on
   if not frame then return end
@@ -699,9 +860,7 @@ function TargetAuras.SetPreview(on)
   end
 end
 
----------------------------------------------------------------------------
 -- Init
----------------------------------------------------------------------------
 function TargetAuras.Init()
   TargetAuras.Create(UIParent)
 end

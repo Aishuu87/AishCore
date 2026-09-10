@@ -206,10 +206,7 @@ ns.ProfileTemplate = {
     y = -220,
     x = 0,
     enabled = false,
-    growDirection = "RIGHT",
-    iconSpacing = 4,
     anchor = "TOP",
-    maxIcons = 8,
     iconSize = 40,
   },
   priorityBar = {

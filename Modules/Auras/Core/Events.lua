@@ -1,33 +1,17 @@
 -- AishUIAura/Core/Events.lua
 -- Dispatcher d'events Blizzard : ADDON_LOADED, PLAYER_*, UNIT_AURA, etc.
 -- Déclenche l'init, les rebuilds, scans, fades et re-hooks CDM selon les events.
-------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 
 local wipe, pcall = wipe, pcall
 local CreateFrame, C_Timer, InCombatLockdown = CreateFrame, C_Timer, InCombatLockdown
 local ipairs, pairs = ipairs, pairs
 
--- Compteur de refresh par auraInstanceID. Incrémenté par UNIT_AURA.updatedAuraInstanceIDs
--- (event Blizzard 100% non-secret : l'event vient avec des IDs, pas des valeurs d'aura).
--- Utilisé par GetAuraKey pour forcer le relancement de SetTimerDuration au recast,
--- sans JAMAIS lire les valeurs potentiellement secret des auras.
+-- Compteur de refresh par auraInstanceID (utilisé par GetAuraKey pour forcer SetTimerDuration au recast,
+-- sans jamais lire les valeurs potentiellement secret des auras).
 ns._refreshCounter = ns._refreshCounter or {}
 
-------------------------------------------------------------------------
--- IDLE WIPE : purge des caches après inactivité prolongée hors combat.
---
--- Objectif : en fin de session longue (raid de 3h, quête prolongée), les caches
--- internes peuvent accumuler des entrées orphelines (instIDs d'auras vues sur
--- d'anciennes cibles, refreshCounters obsolètes). Ces caches sont auto-cleanés
--- par scan, mais seulement pour les instIDs vus récemment. Les orphelins y
--- restent potentiellement des heures.
---
--- Solution : timer qui se déclenche 5 min après la fin du dernier combat. Si
--- l'user est toujours hors combat à ce moment → wipe des caches + collectgarbage.
--- Si l'user re-rentre en combat avant → on annule le timer (pas de wipe pendant
--- l'action).
-------------------------------------------------------------------------
+-- Idle wipe : purge les caches (instIDs, refreshCounters orphelins) 5 min après la fin du dernier combat.
 local IDLE_WIPE_DELAY = 300  -- 5 minutes
 local idleWipeTimer = nil
 
@@ -39,30 +23,18 @@ local function ScheduleIdleWipe()
     CancelIdleWipe()
     idleWipeTimer = C_Timer.NewTimer(IDLE_WIPE_DELAY, function()
         idleWipeTimer = nil
-        -- Double-check : si l'user est re-rentré en combat entre-temps, skip.
         if ns._inCombat then return end
-        -- Wipe les caches volumineux qui ont pu accumuler des orphelins.
         if ns._refreshCounter then wipe(ns._refreshCounter) end
         if ns.cdmData then
             if ns.cdmData.target then wipe(ns.cdmData.target) end
             if ns.cdmData.player then wipe(ns.cdmData.player) end
         end
-        -- Force GC Lua : libère les tables déréférencées.
         collectgarbage("collect")
-        -- Rescan léger pour repeupler les auras actuellement visibles (sinon
-        -- la prochaine barre qui change devra tout recalculer).
         if ns.ScanAuras then pcall(ns.ScanAuras) end
     end)
 end
 
-------------------------------------------------------------------------
--- DEBOUNCE HELPERS HOIST : utilisés par UNIT_AURA, SPELL_UPDATE_CHARGES,
--- UNIT_SPELLCAST_SUCCEEDED, PLAYER_REGEN_DISABLED, PLAYER_TARGET_CHANGED.
---
--- Ces fonctions sont passées à C_Timer.After en remplacement de closures
--- inline. Gain : zéro allocation de closure à chaque event (UNIT_AURA peut
--- firer 10+ fois par seconde en raid). Fonctions minuscules → coût nul.
-------------------------------------------------------------------------
+-- Helpers debounce hoistés (évite l'allocation de closure à chaque event UNIT_AURA/etc.)
 local function _TargetScanDebounced()
     ns._targetScanPending = false
     pcall(ns.ScanAuras)
@@ -79,37 +51,15 @@ local function _ScanAurasSafe()
     pcall(ns.ScanAuras)
 end
 local function _InitCombatScans()
-    -- Rebuild + rescan au début du combat (plusieurs retries rapprochés pour
-    -- attraper les DOTs appliqués juste avant/pendant l'entrée en combat).
+    -- Rebuild + rescan au début du combat (retries rapprochés pour attraper les DOTs déjà appliqués).
     pcall(ns.BuildWhitelist)
     pcall(ns.InitCDMHooks)
     pcall(ns.ScanAuras)
 end
 
-------------------------------------------------------------------------
--- SCAN ADAPTATIF PLAYER_TARGET_CHANGED
---
--- Ancien système : 7 C_Timer.After en série (0.03, 0.06, 0.1, 0.15, 0.22, 0.3, 0.5)
--- → 7 scans TOUS exécutés, même si le premier a déjà trouvé les auras.
---
--- Nouveau système : on programme la série mais on annule les timers restants dès
--- qu'un scan retourne _activeAuraCount > 0 (= on a trouvé les DOTs). Dans le cas
--- commun (Blizzard répond en <50ms), on ne fait que 1-2 scans au lieu de 7.
---
--- En pire cas (Blizzard lent), on fait quand même les 7 scans → filet de sécurité
--- identique. En cas favorable (90%+ des tab targets), on économise 5-6 scans.
---
--- ATTENTION — POURQUOI ON WIPE cdmData.target À CHAQUE TAB TARGET :
--- Ne PAS céder à la tentation de garder cdmData.target persistant entre cibles
--- (comme ElvUI). Les auraInstanceID peuvent être réutilisés par Blizzard entre
--- cibles différentes, et un cache persistant introduit des FAUX POSITIFS :
--- on affiche un Rip sur mob B alors qu'il a juste une aura avec le même instID
--- que notre ancien Rip sur mob A. ElvUI accepte ce bug car ils n'ont pas de
--- whitelist stricte. Nous, avec une whitelist, ça se voit direct → sorts
--- fantômes affichés. Le wipe + retries = prix à payer pour la CORRECTION.
--- Le délai de 30-50ms au tab target est VOLONTAIRE : il laisse GetAuraSlots
--- retourner les données authoritatives fraîches de la nouvelle cible.
-------------------------------------------------------------------------
+-- Scan adaptatif au tab target : série de retries annulée dès qu'un scan trouve les DOTs (au lieu de tous les exécuter).
+-- cdmData.target est wipé à chaque tab target : les auraInstanceID sont réutilisables entre cibles par Blizzard,
+-- et avec notre whitelist stricte un cache persistant afficherait des sorts fantômes (faux positifs d'instID).
 local _targetRetryTimers = {}
 local _targetRetryGen = 0  -- génération : incrémentée à chaque nouveau tab target
 
@@ -120,27 +70,23 @@ local function _CancelTargetRetries()
     end
 end
 
--- Callback d'un retry : scan, check si on a trouvé, si oui cancel le reste.
+-- Callback d'un retry : scan, cancel le reste si trouvé, ignore si un autre tab target est passé entre-temps.
 local function _TargetRetryScan(gen)
-    -- Si un autre tab target est passé entre-temps, ce retry est obsolète.
     if gen ~= _targetRetryGen then return end
     pcall(ns.ScanAuras)
-    -- Si on a trouvé au moins une aura, cancel les retries restants + reset le flag
-    -- (plus besoin d'attendre l'UNIT_AURA fast-path, c'est trouvé).
     if (ns._activeAuraCount or 0) > 0 then
         _CancelTargetRetries()
         ns._awaitingTargetFullUpdate = false
     end
 end
 
-------------------------------------------------------------------------
--- EVENTS (dispatcher principal)
-------------------------------------------------------------------------
+-- Events (dispatcher principal)
 local ef = CreateFrame("Frame")
 ef:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         pcall(function() ns.InitDB() end)
         pcall(function() ns.InitAllRenders() end)
+        pcall(function() if ns.MissingBuffs then ns.MissingBuffs.Init() end end)
 
         -- Note : l'aplatissement de la bibliothèque de modèles 3D (~19 MB) a été
         -- déplacé en lazy-load. Il est désormais déclenché par ns.EnsureModelPaths()
@@ -171,7 +117,7 @@ ef:SetScript("OnEvent", function(_, event, arg1)
             -- ou mal configurées au /reload.
             C_Timer.After(0.5, function() ns._initComplete = true; ns.ScanAuras() end)
         end)
-        print("|cff00b0ffAishaddon|r [Auras] v" .. ns.ADDON_VERSION .. " — |cffffcc00/aa|r ou |cffffcc00/aishaura|r")
+        print("|cff00b0ffAishCore|r [Auras] v" .. ns.ADDON_VERSION .. " — |cffffcc00/aa|r ou |cffffcc00/aishaura|r")
 
     elseif event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "ZONE_CHANGED_NEW_AREA" then
         ns._inCombat = InCombatLockdown(); ns._whitelistBuilt = false
@@ -328,10 +274,44 @@ ef:SetScript("OnEvent", function(_, event, arg1)
         local info = arg2
         local anyWL = ns.anyWhitelist
 
+        -- Secret Values (patch 12.1+, 2026-08-11) : depuis ce patch, TOUT le
+        -- payload UNIT_AURA (isFullUpdate inclus -- un simple booleen) devient
+        -- secret des que des auras concernees sont secretes -- meme un `if
+        -- info.isFullUpdate` plante desormais (crash reproduit en jeu le
+        -- 2026-08-12, cf. Config/ResourceMap.lua qui avait le meme pattern).
+        -- issecretvalue() est la seule facon sure de sonder ce champ AVANT de
+        -- le tester. Si le payload est secret, on ne peut plus se fier a
+        -- AUCUN de ses sous-champs (addedAuras/updatedAuraInstanceIDs/
+        -- removedAuraInstanceIDs peuvent etre des "secret table" -- meme les
+        -- iterer avec ipairs planterait). On saute alors directement le
+        -- refresh counter + l'optimisation ShouldSkipAuraUpdate et on
+        -- retombe sur le meme debounce que le chemin normal, juste sans
+        -- pouvoir skip -- moins optimal, mais jamais un crash.
+        if info and issecretvalue and issecretvalue(info.isFullUpdate) then
+            if arg1 == "target" and ns._awaitingTargetFullUpdate then
+                ns._awaitingTargetFullUpdate = false
+                _CancelTargetRetries()
+                pcall(ns.ScanAuras)
+                return
+            end
+            if arg1 == "target" then
+                if not ns._targetScanPending then
+                    ns._targetScanPending = true
+                    C_Timer.After(0.05, _TargetScanDebounced)
+                end
+            elseif arg1 == "player" and not ns._playerScanPending then
+                ns._playerScanPending = true
+                C_Timer.After(0.1, _PlayerScanDebounced)
+            end
+            return
+        end
+
         -- REFRESH COUNTER : Blizzard fire UNIT_AURA avec updatedAuraInstanceIDs au recast
         -- d'un DOT. On incrémente un compteur par instID. GetAuraKey utilise ce compteur
         -- pour changer la clé d'aura → SetTimerDuration est relancé avec le durObj frais.
-        -- 100% non-secret : l'event vient avec des IDs, pas des valeurs d'aura.
+        -- A ce stade le payload est confirmé NON secret (guard ci-dessus, sorti sinon) --
+        -- avant le patch 12.1 on pensait ce payload "100% non-secret" par nature, ce qui
+        -- s'est révélé faux (isFullUpdate/les listes d'IDs peuvent être secrets ensemble).
         --
         -- EXCEPTION TAB TARGET : dans les 300ms suivant un PLAYER_TARGET_CHANGED, Blizzard
         -- fire des UNIT_AURA.updated pour CONFIRMER l'état initial des auras sur la nouvelle
@@ -380,33 +360,14 @@ ef:SetScript("OnEvent", function(_, event, arg1)
                 local ok, result = pcall(AuraUtil.ShouldSkipAuraUpdate, info, isRelevant)
                 if ok then shouldSkip = result end
             end
-            -- Une aura whitelistée peut avoir été RETIRÉE (removedAuraInstanceIDs).
-            -- Dans ce cas il faut rescanner pour faire disparaître la bar.
-            -- Source de verite : ns.cdmData (mis a jour event-driven par CDMHooks).
-            if shouldSkip and info.removedAuraInstanceIDs then
-                local cdmU = ns.cdmData and ns.cdmData[arg1]
-                if cdmU then
-                    for _, instID in ipairs(info.removedAuraInstanceIDs) do
-                        local entry = cdmU[instID]
-                        if entry and entry.spellId and anyWL and anyWL[entry.spellId] then
-                            shouldSkip = false; break
-                        end
-                    end
-                end
-            end
-            -- FIX REFRESH : une aura whitelistée peut avoir été REFRESH (updatedAuraInstanceIDs).
-            -- Pareil : on double-check via cdmData. Si l'une est dans notre whitelist, on rescanne.
-            if shouldSkip and info.updatedAuraInstanceIDs then
-                local cdmU = ns.cdmData and ns.cdmData[arg1]
-                if cdmU then
-                    for _, instID in ipairs(info.updatedAuraInstanceIDs) do
-                        local entry = cdmU[instID]
-                        if entry and entry.spellId and anyWL and anyWL[entry.spellId] then
-                            shouldSkip = false; break
-                        end
-                    end
-                end
-            end
+            -- Ex-double-check "aura whitelistée retirée/refresh" via cdmU[instID] :
+            -- supprimé. cdmData est désormais clé par spellID (pas par instID,
+            -- cf. CDMHooks.lua, Secret Values 12.0+) donc ce lookup direct par
+            -- instID n'a plus de sens, et le reconstruire nécessiterait de
+            -- comparer des instID potentiellement secrets (== interdit). On
+            -- fait désormais confiance à AuraUtil.ShouldSkipAuraUpdate +
+            -- isRelevant (qui reçoit déjà les auras fraîches, y compris pour
+            -- addedAuras/updatedAuraInstanceIDs) comme seul filtre.
         end
 
         if shouldSkip then return end  -- Zero-cost exit : aucune aura whitelistée touchée
@@ -438,10 +399,24 @@ ef:SetScript("OnEvent", function(_, event, arg1)
         end
 
     elseif event == "PLAYER_REGEN_ENABLED" then
-        ns._inCombat = false; ns.BuildWhitelist(); ns.ScanAuras(); ns.UpdateAllFades()
+        ns._inCombat = false
+        -- Rattrape un InitAllRenders() saute pendant le combat (ex. reload
+        -- pendant un pull) : cf. le guard InCombatLockdown dans
+        -- ns.InitAllRenders (Init.lua), qui pose ce flag au lieu de laisser
+        -- chaque render planter sur un SetPropagateMouseClicks protege.
+        if ns._pendingRenderInit then
+            ns._pendingRenderInit = false
+            pcall(ns.InitAllRenders)
+        end
+        ns.BuildWhitelist(); ns.ScanAuras(); ns.UpdateAllFades()
         -- Fin de combat : programme un wipe idle 5 min plus tard pour nettoyer
         -- les caches si l'user reste inactif. Annulé si re-combat avant.
         ScheduleIdleWipe()
+        -- Rattrape les relais de stacks (AuraTextRelay.lua) qui n'ont pas pu
+        -- se créer pendant le combat (BuildWhitelist ci-dessus les retente déjà,
+        -- mais un flush explicite couvre aussi les cas où BuildWhitelist n'a
+        -- rien de nouveau à traiter).
+        if ns.FlushPendingAuraTextOverlays then ns.FlushPendingAuraTextOverlays() end
 
     elseif event == "PLAYER_REGEN_DISABLED" then
         ns._inCombat = true; ns.UpdateAllFades()

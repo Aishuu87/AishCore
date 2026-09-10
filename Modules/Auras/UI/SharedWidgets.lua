@@ -1,6 +1,5 @@
 -- AishUIAura/UI/SharedWidgets.lua
 -- Widgets — ASCII arrows (v / >) — zero encoding issues
-------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local SW = {}
 ns.SharedWidgets = SW
@@ -16,9 +15,7 @@ local function ApplyBD(f, bg, edge)
     f:SetBackdropBorderColor(edge[1],edge[2],edge[3],edge[4] or 0.8)
 end
 
-------------------------------------------------------------------------
 -- CHECKBOX (12x12)
-------------------------------------------------------------------------
 function SW.CreateCheckbox(parent, label, width)
     width = width or 260
     local row = CreateFrame("Button",nil,parent); row:SetSize(width,26)
@@ -39,9 +36,7 @@ function SW.CreateCheckbox(parent, label, width)
     return row
 end
 
-------------------------------------------------------------------------
 -- SLIDER
-------------------------------------------------------------------------
 function SW.CreateSlider(parent, label, minVal, maxVal, step, width)
     width = math.min(width or 260,300); minVal=minVal or 0; maxVal=maxVal or 100; step=step or 1
     local dec = step<1 and math.max(1,math.ceil(-math.log10(step+1e-9))) or 0; local fmt = "%."..dec.."f"
@@ -53,7 +48,7 @@ function SW.CreateSlider(parent, label, minVal, maxVal, step, width)
     local tr = sl:CreateTexture(nil,"BACKGROUND"); tr:SetPoint("LEFT"); tr:SetPoint("RIGHT"); tr:SetHeight(5); tr:SetColorTexture(unpack(Theme.sliderTrack))
     -- Circular white thumb (Circle_Smooth2)
     local th = sl:CreateTexture(nil,"ARTWORK"); th:SetSize(14,14)
-    th:SetTexture("Interface\\AddOns\\Aishaddon\\Media\\Wheel\\Circle_Smooth2")
+    th:SetTexture("Interface\\AddOns\\AishCore\\Media\\Wheel\\Circle_Smooth2")
     th:SetVertexColor(1, 1, 1, 1)
     sl:SetThumbTexture(th)
     local mnT = c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(mnT,FONT,9); mnT:SetPoint("TOPLEFT",sl,"BOTTOMLEFT",0,-2)
@@ -74,9 +69,7 @@ function SW.CreateSlider(parent, label, minVal, maxVal, step, width)
     eb:SetScript("OnEscapePressed",function(s) s:ClearFocus() end); return c
 end
 
-------------------------------------------------------------------------
 -- DROPDOWN
-------------------------------------------------------------------------
 function SW.CreateDropdown(parent, label, options, width)
     width = width or 260; local c = CreateFrame("Frame",nil,parent); c:SetSize(width,label and 42 or 22); c._options=options or {}
     if label then c.label=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(c.label,FONT,11); c.label:SetPoint("TOPLEFT")
@@ -127,60 +120,90 @@ function SW.CreateDropdown(parent, label, options, width)
     btn:SetScript("OnLeave",function(s) s:SetBackdropColor(0.12,0.12,0.14,1) end); Build(); return c
 end
 
-------------------------------------------------------------------------
 -- COLOR BUTTON
-------------------------------------------------------------------------
 function SW.CreateColorButton(parent, label, width)
     width = width or 260; local c=CreateFrame("Frame",nil,parent); c:SetSize(width,26)
     c.label=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(c.label,FONT,11); c.label:SetPoint("LEFT",8,0)
     c.label:SetTextColor(unpack(Theme.textNormal)); c.label:SetText(label or "")
     local sw=CreateFrame("Button",nil,c); sw:SetSize(20,20); sw:SetPoint("RIGHT",-8,0)
+    c._swatch = sw  -- expose pour un tooltip custom cote appelant (cf. OnEnter/OnLeave optionnels)
+    -- Clic droit = reset (meme convention que UI/SettingsPanel.lua) : c.onReset laisse l'appelant
+    -- decider quoi faire, on se contente ici de relayer le clic droit.
+    sw:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     local sc=sw:CreateTexture(nil,"ARTWORK"); sc:SetAllPoints(); sc:SetColorTexture(1,1,1)
     local sb=sw:CreateTexture(nil,"BORDER"); sb:SetPoint("TOPLEFT",-1,1); sb:SetPoint("BOTTOMRIGHT",1,-1); sb:SetColorTexture(unpack(Theme.border))
     c.currentColor={1,1,1}
     function c:SetColor(r,g,b) self.currentColor={r or 1,g or 1,b or 1}; sc:SetColorTexture(r or 1,g or 1,b or 1) end
-    sw:SetScript("OnClick",function() local r,g,b=unpack(c.currentColor)
+    sw:SetScript("OnClick",function(_, btn)
+        if btn == "RightButton" then
+            if c.onReset then c.onReset() end
+            return
+        end
+        local r,g,b=unpack(c.currentColor)
         ColorPickerFrame:SetupColorPickerAndShow({r=r,g=g,b=b,
         swatchFunc=function() local nr,ng,nb=ColorPickerFrame:GetColorRGB(); c:SetColor(nr,ng,nb); if c.onChanged then c.onChanged({nr,ng,nb}) end end,
-        cancelFunc=function(p) if p then c:SetColor(p.r,p.g,p.b); if c.onChanged then c.onChanged(c.currentColor) end end end}) end)
+        cancelFunc=function(p) if p then c:SetColor(p.r,p.g,p.b); if c.onChanged then c.onChanged(c.currentColor) end end end})
+    end)
     return c
 end
 
-------------------------------------------------------------------------
 -- SECTION HEADER (WoW-style: 2 class color dots + label + gradient hairline)
--- Inspired by ornate WoW addon section dividers.
-------------------------------------------------------------------------
 function SW.CreateSectionHeader(parent, text, width)
     width = width or 260
     local f = CreateFrame("Frame",nil,parent); f:SetSize(width, 24)
-    local g = Theme.gold or {0.78, 0.62, 0.30}
+    -- Theme.gold/accentText tenus a jour par _addon.Auras.RefreshAccentTheme() (Core/ClassColors.lua).
+    -- Implementation separee de UI/SharedWidgets.lua (addon principal), meme convention.
+    local g  = Theme.gold or {0.78, 0.62, 0.30}
+    local tc = Theme.accentText or Theme.textNormal or {0.92, 0.92, 0.93}
     -- Single gold dot in front
     local dot1 = f:CreateTexture(nil,"OVERLAY")
     dot1:SetSize(7,7); dot1:SetPoint("LEFT",2,0)
-    dot1:SetTexture("Interface\\AddOns\\Aishaddon\\Media\\Wheel\\circleflat2")
+    dot1:SetTexture("Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2")
     dot1:SetVertexColor(g[1],g[2],g[3],1)
     -- Label
     local lbl = f:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lbl,FONT,11)
     lbl:SetPoint("LEFT",14,0)
-    lbl:SetTextColor(unpack(Theme.textNormal))
+    lbl:SetTextColor(tc[1], tc[2], tc[3], 1)
     lbl:SetText((text or ""):upper())
     -- Gold gradient hairline
     local line = f:CreateTexture(nil,"ARTWORK"); line:SetHeight(1)
     line:SetPoint("LEFT", lbl,"RIGHT", 10, 0); line:SetPoint("RIGHT",-2,0)
     line:SetColorTexture(1,1,1,1)
-    pcall(function()
-        if CreateColor then
-            line:SetGradient("HORIZONTAL",
-                CreateColor(g[1],g[2],g[3],0.85),
-                CreateColor(g[1]*0.20, g[2]*0.20, g[3]*0.20, 0.10))
-        end
-    end)
+    local function ApplyGradient(color)
+        pcall(function()
+            if CreateColor then
+                line:SetGradient("HORIZONTAL",
+                    CreateColor(color[1],color[2],color[3],0.85),
+                    CreateColor(color[1]*0.20, color[2]*0.20, color[3]*0.20, 0.10))
+            end
+        end)
+    end
+    ApplyGradient(g)
+
+    -- RefreshColor() + le registre ci-dessous permettent de recolorer au changement de spe sans
+    -- reconstruire les menus (cf. SW.RefreshSectionHeaderColors, appele depuis RefreshAccentTheme).
+    function f:RefreshColor()
+        local gg = Theme.gold or {0.78, 0.62, 0.30}
+        local tt = Theme.accentText or Theme.textNormal or {0.92, 0.92, 0.93}
+        dot1:SetVertexColor(gg[1], gg[2], gg[3], 1)
+        lbl:SetTextColor(tt[1], tt[2], tt[3], 1)
+        ApplyGradient(gg)
+    end
+
+    SW._sectionHeaders = SW._sectionHeaders or {}
+    table.insert(SW._sectionHeaders, f)
+
     return f
 end
 
-------------------------------------------------------------------------
+-- Recolore tous les section headers Auras deja construits.
+function SW.RefreshSectionHeaderColors()
+    for _, f in ipairs(SW._sectionHeaders or {}) do
+        if f.RefreshColor then f:RefreshColor() end
+    end
+end
+
 -- TOGGLE (labeled ON/OFF pill in gold)
-------------------------------------------------------------------------
 function SW.CreateToggle(parent, width)
     width = width or 40; local h = 18
     local f = CreateFrame("Button",nil,parent,"BackdropTemplate"); f:SetSize(width, h)
@@ -220,10 +243,8 @@ function SW.CreateToggle(parent, width)
     return f
 end
 
-------------------------------------------------------------------------
--- SECTION ROUTER (Apple-style: minimal dropdown above swap content)
--- Replaces stacked accordions. Same input shape so call sites stay intact.
-------------------------------------------------------------------------
+-- SECTION ROUTER (Apple-style: minimal dropdown above swap content). Replaces stacked accordions,
+-- same input shape so call sites stay intact.
 function SW.CreateAccordionStack(parent, sections, cw, startY)
     startY = startY or 0
     local W = cw - 20
@@ -236,9 +257,7 @@ function SW.CreateAccordionStack(parent, sections, cw, startY)
         opts[i] = { value = i, text = (sec.name or ("SECTION "..i)) }
     end
 
-    -- Petit label en majuscules au-dessus du dropdown (style groupe Apple settings)
-    -- Le label est mis a jour dynamiquement avec la categorie de la section selectionnee.
-    -- Format : "SECTION - <CATEGORIE>" si la section a un champ `category`, sinon "SECTION".
+    -- Label au-dessus du dropdown, mis a jour avec la categorie de la section selectionnee.
     local title = wrap:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(title,FONT,10)
     title:SetPoint("TOPLEFT",2,-2); title:SetTextColor(unpack(Theme.textDim))
     title:SetText("SECTION")
@@ -296,11 +315,8 @@ function SW.CreateAccordionStack(parent, sections, cw, startY)
     return wrap
 end
 
-------------------------------------------------------------------------
--- SECTION STACK : empile toutes les sections verticalement, chacune
--- precedee d'un CreateSectionHeader (divider + titre uppercase + filet or).
+-- SECTION STACK : empile les sections verticalement, chacune precedee d'un CreateSectionHeader.
 -- Remplace CreateAccordionStack pour les menus sans selecteur deroulant.
-------------------------------------------------------------------------
 function SW.CreateSectionStack(parent, sections, cw, startY)
     startY = startY or 0
     local W = cw - 20
@@ -332,9 +348,7 @@ function SW.CreateSectionStack(parent, sections, cw, startY)
     return wrap
 end
 
-------------------------------------------------------------------------
 -- ACTION BUTTON
-------------------------------------------------------------------------
 function SW.CreateActionBtn(parent, text, width, bgColor, borderColor, textColor)
     width=width or 160; local btn=CreateFrame("Button",nil,parent,"BackdropTemplate"); btn:SetSize(width,24)
     ApplyBD(btn, bgColor or {0.08,0.08,0.12}, borderColor or Theme.border)

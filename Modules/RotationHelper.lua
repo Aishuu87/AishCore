@@ -1,38 +1,31 @@
--- Modules/RotationHelper.lua : Affiche les icones des sorts mis en surbrillance
--- par l'assistant de rotation Blizzard (spell overlay glow)
--- Detection par polling des action slots + multi-API fallback
+-- Modules/RotationHelper.lua : icones des sorts surlignes par l'assistant de rotation Blizzard (polling action slots + fallback API)
 local addonName, ns = ...
 
 local RotationHelper = {}
 ns.Modules.RotationHelper = RotationHelper
 
----------------------------------------------------------------------------
 -- State
----------------------------------------------------------------------------
 local containerFrame = nil
 local iconPool = {}               -- { spellID = iconFrame }
 local activeIcons = {}            -- liste ordonnee des spellID actifs
 local activeSet = {}              -- { spellID = true }
 local iconSize = 40
-local iconSpacing = 4
-local maxIcons = 8
 local initialized = false
 local pollTicker = nil
 local debugMode = false
 local testMode = false
+local dragUnlocked = false -- glisser/deposer arme (bouton "reglages > position"), cf. EnableDrag
+local previewMode = false
+local previewIcon = nil -- icone dediee au SetPreview du panneau de reglages, cf. plus bas
 
----------------------------------------------------------------------------
 -- Debug
----------------------------------------------------------------------------
 local function Debug(msg)
   if debugMode then
     print("|cff00b0ff[RH]|r " .. tostring(msg))
   end
 end
 
----------------------------------------------------------------------------
 -- Utilitaires
----------------------------------------------------------------------------
 local function GetSpellIcon(spellID)
   if C_Spell and C_Spell.GetSpellTexture then
     local ok, tex = pcall(C_Spell.GetSpellTexture, spellID)
@@ -41,9 +34,7 @@ local function GetSpellIcon(spellID)
   return nil
 end
 
----------------------------------------------------------------------------
 -- Noms des boutons d'action standard Blizzard / ABE
----------------------------------------------------------------------------
 local BUTTON_PREFIXES = {
   "ActionButton",
   "MultiBarBottomLeftButton",
@@ -82,21 +73,38 @@ local function GetButtonSpellID(button)
   return nil
 end
 
----------------------------------------------------------------------------
--- Collecte des spellIDs glow en scannant les boutons d'action
----------------------------------------------------------------------------
+-- API Blizzard directe pour le sort suggere (meme source que PriorityBar.lua), plus fiable que scanner les boutons un par un
+local C_AC_GetNextCastSpell = C_AssistedCombat and C_AssistedCombat.GetNextCastSpell
+
+local function GetAssistedCombatHighlightSpell()
+  if not C_AC_GetNextCastSpell then return nil end
+  local ok, sid = pcall(C_AC_GetNextCastSpell)
+  if not ok or not sid or sid == 0 then return nil end
+  -- Patch 12.x : une valeur retournee depuis une pile taintee peut etre secrete.
+  if type(issecretvalue) == "function" then
+    local okSec, isSec = pcall(issecretvalue, sid)
+    if okSec and isSec then return nil end
+  end
+  return sid
+end
+
+-- Collecte du/des sort(s) surligne(s) : API directe en priorite, repli sur scan des boutons si indisponible
 local function CollectGlowedSpells()
   local glowed = {}
+
+  local assistedSid = GetAssistedCombatHighlightSpell()
+  if assistedSid then
+    glowed[assistedSid] = true
+    return glowed
+  end
 
   for _, prefix in ipairs(BUTTON_PREFIXES) do
     for i = 1, 12 do
       local button = _G[prefix .. i]
-      if button then
-        if ButtonHasGlow(button) then
-          local spellID = GetButtonSpellID(button)
-          if spellID then
-            glowed[spellID] = true
-          end
+      if button and ButtonHasGlow(button) then
+        local spellID = GetButtonSpellID(button)
+        if spellID then
+          glowed[spellID] = true
         end
       end
     end
@@ -105,14 +113,12 @@ local function CollectGlowedSpells()
   return glowed
 end
 
----------------------------------------------------------------------------
 -- Creation du conteneur principal
----------------------------------------------------------------------------
 local function CreateContainer()
   if containerFrame then return containerFrame end
   local cfg = ns.GetCfg("rotationHelper") or {}
 
-  containerFrame = CreateFrame("Frame", "AishaddonRotationHelperBar", UIParent)
+  containerFrame = CreateFrame("Frame", "AishCoreRotationHelperBar", UIParent)
   containerFrame:SetSize(1, 1)
   containerFrame:SetPoint(
     cfg.anchor or "TOP",
@@ -129,9 +135,29 @@ local function CreateContainer()
   return containerFrame
 end
 
----------------------------------------------------------------------------
+-- Glisser/deposer relaye depuis l'icone visible vers containerFrame (un enfant recoit la souris avant son parent), gardé derriere dragUnlocked
+local function OnRHDragStart()
+  if not dragUnlocked or not containerFrame then return end
+  containerFrame:StartMoving()
+end
+
+local function OnRHDragStop()
+  if not containerFrame then return end
+  containerFrame:StopMovingOrSizing()
+  local point, _, _, x, y = containerFrame:GetPoint()
+  if ns.DB and ns.DB.rotationHelper then
+    ns.DB.rotationHelper.anchor = point
+    ns.DB.rotationHelper.x = x
+    ns.DB.rotationHelper.y = y
+  end
+  -- Met a jour les sliders X/Y du panneau de reglages (meme convention que ResourceCircle/Skyriding)
+  local xSl = _G["AishCoreRHPosXSlider"]
+  local ySl = _G["AishCoreRHPosYSlider"]
+  if xSl then xSl:SetValue(x) end
+  if ySl then ySl:SetValue(y) end
+end
+
 -- Creation d'une icone de sort
----------------------------------------------------------------------------
 local function CreateSpellIcon(spellID)
   local cfg = ns.GetCfg("rotationHelper") or {}
   local size = cfg.iconSize or iconSize
@@ -153,28 +179,7 @@ local function CreateSpellIcon(spellID)
     frame.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
   end
 
-  frame.border = frame:CreateTexture(nil, "OVERLAY")
-  frame.border:SetAllPoints()
-  frame.border:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-  frame.border:SetBlendMode("ADD")
-  frame.border:SetAlpha(0.5)
-
-  frame.glow = frame:CreateTexture(nil, "OVERLAY", nil, 1)
-  frame.glow:SetPoint("TOPLEFT", -4, 4)
-  frame.glow:SetPoint("BOTTOMRIGHT", 4, -4)
-  frame.glow:SetTexture("Interface\\SpellActivationOverlay\\IconAlert")
-  frame.glow:SetTexCoord(0.00781250, 0.50781250, 0.27734375, 0.52734375)
-  frame.glow:SetBlendMode("ADD")
-  frame.glow:SetAlpha(0.6)
-
-  frame.glowAG = frame.glow:CreateAnimationGroup()
-  frame.glowAG:SetLooping("BOUNCE")
-  local pulse = frame.glowAG:CreateAnimation("Alpha")
-  pulse:SetFromAlpha(0.4)
-  pulse:SetToAlpha(0.8)
-  pulse:SetDuration(0.8)
-  pulse:SetSmoothing("IN_OUT")
-  frame.glowAG:Play()
+  -- Glow non porte par l'icone : instance unique partagee sur containerFrame (cf. bloc GLOW PARTAGE plus bas)
 
   frame.showAG = frame:CreateAnimationGroup()
   local fadeIn = frame.showAG:CreateAnimation("Alpha")
@@ -208,6 +213,10 @@ local function CreateSpellIcon(spellID)
 
   frame.spellID = spellID
   frame:EnableMouse(true)
+  -- Relais de glisser/deposer vers containerFrame (l'icone visible recoit le clic, pas le containerFrame invisible/1x1)
+  frame:RegisterForDrag("LeftButton")
+  frame:SetScript("OnDragStart", OnRHDragStart)
+  frame:SetScript("OnDragStop", OnRHDragStop)
   frame:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM", 0, -4)
     GameTooltip:SetSpellByID(self.spellID)
@@ -222,39 +231,169 @@ local function CreateSpellIcon(spellID)
   return frame
 end
 
----------------------------------------------------------------------------
--- Layout
----------------------------------------------------------------------------
-local function LayoutIcons()
-  if not containerFrame then return end
-  local cfg = ns.GetCfg("rotationHelper") or {}
-  local size = cfg.iconSize or iconSize
-  local spacing = cfg.iconSpacing or iconSpacing
-  local count = #activeIcons
-  if count == 0 then return end
+-- GLOW PARTAGE : instance unique sur containerFrame (pas par icone/spellID, evite le bug de glow qui ne se rallumait qu'une fois sur deux).
+-- L'anim (pulse/flipbook) demarre une seule fois et tourne en permanence ; StartGlow/StopGlow ne font que Show()/Hide(), jamais Play()/Stop().
+local rhGlowContainer, rhGlowTex, rhGlowAG, rhGlowPulse
+local rhLoopFlipTex, rhLoopFlipAG, rhLoopFlipAnim
+local rhGlowMode = "none"
 
-  local totalWidth = count * size + (count - 1) * spacing
-  for i, spellID in ipairs(activeIcons) do
-    local icon = iconPool[spellID]
-    if icon then
-      icon:ClearAllPoints()
-      local xOffset = (i - 1) * (size + spacing) - totalWidth / 2 + size / 2
-      icon:SetPoint("CENTER", containerFrame, "CENTER", xOffset, 0)
+local function EnsureContainerGlow()
+  if rhGlowContainer or not containerFrame then return end
+  rhGlowContainer = CreateFrame("Frame", nil, containerFrame)
+  rhGlowContainer:SetPoint("CENTER", containerFrame, "CENTER", 0, 0)
+  rhGlowContainer:SetFrameLevel(containerFrame:GetFrameLevel() + 2)
+
+  rhGlowTex = rhGlowContainer:CreateTexture(nil, "OVERLAY", nil, 1)
+  rhGlowTex:SetBlendMode("ADD")
+  rhGlowTex:SetAlpha(0)
+  rhGlowTex:Hide()
+  rhGlowAG = rhGlowTex:CreateAnimationGroup()
+  rhGlowAG:SetLooping("BOUNCE")
+  rhGlowPulse = rhGlowAG:CreateAnimation("Alpha")
+  rhGlowPulse:SetSmoothing("IN_OUT")
+
+  rhLoopFlipTex = rhGlowContainer:CreateTexture(nil, "OVERLAY", nil, 2)
+  rhLoopFlipTex:SetAlpha(0)
+  rhLoopFlipTex:Hide()
+  rhLoopFlipAG = rhLoopFlipTex:CreateAnimationGroup()
+  rhLoopFlipAG:SetLooping("REPEAT")
+  rhLoopFlipAnim = rhLoopFlipAG:CreateAnimation("FlipBook")
+  rhLoopFlipAnim:SetOrder(1)
+end
+
+-- Applique la config de glow (type/couleur/taille), meme logique que PriorityBar.ApplyGlowConfig. Appelee a la creation/reglage, jamais a chaque activation (cf. StartGlow)
+local function ApplyGlowConfig()
+  EnsureContainerGlow()
+  if not rhGlowContainer then return end
+  local cfg = ns.GetCfg("rotationHelper") or {}
+  local PB = ns.Modules and ns.Modules.PriorityBar
+  local LOOP = PB and PB.LOOP_GLOW_TYPES
+  if not LOOP then rhGlowMode = "none"; return end
+
+  -- Couleur : priorite a la couleur "Glow" de la spec active si demande, retombe sur cfg.glowColor sinon
+  local glowColor
+  if cfg.useSpecGlowColor then
+    local Clr = ns.Modules and ns.Modules.Colors
+    if Clr and Clr.Get then glowColor = Clr.Get("glow") end
+  end
+  glowColor = glowColor or cfg.glowColor or { 1, 0.85, 0, 0.8 }
+  local glowSize  = cfg.glowSize or 4
+  local loopIdx   = cfg.loopGlowIndex or 1
+  local gt = LOOP[loopIdx] or LOOP[1]
+  local size = cfg.iconSize or iconSize
+  rhGlowContainer:SetSize(size, size)
+
+  -- Repli sur "Pulse" (LOOP[2]) si l'atlas choisi n'existe pas sur ce client : SetAtlas echoue silencieusement sinon (icone invisible)
+  if gt.atlas and C_Texture and C_Texture.GetAtlasInfo and not C_Texture.GetAtlasInfo(gt.atlas) then
+    gt = LOOP[2] or gt
+  end
+
+  if gt.useAlphaPulse then
+    rhGlowMode = "pulse"
+    rhLoopFlipAG:Stop(); rhLoopFlipTex:SetAlpha(0); rhLoopFlipTex:Hide()
+
+    if gt.atlas then
+      rhGlowTex:SetTexture(nil); rhGlowTex:SetAtlas(gt.atlas); rhGlowTex:SetTexCoord(0, 1, 0, 1)
+    else
+      rhGlowTex:SetTexture(gt.texture)
+      if gt.texCoord then rhGlowTex:SetTexCoord(unpack(gt.texCoord))
+      else rhGlowTex:SetTexCoord(0, 1, 0, 1) end
     end
+    rhGlowTex:SetBlendMode(gt.blendMode or "ADD")
+    rhGlowTex:SetVertexColor(glowColor[1], glowColor[2], glowColor[3], glowColor[4] or 1)
+    rhGlowTex:ClearAllPoints()
+    rhGlowTex:SetPoint("TOPLEFT", rhGlowContainer, "TOPLEFT", -glowSize, glowSize)
+    rhGlowTex:SetPoint("BOTTOMRIGHT", rhGlowContainer, "BOTTOMRIGHT", glowSize, -glowSize)
+    rhGlowPulse:SetFromAlpha(gt.fromAlpha or 0.4)
+    rhGlowPulse:SetToAlpha(gt.toAlpha or 0.8)
+    rhGlowPulse:SetDuration(gt.duration or 0.8)
+  elseif gt.atlas or gt.texture then
+    rhGlowMode = "flipbook"
+    rhGlowAG:Stop(); rhGlowTex:SetAlpha(0); rhGlowTex:Hide()
+
+    if gt.atlas then
+      rhLoopFlipTex:SetTexture(nil); rhLoopFlipTex:SetAtlas(gt.atlas)
+    else
+      rhLoopFlipTex:SetTexture(gt.texture)
+    end
+    local sc = gt.scale or 1
+    local texSize = size * sc + glowSize * 2
+    rhLoopFlipTex:ClearAllPoints()
+    rhLoopFlipTex:SetSize(texSize, texSize)
+    rhLoopFlipTex:SetPoint("CENTER", rhGlowContainer, "CENTER", 0, 0)
+    rhLoopFlipTex:SetVertexColor(glowColor[1], glowColor[2], glowColor[3], glowColor[4] or 1)
+    rhLoopFlipTex:SetBlendMode("ADD")
+    rhLoopFlipAnim:SetFlipBookRows(gt.rows or 6)
+    rhLoopFlipAnim:SetFlipBookColumns(gt.columns or 5)
+    rhLoopFlipAnim:SetFlipBookFrames(gt.frames or 30)
+    rhLoopFlipAnim:SetDuration(gt.duration or 1.0)
+    rhLoopFlipAnim:SetFlipBookFrameWidth(gt.frameW or 0)
+    rhLoopFlipAnim:SetFlipBookFrameHeight(gt.frameH or 0)
+  else
+    -- "Aucun" (index 1 : ni useAlphaPulse, ni atlas, ni texture)
+    rhGlowMode = "none"
+    rhGlowAG:Stop(); rhGlowTex:SetAlpha(0); rhGlowTex:Hide()
+    rhLoopFlipAG:Stop(); rhLoopFlipTex:SetAlpha(0); rhLoopFlipTex:Hide()
+  end
+
+  -- Demarre l'anim active ici une seule fois, elle tourne ensuite en permanence jusqu'au prochain changement de reglage.
+  if rhGlowMode == "flipbook" and not rhLoopFlipAG:IsPlaying() then rhLoopFlipAG:Play() end
+  if rhGlowMode == "pulse" and not rhGlowAG:IsPlaying() then rhGlowAG:Play() end
+end
+
+-- Rafraichit la couleur "spec" du glow au changement de spec/profil (sinon useSpecGlowColor reste fige sur l'ancienne spec)
+if ns.CallbackRegistry then
+  local function RefreshGlowColorOnSpecChange()
+    if containerFrame and (ns.GetCfg("rotationHelper") or {}).useSpecGlowColor then
+      ApplyGlowConfig()
+    end
+  end
+  ns.CallbackRegistry:Register("SPEC_CHANGED", RefreshGlowColorOnSpecChange)
+  ns.CallbackRegistry:Register("PROFILE_CHANGED", RefreshGlowColorOnSpecChange)
+end
+
+-- Affiche/masque le glow (seule condition : une icone est affichee), ne touche jamais Play()/Stop() (gere par ApplyGlowConfig)
+local function StartGlow()
+  if not rhGlowContainer then ApplyGlowConfig() end
+  if not rhGlowContainer then return end
+  if rhGlowMode == "flipbook" then
+    rhLoopFlipTex:SetAlpha(1)
+    rhLoopFlipTex:Show()
+  elseif rhGlowMode == "pulse" then
+    rhGlowTex:SetAlpha(0.6)
+    rhGlowTex:Show()
   end
 end
 
----------------------------------------------------------------------------
+local function StopGlow()
+  if not rhGlowContainer then return end
+  rhGlowTex:SetAlpha(0); rhGlowTex:Hide()
+  rhLoopFlipTex:SetAlpha(0); rhLoopFlipTex:Hide()
+end
+
+-- Layout : une seule icone possible (cf. ShowSpellIcon), toujours centree.
+local function LayoutIcons()
+  if not containerFrame then return end
+  local spellID = activeIcons[1]
+  if not spellID then return end
+  local icon = iconPool[spellID]
+  if icon then
+    icon:ClearAllPoints()
+    icon:SetPoint("CENTER", containerFrame, "CENTER", 0, 0)
+  end
+end
+
 -- Show / Hide
----------------------------------------------------------------------------
 local function ShowSpellIcon(spellID)
   if not containerFrame or not spellID or spellID == 0 then return end
   local cfg = ns.GetCfg("rotationHelper") or {}
   if cfg.enabled == false then return end
   if ns.IsInBlockedState() then return end
-  if ns.skyridingActive and (ns.GetCfg("skyriding") or {}).hideRotationHelper ~= false then return end
+  -- ns.skyridingActive ne couvre que le HUD Skyriding ; IsFlying() couvre aussi un mont volant classique (masquage "pendant le vol" au sens large)
+  if (ns.skyridingActive or (IsFlying and IsFlying())) and (ns.GetCfg("skyriding") or {}).hideRotationHelper ~= false then return end
   if activeSet[spellID] then return end
-  if #activeIcons >= (cfg.maxIcons or maxIcons) then return end
+  -- Une seule icone a la fois (miroir du highlight Blizzard, qui ne suggere jamais qu'un seul sort a la fois)
+  if #activeIcons >= 1 then return end
 
   local icon = iconPool[spellID]
   if not icon then
@@ -274,7 +413,7 @@ local function ShowSpellIcon(spellID)
   icon:Show()
   icon:SetAlpha(0)
   icon.showAG:Play()
-  icon.glowAG:Play()
+  StartGlow()
 
   Debug("SHOW " .. spellID)
 end
@@ -293,21 +432,50 @@ local function HideSpellIcon(spellID)
 
   if icon then
     icon.showAG:Stop()
-    icon.glowAG:Stop()
     icon.hideAG:Play()
   end
+  StopGlow()
 
   Debug("HIDE " .. spellID)
 
   C_Timer.After(0.16, function() LayoutIcons() end)
 end
 
----------------------------------------------------------------------------
+-- Vrai si la cible existe, est vivante et est attaquable par le joueur (meme verification que MissingBuffs.lua)
+local function IsTargetAttackable()
+  return UnitExists("target")
+    and not UnitIsDeadOrGhost("target")
+    and UnitCanAttack and UnitCanAttack("player", "target")
+end
+
+-- Visibilite (memes reglages que PriorityBar) : consultee uniquement par PollGlows, Test()/SetPreview contournent volontairement
+local function ShouldShowIcons()
+  local cfg = ns.GetCfg("rotationHelper") or {}
+  if cfg.enabled == false then return false end
+  if ns.IsInBlockedState() then return false end
+  if (ns.skyridingActive or (IsFlying and IsFlying())) and (ns.GetCfg("skyriding") or {}).hideRotationHelper ~= false then return false end
+  local vMode = cfg.visibilityMode or "combat"
+  -- Zone de repos : les modes "Cible uniquement"/"En combat" overrident ce masquage s'ils sont satisfaits, seul "Toujours" y reste soumis
+  if cfg.ignoreWhileResting and IsResting and IsResting() then
+    if vMode == "target" then
+      if not IsTargetAttackable() then return false end
+    elseif vMode == "combat" then
+      if not UnitAffectingCombat("player") then return false end
+    else
+      return false
+    end
+  end
+  if cfg.alwaysInInstance and ns.inInstance then return true end
+  if vMode == "always" then return true end
+  -- "Cible uniquement" : vrai seulement si la cible est reellement attaquable (pas juste presente)
+  if vMode == "target" then return IsTargetAttackable() and true or false end
+  return UnitAffectingCombat("player") and true or false
+end
+
 -- Polling
----------------------------------------------------------------------------
 local function PollGlows()
-  if testMode then return end
-  local currentGlows = CollectGlowedSpells()
+  if testMode or previewMode then return end
+  local currentGlows = ShouldShowIcons() and CollectGlowedSpells() or {}
 
   for spellID in pairs(currentGlows) do
     if not activeSet[spellID] then
@@ -335,9 +503,7 @@ local function StopPolling()
   if pollTicker then pollTicker:Cancel(); pollTicker = nil end
 end
 
----------------------------------------------------------------------------
 -- API publique
----------------------------------------------------------------------------
 
 -- Hook UpdateSpellHighlightMark sur tous les boutons (detection plus rapide)
 local buttonsHooked = false
@@ -426,6 +592,12 @@ function RotationHelper.ApplySettings()
     icon.icon:SetPoint("TOPLEFT", 2, -2)
     icon.icon:SetPoint("BOTTOMRIGHT", -2, 2)
   end
+
+  -- Re-applique le glow (type/couleur/taille) : instance partagee (cf. GLOW PARTAGE), redemarre l'affichage seulement si une icone est visible
+  ApplyGlowConfig()
+  if #activeIcons > 0 or previewMode then
+    StartGlow()
+  end
   LayoutIcons()
 end
 
@@ -451,22 +623,53 @@ function RotationHelper.SetEnabled(enabled)
   end
 end
 
+-- Apercu force pour le panneau de reglages (meme convention que CastBar.SetPreview). Icone dediee (cle "preview") pour eviter les gardes de ShowSpellIcon.
+function RotationHelper.SetPreview(on)
+  if not containerFrame then return end
+  local cfg = ns.GetCfg("rotationHelper") or {}
+  if on and cfg.enabled == false then return end
+  previewMode = on
+  if on then
+    StopPolling()
+    for _, icon in pairs(iconPool) do icon:Hide() end
+    wipe(activeIcons)
+    wipe(activeSet)
+    containerFrame:SetSize(200, 60)
+    containerFrame:Show()
+    if not previewIcon then
+      previewIcon = CreateSpellIcon(133) -- Boule de feu : meme sort "neutre" que CastBar/TargetCastBar SetPreview
+      iconPool.preview = previewIcon      -- redimensionne automatiquement avec les autres (cf. ApplySettings)
+    end
+    previewIcon:ClearAllPoints()
+    previewIcon:SetPoint("CENTER", containerFrame, "CENTER", 0, 0)
+    previewIcon:SetAlpha(1)
+    previewIcon:Show()
+    StartGlow()
+  else
+    StopGlow()
+    if previewIcon then
+      previewIcon:Hide()
+    end
+    if cfg.enabled ~= false then
+      StartPolling()
+      C_Timer.After(0.1, function() PollGlows() end)
+    else
+      containerFrame:SetSize(1, 1)
+      containerFrame:Hide()
+    end
+  end
+end
+
 function RotationHelper.EnableDrag(enable)
   if not containerFrame then return end
+  -- Arme/desarme aussi le relais sur l'icone (cf. OnRHDragStart) : c'est elle qui recoit le clic, containerFrame est invisible/1x1 hors mode drag
+  dragUnlocked = enable
   containerFrame:EnableMouse(enable)
   if enable then
     containerFrame:SetSize(200, 60)
     containerFrame:RegisterForDrag("LeftButton")
-    containerFrame:SetScript("OnDragStart", function(self) self:StartMoving() end)
-    containerFrame:SetScript("OnDragStop", function(self)
-      self:StopMovingOrSizing()
-      local point, _, _, x, y = self:GetPoint()
-      if ns.DB and ns.DB.rotationHelper then
-        ns.DB.rotationHelper.anchor = point
-        ns.DB.rotationHelper.x = x
-        ns.DB.rotationHelper.y = y
-      end
-    end)
+    containerFrame:SetScript("OnDragStart", OnRHDragStart)
+    containerFrame:SetScript("OnDragStop", OnRHDragStop)
     if not containerFrame.dragBg then
       containerFrame.dragBg = containerFrame:CreateTexture(nil, "BACKGROUND")
       containerFrame.dragBg:SetAllPoints()
@@ -484,8 +687,9 @@ end
 
 function RotationHelper.Reset()
   for _, icon in pairs(iconPool) do
-    icon:Hide(); icon.showAG:Stop(); icon.hideAG:Stop(); icon.glowAG:Stop()
+    icon:Hide(); icon.showAG:Stop(); icon.hideAG:Stop()
   end
+  StopGlow()
   wipe(activeIcons)
   wipe(activeSet)
   LayoutIcons()
@@ -567,13 +771,13 @@ function RotationHelper.ToggleDebug()
   end
 end
 
--- Commande test : force l'affichage de quelques icones pour verifier le display
+-- Commande test : force l'affichage de l'icone pour verifier le display (une seule a la fois)
 function RotationHelper.Test()
   -- Bloquer le polling (ticker + hooks) pendant le test
   testMode = true
   StopPolling()
 
-  -- Chercher 3 sorts assignes sur les barres
+  -- Chercher 1 sort assigne sur les barres
   local testSpells = {}
   local count = 0
   for _, prefix in ipairs(BUTTON_PREFIXES) do
@@ -585,11 +789,11 @@ function RotationHelper.Test()
           testSpells[sid] = true
           count = count + 1
           ShowSpellIcon(sid)
-          if count >= 3 then break end
+          if count >= 1 then break end
         end
       end
     end
-    if count >= 3 then break end
+    if count >= 1 then break end
   end
   if count > 0 then
     print("|cff00b0ff[RH]|r Test: " .. count .. " icones forcees pendant 5 sec")

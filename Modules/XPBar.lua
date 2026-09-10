@@ -1,7 +1,4 @@
-﻿-- Modules/XPBar.lua : Barre d'experience custom
--- Structure : fond noir | StatusBar (degrade teal) | overlay aishui_xpbar.png
--- Badge de niveau et infos en grunge_spot1.png. Info XP centre au hover.
--- Layout mode : drag/resize + sliders settings pour positionner les elements.
+﻿-- Modules/XPBar.lua : Barre d'experience custom (fond + overlay + badge niveau, layout mode drag/resize)
 local addonName, ns = ...
 local L = ns.L
 
@@ -9,11 +6,9 @@ ns.Modules = ns.Modules or {}
 local XPBar = {}
 ns.Modules.XPBar = XPBar
 
--- ---------------------------------------------------------------------------
 -- Constantes
--- ---------------------------------------------------------------------------
-local TEX_OVERLAY   = "Interface\\AddOns\\AishuuMedia\\aishui_xpbar.png"
-local TEX_GRUNGE    = "Interface\\AddOns\\AishuuMedia\\grunge_spot1.png"
+local TEX_OVERLAY   = "Interface\\AddOns\\AishCore\\Media\\XPBar\\aishui_xpbar.png"
+local TEX_GRUNGE    = "Interface\\AddOns\\AishCore\\Media\\XPBar\\grunge_spot1.png"
 local TEX_SPARK     = "Interface\\CastingBar\\UI-CastingBar-Spark"
 local TEX_SOLID     = "Interface\\BUTTONS\\WHITE8X8"
 
@@ -47,9 +42,7 @@ local DEF_LB = { x = -34, y = 2.15, w = 116, h = 79, rot = 201 }
 local DEF_TF = { x = -34, y = 85,   w = 145, h = 48,
                  bgRot = 48, bgW = 200, bgH = 104, bgOffX = -23, bgOffY = 0 }
 
--- ---------------------------------------------------------------------------
 -- Etat prive
--- ---------------------------------------------------------------------------
 local container
 local bgTex
 local xpBar
@@ -67,6 +60,12 @@ local centerXPText
 local hoverFrame
 local fxModel
 local restModel       -- animation 3D indicateur de zone de repos
+
+--- Applique le style de contour a levelText (factorise les ~9 sites qui refont SetFont).
+local function SetLevelTextFont(size)
+  ns.ApplyTextOutlineStyle(levelText, levelText.slugRing, xpFontLevel, size,
+    ns.DB.xpBar and ns.DB.xpBar.levelOutlineStyle, true)
+end
 
 -- Elements layout mode
 local lbBorder        -- Frame bordure rouge autour de levelBg
@@ -86,9 +85,7 @@ local isCompanionMode     = false  -- vrai quand on affiche l'XP compagnon de go
 local COMPANION_FACTION_IDS    = {2640, 2744}  -- Brann (TWW), Valeera (Midnight)
 local companionStandingCache   = {}            -- {[factionID]=standing} pour détecter les gains
 local activeCompanionFactionID = nil           -- faction qui gagne de l'XP pendant le scénario
--- Whitelist mapIDs gouffres : valeur = factionID compagnon préféré.
--- TWW est couvert par scenarioType=11 ; Midnight nécessite ce fallback.
--- Ajouter les IDs manquants via /xbdelve depuis chaque gouffre.
+-- Whitelist mapIDs gouffres (valeur = factionID compagnon préféré) ; TWW couvert par scenarioType=11, Midnight via fallback
 local DELVE_MAP_IDS = {
   -- Midnight (Valeera 2744)
   [2503] = 2744,  -- Cryptes du Crépuscule
@@ -105,6 +102,7 @@ local DELVE_MAP_IDS = {
   [2507] = 2744,  -- Eminence du tourment
   [2525] = 2744,  -- Sombrevoie
   [2545] = 2744,  -- Parhélion
+  [2633] = 2744,  -- Arène de la Gloire
   -- TWW (Brann 2640) - normalement détectés via scenarioType=11
   [2269] = 2640,  -- Mines de Rampeterre
   [2250] = 2640,  -- Repos de Kriegval
@@ -148,8 +146,7 @@ local prevXP        = nil
 local prevCompanionPct = nil  -- pour détecter le delta d'XP compagnon
 local prevRepPct       = nil  -- pour détecter le delta de réputation
 
---- Réinitialise proprement tout l'état lié au mode compagnon de gouffre.
---- Appelée UNIQUEMENT aux transitions explicites (sortie gouffre, loading screen, toggle).
+--- Réinitialise l'état du mode compagnon (sortie gouffre, loading screen, toggle).
 local function ResetCompanionState()
   isCompanionMode          = false
   prevCompanionPct         = nil
@@ -160,17 +157,14 @@ end
 local FX_MODEL_ID = 4507696
 local FX_W, FX_H = 313, 283
 
--- Indicateur de zone de repos 
--- fileID 165675 · ancré sur le badge de niveau (levelBg)
+-- Indicateur de zone de repos, ancré sur le badge de niveau (levelBg)
 local REST_MODEL_ID = 165675
 local REST_W        = 85.591751098633
 local REST_H        = 66.667037963867
 local REST_SCALE    = 40               
 local REST_TX       = 40               
 
--- ---------------------------------------------------------------------------
 -- Helpers DB
--- ---------------------------------------------------------------------------
 local function GetCfgLB()
   local db = ns.DB and ns.DB.xpBar and ns.DB.xpBar.levelBg
   if not db then db = ns.Defaults and ns.Defaults.xpBar and ns.Defaults.xpBar.levelBg end
@@ -229,9 +223,7 @@ local function SaveTF()
   ns.DB.xpBar.tooltipFrame.h = h
 end
 
--- ---------------------------------------------------------------------------
 -- Helpers display
--- ---------------------------------------------------------------------------
 local function GetClassColor()
   local _, class = UnitClass("player")
   local c = (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[class]
@@ -263,8 +255,7 @@ local function UpdateBarColor()
   end
 end
 
--- Applique la couleur XP Bar (texte niveau, hover, texte central)
--- la couleur GAIN_COLOR turquoise du gain XP n'est jamais touchée
+-- Applique la couleur XP Bar (texte niveau, hover, texte central) ; GAIN_COLOR n'est jamais touchée
 local function UpdateXPColors()
   local r, g, b
   local CLR = ns.Modules.Colors
@@ -307,12 +298,8 @@ local function IsMaxLevel()
   return UnitLevel("player") >= GetMaxPlayerLevel()
 end
 
--- ---------------------------------------------------------------------------
 -- Réputation trackée (mode niveau max)
--- ---------------------------------------------------------------------------
---- Données d'une faction par factionID + nom (les 3 systèmes : Renommée, Amitié, Classique).
---- factionData optionnel (struct FactionData déjà obtenu) : utilisé pour le chemin classique.
---- Champs retournés : name, letter, pct (0–1), cur, max, standing, rank*, rankMax*, isBattalion
+--- Données d'une faction (les 3 systèmes : Renommée, Amitié, Classique). factionData optionnel pour le chemin classique.
 local function GetRepDataForFaction(factionID, factionName, factionData)
   if not factionID or not factionName or factionName == "" then return nil end
   local name   = factionName
@@ -325,7 +312,7 @@ local function GetRepDataForFaction(factionID, factionName, factionData)
     if ok and basefd then isBattalion = basefd.isAccountWide or false end
   end
 
-  -- ── Système de Renommée (Dragonflight / TWW — Major Factions) ────────────
+  -- Système de Renommée (Dragonflight / TWW — Major Factions)
   if C_MajorFactions and C_MajorFactions.GetMajorFactionData then
     local ok, mf = pcall(C_MajorFactions.GetMajorFactionData, factionID)
     if ok and mf and mf.renownLevel ~= nil then
@@ -344,7 +331,7 @@ local function GetRepDataForFaction(factionID, factionName, factionData)
     end
   end
 
-  -- ── Système de Réputation d'amitié (Chromie, etc.) ───────────────────────
+  -- Système de Réputation d'amitié (Chromie, etc.)
   if C_GossipInfo and C_GossipInfo.GetFriendshipReputation then
     local ok, fr = pcall(C_GossipInfo.GetFriendshipReputation, factionID)
     if ok and fr and fr.friendshipFactionID and fr.friendshipFactionID > 0 then
@@ -364,7 +351,7 @@ local function GetRepDataForFaction(factionID, factionName, factionData)
     end
   end
 
-  -- ── Système classique (standings Amical / Honorable / Exalté…) ───────────
+  -- Système classique (standings Amical / Honorable / Exalté…)
   local fd
   if C_Reputation and C_Reputation.GetFactionDataByID then
     local ok, r = pcall(C_Reputation.GetFactionDataByID, factionID)
@@ -400,10 +387,7 @@ local function GetRepData()
   return GetRepDataForFaction(data.factionID, data.name, data)
 end
 
---- Retourne la réputation à afficher selon le mode configuré, ou nil si le module est désactivé.
----   repEnabled = false → nil
----   "tracked"          → réputation trackée dans le panneau Réputations
----   "lastGained"       → dernière réputation qui a progressé (jusqu'au prochain gain)
+--- Réputation à afficher selon le mode configuré ("tracked" ou "lastGained"), ou nil si désactivé.
 local function GetActiveRepData()
   local cfg = ns.GetCfg("xpBar")
   if cfg and cfg.repEnabled == false then return nil end
@@ -449,19 +433,14 @@ local function IsInDelve()
   return false
 end
 
---- Retourne les données XP du compagnon de gouffre (Brann / Valeera), ou nil si inactif.
---- Actif seulement : niveau max + dans un gouffre + option companionXP activée.
+--- Données XP du compagnon de gouffre (Brann / Valeera), ou nil si inactif (niveau max + en gouffre requis).
 local function GetCompanionXPData()
   if not IsMaxLevel() then return nil end
   local cfg = ns.GetCfg("xpBar")
   if not cfg or cfg.companionXP == false then return nil end
   if not IsInDelve() then return nil end
-  -- IsInDelve() est l'autorité : en gouffre on cherche forcément un compagnon.
   if not (C_GossipInfo and C_GossipInfo.GetFriendshipReputation) then return nil end
-  -- Ordre de préférence :
-  --  1. compagnon qui a déjà gagné de l'XP ce scénario (activeCompanionFactionID)
-  --  2. compagnon préféré selon le mapID (TWW→Brann 2640, Midnight→Valeera 2744)
-  --  3. liste complète
+  -- Ordre de préférence : compagnon actif ce scénario, puis préféré selon mapID, puis liste complète
   local preferredID = activeCompanionFactionID
   if not preferredID and C_Map and C_Map.GetBestMapForUnit then
     local mapID = C_Map.GetBestMapForUnit("player")
@@ -510,11 +489,7 @@ local function GetCompanionXPData()
   return nil
 end
 
---- Calcule une clé de progression monotone croissante pour une faction donnée.
---- Renommée  : renownLevel * 100000 + earned  (ne régresse jamais même au level-up)
---- Amitié    : standing absolu
---- Classique : currentStanding absolu
---- Retourne nil si la faction est inconnue.
+--- Clé de progression monotone croissante pour une faction (Renommée/Amitié/Classique), ou nil si inconnue.
 local function GetFactionProgressKey(fid)
   if not fid or fid <= 0 then return nil end
   -- Renommée
@@ -541,9 +516,7 @@ local function GetFactionProgressKey(fid)
   return nil
 end
 
---- Remplit knownMajorFactionIDs + factionNameCache pour toutes les extensions
---- contenant des factions de Renommée (Dragonflight=9, TWW=10, +1 pour le futur).
---- N'itère que les factionIDs non encore vus : peut être appelé plusieurs fois.
+--- Remplit knownMajorFactionIDs + factionNameCache pour les factions de Renommée ; safe à rappeler plusieurs fois.
 local function EnrichMajorFactionIDs()
   if not (C_MajorFactions and C_MajorFactions.GetMajorFactionIDs) then return end
   local maxExp = (LE_EXPANSION_LEVEL_CURRENT or 10) + 1
@@ -575,9 +548,7 @@ local function EnrichMajorFactionIDs()
   end
 end
 
---- Détecte les gains de réputation parmi les factions connues.
---- Coût par appel : N * pcall(GetMajorFactionData) où N = factions Renommée connues (~15-20).
---- Les noms sont pré-cachés → aucun GetFactionDataByID supplémentaire.
+--- Détecte les gains de réputation parmi les factions connues (noms pré-cachés).
 local function ScanRepGains()
   local function CheckFaction(fid, fname, fdHint)
     if not fid or fid <= 0 then return end
@@ -640,8 +611,7 @@ local function ScanRepGains()
   end
 end
 
---- Initialise les caches au login / reload.
---- Remplit knownMajorFactionIDs, factionNameCache et les baselines repCache.
+--- Initialise les caches au login / reload (knownMajorFactionIDs, factionNameCache, baselines repCache).
 local function InitRepCache()
   repCache         = {}
   repPctCache      = {}
@@ -795,9 +765,7 @@ local function UpdateTooltip()
   end
 end
 
--- ---------------------------------------------------------------------------
 -- Animations
--- ---------------------------------------------------------------------------
 local function BuildAnimations()
   showAnim = container:CreateAnimationGroup()
   showAnim:SetToFinalAlpha(true)
@@ -837,15 +805,12 @@ local function BuildAnimations()
   end)
 end
 
--- ---------------------------------------------------------------------------
 -- Show / Hide
--- ---------------------------------------------------------------------------
 local function ShowXPBar()
   if IsMaxLevel() and not GetCompanionXPData() and not GetActiveRepData() then return end
   if not container then return end
 
-  -- Si la barre est deja completement visible (hors hideAnim/showAnim en cours),
-  -- on met juste a jour le fill sans relancer l'animation d'entree.
+  -- Si deja completement visible (hors anim en cours), juste maj du fill sans relancer l'entree
   local alreadyVisible = container:IsVisible()
                       and container:GetAlpha() > 0.5
                       and not (hideAnim and hideAnim:IsPlaying())
@@ -853,15 +818,14 @@ local function ShowXPBar()
   if alreadyVisible then
     UpdateBarFill()
     if fxModel then fxModel:Show() end
-    -- Si une animation de gain était en cours et que gainAnimFrame a été stoppé
-    -- (ex : autre addon qui cache/reaffiche l'UI), le relancer.
+    -- Relance l'anim de gain si gainAnimFrame a été stoppé (ex : autre addon qui cache/reaffiche l'UI)
     if gainAnimFrame and gainPhase ~= "idle" and not gainAnimFrame:IsVisible() then
       gainAnimFrame:Show()
     end
     return
   end
 
-  -- Barre cachee ou en cours de hide/show : lancer l'animation d'entree
+  -- Barre cachee ou en transition : lancer l'animation d'entree
   if hideAnim and hideAnim:IsPlaying() then
     hideAnim:Stop()
   end
@@ -880,8 +844,7 @@ local function ShowXPBar()
     gainAnimFrame:Show()
   end
 
-  -- Sécurité : si l'animation OnFinished ne fire pas (rare mais possible),
-  -- forcer la position et l'alpha corrects après le délai théorique.
+  -- Sécurité : si OnFinished ne fire pas, forcer position/alpha après le délai théorique
   C_Timer.After(ANIM_IN_DUR + 0.05, function()
     if container and container:IsVisible()
        and not (hideAnim and hideAnim:IsPlaying()) then
@@ -902,9 +865,7 @@ local function HideXPBar()
   end
 end
 
--- ---------------------------------------------------------------------------
 -- Callback XP
--- ---------------------------------------------------------------------------
 local function OnXPGained()
   if IsMaxLevel() then return end
   local cfg = ns.GetCfg("xpBar")
@@ -931,9 +892,7 @@ local function OnXPGained()
   end)
 end
 
--- ---------------------------------------------------------------------------
 -- Helpers layout mode
--- ---------------------------------------------------------------------------
 local function MakeBorder(parent, color)
   local b = CreateFrame("Frame", nil, parent)
   b:SetAllPoints(parent)
@@ -996,9 +955,7 @@ local function MakeCoordText(parent)
   return f
 end
 
--- ---------------------------------------------------------------------------
 -- Callbacks inner (extraits de Create pour ne pas depasser 60 upvalues)
--- ---------------------------------------------------------------------------
 local function OnGainUpdate(self, dt)
   gainElapsed = gainElapsed + dt
   -- Pulse de base (0.4 -> 1.0), modifie par phase
@@ -1120,7 +1077,6 @@ local function OnHoverLeave()
 end
 
 --- Détecte quel compagnon de gouffre gagne de l'XP (UPDATE_FACTION en scénario).
---- Met à jour activeCompanionFactionID et companionStandingCache.
 local function TrackCompanionXPGain()
   if not IsMaxLevel() then return end
   if not IsInDelve() then return end
@@ -1155,32 +1111,26 @@ local function OnRepChanged()
 
   UpdateBarFill()  -- synchronise isRepMode + couleur + valeur
 
-  -- S'assure que le badge et la zone de survol sont visibles (peuvent être cachés
-  -- entre deux UpdateVisibility si on vient d'un état sans réputation).
+  -- S'assure que badge et zone de survol sont visibles (peuvent être cachés entre deux UpdateVisibility)
   if levelBg    and not levelBg:IsVisible()    then levelBg:Show()    end
   if hoverFrame and not hoverFrame:IsVisible() then hoverFrame:Show() end
 
   -- Rafraîchit le texte/police du badge (lettre de la faction)
   if levelText then
-    levelText:SetFont(xpFontLevel, 13, "OUTLINE")
+    SetLevelTextFont(13)
     levelText:SetText(rep.letter)
     UpdateXPColors()
   end
 
-  -- ShowXPBar() AVANT AnimateXPGain : gainAnimFrame est enfant de container,
-  -- son OnUpdate ne fire pas si container est caché.
+  -- ShowXPBar() AVANT AnimateXPGain : gainAnimFrame est enfant de container, inactif si container caché
   ShowXPBar()
 
-  -- Animation de gain réputation (turquoise flash)
-  -- Déclencheur 1 : ScanRepGains a détecté un gain (référence lastGainedRepData changée).
-  --   Utilise lastGainedRepData.prevPct pour les coords exactes, même si prevRepPct
-  --   était nil (1er gain après login) ou provenait d'une autre faction.
-  -- Déclencheur 2 (fallback) : pct de la faction affichée a augmenté (même faction).
+  -- Flash turquoise : déclencheur 1 = gain détecté par ScanRepGains (coords via prevPct), déclencheur 2 = fallback sur pct affiché
   local gainDetected = (lastGainedRepData ~= prevLast and lastGainedRepData ~= nil)
   if gainDetected then
     local gd      = lastGainedRepData
     local startPct = gd.prevPct  -- nil si faction jamais vue avant ce gain
-    -- Renown level-up (pct repart de 0) ou 1er gain : prevPct nil ou > pct → flash depuis 0
+    -- Renown level-up ou 1er gain : prevPct nil ou > pct → flash depuis 0
     if startPct == nil or startPct > gd.pct then startPct = 0 end
     if gd.pct > startPct then
       AnimateXPGain(startPct, gd.pct - startPct)
@@ -1222,17 +1172,14 @@ local function OnCompanionUpdate()
 
   -- Rafraîchit le texte du badge (lettre du compagnon)
   if levelText and comp then
-    levelText:SetFont(xpFontLevel, 13, "OUTLINE")
+    SetLevelTextFont(13)
     levelText:SetText(comp.letter)
     UpdateXPColors()
   end
 
-  -- Première détection : afficher badge + barre sans animation (entrée en gouffre)
-  -- Gain réel : afficher avec animation turquoise
-  -- Aucun des deux : mise à jour silencieuse du fill uniquement
+  -- 1ere détection : badge+barre sans anim ; gain réel : avec flash turquoise ; sinon maj silencieuse
   if isFirstDetection or hasGain then
-    -- ShowXPBar() AVANT AnimateXPGain : gainAnimFrame est enfant de container,
-    -- son OnUpdate ne fire pas si container est caché.
+    -- ShowXPBar() AVANT AnimateXPGain : gainAnimFrame est enfant de container, inactif si container caché
     ShowXPBar()
     if hasGain then
       AnimateXPGain(oldCompanionPct, comp.pct - oldCompanionPct)
@@ -1277,8 +1224,7 @@ local function OnXPBarEvent(_, event, arg1)
       end)
     end
   elseif event == "MAJOR_FACTION_RENOWN_LEVEL_CHANGED" then
-    -- arg1 = factionID, arg2 = newRenownLevel
-    -- On enregistre ce factionID dans knownMajorFactionIDs pour les scans futurs
+    -- arg1 = factionID : enregistré dans knownMajorFactionIDs pour les scans futurs
     if arg1 and arg1 > 0 then
       knownMajorFactionIDs[arg1] = true
       -- Pré-cache le nom si pas encore connu
@@ -1298,7 +1244,7 @@ local function OnXPBarEvent(_, event, arg1)
     if IsMaxLevel() and GetCompanionXPData() then
       OnCompanionUpdate()
     else
-      -- Sortie de gouffre : ACTIVE_DELVE_DATA_UPDATE n'a peut-être pas firé.
+      -- Sortie de gouffre : ACTIVE_DELVE_DATA_UPDATE n'a peut-être pas firé
       if isCompanionMode then
         ResetCompanionState()
         XPBar.UpdateVisibility()
@@ -1308,8 +1254,7 @@ local function OnXPBarEvent(_, event, arg1)
   elseif event == "ACTIVE_DELVE_DATA_UPDATE" then
     OnCompanionUpdate()
   elseif event == "ZONE_CHANGED_NEW_AREA" then
-    -- Transition de zone complète : les APIs (IsInDelve, mapID) sont fiables.
-    -- Court délai pour laisser le scénario se stabiliser, puis refresh complet.
+    -- Court délai pour laisser le scénario se stabiliser (IsInDelve/mapID fiables), puis refresh
     C_Timer.After(0.5, function()
       if not XPBar.UpdateVisibility then return end
       XPBar.UpdateVisibility()
@@ -1323,9 +1268,7 @@ local function OnXPBarEvent(_, event, arg1)
   end
 end
 
--- ---------------------------------------------------------------------------
 -- Debug commande /xbdelve
--- ---------------------------------------------------------------------------
 SLASH_XBDELVE1 = "/xbdelve"
 SlashCmdList["XBDELVE"] = function()
   local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
@@ -1333,131 +1276,6 @@ SlashCmdList["XBDELVE"] = function()
   local name  = (info and info.name) or "?"
   DEFAULT_CHAT_FRAME:AddMessage("|cffffff00[XBDelve]|r subzone mapID=" .. tostring(mapID) .. " (" .. name .. ")")
 end
-
---[[
-  -- ancien debug complet
-  local function p(msg) DEFAULT_CHAT_FRAME:AddMessage("|cffffff00[XBDelve]|r " .. tostring(msg)) end
-
-  p("=== Delve Companion Debug v5 ===")
-
-  -- Zone / Map ID courant
-  p("-- Zone info --")
-  do
-    local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
-    p("mapID=" .. tostring(mapID))
-    if mapID then
-      local info = C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
-      p("mapName=" .. tostring(info and info.name))
-    end
-    local zone = GetRealZoneText and GetRealZoneText() or "?"
-    local subzone = GetSubZoneText and GetSubZoneText() or "?"
-    p("zone=" .. zone .. " / subzone=" .. subzone)
-  end
-
-  -- Etat IsInDelve() etape par etape
-  p("-- IsInDelve() diagnostic --")
-  do
-    local inScenario = false
-    if C_Scenario and C_Scenario.IsInScenario then
-      local ok, v = pcall(C_Scenario.IsInScenario)
-      p("C_Scenario.IsInScenario ok="..tostring(ok).." v="..tostring(v))
-      inScenario = ok and v == true
-    else
-      p("C_Scenario.IsInScenario: indisponible")
-    end
-    if C_DelvesUI then
-      if C_DelvesUI.IsInDelve then
-        local ok, v = pcall(C_DelvesUI.IsInDelve)
-        p("C_DelvesUI.IsInDelve ok="..tostring(ok).." v="..tostring(v))
-      else p("C_DelvesUI.IsInDelve: nil") end
-      if C_DelvesUI.HasCompanionPanel then
-        local ok, v = pcall(C_DelvesUI.HasCompanionPanel)
-        p("C_DelvesUI.HasCompanionPanel ok="..tostring(ok).." v="..tostring(v))
-      else p("C_DelvesUI.HasCompanionPanel: nil") end
-      if C_DelvesUI.GetActiveDelveInfo then
-        local ok, v = pcall(C_DelvesUI.GetActiveDelveInfo)
-        p("C_DelvesUI.GetActiveDelveInfo ok="..tostring(ok).." v="..tostring(v ~= nil and "table" or v))
-      else p("C_DelvesUI.GetActiveDelveInfo: nil") end
-    else
-      p("C_DelvesUI: nil (pas disponible)")
-    end
-    if C_Scenario and C_Scenario.GetScenarioInfo then
-      local ok, info = pcall(C_Scenario.GetScenarioInfo)
-      if ok and info then
-        p("ScenarioInfo: type="..tostring(info.scenarioType).." name="..tostring(info.name))
-      else p("GetScenarioInfo: ok="..tostring(ok).." info=nil") end
-    end
-    if C_Scenario and C_Scenario.GetScenarioInfo then
-      local okI, info = pcall(C_Scenario.GetScenarioInfo)
-      if okI and info then
-        p("ScenarioInfo: type=" .. tostring(info.scenarioType) .. " name=" .. tostring(info.name))
-      else
-        p("GetScenarioInfo: ok=" .. tostring(okI) .. " info=nil")
-      end
-    end
-    local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
-    p("DELVE_MAP_IDS[" .. tostring(mapID) .. "] = " .. tostring(DELVE_MAP_IDS[mapID or 0]))
-    p("IsInDelve() final => " .. tostring(IsInDelve()))
-  end
-
-  -- Dump complet de GetFactionDataByID pour Brann(2640) et Valeera(2744)
-  p("-- GetFactionDataByID full dump --")
-  for _, fid in ipairs({2640, 2744}) do
-    if C_Reputation and C_Reputation.GetFactionDataByID then
-      local ok, fd = pcall(C_Reputation.GetFactionDataByID, fid)
-      if ok and fd then
-        p("fid="..tostring(fid)..":")
-        for k, v in pairs(fd) do p("  ."..tostring(k).."="..tostring(v)) end
-      else
-        p("fid="..tostring(fid)..": nil")
-      end
-    end
-  end
-
-  -- Friendship reputation APIs
-  p("-- Friendship APIs --")
-  for _, fid in ipairs({2640, 2744}) do
-    -- GetFriendshipReputation
-    if C_GossipInfo and C_GossipInfo.GetFriendshipReputation then
-      local ok, r = pcall(C_GossipInfo.GetFriendshipReputation, fid)
-      p("GetFriendshipReputation("..fid..") ok="..tostring(ok))
-      if ok and type(r) == "table" then
-        for k,v in pairs(r) do p("  ."..tostring(k).."="..tostring(v)) end
-      elseif ok then p("  r="..tostring(r)) end
-    end
-    -- GetFriendshipReputationRanks
-    if C_GossipInfo and C_GossipInfo.GetFriendshipReputationRanks then
-      local ok, r = pcall(C_GossipInfo.GetFriendshipReputationRanks, fid)
-      p("GetFriendshipReputationRanks("..fid..") ok="..tostring(ok))
-      if ok and type(r) == "table" then
-        for k,v in pairs(r) do p("  ."..tostring(k).."="..tostring(v)) end
-      elseif ok then p("  r="..tostring(r)) end
-    end
-  end
-
-  -- C_Reputation plus récente : GetFactionDataByIndex + IsFriendshipReputation
-  p("-- IsFriendshipReputation --")
-  for _, fid in ipairs({2640, 2744}) do
-    if C_Reputation and C_Reputation.IsFriendshipReputation then
-      local ok, v = pcall(C_Reputation.IsFriendshipReputation, fid)
-      p("IsFriendshipReputation("..fid..") ok="..tostring(ok).." v="..tostring(v))
-    end
-    if C_Reputation and C_Reputation.GetFriendshipReputation then
-      local ok, v = pcall(C_Reputation.GetFriendshipReputation, fid)
-      p("C_Reputation.GetFriendshipReputation("..fid..") ok="..tostring(ok))
-      if ok and type(v) == "table" then
-        for k,v2 in pairs(v) do p("  ."..tostring(k).."="..tostring(v2)) end
-      elseif ok then p("  v="..tostring(v)) end
-    end
-  end
-
-  -- Résultat final
-  local comp = GetCompanionXPData()
-  if comp then
-    p("GetCompanionXPData => name="..comp.name.." lvl="..comp.level.." xp="..comp.xp.."/"..comp.maxXP.." pct="..string.format("%.1f%%", comp.pct*100))
-  else p("GetCompanionXPData => nil") end
-end
-]]
 
 -- Enregistrement des events au niveau module (independant de Create)
 do
@@ -1472,9 +1290,7 @@ do
   evtFrame:SetScript("OnEvent", OnXPBarEvent)
 end
 
--- ---------------------------------------------------------------------------
 -- Apply layout visuals (positions/sizes/rotations depuis DB)
--- ---------------------------------------------------------------------------
 local function ApplyLayoutCfg()
   local lb = GetCfgLB()
   local tf = GetCfgTF()
@@ -1505,9 +1321,7 @@ local function ApplyLayoutCfg()
   end
 end
 
--- ---------------------------------------------------------------------------
 -- Create : sous-fonctions (découpage pour rester sous 60 upvalues chacune)
--- ---------------------------------------------------------------------------
 
 -- 1. Barre de fond + StatusBar XP + animation de gain
 local function CreateXPBar_Container()
@@ -1533,10 +1347,7 @@ local function CreateXPBar_Container()
   gainAnimFrame:Hide()
   gainAnimFrame:SetScript("OnUpdate", OnGainUpdate)
 
-  -- Ordre dans overlayHolder (frame level au-dessus de xpBar) :
-  --   ARTWORK  (sublevel 0) : overlayTex   — décoration (aishui_xpbar.png)
-  --   OVERLAY  (sublevel 0) : gainBar      — flash de gain, toujours au-dessus de la déco
-  --   OVERLAY  (sublevel 1) : sparkTex     — spark, au-dessus du flash
+  -- Ordre overlayHolder : overlayTex (déco) < gainBar (flash) < sparkTex (au-dessus)
   local overlayHolder = CreateFrame("Frame", nil, container)
   overlayHolder:SetAllPoints(container)
   overlayHolder:SetFrameLevel(xpBar:GetFrameLevel() + 1)
@@ -1581,20 +1392,18 @@ local function CreateXPBar_Badge(lb)
   levelTextHolder:SetFrameStrata("MEDIUM")
 
   levelText = levelTextHolder:CreateFontString(nil, "OVERLAY")
-  levelText:SetFont(xpFontLevel, 19, "OUTLINE")
+  levelText.slugRing = ns.CreateSlugRing(levelTextHolder, levelText)
+  SetLevelTextFont(19)
   levelText:SetPoint("CENTER", levelBg, "CENTER", 0, 0)
   levelText:SetJustifyH("CENTER")
-  levelText:SetShadowOffset(1, -1)
-  levelText:SetShadowColor(0, 0, 0, 1)
 
   -- Label plein nom affiché au hover en mode réputation (remplace temporairement levelText)
   -- Ancré sur UIParent BOTTOMLEFT à x=4 pour rester on-screen (lb.x=-34 serait hors-écran)
   repNameLabel = levelTextHolder:CreateFontString(nil, "OVERLAY")
-  repNameLabel:SetFont(xpFontLevel, 13, "OUTLINE")
+  repNameLabel.slugRing = ns.CreateSlugRing(levelTextHolder, repNameLabel)
+  ns.ApplyTextOutlineStyle(repNameLabel, repNameLabel.slugRing, xpFontLevel, 13, ns.DB.xpBar and ns.DB.xpBar.levelOutlineStyle, true)
   repNameLabel:SetPoint("LEFT", UIParent, "BOTTOMLEFT", 4, lb.y + lb.h * 0.45 + 2)
   repNameLabel:SetJustifyH("LEFT")
-  repNameLabel:SetShadowOffset(1, -1)
-  repNameLabel:SetShadowColor(0, 0, 0, 1)
   repNameLabel:Hide()
   levelBg:Hide()
 end
@@ -1667,7 +1476,7 @@ local function CreateXPBar_HoverAndModel(lb)
   fxModel:Hide()
 
   -- Indicateur de zone de repos : même pattern que SpellEffects (PlayerModel + SetKeepModelOnHide + SetModel(tonumber))
-  restModel = CreateFrame("PlayerModel", "AishaddonRestModel", UIParent)
+  restModel = CreateFrame("PlayerModel", "AishCoreRestModel", UIParent)
   restModel:SetSize(REST_W, REST_H)
   restModel:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, 0)
   restModel:SetFrameStrata("HIGH")
@@ -1717,9 +1526,7 @@ local function CreateXPBar_Finalize()
   XPBar.Update()
 end
 
--- ---------------------------------------------------------------------------
 -- Create
--- ---------------------------------------------------------------------------
 function XPBar.Create()
   if container then return end  -- deja cree, evite double-creation sur PLAYER_ENTERING_WORLD
   local cfg = ns.GetCfg("xpBar")
@@ -1736,12 +1543,8 @@ function XPBar.Create()
   CreateXPBar_Finalize()
 end
 
--- ---------------------------------------------------------------------------
 -- SetLayoutMode
--- ---------------------------------------------------------------------------
--- ---------------------------------------------------------------------------
 -- ApplyRestModelCfg
--- ---------------------------------------------------------------------------
 ApplyRestModelCfg = function()
   if not restModel then return end
   local cfg = ns.GetCfg("xpBar")
@@ -1763,7 +1566,7 @@ end
 -- Force le restModel au centre de l'écran, bypass total de toute la logique
 function XPBar.ForceRestCenter()
   if not restModel then
-    print("|cffff4444[Aishaddon]|r restModel est nil")
+    print("|cffff4444[AishCore]|r restModel est nil")
     return
   end
   restModel:ClearAllPoints()
@@ -1772,12 +1575,10 @@ function XPBar.ForceRestCenter()
   restModel:SetAlpha(1)
   restModel:SetFrameStrata("TOOLTIP")
   restModel:Show()
-  print("|cff00b0ff[Aishaddon]|r ForceRestCenter visible=" .. tostring(restModel:IsVisible()))
+  print("|cff00b0ff[AishCore]|r ForceRestCenter visible=" .. tostring(restModel:IsVisible()))
 end
 
--- ---------------------------------------------------------------------------
 -- UpdateRestingIndicator
--- ---------------------------------------------------------------------------
 UpdateRestingIndicator = function()
   if not restModel then return end
   local cfg = ns.GetCfg("xpBar")
@@ -1834,29 +1635,32 @@ function XPBar.GetLayoutMode()
   return isLayoutMode
 end
 
--- ---------------------------------------------------------------------------
+-- Accesseur hoverFrame pour ModuleHoverOverlay : la hitbox est hoverFrame, pas container (alpha 0 hors survol)
+function XPBar.GetHoverFrame()
+  return hoverFrame
+end
+
 -- Update
--- ---------------------------------------------------------------------------
 function XPBar.Update()
   if not container then return end
   if not levelText then return end
   if IsMaxLevel() then
     local comp = GetCompanionXPData()
     if comp then
-      levelText:SetFont(xpFontLevel, 13, "OUTLINE")
+      SetLevelTextFont(13)
       levelText:SetText(comp.letter)
       UpdateXPColors()
       return
     end
     local rep = GetActiveRepData()
     if rep then
-      levelText:SetFont(xpFontLevel, 13, "OUTLINE")  -- plus petit pour 4 chars
+      SetLevelTextFont(13)  -- plus petit pour 4 chars
       levelText:SetText(rep.letter)
       UpdateXPColors()
     end
     return
   end
-  levelText:SetFont(xpFontLevel, 19, "OUTLINE")  -- taille normale pour le niveau
+  SetLevelTextFont(19)  -- taille normale pour le niveau
   levelText:SetText(tostring(UnitLevel("player")))
   UpdateXPColors()
   UpdateBarColor()
@@ -1865,9 +1669,7 @@ function XPBar.Update()
   end
 end
 
--- ---------------------------------------------------------------------------
 -- UpdateVisibility
--- ---------------------------------------------------------------------------
 function XPBar.UpdateVisibility()
   if not container then return end
   if isLayoutMode then return end  -- layout mode gere sa propre visibilite
@@ -1893,7 +1695,7 @@ function XPBar.UpdateVisibility()
       SetBlizzXPBarHidden(true)
       if levelBg then levelBg:Show() end
       if levelText then
-        levelText:SetFont(xpFontLevel, 13, "OUTLINE")
+        SetLevelTextFont(13)
         levelText:SetText(comp.letter)
         UpdateXPColors()
       end
@@ -1918,7 +1720,7 @@ function XPBar.UpdateVisibility()
         SetBlizzXPBarHidden(true)  -- la barre Blizz peut se réafficher après un TP
         if levelBg then levelBg:Show() end
         if levelText then
-          levelText:SetFont(xpFontLevel, 13, "OUTLINE")  -- plus petit pour 4 chars
+          SetLevelTextFont(13)  -- plus petit pour 4 chars
           levelText:SetText(rep.letter)
           UpdateXPColors()
         end
@@ -1929,9 +1731,7 @@ function XPBar.UpdateVisibility()
         if showTimer then showTimer:Cancel(); showTimer = nil end
         if container:IsVisible() and not isHovered then HideXPBar() end
       else
-        -- Niveau max sans réputation trackee ni compagnon
-        -- Si on est en gouffre, les données compagnon arrivent peut-être avec délai :
-        -- on planifie un retry plutôt que de tout masquer définitivement.
+        -- Niveau max sans rep/compagnon : si en gouffre, retry différé plutôt que masquer définitivement
         if IsInDelve() then
           C_Timer.After(2, function() if XPBar.UpdateVisibility then XPBar.UpdateVisibility() end end)
           return  -- ne pas masquer, attendre le retry
@@ -1951,7 +1751,7 @@ function XPBar.UpdateVisibility()
   else
     if levelBg then levelBg:Show() end
     if levelText then
-      levelText:SetFont(xpFontLevel, 19, "OUTLINE")  -- taille normale pour le niveau
+      SetLevelTextFont(19)  -- taille normale pour le niveau
       levelText:SetText(tostring(UnitLevel("player")))
       UpdateXPColors()
     end
@@ -1960,12 +1760,7 @@ function XPBar.UpdateVisibility()
   end
 end
 
--- ---------------------------------------------------------------------------
--- Masquer la barre XP / Réputation Blizzard quand notre module est actif
--- ---------------------------------------------------------------------------
--- Un seul hook sur UpdateBarsShown suffit : c'est la méthode que le
--- StatusTrackingBarManager appelle sur chaque événement (XP, rep, level-up)
--- pour remettre les barres à jour. On réapplique l'alpha 0 immédiatement après.
+-- Masquer les barres Blizzard XP/Rép : hook UpdateBarsShown pour réappliquer alpha 0 à chaque événement
 local function HookBlizzBars()
   if not StatusTrackingBarManager then return end
   if StatusTrackingBarManager._aishHooked then return end
@@ -1985,9 +1780,7 @@ SetBlizzXPBarHidden = function(hide)
   end
 end
 
--- ---------------------------------------------------------------------------
 -- ApplySettings
--- ---------------------------------------------------------------------------
 function XPBar.ApplySettings()
   if not container then return end
   local cfg = ns.GetCfg("xpBar")
@@ -2010,12 +1803,12 @@ function XPBar.ApplySettings()
   -- Police du badge de niveau (mis a jour avant les fonctions dynamiques)
   xpFontLevel = cfg.fontLevel or FONT_LEVEL
   if levelText then
-    local _, sz, fl = levelText:GetFont()
-    levelText:SetFont(xpFontLevel, sz or 19, fl or "OUTLINE")
+    local _, sz = levelText:GetFont()
+    SetLevelTextFont(sz or 19)
   end
   if repNameLabel then
-    local _, sz, fl = repNameLabel:GetFont()
-    repNameLabel:SetFont(xpFontLevel, sz or 13, fl or "OUTLINE")
+    local _, sz = repNameLabel:GetFont()
+    ns.ApplyTextOutlineStyle(repNameLabel, repNameLabel.slugRing, xpFontLevel, sz or 13, cfg.levelOutlineStyle, true)
   end
   -- Re-applique positions/tailles/rotations depuis DB
   ApplyLayoutCfg()
@@ -2026,9 +1819,7 @@ function XPBar.ApplySettings()
   SetBlizzXPBarHidden(true)   -- cacher la barre Blizzard
 end
 
--- ---------------------------------------------------------------------------
 -- Init
--- ---------------------------------------------------------------------------
 function XPBar.Init()
   XPBar.Create()
 end

@@ -1,6 +1,5 @@
 -- AishUIAura/UI/Menus/Equipment.lua
 -- Equipment menu: layout cards (Shield Wall / Ronin) + equipment list + position/borders
-------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
@@ -37,8 +36,7 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
     end
     for i,c in ipairs(cards) do
         local isAct=(al==c.key)
-        -- Card sans encadré : juste Button transparent + icône + label.
-        -- Le halo doré apparaît uniquement au survol (hover feedback).
+        -- Card transparente, halo doré au survol seulement
         local card=CreateFrame("Button",nil,p,"BackdropTemplate"); card:SetSize(140,110); card:SetPoint("TOPLEFT",sx+(i-1)*155,-(y+10))
 
         -- Halo de survol (caché par défaut)
@@ -159,8 +157,7 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
                     dBtn:SetScript("OnClick",function() sd.desat=not sd.desat; RD(); onSlotChg() end)
                     dBtn:SetScript("OnEnter",function() dIco:SetAlpha(1); GameTooltip:SetOwner(dBtn,"ANCHOR_TOP"); GameTooltip:SetText(L["AURASMENU_EQUIPMENT_DESATURATE_TOOLTIP"],1,1,1); GameTooltip:Show() end)
                     dBtn:SetScript("OnLeave",function() RD(); GameTooltip:Hide() end)
-                    -- Bouton glow fusionné : affiche le type + on/off. Clic gauche = toggle, clic droit = picker
-                    -- Style harmonisé avec le menu Sorts (Tactics)
+                    -- Bouton glow fusionné : clic gauche = toggle, clic droit = picker
                     local gFus = CreateFrame("Button",nil,row,"BackdropTemplate"); gFus:SetSize(70,16); gFus:SetPoint("RIGHT",dBtn,"LEFT",-6,0)
                     gFus:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8x8",edgeFile="Interface\\Buttons\\WHITE8x8",edgeSize=1})
                     local gFusTx = gFus:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(gFusTx,FONT,8,"OUTLINE"); gFusTx:SetAllPoints(); gFusTx:SetJustifyH("CENTER")
@@ -229,9 +226,9 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
     if curLayout == "grid_fixed" then
         wgSections[#wgSections+1] = {name=L["AURASMENU_EQUIPMENT_SECTION_POSITION"],build=function(c,w) local cy=0; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
             local cf = ns.db and ns.db.equipment or {}
-            local s1=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_POSITION_X"],-1000,1000,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.groupX or -167)
+            local s1=SW.CreateSlider(c,L["SETTINGS_POSITION_X"],-1000,1000,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(cf.groupX or -167)
             s1.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupX=v end; pcall(function() ns.Providers:Layout() end) end
-            local s2=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_POSITION_Y"],-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.groupY or -188)
+            local s2=SW.CreateSlider(c,L["SETTINGS_POSITION_Y"],-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.groupY or -188)
             s2.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupY=v end; pcall(function() ns.Providers:Layout() end) end; cy=cy+60
             local s3=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_ICON_WIDTH"],10,80,1,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(cf.groupW or 31)
             s3.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupW=v end; pcall(function() ns.Providers:Layout() end) end
@@ -266,9 +263,9 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
                     pcall(function() hIco:SetTexture(sTex) end)
                     local hLbl=hdr:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(hLbl,FONT,10); hLbl:SetPoint("LEFT",20,0); hLbl:SetJustifyH("LEFT")
                     hLbl:SetText(string.format("|cff%02x%02x%02x%s|r", math.floor(tc[1]*255), math.floor(tc[2]*255), math.floor(tc[3]*255), sName)); cy=cy+22
-                    local s1=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_POSITION_X"],-1000,1000,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(sd.x or 0)
+                    local s1=SW.CreateSlider(c,L["SETTINGS_POSITION_X"],-1000,1000,1,slW); s1:SetPoint("TOPLEFT",ox,-cy); s1:SetValue(sd.x or 0)
                     s1.onChanged=function(v) sd.x=v; pcall(function() ns.Providers:Layout() end) end
-                    local s2=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_POSITION_Y"],-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(sd.y or -188)
+                    local s2=SW.CreateSlider(c,L["SETTINGS_POSITION_Y"],-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(sd.y or -188)
                     s2.onChanged=function(v) sd.y=v; pcall(function() ns.Providers:Layout() end) end; cy=cy+60
                     local s3=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_WIDTH"],10,80,1,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(sd.w or 31)
                     s3.onChanged=function(v) sd.w=v; pcall(function() ns.Providers:Layout() end) end

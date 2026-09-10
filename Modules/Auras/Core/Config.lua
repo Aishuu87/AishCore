@@ -1,22 +1,21 @@
 -- AishUIAura/Core/Config.lua
--- SOURCE UNIQUE pour TOUS les noms, thème, listes, constantes
--- Police système = WoW NATIF. SharedMedia = dropdown uniquement.
-------------------------------------------------------------------------
+-- Source unique pour tous les noms, theme, listes, constantes. Police systeme = WoW natif, SharedMedia en dropdown uniquement.
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 ns.ADDON_VERSION = "0.0.0"
 
--- Partage des utilitaires du namespace parent (définis dans Core.lua d'Aishaddon)
+-- Partage des utilitaires du namespace parent (definis dans Core.lua d'AishCore)
 ns.DeepCopy     = ns.DeepCopy     or _addon.DeepCopy
 ns.MergeDefaults = ns.MergeDefaults or _addon.MergeDefaults
 ns.FONT_LIST    = ns.FONT_LIST    or _addon.FONT_LIST
 ns.GetFontList  = ns.GetFontList  or _addon.GetFontList
+ns.GetTextOutlineStyles = ns.GetTextOutlineStyles or _addon.GetTextOutlineStyles
+ns.CreateSlugRing       = ns.CreateSlugRing       or _addon.CreateSlugRing
+ns.ApplyTextOutlineStyle = ns.ApplyTextOutlineStyle or _addon.ApplyTextOutlineStyle
+ns.SetSlugRingText      = ns.SetSlugRingText      or _addon.SetSlugRingText
 
-------------------------------------------------------------------------
--- SAFE FONT  (essaie le path, fallback FRIZQT si échec)
-------------------------------------------------------------------------
 local SAFE_FONT = "Fonts\\FRIZQT__.TTF"
 
--- Wrapper sécurisé pour SetFont (JAMAIS de crash)
+-- Wrapper securise pour SetFont (jamais de crash)
 function ns.ApplyFont(fontString, path, size, flags)
     path = path or SAFE_FONT
     size = size or 11
@@ -28,22 +27,14 @@ function ns.ApplyFont(fontString, path, size, flags)
     end
 end
 
-------------------------------------------------------------------------
--- MEDIA PATHS  (WoW natif UNIQUEMENT — jamais SharedMedia en dur)
-------------------------------------------------------------------------
+-- Media paths (WoW natif uniquement, jamais SharedMedia en dur)
 ns.Media = {
     font      = SAFE_FONT,  -- Friz Quadrata
     sparkTex  = "Interface\\CastingBar\\UI-CastingBar-Spark",
     fallbackBar = "Interface\\TargetingFrame\\UI-StatusBar",
 }
 
-------------------------------------------------------------------------
--- LAYOUT NAMES
-------------------------------------------------------------------------
-
--- Noms des dispositions en français (labels UI).
--- Les clés internes (center_mirror, side_large, etc.) restent en anglais-descriptif
--- pour la compatibilité Lua et la lisibilité du code.
+-- Noms des dispositions en francais (labels UI) ; les cles internes restent en anglais-descriptif pour le code.
 ns.LAYOUT_NAMES = {
     CENTER_MIRROR        = "Icône centrée",
     RESOURCE_CIRCLE = "Buff autour du cercle",
@@ -57,28 +48,28 @@ ns.LAYOUT_NAMES = {
 }
 
 ns.LAYOUT_ICONS = {
-    CENTER_MIRROR        = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_aegis",
-    RESOURCE_CIRCLE = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_resourcecircle",
-    CENTER_DUAL    = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_berserk",
-    SIDE_LARGE     = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_vanguard",
-    SIDE_COMPACT   = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_sparte",
-    SIDE_BANNER    = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_banner",
-    PORTRAIT_SMALL = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_fury",
-    GRID_FIXED     = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_shieldwall",
-    GRID_FREE      = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_ronin",
+    CENTER_MIRROR        = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_aegis",
+    RESOURCE_CIRCLE = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_resourcecircle",
+    CENTER_DUAL    = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_berserk",
+    SIDE_LARGE     = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_vanguard",
+    SIDE_COMPACT   = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_sparte",
+    SIDE_BANNER    = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_banner",
+    PORTRAIT_SMALL = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_fury",
+    GRID_FIXED     = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_shieldwall",
+    GRID_FREE      = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_ronin",
 }
 
 -- Versions INACTIVE (grisées N&B) — utilisées quand la disposition n'est pas active
 ns.LAYOUT_ICONS_INACTIVE = {
-    CENTER_MIRROR        = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_aegis_inactive",
-    RESOURCE_CIRCLE = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_resourcecircle_inactive",
-    CENTER_DUAL    = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_berserk_inactive",
-    SIDE_LARGE     = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_vanguard_inactive",
-    SIDE_COMPACT   = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_sparte_inactive",
-    SIDE_BANNER    = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_banner_inactive",
-    PORTRAIT_SMALL = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_fury_inactive",
-    GRID_FIXED     = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_shieldwall_inactive",
-    GRID_FREE      = "Interface\\AddOns\\Aishaddon\\Media\\textures\\layout_ronin_inactive",
+    CENTER_MIRROR        = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_aegis_inactive",
+    RESOURCE_CIRCLE = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_resourcecircle_inactive",
+    CENTER_DUAL    = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_berserk_inactive",
+    SIDE_LARGE     = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_vanguard_inactive",
+    SIDE_COMPACT   = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_sparte_inactive",
+    SIDE_BANNER    = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_banner_inactive",
+    PORTRAIT_SMALL = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_fury_inactive",
+    GRID_FIXED     = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_shieldwall_inactive",
+    GRID_FREE      = "Interface\\AddOns\\AishCore\\Media\\textures\\layout_ronin_inactive",
 }
 
 ns.LAYOUT_ICON_FALLBACKS = {
@@ -93,10 +84,7 @@ ns.LAYOUT_ICON_FALLBACKS = {
     GRID_FREE      = "ability_rogue_sprint",
 }
 
-------------------------------------------------------------------------
--- DESTINATION BADGES  [L][C][I][B]
--- L = Liste d'icônes | C = Barres de cercle | I = Icones | B = Barres libres
-------------------------------------------------------------------------
+-- Destination badges [L][C][I][B] : L = Liste d'icones, C = Barres de cercle, I = Icones, B = Barres libres
 ns.DEST_BADGES = {
     L = { key = "iconlist",   label = "L" },
     C = { key = "freebars",   label = "C" },
@@ -104,11 +92,7 @@ ns.DEST_BADGES = {
     B = { key = "circlebars", label = "B" },
 }
 
-------------------------------------------------------------------------
--- THEME — AISHUI BLACK & GOLD
--- Pure dark surfaces, clean off-white text. Class color reserved for
--- active states only. Gold tone reserved for ornamental dots/spines.
-------------------------------------------------------------------------
+-- Theme AishUI black & gold : surfaces sombres, texte off-white, couleur de classe reservee aux etats actifs.
 ns.THEME = {
     -- Surfaces (noir quasi pur avec une légère teinte chaude)
     bg            = { 0.030, 0.030, 0.035, 0.97 },
@@ -131,6 +115,11 @@ ns.THEME = {
     -- AISHUI signature gold (used on ornaments — dots, spines, hairlines)
     gold          = { 0.78, 0.62, 0.30 },
 
+    -- Accent de TEXTE des headers de section (labels) -- distinct de gold/
+    -- accent (dots, hairlines) : mute dynamiquement par
+    -- _addon.Auras.RefreshAccentTheme(), cf. Core/ClassColors.lua.
+    accentText    = { 0.776, 0.710, 0.471 },
+
     -- Form controls
     checkboxOn    = { 0.92, 0.92, 0.93 },     -- gets class color
     checkboxOff   = { 0.180, 0.180, 0.195 },
@@ -138,9 +127,7 @@ ns.THEME = {
     rowHover      = { 1, 1, 1, 0.04 },
 }
 
-------------------------------------------------------------------------
--- GLOW DEFINITIONS  (1 Aucun + 67 boucle + 34 proc = 102 total)
-------------------------------------------------------------------------
+-- Glow definitions (1 Aucun + 67 boucle + 34 proc = 102 total)
 ns.GLOW_DEFS = {
     { name = "Aucun" },
     -- BOUCLE (2-36)
@@ -150,12 +137,12 @@ ns.GLOW_DEFS = {
     { name = "Modern Glow",       atlas = "UI-HUD-ActionBar-Proc-Loop-Flipbook" },
     { name = "Assist Blue",       atlas = "RotationHelper-ProcLoopBlue-Flipbook" },
     { name = "Assist Ants",       atlas = "RotationHelper_Ants_Flipbook" },
-    { name = "Assist White",      texture = "Interface/addons/ActionBarsEnhanced/assets/flipbook2.tga" },
-    { name = "Assist Rainbow",    texture = "Interface/addons/ActionBarsEnhanced/assets/ABE_flipbook_rainbow.png",
+    { name = "Assist White",      texture = "Interface/AddOns/AishCore/Media/Glows/flipbook2.tga" },
+    { name = "Assist Rainbow",    texture = "Interface/AddOns/AishCore/Media/Glows/ABE_flipbook_rainbow.png",
       rows=6, columns=10, frames=60, duration=0.9, frameW=80, frameH=80, scale=1.05 },
     { name = "Classic Glow",      texture = "Interface\\SpellActivationOverlay\\IconAlertAnts",
       rows=5, columns=5, frames=25, duration=0.3, frameW=48, frameH=48, scale=0.85 },
-    { name = "ABE Classic-like",  texture = "Interface/addons/ActionBarsEnhanced/assets/AB_ClassicLike_Glow.tga",
+    { name = "ABE Classic-like",  texture = "Interface/AddOns/AishCore/Media/Glows/AB_ClassicLike_Glow.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=1 },
     { name = "GCD",               atlas = "UI-CooldownManager-Alert-Flipbook",
       rows=11, columns=2, frames=22, duration=1.0, scale=0.7 },
@@ -225,80 +212,80 @@ ns.GLOW_DEFS = {
     { name = "FX Eye",            atlas="groupfinder-eye-flipbook-foundfx", rows=5, columns=15, frames=75, duration=1.0, scale=1.0 },
     { name = "Arrow",             atlas="Ping_Marker_FlipBook_OnMyWay", rows=4, columns=6, frames=24, duration=1.0, scale=0.7 },
     { name = "Soul",              atlas="UF-SoulShards-Flipbook-Soul", rows=3, columns=7, frames=21, duration=1.2, scale=0.9 },
-    -- Textures externes (require l'addon ActionBarsEnhanced installé)
-    { name = "ABE Assist White",  texture="Interface/addons/ActionBarsEnhanced/assets/flipbook2.tga" },
-    { name = "ABE Rainbow",       texture="Interface/addons/ActionBarsEnhanced/assets/ABE_flipbook_rainbow.png",
+    -- Textures d'animation bundlees localement dans Media/Glows/
+    { name = "ABE Assist White",  texture="Interface/AddOns/AishCore/Media/Glows/flipbook2.tga" },
+    { name = "ABE Rainbow",       texture="Interface/AddOns/AishCore/Media/Glows/ABE_flipbook_rainbow.png",
       rows=6, columns=10, frames=60, duration=0.9, frameW=80, frameH=80, scale=1.05 },
-    { name = "ABE Classic-like",  texture="Interface/addons/ActionBarsEnhanced/assets/AB_ClassicLike_Glow.tga",
+    { name = "ABE Classic-like",  texture="Interface/AddOns/AishCore/Media/Glows/AB_ClassicLike_Glow.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=1 },
-    { name = "ABE Star 1",        texture="Interface/addons/ActionBarsEnhanced/assets/stars_new2.tga",
+    { name = "ABE Star 1",        texture="Interface/AddOns/AishCore/Media/Glows/stars_new2.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=0.9 },
-    { name = "ABE Star 2",        texture="Interface/addons/ActionBarsEnhanced/assets/stars_new.tga",
+    { name = "ABE Star 2",        texture="Interface/AddOns/AishCore/Media/Glows/stars_new.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=0.9 },
-    { name = "ABE Star Rainbow",  texture="Interface/addons/ActionBarsEnhanced/assets/stars_rainbow_new.tga",
+    { name = "ABE Star Rainbow",  texture="Interface/AddOns/AishCore/Media/Glows/stars_rainbow_new.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=100, frameH=100, scale=0.9 },
-    { name = "ABE Lines",         texture="Interface/addons/ActionBarsEnhanced/assets/AB_Lines.tga",
+    { name = "ABE Lines",         texture="Interface/AddOns/AishCore/Media/Glows/AB_Lines.tga",
       rows=6, columns=4, frames=24, duration=1.0, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Lines Pixel",   texture="Interface/addons/ActionBarsEnhanced/assets/AB_Lines_Pixel.tga",
+    { name = "ABE Lines Pixel",   texture="Interface/AddOns/AishCore/Media/Glows/AB_Lines_Pixel.tga",
       rows=6, columns=2, frames=12, duration=0.35, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Leaves",        texture="Interface/addons/ActionBarsEnhanced/assets/AB_Leaves.tga",
+    { name = "ABE Leaves",        texture="Interface/AddOns/AishCore/Media/Glows/AB_Leaves.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Void",          texture="Interface/addons/ActionBarsEnhanced/assets/AB_Void.tga",
+    { name = "ABE Void",          texture="Interface/AddOns/AishCore/Media/Glows/AB_Void.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=50, frameH=50, scale=0.85 },
-    { name = "ABE Garg",          texture="Interface/addons/ActionBarsEnhanced/assets/AB_Garg.tga",
+    { name = "ABE Garg",          texture="Interface/AddOns/AishCore/Media/Glows/AB_Garg.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=100, frameH=100, scale=0.85 },
-    { name = "ABE Energy",        texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Energy.tga",
+    { name = "ABE Energy",        texture="Interface/AddOns/AishCore/Media/Glows/ABE_Energy.tga",
       rows=6, columns=5, frames=30, duration=0.5, frameW=72, frameH=72, scale=0.85 },
-    { name = "ABE Fire",          texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Fire.tga",
+    { name = "ABE Fire",          texture="Interface/AddOns/AishCore/Media/Glows/ABE_Fire.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=72, frameH=72, scale=0.9 },
-    { name = "ABE Fire2",         texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Fire2.tga",
+    { name = "ABE Fire2",         texture="Interface/AddOns/AishCore/Media/Glows/ABE_Fire2.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=80, frameH=80, scale=0.9 },
-    { name = "ABE Antorus",       texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Antorus.tga",
+    { name = "ABE Antorus",       texture="Interface/AddOns/AishCore/Media/Glows/ABE_Antorus.tga",
       rows=6, columns=5, frames=30, duration=0.9, frameW=100, frameH=100, scale=0.85 },
-    { name = "ABE Lightning",     texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Lightning.tga",
+    { name = "ABE Lightning",     texture="Interface/AddOns/AishCore/Media/Glows/ABE_Lightning.tga",
       rows=6, columns=5, frames=30, duration=1.2, frameW=100, frameH=100, scale=0.85 },
-    { name = "ABE Zereth Square", texture="Interface/addons/ActionBarsEnhanced/assets/proc_4.tga",
+    { name = "ABE Zereth Square", texture="Interface/AddOns/AishCore/Media/Glows/proc_4.tga",
       rows=6, columns=5, frames=30, duration=1.2, frameW=100, frameH=100, scale=1.01 },
-    { name = "ABE Pulse",         texture="Interface/addons/ActionBarsEnhanced/assets/pulse_01.tga",
+    { name = "ABE Pulse",         texture="Interface/AddOns/AishCore/Media/Glows/pulse_01.tga",
       rows=6, columns=5, frames=30, duration=1.0, frameW=100, frameH=100, scale=0.95 },
-    { name = "ABE Square Pixel",  texture="Interface/addons/ActionBarsEnhanced/assets/ABE_Square_PixelLike.png",
+    { name = "ABE Square Pixel",  texture="Interface/AddOns/AishCore/Media/Glows/ABE_Square_PixelLike.png",
       rows=6, columns=5, frames=30, duration=0.35, frameW=100, frameH=100, scale=0.82 },
-    { name = "ABE Arc Raiders",   texture="Interface/addons/ActionBarsEnhanced/assets/ABE_ArcRaiders.png",
+    { name = "ABE Arc Raiders",   texture="Interface/AddOns/AishCore/Media/Glows/ABE_ArcRaiders.png",
       rows=10, columns=6, frames=60, duration=1, frameW=100, frameH=100, scale=1 },
-    { name = "GCD 2",             texture="Interface/addons/ActionBarsEnhanced/assets/GCD_2.tga",
+    { name = "GCD 2",             texture="Interface/AddOns/AishCore/Media/Glows/GCD_2.tga",
       rows=6, columns=2, frames=12, duration=0.5, frameW=47, frameH=47, scale=0.7 },
     -- PROC START (entry animations)
     { name = "Proc: Blizzard",    isProcStart=true, atlas="UI-HUD-ActionBar-Proc-Start-Flipbook" },
     { name = "Proc: Blue",        isProcStart=true, atlas="RotationHelper-ProcStartBlue-Flipbook-2x" },
-    { name = "Proc: Short",       isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartYellow.tga",
+    { name = "Proc: Short",       isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartYellow.tga",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: Shorter",     isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartYellow_Shorter.tga",
+    { name = "Proc: Shorter",     isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartYellow_Shorter.tga",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: Blue Short",  isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartBlue.tga",
+    { name = "Proc: Blue Short",  isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartBlue.tga",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: Blue Shorter",isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartBlue_Shorter.tga",
+    { name = "Proc: Blue Shorter",isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartBlue_Shorter.tga",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: White Short", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartWhite.tga",
+    { name = "Proc: White Short", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartWhite.tga",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: White Shorter",isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ProcStartWhite_Shorter.tga",
+    { name = "Proc: White Shorter",isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ProcStartWhite_Shorter.tga",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: Rainbow",     isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ABE_ProcRainbow_Short.png",
+    { name = "Proc: Rainbow",     isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ABE_ProcRainbow_Short.png",
       rows=3, columns=6, frames=18, duration=0.5, scale=1.0 },
-    { name = "Proc: Rainbow Shorter", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ABE_ProcRainbow_Shorter.png",
+    { name = "Proc: Rainbow Shorter", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ABE_ProcRainbow_Shorter.png",
       rows=2, columns=5, frames=10, duration=0.35, scale=1.0 },
-    { name = "Proc: Classic-like", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/ClassicLike_Flipbook.tga",
+    { name = "Proc: Classic-like", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/ClassicLike_Flipbook.tga",
       rows=4, columns=3, frames=12, duration=0.25, frameW=80, frameH=80, scale=0.9 },
-    { name = "Proc: ABE Burst Square", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_square.tga",
+    { name = "Proc: ABE Burst Square", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_square.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Burst Rune", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_2.tga",
+    { name = "Proc: ABE Burst Rune", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_2.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Burst Rune 2", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_3.tga",
+    { name = "Proc: ABE Burst Rune 2", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_3.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Burst Zereth", isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_4.tga",
+    { name = "Proc: ABE Burst Zereth", isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_4.tga",
       rows=6, columns=5, frames=30, duration=0.33, frameW=100, frameH=100, scale=0.42 },
-    { name = "Proc: ABE Ring",     isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_5.tga",
+    { name = "Proc: ABE Ring",     isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_5.tga",
       rows=6, columns=5, frames=30, duration=0.7, frameW=100, frameH=100, scale=0.38 },
-    { name = "Proc: ABE Ring 2",   isProcStart=true, texture="Interface/addons/ActionBarsEnhanced/assets/burst_6.tga",
+    { name = "Proc: ABE Ring 2",   isProcStart=true, texture="Interface/AddOns/AishCore/Media/Glows/burst_6.tga",
       rows=6, columns=5, frames=30, duration=0.4, frameW=100, frameH=100, scale=0.38 },
     { name = "Proc: Flash In",    isProcStart=true, useAlphaPulse=true, texture="Interface\\SpellActivationOverlay\\IconAlert",
       texCoord={0.00781250,0.50781250,0.27734375,0.52734375}, blendMode="ADD", fromAlpha=0.0, toAlpha=1.0, duration=0.15 },
@@ -336,15 +323,13 @@ ns.GLOW_DEFS = {
       texCoord={0.00781250,0.50781250,0.27734375,0.52734375}, blendMode="ADD", fromAlpha=0.0, toAlpha=0.85, duration=0.28 },
 }
 
-------------------------------------------------------------------------
--- BAR TEXTURES  (~45)
-------------------------------------------------------------------------
+-- Bar textures (~45)
 ns.BAR_TEXTURES = {
-    { value = "aish_grad",   text = "Aish Gradient",     path = "Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_gradient" },
-    { value = "aish_grad2",  text = "Aish Gradient 2",   path = "Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_gradient2" },
-    { value = "aish_grad3",  text = "Aish Gradient 3",   path = "Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_gradient3" },
-    { value = "aish_fx",     text = "Aish Effect",       path = "Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_effect" },
-    { value = "aish_fx2",    text = "Aish Effect 2",     path = "Interface\\AddOns\\Aishaddon\\Media\\Statusbars\\aish_effect2" },
+    { value = "aish_grad",   text = "Aish Gradient",     path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient" },
+    { value = "aish_grad2",  text = "Aish Gradient 2",   path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient2" },
+    { value = "aish_grad3",  text = "Aish Gradient 3",   path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient3" },
+    { value = "aish_fx",     text = "Aish Effect",       path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_effect" },
+    { value = "aish_fx2",    text = "Aish Effect 2",     path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_effect2" },
     { value = "toxiui",     text = "ToxiUI Clean",     path = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga", lsm = "ToxiUI-clean" },
     { value = "birg00",     text = "Birg00",            lsm = "Birg00" },
     { value = "charcoal",   text = "Charcoal",          lsm = "Charcoal" },
@@ -388,14 +373,10 @@ ns.BAR_TEXTURES = {
     { value = "wisps",      text = "Wisps",             lsm = "Wisps" },
 }
 
-------------------------------------------------------------------------
--- CASCADE URGENCY (2 niveaux en SECONDES)
-------------------------------------------------------------------------
+-- Cascade urgency (2 niveaux en secondes)
 ns.URGENCY = { MEDIUM = 5, CRITICAL = 2 }
 
-------------------------------------------------------------------------
--- RESOLVE TEXTURE VIA LSM
-------------------------------------------------------------------------
+-- Resout une texture via LSM
 function ns.ResolveLSMTexture(entry)
     if entry.lsm then
         local ok, LSM = pcall(function()
@@ -419,9 +400,6 @@ function ns.ResolveBarTexFromKey(texKey)
     return def and ns.ResolveLSMTexture(def) or ns.Media.fallbackBar
 end
 
-------------------------------------------------------------------------
--- UTILITY
-------------------------------------------------------------------------
 function ns.DeepCopy(src)
     if type(src) ~= "table" then return src end
     local copy = {}
@@ -441,10 +419,86 @@ function ns.MergeDefaults(saved, defaults)
     return saved
 end
 
-------------------------------------------------------------------------
--- RENDER REGISTRY
-------------------------------------------------------------------------
 ns.RenderRegistry = {}
 function ns.RegisterRender(id, renderTable)
     ns.RenderRegistry[id] = renderTable
+end
+
+-- Tooltip au survol des icones buff/debuff, partage entre les 3 renders. En combat, n'apparait que tant
+-- qu'ALT est maintenu (option ns.db.tooltipAltCombatOnly, independante de priorityBar.tooltipAltCombatOnly) ;
+-- hors combat, affichage normal au survol.
+-- GameTooltip:SetUnitAura attend un index de position, pas un auraInstanceID (d'ou un tooltip vide sinon) :
+-- les instanceID ont leurs propres methodes dediees, meme pattern que Modules/TargetAuras.lua.
+local function _SetUnitAuraTooltip(unit, instID, filter)
+    if filter == "HELPFUL" then
+        GameTooltip:SetUnitBuffByAuraInstanceID(unit, instID)
+    else
+        GameTooltip:SetUnitDebuffByAuraInstanceID(unit, instID)
+    end
+end
+
+local function ShouldShowAuraTooltip()
+    if not (ns.db and ns.db.tooltipAltCombatOnly) then return true end
+    if not UnitAffectingCombat("player") then return true end
+    return IsAltKeyDown()
+end
+
+local _ttDebug = false
+local function _ttp(msg) if _ttDebug then DEFAULT_CHAT_FRAME:AddMessage("|cff00ff88[RCTT]|r " .. tostring(msg)) end end
+
+local hoveredAuraIcon
+local function RefreshAuraTooltip()
+    if not hoveredAuraIcon or GameTooltip:IsForbidden() then return end
+    if not ShouldShowAuraTooltip() then
+        _ttp("RefreshAuraTooltip: ShouldShowAuraTooltip=false -> Hide()")
+        GameTooltip:Hide()
+        return
+    end
+    GameTooltip:SetOwner(hoveredAuraIcon, "ANCHOR_BOTTOMRIGHT", 5, -5)
+    _ttp(string.format("RefreshAuraTooltip: unit=%s auraInstanceID=%s spellID=%s",
+        tostring(hoveredAuraIcon.unit), tostring(hoveredAuraIcon.auraInstanceID), tostring(hoveredAuraIcon.spellID)))
+    local gotAura = false
+    if hoveredAuraIcon.unit and hoveredAuraIcon.auraInstanceID then
+        local ok = pcall(_SetUnitAuraTooltip, hoveredAuraIcon.unit, hoveredAuraIcon.auraInstanceID,
+            hoveredAuraIcon.unit == "player" and "HELPFUL" or "HARMFUL")
+        gotAura = ok and GameTooltip:NumLines() > 0
+    end
+    if not gotAura and hoveredAuraIcon.spellID then
+        -- Pas d'aura active (proc "prêt" sans buff en cours) OU auraInstanceID
+        -- périmé (aura déjà retombée entre le dernier scan et le survol) : on
+        -- retombe sur le tooltip de sort générique plutôt que de laisser un
+        -- tooltip vide (SetOwner+Show sans contenu, quasi invisible à l'écran).
+        pcall(GameTooltip.SetSpellByID, GameTooltip, hoveredAuraIcon.spellID)
+    end
+    GameTooltip:Show()
+    _ttp("RefreshAuraTooltip: NumLines=" .. tostring(GameTooltip:NumLines()))
+end
+
+function ns.AuraIconOnEnter(self)
+    local w, h = self:GetSize()
+    _ttp(string.format("OnEnter appelé. Forbidden=%s IsVisible=%s size=%sx%s unit=%s auraInstanceID=%s spellID=%s",
+        tostring(GameTooltip:IsForbidden()), tostring(self:IsVisible()), tostring(w), tostring(h),
+        tostring(self.unit), tostring(self.auraInstanceID), tostring(self.spellID)))
+    if GameTooltip:IsForbidden() or not self:IsVisible() then return end
+    hoveredAuraIcon = self
+    RefreshAuraTooltip()
+    _ttp("Après RefreshAuraTooltip : GameTooltip:IsShown()=" .. tostring(GameTooltip:IsShown()))
+end
+
+function ns.AuraIconOnLeave(self)
+    _ttp("OnLeave appelé.")
+    if hoveredAuraIcon == self then hoveredAuraIcon = nil end
+    if not GameTooltip:IsForbidden() then GameTooltip:Hide() end
+end
+
+local _tooltipWatcher = CreateFrame("Frame")
+_tooltipWatcher:RegisterEvent("MODIFIER_STATE_CHANGED")
+_tooltipWatcher:RegisterEvent("PLAYER_REGEN_DISABLED")
+_tooltipWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+_tooltipWatcher:SetScript("OnEvent", RefreshAuraTooltip)
+
+SLASH_RCTTDEBUG1 = "/rctt"
+SlashCmdList["RCTTDEBUG"] = function()
+    _ttDebug = not _ttDebug
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff88[RCTT]|r debug tooltip = " .. tostring(_ttDebug))
 end

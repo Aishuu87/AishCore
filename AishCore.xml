@@ -1,0 +1,4 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+  <Frame name="AishCoreFrame" hidden="true">
+  </Frame>
+</Ui>

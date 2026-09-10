@@ -22,6 +22,8 @@ local Theme = {
   -- Accent or (signature AishUI)
   accent        = { 0.78, 0.62, 0.30 },
   gold          = { 0.78, 0.62, 0.30 },
+  -- Accent de TEXTE (labels, titres...) -- distinct de accent/gold (dots, hairlines) ; cf. RefreshAccentTheme.
+  accentText    = { 0.776, 0.710, 0.471 },
   accentGreen   = { 0.3,  0.9,  0.3  },
   -- Contrôles
   checkboxOn    = { 0.78, 0.62, 0.30 },
@@ -32,9 +34,7 @@ local Theme = {
 }
 ns.Theme = Theme
 
----------------------------------------------------------------------------
 -- Checkbox (12×12) — style AishUI
----------------------------------------------------------------------------
 function SharedWidgets.CreateCheckbox(parent, label, tooltip, width, height)
   width  = width  or 260
   height = height or 26
@@ -104,9 +104,7 @@ function SharedWidgets.CreateCheckbox(parent, label, tooltip, width, height)
   return row
 end
 
----------------------------------------------------------------------------
 -- Slider (valeur numerique) â€” Style ElvUI : track plat + thumb carre + EditBox
----------------------------------------------------------------------------
 function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width)
   width = width or 260
   -- Largeur maximale : Ã©vite qu'un slider en pleine largeur de panneau
@@ -163,7 +161,7 @@ function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width)
   -- Curseur circulaire (thumb AishUI — Circle_Smooth2)
   local thumb = slider:CreateTexture(nil, "ARTWORK")
   thumb:SetSize(THUMB_W, THUMB_H)
-  thumb:SetTexture("Interface\\AddOns\\Aishaddon\\Media\\Wheel\\Circle_Smooth2")
+  thumb:SetTexture("Interface\\AddOns\\AishCore\\Media\\Wheel\\Circle_Smooth2")
   thumb:SetVertexColor(1, 1, 1, 1)
   slider:SetThumbTexture(thumb)
 
@@ -266,10 +264,9 @@ function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width)
     end
   end)
 
-  -- Validation de l'EditBox (Enter ou perte de focus)
-  -- La valeur saisie peut dépasser [minVal, maxVal] intentionnellement :
-  -- le slider se positionne à la borne la plus proche, mais currentValue
-  -- et onChanged reçoivent la vraie valeur saisie.
+  -- Validation de l'EditBox (Enter ou perte de focus) : la valeur saisie peut
+  -- depasser [minVal, maxVal] intentionnellement (slider cale sur la borne
+  -- proche, mais currentValue/onChanged recoivent la vraie valeur).
   local function CommitEditBox()
     local text = editBox:GetText()
     local num  = tonumber(text)
@@ -303,27 +300,28 @@ function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width)
   return container
 end
 
----------------------------------------------------------------------------
 -- Section Header — style AishUI (gold dot + texte uppercase + gold hairline)
----------------------------------------------------------------------------
-function SharedWidgets.CreateSectionHeader(parent, text, width)
+function SharedWidgets.CreateSectionHeader(parent, text, width, colorOverride)
   width = width or 280
   local f = CreateFrame("Frame", nil, parent)
   f:SetSize(width, 24)
-  local g = Theme.gold or Theme.accent
+  -- Theme.gold/accentText suivent RefreshAccentTheme (theme de spe) ;
+  -- colorOverride fixe une teinte propre (ex. couleur de classe) qui l'ignore.
+  local g = colorOverride or Theme.gold or Theme.accent
 
   -- Dot or (circleflat2, 7×7)
   local dot = f:CreateTexture(nil, "OVERLAY")
   dot:SetSize(7, 7)
   dot:SetPoint("LEFT", 2, 0)
-  dot:SetTexture("Interface\\AddOns\\Aishaddon\\Media\\Wheel\\circleflat2")
+  dot:SetTexture("Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2")
   dot:SetVertexColor(g[1], g[2], g[3], 1)
 
-  -- Label uppercase
+  -- Label uppercase (Theme.accentText, suit RefreshAccentTheme, distinct du dot/hairline)
   local lbl = f:CreateFontString(nil, "OVERLAY")
   lbl:SetFont(ns.Media.fontGui, 11)
   lbl:SetPoint("LEFT", 14, 0)
-  lbl:SetTextColor(0.776, 0.710, 0.471, 1)  -- C6B578
+  local tc = colorOverride or Theme.accentText or { 0.776, 0.710, 0.471 }
+  lbl:SetTextColor(tc[1], tc[2], tc[3], 1)
   lbl:SetText((text or ""):upper())
   f.text = lbl
 
@@ -333,20 +331,69 @@ function SharedWidgets.CreateSectionHeader(parent, text, width)
   line:SetPoint("LEFT",  lbl,  "RIGHT", 10, 0)
   line:SetPoint("RIGHT", f,    "RIGHT", -2, 0)
   line:SetColorTexture(1, 1, 1, 1)
-  pcall(function()
-    if CreateColor then
-      line:SetGradient("HORIZONTAL",
-        CreateColor(g[1], g[2], g[3], 0.85),
-        CreateColor(g[1] * 0.20, g[2] * 0.20, g[3] * 0.20, 0.10))
-    end
-  end)
+  local function ApplyGradient(color)
+    pcall(function()
+      if CreateColor then
+        line:SetGradient("HORIZONTAL",
+          CreateColor(color[1], color[2], color[3], 0.85),
+          CreateColor(color[1] * 0.20, color[2] * 0.20, color[3] * 0.20, 0.10))
+      end
+    end)
+  end
+  ApplyGradient(g)
+
+  -- Header mis en cache par session ; RefreshColor() permet de le retenter
+  -- au changement de spe sans rebuild (cf. RefreshSectionHeaderColors).
+  function f:RefreshColor()
+    -- Un header colorOverride garde sa teinte propre (couleur de classe) --
+    -- seuls les headers "neutres" suivent le theme d'accent global.
+    local c = colorOverride or Theme.gold or Theme.accent
+    dot:SetVertexColor(c[1], c[2], c[3], 1)
+    ApplyGradient(c)
+    local tc = colorOverride or Theme.accentText or c
+    lbl:SetTextColor(tc[1], tc[2], tc[3], 1)
+  end
+
+  SharedWidgets._sectionHeaders = SharedWidgets._sectionHeaders or {}
+  table.insert(SharedWidgets._sectionHeaders, f)
 
   return f
 end
 
----------------------------------------------------------------------------
+-- Recolore les section headers existants sans rebuild (safe au changement de spe ou edit couleur en direct).
+function SharedWidgets.RefreshSectionHeaderColors()
+  for _, f in ipairs(SharedWidgets._sectionHeaders or {}) do
+    if f.RefreshColor then f:RefreshColor() end
+  end
+end
+
+-- Theme d'accent GUI (gold/accent = "Points de Puissance A", accentText = "B"),
+-- source du module Colors si ns.DB.colors.themeGUI est actif, sinon ocre statique.
+-- Mute les tables Theme EN PLACE (lues directement a ~90 endroits) ; les
+-- widgets deja peints ne se repeignent pas retroactivement sans refresh explicite.
+local ACCENT_STATIC      = { 0.78, 0.62, 0.30 }
+local ACCENT_TEXT_STATIC = { 0.776, 0.710, 0.471 }
+function SharedWidgets.RefreshAccentTheme()
+  local useTheme = not (ns.DB and ns.DB.colors and ns.DB.colors.themeGUI == false)
+  local c, ct = ACCENT_STATIC, ACCENT_TEXT_STATIC
+  if useTheme then
+    local CLR = ns.Modules and ns.Modules.Colors
+    local dc = CLR and CLR.Get and CLR.Get("powerdotsa")
+    if dc then c = dc end
+    local tc = CLR and CLR.Get and CLR.Get("powerdotsb")
+    if tc then ct = tc end
+  end
+  for i = 1, 3 do
+    Theme.gold[i]       = c[i]
+    Theme.accent[i]     = c[i]
+    Theme.accentText[i] = ct[i]
+  end
+  SharedWidgets.RefreshSectionHeaderColors()
+  local SP = ns.SettingsPanel
+  if SP and SP.RefreshSidebarColors then pcall(SP.RefreshSidebarColors) end
+end
+
 -- Color swatch — carré coloré cliquable qui ouvre le picker natif WoW
----------------------------------------------------------------------------
 function SharedWidgets.CreateColorSwatch(parent, label, tooltip, width)
   width = width or 260
   local row = CreateFrame("Frame", nil, parent)
@@ -439,9 +486,7 @@ function SharedWidgets.CreateColorSwatch(parent, label, tooltip, width)
   return row
 end
 
----------------------------------------------------------------------------
 -- Bouton fermer (X)
----------------------------------------------------------------------------
 function SharedWidgets.CreateCloseButton(parent, size)
   size = size or 20
   local btn = CreateFrame("Button", nil, parent)
@@ -467,14 +512,12 @@ function SharedWidgets.CreateCloseButton(parent, size)
   return btn
 end
 
----------------------------------------------------------------------------
 -- Background panel (fond arrondi avec bordure)
----------------------------------------------------------------------------
 function SharedWidgets.ApplyPanelBackground(frame)
   -- Fond texturé noir AishUI (grain procédural + vignette)
   local bg = frame:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints()
-  bg:SetTexture("Interface\\AddOns\\Aishaddon\\Media\\UI\\PanelBackground")
+  bg:SetTexture("Interface\\AddOns\\AishCore\\Media\\UI\\PanelBackground")
   bg:SetVertexColor(1, 1, 1, Theme.bg[4] or 0.97)
   frame._bg = bg
 
@@ -503,9 +546,7 @@ function SharedWidgets.ApplyPanelBackground(frame)
   eRight:SetWidth(1)
 end
 
----------------------------------------------------------------------------
 -- Title bar (barre de titre en haut)
----------------------------------------------------------------------------
 function SharedWidgets.CreateTitleBar(frame, title, height)
   height = height or 28
   local bar = CreateFrame("Frame", nil, frame)
@@ -519,9 +560,7 @@ function SharedWidgets.CreateTitleBar(frame, title, height)
   return bar
 end
 
----------------------------------------------------------------------------
 -- Helpers privés SharedWidgets
----------------------------------------------------------------------------
 local function _ApplyBD(f, bg, edge)
   if not f.SetBackdrop then Mixin(f, BackdropTemplateMixin) end
   f:SetBackdrop({
@@ -534,9 +573,7 @@ local function _ApplyBD(f, bg, edge)
   f:SetBackdropBorderColor(edge[1], edge[2], edge[3], edge[4] or 0.8)
 end
 
----------------------------------------------------------------------------
 -- Dropdown (liste déroulante) — style AishUI : label au-dessus, bouton pleine largeur
----------------------------------------------------------------------------
 function SharedWidgets.CreateDropdown(parent, label, options, width)
   -- options = { { value = ..., text = "..." }, ... }
   width = width or 260
@@ -699,7 +736,12 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
         return
       end
     end
-    self._btn.text:SetText(tostring(val))
+    -- Pas de correspondance exacte (ex: chemin de police obsolete) : afficher
+    -- le nom de fichier plutot que le chemin complet illisible.
+    local display = tostring(val)
+    local base = display:match("([^\\/]+)$") or display
+    base = base:gsub("%.%a+$", "")
+    self._btn.text:SetText(base ~= "" and base or display)
   end
 
   function container:GetValue()
@@ -726,7 +768,7 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
   -- Fermer au clic extérieur
   menu:SetScript("OnUpdate", function(self)
     if not self:IsShown() then return end
-    if not self:IsMouseOver() and not btn:IsMouseOver() then
+    if not ns.IsFrameMouseOver(self) and not ns.IsFrameMouseOver(btn) then
       if IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton") then
         CloseMenu()
       end
@@ -737,9 +779,7 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
   return container
 end
 
----------------------------------------------------------------------------
 -- Color Button (ouvre le ColorPicker Blizzard)
----------------------------------------------------------------------------
 function SharedWidgets.CreateColorButton(parent, label, width)
   width = width or 260
   local height = 28
@@ -828,12 +868,77 @@ function SharedWidgets.CreateColorButton(parent, label, width)
   return container
 end
 
----------------------------------------------------------------------------
+-- Ligne d'alignement/ancrage : 3 boutons exclusifs, label simple au-dessus.
+-- Partage entre Alignement (cast bars) et Ancrage (Top Target).
+function SharedWidgets.CreateAlignRow(parent, label, width, options)
+  options = options or {
+    { k = "LEFT",   l = L["SETTINGS_ALIGN_LEFT"] },
+    { k = "CENTER", l = L["SETTINGS_ALIGN_CENTER"] },
+    { k = "RIGHT",  l = L["SETTINGS_ALIGN_RIGHT"] },
+  }
+  local ABTN_W = 90
+  local LBL_H  = 14
+  local GAP    = 3
+  local BTN_H  = 22
+
+  local container = CreateFrame("Frame", nil, parent)
+  container:SetSize(width or 260, LBL_H + GAP + BTN_H)
+
+  local lbl = container:CreateFontString(nil, "OVERLAY")
+  lbl:SetFont(ns.Media.fontGui, 10)
+  lbl:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0)
+  lbl:SetTextColor(unpack(Theme.textDim))
+  lbl:SetText(label or "")
+
+  container.currentValue = options[1].k
+  local btns = {}
+  local function Refresh(val)
+    container.currentValue = val
+    for _, b in ipairs(btns) do
+      if b.key == val then
+        b._lbl:SetTextColor(unpack(Theme.accentText))
+        b:SetBackdropColor(0.20, 0.15, 0.08, 1)
+      else
+        b._lbl:SetTextColor(unpack(Theme.textNormal))
+        b:SetBackdropColor(0.08, 0.08, 0.12, 1)
+      end
+    end
+  end
+
+  for i, opt in ipairs(options) do
+    local b = CreateFrame("Button", nil, container, "BackdropTemplate")
+    b:SetSize(ABTN_W, BTN_H)
+    b:SetPoint("TOPLEFT", container, "TOPLEFT", (i - 1) * (ABTN_W + 4), -(LBL_H + GAP))
+    b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    b:SetBackdropColor(0.08, 0.08, 0.12, 1)
+    b:SetBackdropBorderColor(unpack(Theme.border))
+    local blbl = b:CreateFontString(nil, "OVERLAY")
+    blbl:SetAllPoints()
+    blbl:SetFont(ns.Media.fontGui, 11)
+    blbl:SetJustifyH("CENTER")
+    blbl:SetTextColor(unpack(Theme.textNormal))
+    blbl:SetText(opt.l)
+    b._lbl = blbl
+    b.key = opt.k
+    b:SetScript("OnClick", function()
+      Refresh(opt.k)
+      if container.onChanged then container.onChanged(opt.k) end
+      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    end)
+    table.insert(btns, b)
+  end
+
+  function container:SetValue(val)
+    Refresh(val or options[1].k)
+  end
+
+  container:SetValue(options[1].k)
+  return container
+end
+
 -- Groupe de boutons Radio (choix exclusif)
----------------------------------------------------------------------------
 -- options = { { value = "...", label = "...", tooltip = "..." }, ... }
 -- Retourne un frame avec :SetValue(val) / :GetValue() / .onChanged
----------------------------------------------------------------------------
 function SharedWidgets.CreateRadioGroup(parent, options, width)
   width    = width or 260
   local itemH  = 28
@@ -923,10 +1028,8 @@ function SharedWidgets.CreateRadioGroup(parent, options, width)
   return group
 end
 
----------------------------------------------------------------------------
 -- Toggle ON/OFF (pilule or) — style AishUI
 -- Usage : t = SW.CreateToggle(parent, width); t:SetValue(bool); t.onChanged = fn
----------------------------------------------------------------------------
 function SharedWidgets.CreateToggle(parent, width)
   width = width or 44
   local h = 18
@@ -983,11 +1086,9 @@ function SharedWidgets.CreateToggle(parent, width)
   return f
 end
 
----------------------------------------------------------------------------
 -- Action Button (bouton d'action avec backdrop) — style AishUI
 -- Usage : btn = SW.CreateActionBtn(parent, "Texte", width, bgColor, borderColor, textColor)
 -- Defaults : dark bg + theme border + white text
----------------------------------------------------------------------------
 function SharedWidgets.CreateActionBtn(parent, text, width, bgColor, borderColor, textColor)
   width = width or 160
   local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
@@ -1025,13 +1126,9 @@ function SharedWidgets.CreateActionBtn(parent, text, width, bgColor, borderColor
   return btn
 end
 
----------------------------------------------------------------------------
--- StyleEditBox — applique le thème AishUI Black & Gold sur un EditBox.
--- Masque les textures Blizzard (InputBoxTemplate), ajoute un fond sombre
--- et une bordure fine, et applique la police fontGui.
--- Usage :  SW.StyleEditBox(eb)           -- taille 11 par défaut
---          SW.StyleEditBox(eb, 10)        -- taille personnalisée
----------------------------------------------------------------------------
+-- StyleEditBox — applique le thème AishUI Black & Gold sur un EditBox (masque
+-- les textures Blizzard, ajoute fond sombre + bordure fine, police fontGui).
+-- Usage : SW.StyleEditBox(eb[, size])  -- taille 11 par défaut
 function SharedWidgets.StyleEditBox(eb, size)
   size = size or 11
   -- Masquer les textures du template Blizzard (Left / Middle / Right)
@@ -1054,4 +1151,199 @@ function SharedWidgets.StyleEditBox(eb, size)
   eBd:SetPoint("BOTTOMRIGHT",  2, -2)
   eBd:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
   eBd:SetBackdropBorderColor(unpack(Theme.border))
+end
+
+-- Nag de soutien : phrase grisee avec une portion cliquable (SimpleHTML,
+-- seul type de frame Blizzard a gerer wrap + lien cliquable a la fois).
+-- template : phrase localisee avec un "%s" ou inserer la portion cliquable.
+function SharedWidgets.CreateSupportNag(parent, width, template)
+  local html = CreateFrame("SimpleHTML", nil, parent)
+  html:SetWidth(width)
+  -- SimpleHTML:SetFont() ne supporte que p/h1-h3 (pas "a") : couleur du lien
+  -- via un code couleur |cffRRGGBB inline dans le texte visible.
+  html:SetFont("p", ns.Media.fontGui, 11, "")
+  html:SetTextColor("p", 0.45, 0.45, 0.47)
+
+  local ar, ag, ab = Theme.accentText[1], Theme.accentText[2], Theme.accentText[3]
+  local hex = string.format("%02x%02x%02x",
+    math.floor(ar * 255 + 0.5), math.floor(ag * 255 + 0.5), math.floor(ab * 255 + 0.5))
+  local linkTag = string.format('<a href="heroicsupport">|cff%s%s|r</a>', hex, L["SETTINGS_SUPPORT_LINK_TEXT"])
+  local body = string.format(template, linkTag)
+  html:SetText("<html><body><p>" .. body .. "</p></body></html>")
+
+  html:SetScript("OnHyperlinkClick", function()
+    local panel = ns.SettingsPanel
+    if not panel then return end
+    if not panel:IsShown() and panel.ShowUI then panel:ShowUI() end
+    if panel.SelectCategory then panel:SelectCategory("heroicSupport") end
+  end)
+  -- Survol signale par une texture de soulignement dessinee sous le lien
+  -- (SimpleHTML ne supporte pas le tag <u>, pas de SetCursor non plus).
+  local underline = html:CreateTexture(nil, "OVERLAY")
+  underline:SetColorTexture(ar, ag, ab, 1)
+  underline:SetHeight(1)
+  underline:Hide()
+  html:SetScript("OnHyperlinkEnter", function(_, _, _, region)
+    if not region then return end
+    underline:ClearAllPoints()
+    underline:SetPoint("TOPLEFT", region, "BOTTOMLEFT", 0, -1)
+    underline:SetPoint("TOPRIGHT", region, "BOTTOMRIGHT", 0, -1)
+    underline:Show()
+  end)
+  html:SetScript("OnHyperlinkLeave", function()
+    underline:Hide()
+  end)
+
+  -- Hauteur de contenu calculee par SimpleHTML apres SetText+SetWidth ; relue ici pour l'appelant.
+  html:SetHeight(math.max(16, html:GetHeight() or 16))
+  return html
+end
+
+-- Carrousel d'images : bandeau + miniatures cliquables, defilement auto (pause
+-- 10s apres un clic manuel). images = { { texture = "chemin", tooltip =
+-- "optionnel" }, ... }. Pas de GIF anime (pas de decodeur GIF dans WoW).
+-- Dore FIXE, independant de Theme.accent/gold (mutes par RefreshAccentTheme
+-- selon la spe) : le carrousel reste dore quel que soit le theme d'accent.
+local CAROUSEL_GOLD = { 0.78, 0.62, 0.30 }
+-- Expose pour les usages hors de ce fichier (ex: Build.HeroicSupport) qui doivent
+-- eux aussi rester dores en permanence, independamment du theme d'accent.
+SharedWidgets.HEROIC_GOLD = CAROUSEL_GOLD
+-- Police italique pour la legende ; degrade silencieusement vers la police
+-- normale si SharedMedia_MyMedia n'est pas installe.
+local CAROUSEL_ITALIC_FONT = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Fontin-Italic.ttf"
+
+function SharedWidgets.CreateCarousel(parent, width, height, images, autoInterval)
+  autoInterval = autoInterval or 6
+  -- THUMB=8 (moitie de l'ancienne taille) evite le rendu flou observe a 10px/16px.
+  local THUMB, GAP = 8, 4
+  local FOOT_H = 16 -- rangee sous le cadre : legende (gauche) + miniatures (droite)
+
+  local container = CreateFrame("Frame", nil, parent)
+  container:SetSize(width, height + FOOT_H + 8)
+
+  local mainFrame = CreateFrame("Frame", nil, container)
+  mainFrame:SetSize(width, height)
+  mainFrame:SetPoint("TOP", container, "TOP", 0, 0)
+  local mainBorder = mainFrame:CreateTexture(nil, "BORDER")
+  mainBorder:SetPoint("TOPLEFT", -2, 2)
+  mainBorder:SetPoint("BOTTOMRIGHT", 2, -2)
+  mainBorder:SetColorTexture(unpack(CAROUSEL_GOLD))
+  local tex = mainFrame:CreateTexture(nil, "ARTWORK")
+  tex:SetAllPoints()
+
+  -- Barre de progression (style "story") : visualise le temps restant avant
+  -- le prochain slide, remise a 0 a chaque changement (manuel ou auto).
+  local progressTrack = mainFrame:CreateTexture(nil, "OVERLAY")
+  progressTrack:SetPoint("BOTTOMLEFT", 0, 0)
+  progressTrack:SetPoint("BOTTOMRIGHT", 0, 0)
+  progressTrack:SetHeight(4)
+  progressTrack:SetColorTexture(0, 0, 0, 0)
+  local progressBar = mainFrame:CreateTexture(nil, "OVERLAY")
+  progressBar:SetPoint("BOTTOMLEFT", 0, 0)
+  progressBar:SetHeight(4)
+  progressBar:SetWidth(1)
+  progressBar:SetColorTexture(unpack(CAROUSEL_GOLD))
+  -- pendingWait : delai avant le prochain slide (10s apres un clic manuel).
+  -- Un seul chrono (slideStartTime) pilote barre + defilement, evite la
+  -- desync de l'ancien systeme a deux chronos separes.
+  local slideStartTime = GetTime()
+  local pendingWait = autoInterval
+  mainFrame:SetScript("OnUpdate", function()
+    local pct = math.min(1, (GetTime() - slideStartTime) / pendingWait)
+    progressBar:SetWidth(math.max(1, math.floor(width * pct)))
+  end)
+
+  -- Legende (nom de l'image courante), bas-gauche, italique -- meme niveau
+  -- que les miniatures cote droit.
+  local caption = container:CreateFontString(nil, "OVERLAY")
+  caption:SetFont(CAROUSEL_ITALIC_FONT, 10, "")
+  caption:SetTextColor(unpack(CAROUSEL_GOLD))
+  caption:SetJustifyH("LEFT")
+  caption:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", 0, 0)
+  caption:SetPoint("TOP", container, "TOP", 0, -(height + 6))
+
+  local thumbs = {}
+  local current = 1
+  local n = #images
+
+  -- Pas de defilement auto avec 0-1 image : pas de barre de progression non
+  -- plus (rien a "attendre").
+  if n <= 1 then
+    progressTrack:Hide()
+    progressBar:Hide()
+    mainFrame:SetScript("OnUpdate", nil)
+  end
+
+  local function ShowSlide(idx)
+    if n == 0 then return end
+    idx = ((idx - 1) % n) + 1
+    current = idx
+    slideStartTime = GetTime()
+    tex:SetTexture(images[idx].texture)
+    caption:SetText(images[idx].tooltip or "")
+    -- Carre plein = miniature active, vide = inactive (thFill/thHole, memes couleurs, remplissage different).
+    for i, t in ipairs(thumbs) do
+      t.fill:SetShown(i == idx)
+    end
+  end
+
+  -- Miniatures alignees sous le coin BAS-DROIT du cadre (pas centrees).
+  local totalW = n * THUMB + math.max(0, n - 1) * GAP
+  local startX = width - totalW
+  for i, img in ipairs(images) do
+    local th = CreateFrame("Button", nil, container)
+    th:SetSize(THUMB, THUMB)
+    th:SetPoint("TOPLEFT", container, "TOPLEFT", startX + (i - 1) * (THUMB + GAP), -(height + 6))
+    -- 3 calques dans cet ordre (peignent par-dessus) : BACKGROUND = disque
+    -- dore plein (anneau visible), BORDER = disque noir plus petit (creuse
+    -- le trou = rond vide), ARTWORK = disque dore cache par defaut (rebouche
+    -- le trou pour la miniature active).
+    local DOT_TEX = "Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2"
+    local thGoldBg = th:CreateTexture(nil, "BACKGROUND")
+    thGoldBg:SetAllPoints()
+    thGoldBg:SetTexture(DOT_TEX)
+    thGoldBg:SetVertexColor(unpack(CAROUSEL_GOLD))
+    local thHole = th:CreateTexture(nil, "BORDER")
+    thHole:SetPoint("TOPLEFT", 2, -2)
+    thHole:SetPoint("BOTTOMRIGHT", -2, 2)
+    thHole:SetTexture(DOT_TEX)
+    thHole:SetVertexColor(0.05, 0.05, 0.06, 1)
+    local thFill = th:CreateTexture(nil, "ARTWORK")
+    thFill:SetPoint("TOPLEFT", 2, -2)
+    thFill:SetPoint("BOTTOMRIGHT", -2, 2)
+    thFill:SetTexture(DOT_TEX)
+    thFill:SetVertexColor(unpack(CAROUSEL_GOLD))
+    thFill:Hide()
+    th:SetScript("OnClick", function()
+      pendingWait = 10 -- pause plus longue qu'un defilement auto normal
+      ShowSlide(i)
+    end)
+    if img.tooltip then
+      th:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(img.tooltip, 1, 1, 1)
+        GameTooltip:Show()
+      end)
+      th:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    thumbs[i] = { fill = thFill }
+  end
+
+  if n > 0 then ShowSlide(1) end
+
+  -- Poll rapide (0.1s) : verifie si pendingWait est ecoule depuis le dernier
+  -- slide, reste synchro avec la barre de progression. Annule sur OnHide
+  -- pour ne pas tourner indefiniment en arriere-plan.
+  if n > 1 then
+    local ticker = C_Timer.NewTicker(0.1, function()
+      if GetTime() - slideStartTime >= pendingWait then
+        pendingWait = autoInterval
+        ShowSlide(current + 1)
+      end
+    end)
+    container:SetScript("OnHide", function() ticker:Cancel() end)
+  end
+
+  container.ShowSlide = ShowSlide
+  return container
 end

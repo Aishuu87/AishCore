@@ -6,14 +6,12 @@ local L = ns.L
 
 -- Format recommandé : TGA 32-bit avec canal alpha (fond transparent)
 -- Placer le fichier dans : Media/logo.tga
-local ICON_PATH   = "Interface\\AddOns\\Aishaddon\\Media\\logo_icon.tga"
+local ICON_PATH   = "Interface\\AddOns\\AishCore\\Media\\logo_icon.tga"
 local BUTTON_SIZE = 32
 local RADIUS      = 80   -- distance du centre de la minimap
 
----------------------------------------------------------------------------
 -- Création du bouton
----------------------------------------------------------------------------
-local btn = CreateFrame("Button", "AishaddonMinimapButton", Minimap)
+local btn = CreateFrame("Button", "AishCoreMinimapButton", Minimap)
 btn:SetSize(BUTTON_SIZE, BUTTON_SIZE)
 btn:SetFrameStrata("MEDIUM")
 btn:SetFrameLevel(8)
@@ -29,9 +27,7 @@ local highlight = btn:CreateTexture(nil, "HIGHLIGHT")
 highlight:SetColorTexture(1, 1, 1, 0.15)
 highlight:SetAllPoints()
 
----------------------------------------------------------------------------
 -- Positionnement
----------------------------------------------------------------------------
 local function UpdatePosition()
   local cfg = ns.DB and ns.DB.minimapButton
   local angle = math.rad(cfg and cfg.angle or 225)
@@ -41,9 +37,7 @@ local function UpdatePosition()
   btn:SetPoint("CENTER", Minimap, "CENTER", x, y)
 end
 
----------------------------------------------------------------------------
 -- Drag : repositionner autour de la minimap à la souris
----------------------------------------------------------------------------
 local isDragging = false
 
 btn:RegisterForDrag("LeftButton")
@@ -68,9 +62,7 @@ btn:SetScript("OnDragStop", function(self)
   C_Timer.After(0.05, function() isDragging = false end)
 end)
 
----------------------------------------------------------------------------
 -- Clic gauche : ouvrir / fermer le panneau
----------------------------------------------------------------------------
 btn:SetScript("OnClick", function(self, button)
   if button == "LeftButton" and not isDragging then
     if ns.SettingsPanel then
@@ -79,9 +71,7 @@ btn:SetScript("OnClick", function(self, button)
   end
 end)
 
----------------------------------------------------------------------------
 -- Tooltip
----------------------------------------------------------------------------
 btn:SetScript("OnEnter", function(self)
   GameTooltip:SetOwner(self, "ANCHOR_LEFT")
   GameTooltip:AddLine(L["MINIMAP_TOOLTIP_TITLE"], 0, 0.69, 1)
@@ -94,9 +84,7 @@ btn:SetScript("OnLeave", function()
   GameTooltip:Hide()
 end)
 
----------------------------------------------------------------------------
 -- Initialisation après chargement de la DB (PLAYER_ENTERING_WORLD)
----------------------------------------------------------------------------
 ns.MinimapButton = {}
 
 function ns.MinimapButton.Init()

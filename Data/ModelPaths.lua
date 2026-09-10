@@ -1,4 +1,4 @@
-AishaddonModelPaths = {
+AishCoreModelPaths = {
  {
   children = {
    {
@@ -371,6 +371,11 @@ AishaddonModelPaths = {
     fileId = "4620432",
     text = "10fx_airmissile01.m2",
     value = "10fx_airmissile01.m2",
+   },
+   {
+    fileId = "7303933",
+    text = "10fx_algethar_crawth_blisteringfire_aura.m2",
+    value = "10fx_algethar_crawth_blisteringfire_aura.m2",
    },
    {
     fileId = "4550038",
@@ -923,6 +928,11 @@ AishaddonModelPaths = {
     value = "10fx_frostaura01.m2",
    },
    {
+    fileId = "7456035",
+    text = "10fx_generic_dragon_blue_rune_trickle03_v2.m2",
+    value = "10fx_generic_dragon_blue_rune_trickle03_v2.m2",
+   },
+   {
     fileId = "4507696",
     text = "10fx_generic_dragon_bronze_cast_hand_low.m2",
     value = "10fx_generic_dragon_bronze_cast_hand_low.m2",
@@ -1211,6 +1221,11 @@ AishaddonModelPaths = {
     fileId = "4417694",
     text = "10fx_rubylifepools_kokiablazehoof_searingblows_channel.m2",
     value = "10fx_rubylifepools_kokiablazehoof_searingblows_channel.m2",
+   },
+   {
+    fileId = "8038488",
+    text = "10fx_rubylifepools_kyrakkaanderkhartstormvein_roaringfirebreath_precast.m2",
+    value = "10fx_rubylifepools_kyrakkaanderkhartstormvein_roaringfirebreath_precast.m2",
    },
    {
     fileId = "4421627",
@@ -1893,6 +1908,11 @@ AishaddonModelPaths = {
     value = "10fx_voti_theprimalcouncil_slashingblaze_aura.m2",
    },
    {
+    fileId = "5054341",
+    text = "10gfx_arcane_precasthands.m2",
+    value = "10gfx_arcane_precasthands.m2",
+   },
+   {
     fileId = "5193729",
     text = "10gfx_dragon_bronze_precastcone_state_base.m2",
     value = "10gfx_dragon_bronze_precastcone_state_base.m2",
@@ -2435,6 +2455,11 @@ AishaddonModelPaths = {
     value = "11fx_earthen_totem_water01.m2",
    },
    {
+    fileId = "6372116",
+    text = "11fx_ecodomealdani_azhiccar_devour_precast.m2",
+    value = "11fx_ecodomealdani_azhiccar_devour_precast.m2",
+   },
+   {
     fileId = "6914728",
     text = "11fx_ecodomealdani_taahbatandawazj_arcaneoverload_missile.m2",
     value = "11fx_ecodomealdani_taahbatandawazj_arcaneoverload_missile.m2",
@@ -2875,9 +2900,9 @@ AishaddonModelPaths = {
     value = "11fx_lightcircle01.m2",
    },
    {
-    fileId = "5927961",
-    text = "11fx_lightcircle02.m2",
-    value = "11fx_lightcircle02.m2",
+    fileId = "5523140",
+    text = "11fx_lightemissionblue01.m2",
+    value = "11fx_lightemissionblue01.m2",
    },
    {
     fileId = "5868079",
@@ -2990,11 +3015,6 @@ AishaddonModelPaths = {
     value = "11fx_manaforgeomega_forgeweaveraraz_astralharvest_impact.m2",
    },
    {
-    fileId = "6703761",
-    text = "11fx_manaforgeomega_forgeweaveraraz_powermanifested_impact.m2",
-    value = "11fx_manaforgeomega_forgeweaveraraz_powermanifested_impact.m2",
-   },
-   {
     fileId = "6981927",
     text = "11fx_manaforgeomega_fractillus_crystallized_aura.m2",
     value = "11fx_manaforgeomega_fractillus_crystallized_aura.m2",
@@ -3088,6 +3108,26 @@ AishaddonModelPaths = {
     fileId = "7129330",
     text = "11fx_manifestmatrices_aura02.m2",
     value = "11fx_manifestmatrices_aura02.m2",
+   },
+   {
+    fileId = "5945902",
+    text = "11fx_midnight_cragpine_eruptingroots_travele.m2",
+    value = "11fx_midnight_cragpine_eruptingroots_travele.m2",
+   },
+   {
+    fileId = "6047550",
+    text = "11fx_midnight_luashal_dawnfirebreath_channel.m2",
+    value = "11fx_midnight_luashal_dawnfirebreath_channel.m2",
+   },
+   {
+    fileId = "7114906",
+    text = "11fx_midnight_luashal_radiantsunder_cast.m2",
+    value = "11fx_midnight_luashal_radiantsunder_cast.m2",
+   },
+   {
+    fileId = "6350770",
+    text = "11fx_midnight_luashal_radiantsunder_precast.m2",
+    value = "11fx_midnight_luashal_radiantsunder_precast.m2",
    },
    {
     fileId = "7082135",
@@ -3590,6 +3630,66 @@ AishaddonModelPaths = {
     value = "11fx_spottingeagle.m2",
    },
    {
+    fileId = "7444048",
+    text = "11fx_squirrelflying_arcane_dissolve_missile.m2",
+    value = "11fx_squirrelflying_arcane_dissolve_missile.m2",
+   },
+   {
+    fileId = "7446444",
+    text = "11fx_squirrelflying_arcane_nova_low.m2",
+    value = "11fx_squirrelflying_arcane_nova_low.m2",
+   },
+   {
+    fileId = "7427922",
+    text = "11fx_squirrelflying_footprint_arcane.m2",
+    value = "11fx_squirrelflying_footprint_arcane.m2",
+   },
+   {
+    fileId = "7427921",
+    text = "11fx_squirrelflying_footprint_frost.m2",
+    value = "11fx_squirrelflying_footprint_frost.m2",
+   },
+   {
+    fileId = "7427924",
+    text = "11fx_squirrelflying_footprint_holy.m2",
+    value = "11fx_squirrelflying_footprint_holy.m2",
+   },
+   {
+    fileId = "7427923",
+    text = "11fx_squirrelflying_footprint_shadow.m2",
+    value = "11fx_squirrelflying_footprint_shadow.m2",
+   },
+   {
+    fileId = "7444046",
+    text = "11fx_squirrelflying_frost_dissolve_missile.m2",
+    value = "11fx_squirrelflying_frost_dissolve_missile.m2",
+   },
+   {
+    fileId = "7442189",
+    text = "11fx_squirrelflying_frost_nova_low.m2",
+    value = "11fx_squirrelflying_frost_nova_low.m2",
+   },
+   {
+    fileId = "7444047",
+    text = "11fx_squirrelflying_holy_dissolve_missile.m2",
+    value = "11fx_squirrelflying_holy_dissolve_missile.m2",
+   },
+   {
+    fileId = "7446443",
+    text = "11fx_squirrelflying_holy_nova.m2",
+    value = "11fx_squirrelflying_holy_nova.m2",
+   },
+   {
+    fileId = "7444049",
+    text = "11fx_squirrelflying_shadow_dissolve_missile.m2",
+    value = "11fx_squirrelflying_shadow_dissolve_missile.m2",
+   },
+   {
+    fileId = "7442190",
+    text = "11fx_squirrelflying_shadow_nova_low.m2",
+    value = "11fx_squirrelflying_shadow_nova_low.m2",
+   },
+   {
     fileId = "5876227",
     text = "11fx_starmissile01.m2",
     value = "11fx_starmissile01.m2",
@@ -3865,6 +3965,11 @@ AishaddonModelPaths = {
     value = "11fx_undermineraid_sprocketmonger_firelaser_channel.m2",
    },
    {
+    fileId = "6379322",
+    text = "11fx_undermineraid_sprocketmonger_jumbovoidbeam_channel.m2",
+    value = "11fx_undermineraid_sprocketmonger_jumbovoidbeam_channel.m2",
+   },
+   {
     fileId = "6216757",
     text = "11fx_undermineraid_sprocketmonger_negapolarization_aura.m2",
     value = "11fx_undermineraid_sprocketmonger_negapolarization_aura.m2",
@@ -3903,11 +4008,6 @@ AishaddonModelPaths = {
     fileId = "6372069",
     text = "11fx_undermineraid_stixbunkjunker_muffleddoomsplosion_impact.m2",
     value = "11fx_undermineraid_stixbunkjunker_muffleddoomsplosion_impact.m2",
-   },
-   {
-    fileId = "6372071",
-    text = "11fx_undermineraid_stixbunkjunker_muffleddoomsplosion_travele.m2",
-    value = "11fx_undermineraid_stixbunkjunker_muffleddoomsplosion_travele.m2",
    },
    {
     fileId = "6321357",
@@ -4275,9 +4375,19 @@ AishaddonModelPaths = {
     value = "11fx_writhingwave_precast02.m2",
    },
    {
+    fileId = "6703761",
+    text = "11gfx_arcane_verticalimpact.m2",
+    value = "11gfx_arcane_verticalimpact.m2",
+   },
+   {
     fileId = "5679913",
     text = "11gfx_enchant_voidskardyn_generic.m2",
     value = "11gfx_enchant_voidskardyn_generic.m2",
+   },
+   {
+    fileId = "6372071",
+    text = "11gfx_explosion_verticalimpact.m2",
+    value = "11gfx_explosion_verticalimpact.m2",
    },
    {
     fileId = "5566977",
@@ -4290,6 +4400,11 @@ AishaddonModelPaths = {
     value = "11gfx_holy_pickup_state.m2",
    },
    {
+    fileId = "5927961",
+    text = "11gfx_holy_precast_base.m2",
+    value = "11gfx_holy_precast_base.m2",
+   },
+   {
     fileId = "5552700",
     text = "11gfx_shadow_barrier_state.m2",
     value = "11gfx_shadow_barrier_state.m2",
@@ -4298,6 +4413,606 @@ AishaddonModelPaths = {
     fileId = "5763802",
     text = "11gfx_weaponenchant_holyfire_generic.m2",
     value = "11gfx_weaponenchant_holyfire_generic.m2",
+   },
+   {
+    fileId = "7810780",
+    text = "12fx_altaroffangs_ravi_freshmeat_aura.m2",
+    value = "12fx_altaroffangs_ravi_freshmeat_aura.m2",
+   },
+   {
+    fileId = "8039974",
+    text = "12fx_altaroffangs_thewrithingcoil_venomjet_precast.m2",
+    value = "12fx_altaroffangs_thewrithingcoil_venomjet_precast.m2",
+   },
+   {
+    fileId = "8164433",
+    text = "12fx_altaroffangs_zuljan_boneslicer_precast.m2",
+    value = "12fx_altaroffangs_zuljan_boneslicer_precast.m2",
+   },
+   {
+    fileId = "8245756",
+    text = "12fx_bubbles01.m2",
+    value = "12fx_bubbles01.m2",
+   },
+   {
+    fileId = "6922707",
+    text = "12fx_custom_voidcosmic_blackhole_active.m2",
+    value = "12fx_custom_voidcosmic_blackhole_active.m2",
+   },
+   {
+    fileId = "7290031",
+    text = "12fx_custom_voidcosmic_blackhole_active_02.m2",
+    value = "12fx_custom_voidcosmic_blackhole_active_02.m2",
+   },
+   {
+    fileId = "6922706",
+    text = "12fx_custom_voidcosmic_blackhole_small.m2",
+    value = "12fx_custom_voidcosmic_blackhole_small.m2",
+   },
+   {
+    fileId = "7317260",
+    text = "12fx_denofnalorakk_nalorakk_furyofthewargod_aura.m2",
+    value = "12fx_denofnalorakk_nalorakk_furyofthewargod_aura.m2",
+   },
+   {
+    fileId = "6220515",
+    text = "12fx_denofnalorakk_sentinelofwinter_glacialtorment_cast.m2",
+    value = "12fx_denofnalorakk_sentinelofwinter_glacialtorment_cast.m2",
+   },
+   {
+    fileId = "8060393",
+    text = "12fx_denofnalorakk_thehoardmonger_earthshatterslam_precast.m2",
+    value = "12fx_denofnalorakk_thehoardmonger_earthshatterslam_precast.m2",
+   },
+   {
+    fileId = "6020261",
+    text = "12fx_magistersterrace_arcanotroncustos_arcaneresidue_aura.m2",
+    value = "12fx_magistersterrace_arcanotroncustos_arcaneresidue_aura.m2",
+   },
+   {
+    fileId = "6020263",
+    text = "12fx_magistersterrace_arcanotroncustos_energyorb_areatrigger.m2",
+    value = "12fx_magistersterrace_arcanotroncustos_energyorb_areatrigger.m2",
+   },
+   {
+    fileId = "6211596",
+    text = "12fx_magistersterrace_arcanotroncustos_refuelingprotocol_channel.m2",
+    value = "12fx_magistersterrace_arcanotroncustos_refuelingprotocol_channel.m2",
+   },
+   {
+    fileId = "7212000",
+    text = "12fx_magistersterrace_degentrius_entropyorb_aura.m2",
+    value = "12fx_magistersterrace_degentrius_entropyorb_aura.m2",
+   },
+   {
+    fileId = "7525355",
+    text = "12fx_magistersterrace_degentrius_hulkingfragment_precast.m2",
+    value = "12fx_magistersterrace_degentrius_hulkingfragment_precast.m2",
+   },
+   {
+    fileId = "7114955",
+    text = "12fx_marchonqueldanas_belorenchildofalar_lighteruption_cast.m2",
+    value = "12fx_marchonqueldanas_belorenchildofalar_lighteruption_cast.m2",
+   },
+   {
+    fileId = "7483954",
+    text = "12fx_marchonqueldanas_belorenchildofalar_lightfeather_impact.m2",
+    value = "12fx_marchonqueldanas_belorenchildofalar_lightfeather_impact.m2",
+   },
+   {
+    fileId = "7483955",
+    text = "12fx_marchonqueldanas_belorenchildofalar_lightfeather_impact01.m2",
+    value = "12fx_marchonqueldanas_belorenchildofalar_lightfeather_impact01.m2",
+   },
+   {
+    fileId = "7351360",
+    text = "12fx_marchonqueldanas_belorenchildofalar_lightflames_areatrigger.m2",
+    value = "12fx_marchonqueldanas_belorenchildofalar_lightflames_areatrigger.m2",
+   },
+   {
+    fileId = "7213760",
+    text = "12fx_marchonqueldanas_belorenchildofalar_voidburn_impact.m2",
+    value = "12fx_marchonqueldanas_belorenchildofalar_voidburn_impact.m2",
+   },
+   {
+    fileId = "7114966",
+    text = "12fx_marchonqueldanas_belorenchildofalar_voideruption_cast.m2",
+    value = "12fx_marchonqueldanas_belorenchildofalar_voideruption_cast.m2",
+   },
+   {
+    fileId = "7351370",
+    text = "12fx_marchonqueldanas_belorenchildofalar_voidfeather_impact.m2",
+    value = "12fx_marchonqueldanas_belorenchildofalar_voidfeather_impact.m2",
+   },
+   {
+    fileId = "7483956",
+    text = "12fx_marchonqueldanas_belorenchildofalar_voidfeather_impact01.m2",
+    value = "12fx_marchonqueldanas_belorenchildofalar_voidfeather_impact01.m2",
+   },
+   {
+    fileId = "7483957",
+    text = "12fx_marchonqueldanas_belorenchildofalar_voidfeather_impact02.m2",
+    value = "12fx_marchonqueldanas_belorenchildofalar_voidfeather_impact02.m2",
+   },
+   {
+    fileId = "7351363",
+    text = "12fx_marchonqueldanas_belorenchildofalar_voidflames_areatrigger.m2",
+    value = "12fx_marchonqueldanas_belorenchildofalar_voidflames_areatrigger.m2",
+   },
+   {
+    fileId = "5890163",
+    text = "12fx_marchonqueldanas_midnightfalls_cosmicfracture_cast.m2",
+    value = "12fx_marchonqueldanas_midnightfalls_cosmicfracture_cast.m2",
+   },
+   {
+    fileId = "7701099",
+    text = "12fx_marchonqueldanas_midnightfalls_irisofoblivion_areatrigger.m2",
+    value = "12fx_marchonqueldanas_midnightfalls_irisofoblivion_areatrigger.m2",
+   },
+   {
+    fileId = "7348804",
+    text = "12fx_marchonqueldanas_midnightfalls_midnight_areatrigger.m2",
+    value = "12fx_marchonqueldanas_midnightfalls_midnight_areatrigger.m2",
+   },
+   {
+    fileId = "7284961",
+    text = "12fx_marchonqueldanas_midnightfalls_torchbearer_aura.m2",
+    value = "12fx_marchonqueldanas_midnightfalls_torchbearer_aura.m2",
+   },
+   {
+    fileId = "7644706",
+    text = "12fx_murderrow_kystiamanaheart_chaosbarrage_missile.m2",
+    value = "12fx_murderrow_kystiamanaheart_chaosbarrage_missile.m2",
+   },
+   {
+    fileId = "6372060",
+    text = "12fx_murderrow_kystiamanaheart_destabilized_aura.m2",
+    value = "12fx_murderrow_kystiamanaheart_destabilized_aura.m2",
+   },
+   {
+    fileId = "7515140",
+    text = "12fx_murderrow_kystiamanaheart_felnova_cast.m2",
+    value = "12fx_murderrow_kystiamanaheart_felnova_cast.m2",
+   },
+   {
+    fileId = "6404378",
+    text = "12fx_murderrow_kystiamanaheart_felnova_precast.m2",
+    value = "12fx_murderrow_kystiamanaheart_felnova_precast.m2",
+   },
+   {
+    fileId = "8060294",
+    text = "12fx_murderrow_kystiamanaheart_felspray_channel.m2",
+    value = "12fx_murderrow_kystiamanaheart_felspray_channel.m2",
+   },
+   {
+    fileId = "7257805",
+    text = "12fx_murderrow_kystiamanaheart_felspray_precast.m2",
+    value = "12fx_murderrow_kystiamanaheart_felspray_precast.m2",
+   },
+   {
+    fileId = "7515141",
+    text = "12fx_murderrow_lithielcinderfury_chaosbolt_impact.m2",
+    value = "12fx_murderrow_lithielcinderfury_chaosbolt_impact.m2",
+   },
+   {
+    fileId = "7644710",
+    text = "12fx_murderrow_lithielcinderfury_felfireburst_cast.m2",
+    value = "12fx_murderrow_lithielcinderfury_felfireburst_cast.m2",
+   },
+   {
+    fileId = "7644709",
+    text = "12fx_murderrow_lithielcinderfury_felfireburst_precast.m2",
+    value = "12fx_murderrow_lithielcinderfury_felfireburst_precast.m2",
+   },
+   {
+    fileId = "7257802",
+    text = "12fx_murderrow_lithielcinderfury_felfirecore_aura.m2",
+    value = "12fx_murderrow_lithielcinderfury_felfirecore_aura.m2",
+   },
+   {
+    fileId = "8060394",
+    text = "12fx_murderrow_xathuuxtheannihilator_legionstrike_precast.m2",
+    value = "12fx_murderrow_xathuuxtheannihilator_legionstrike_precast.m2",
+   },
+   {
+    fileId = "7235002",
+    text = "12fx_murderrow_zaenbladesorrow_felinfusedfreight_aura.m2",
+    value = "12fx_murderrow_zaenbladesorrow_felinfusedfreight_aura.m2",
+   },
+   {
+    fileId = "6181813",
+    text = "12fx_nexuspointxenas_chiefcorewrightkasreth_leylinearray_missile.m2",
+    value = "12fx_nexuspointxenas_chiefcorewrightkasreth_leylinearray_missile.m2",
+   },
+   {
+    fileId = "7037153",
+    text = "12fx_raid1_voidcosmic_door01.m2",
+    value = "12fx_raid1_voidcosmic_door01.m2",
+   },
+   {
+    fileId = "7037154",
+    text = "12fx_raid1_voidcosmic_door02.m2",
+    value = "12fx_raid1_voidcosmic_door02.m2",
+   },
+   {
+    fileId = "7037156",
+    text = "12fx_raid1_voidcosmic_wall01.m2",
+    value = "12fx_raid1_voidcosmic_wall01.m2",
+   },
+   {
+    fileId = "6025532",
+    text = "12fx_theblindingvale_ikuzzthelighthunter_lightcrazedfrenzy_precast.m2",
+    value = "12fx_theblindingvale_ikuzzthelighthunter_lightcrazedfrenzy_precast.m2",
+   },
+   {
+    fileId = "6222479",
+    text = "12fx_theblindingvale_lightblossomtrinity_fertileloam_areatrigger.m2",
+    value = "12fx_theblindingvale_lightblossomtrinity_fertileloam_areatrigger.m2",
+   },
+   {
+    fileId = "7536885",
+    text = "12fx_theblindingvale_lightblossomtrinity_lightblossombeam_channel.m2",
+    value = "12fx_theblindingvale_lightblossomtrinity_lightblossombeam_channel.m2",
+   },
+   {
+    fileId = "7536886",
+    text = "12fx_theblindingvale_lightblossomtrinity_lightbolt_impact.m2",
+    value = "12fx_theblindingvale_lightblossomtrinity_lightbolt_impact.m2",
+   },
+   {
+    fileId = "7524290",
+    text = "12fx_theblindingvale_lightblossomtrinity_lightbolt_missile.m2",
+    value = "12fx_theblindingvale_lightblossomtrinity_lightbolt_missile.m2",
+   },
+   {
+    fileId = "7034064",
+    text = "12fx_theblindingvale_lightwardenruia_lightfirebeams_areatrigger.m2",
+    value = "12fx_theblindingvale_lightwardenruia_lightfirebeams_areatrigger.m2",
+   },
+   {
+    fileId = "6195442",
+    text = "12fx_theblindingvale_lightwardenruia_spiritsofthevale_precast.m2",
+    value = "12fx_theblindingvale_lightwardenruia_spiritsofthevale_precast.m2",
+   },
+   {
+    fileId = "6740072",
+    text = "12fx_theblindingvale_ziekket_lightsporeshot_cast.m2",
+    value = "12fx_theblindingvale_ziekket_lightsporeshot_cast.m2",
+   },
+   {
+    fileId = "6740073",
+    text = "12fx_theblindingvale_ziekket_lightsporeshot_impact.m2",
+    value = "12fx_theblindingvale_ziekket_lightsporeshot_impact.m2",
+   },
+   {
+    fileId = "6740070",
+    text = "12fx_theblindingvale_ziekket_lightsporeshot_missile.m2",
+    value = "12fx_theblindingvale_ziekket_lightsporeshot_missile.m2",
+   },
+   {
+    fileId = "6740071",
+    text = "12fx_theblindingvale_ziekket_lightsporeshot_precast.m2",
+    value = "12fx_theblindingvale_ziekket_lightsporeshot_precast.m2",
+   },
+   {
+    fileId = "7164074",
+    text = "12fx_theblindingvale_ziekket_thornspike_precast.m2",
+    value = "12fx_theblindingvale_ziekket_thornspike_precast.m2",
+   },
+   {
+    fileId = "7362302",
+    text = "12fx_thedreamrift_chimaerustheundreamtgod_alndustessence_aura.m2",
+    value = "12fx_thedreamrift_chimaerustheundreamtgod_alndustessence_aura.m2",
+   },
+   {
+    fileId = "6658701",
+    text = "12fx_thedreamrift_chimaerustheundreamtgod_alnsight_aura.m2",
+    value = "12fx_thedreamrift_chimaerustheundreamtgod_alnsight_aura.m2",
+   },
+   {
+    fileId = "6372118",
+    text = "12fx_thevoidspire_crownofthecosmos_empoweringdarkness_precast.m2",
+    value = "12fx_thevoidspire_crownofthecosmos_empoweringdarkness_precast.m2",
+   },
+   {
+    fileId = "7378901",
+    text = "12fx_thevoidspire_crownofthecosmos_rangercaptainsmark_cast.m2",
+    value = "12fx_thevoidspire_crownofthecosmos_rangercaptainsmark_cast.m2",
+   },
+   {
+    fileId = "7378900",
+    text = "12fx_thevoidspire_crownofthecosmos_rangercaptainsmark_precast.m2",
+    value = "12fx_thevoidspire_crownofthecosmos_rangercaptainsmark_precast.m2",
+   },
+   {
+    fileId = "7378906",
+    text = "12fx_thevoidspire_crownofthecosmos_silverresidue_aura.m2",
+    value = "12fx_thevoidspire_crownofthecosmos_silverresidue_aura.m2",
+   },
+   {
+    fileId = "7378903",
+    text = "12fx_thevoidspire_crownofthecosmos_silverstrikearrow_aura.m2",
+    value = "12fx_thevoidspire_crownofthecosmos_silverstrikearrow_aura.m2",
+   },
+   {
+    fileId = "7378905",
+    text = "12fx_thevoidspire_crownofthecosmos_silverstrikearrow_aura01.m2",
+    value = "12fx_thevoidspire_crownofthecosmos_silverstrikearrow_aura01.m2",
+   },
+   {
+    fileId = "7378902",
+    text = "12fx_thevoidspire_crownofthecosmos_silverstrikericochet_impact.m2",
+    value = "12fx_thevoidspire_crownofthecosmos_silverstrikericochet_impact.m2",
+   },
+   {
+    fileId = "7578742",
+    text = "12fx_thevoidspire_crownofthecosmos_silverstrikericochet_impact01.m2",
+    value = "12fx_thevoidspire_crownofthecosmos_silverstrikericochet_impact01.m2",
+   },
+   {
+    fileId = "7539078",
+    text = "12fx_thevoidspire_crownofthecosmos_umbraltether_aura.m2",
+    value = "12fx_thevoidspire_crownofthecosmos_umbraltether_aura.m2",
+   },
+   {
+    fileId = "7378904",
+    text = "12fx_thevoidspire_crownofthecosmos_umbraltether_missile.m2",
+    value = "12fx_thevoidspire_crownofthecosmos_umbraltether_missile.m2",
+   },
+   {
+    fileId = "7303282",
+    text = "12fx_thevoidspire_fallenkingsalhadaar_entropicunraveling_aura.m2",
+    value = "12fx_thevoidspire_fallenkingsalhadaar_entropicunraveling_aura.m2",
+   },
+   {
+    fileId = "7065790",
+    text = "12fx_thevoidspire_fallenkingsalhadaar_oppressivedarkness_aura.m2",
+    value = "12fx_thevoidspire_fallenkingsalhadaar_oppressivedarkness_aura.m2",
+   },
+   {
+    fileId = "6100302",
+    text = "12fx_thevoidspire_imperatoraverzian_shadowsadvance_cast.m2",
+    value = "12fx_thevoidspire_imperatoraverzian_shadowsadvance_cast.m2",
+   },
+   {
+    fileId = "7469745",
+    text = "12fx_thevoidspire_lightblindedvanguard_auraofdevotion_aura.m2",
+    value = "12fx_thevoidspire_lightblindedvanguard_auraofdevotion_aura.m2",
+   },
+   {
+    fileId = "7469748",
+    text = "12fx_thevoidspire_lightblindedvanguard_auraofpeace_aura.m2",
+    value = "12fx_thevoidspire_lightblindedvanguard_auraofpeace_aura.m2",
+   },
+   {
+    fileId = "7469743",
+    text = "12fx_thevoidspire_lightblindedvanguard_auraofwrath_aura.m2",
+    value = "12fx_thevoidspire_lightblindedvanguard_auraofwrath_aura.m2",
+   },
+   {
+    fileId = "7453732",
+    text = "12fx_thevoidspire_vaelgor&ezzorak_gloomfield_areatrigger.m2",
+    value = "12fx_thevoidspire_vaelgor&ezzorak_gloomfield_areatrigger.m2",
+   },
+   {
+    fileId = "7493617",
+    text = "12fx_thevoidspire_vaelgorezzorak_gloomfield_areatrigger01.m2",
+    value = "12fx_thevoidspire_vaelgorezzorak_gloomfield_areatrigger01.m2",
+   },
+   {
+    fileId = "7637254",
+    text = "12fx_thevoidspire_vorasius_aftershock_areatrigger.m2",
+    value = "12fx_thevoidspire_vorasius_aftershock_areatrigger.m2",
+   },
+   {
+    fileId = "7704420",
+    text = "12fx_transmog_set_change.m2",
+    value = "12fx_transmog_set_change.m2",
+   },
+   {
+    fileId = "8117706",
+    text = "12fx_ulatekraid_entombedsentinels_ulateksdominance_aura.m2",
+    value = "12fx_ulatekraid_entombedsentinels_ulateksdominance_aura.m2",
+   },
+   {
+    fileId = "7580103",
+    text = "12fx_ulatekraid_nekzalithesoulcoiler_graveboundadvance_aura.m2",
+    value = "12fx_ulatekraid_nekzalithesoulcoiler_graveboundadvance_aura.m2",
+   },
+   {
+    fileId = "6648719",
+    text = "12fx_ulatekraid_nekzalithesoulcoiler_soulcoiled_aura.m2",
+    value = "12fx_ulatekraid_nekzalithesoulcoiler_soulcoiled_aura.m2",
+   },
+   {
+    fileId = "7034065",
+    text = "12fx_ulatekraid_sszorak_mutilate_cast.m2",
+    value = "12fx_ulatekraid_sszorak_mutilate_cast.m2",
+   },
+   {
+    fileId = "7660514",
+    text = "12fx_ulatekraid_sszorak_mutilate_precast.m2",
+    value = "12fx_ulatekraid_sszorak_mutilate_precast.m2",
+   },
+   {
+    fileId = "7851422",
+    text = "12fx_ulatekraid_sszorak_ravage_precast.m2",
+    value = "12fx_ulatekraid_sszorak_ravage_precast.m2",
+   },
+   {
+    fileId = "7637242",
+    text = "12fx_ulatekraid_sszorak_tempest_precast.m2",
+    value = "12fx_ulatekraid_sszorak_tempest_precast.m2",
+   },
+   {
+    fileId = "7648936",
+    text = "12fx_ulatekraid_sszorak_virulence_aura.m2",
+    value = "12fx_ulatekraid_sszorak_virulence_aura.m2",
+   },
+   {
+    fileId = "7930061",
+    text = "12fx_ulatekraid_sszorak_virulence_aura01.m2",
+    value = "12fx_ulatekraid_sszorak_virulence_aura01.m2",
+   },
+   {
+    fileId = "7967529",
+    text = "12fx_ulatekraid_sszorak_virulence_aura02.m2",
+    value = "12fx_ulatekraid_sszorak_virulence_aura02.m2",
+   },
+   {
+    fileId = "6383713",
+    text = "12fx_ulatekraid_sszorak_viscouscyst_areatrigger.m2",
+    value = "12fx_ulatekraid_sszorak_viscouscyst_areatrigger.m2",
+   },
+   {
+    fileId = "7658224",
+    text = "12fx_ulatekraid_sszorak_viscouscyst_areatrigger01.m2",
+    value = "12fx_ulatekraid_sszorak_viscouscyst_areatrigger01.m2",
+   },
+   {
+    fileId = "8038821",
+    text = "12fx_ulatekraid_thecoiledaltar_coalescedvenom_areatrigger.m2",
+    value = "12fx_ulatekraid_thecoiledaltar_coalescedvenom_areatrigger.m2",
+   },
+   {
+    fileId = "6316086",
+    text = "12fx_ulatekraid_thecoiledaltar_soulbinding_aura.m2",
+    value = "12fx_ulatekraid_thecoiledaltar_soulbinding_aura.m2",
+   },
+   {
+    fileId = "6372109",
+    text = "12fx_ulatekraid_thelostexplorers_aftershock_aura.m2",
+    value = "12fx_ulatekraid_thelostexplorers_aftershock_aura.m2",
+   },
+   {
+    fileId = "7637251",
+    text = "12fx_ulatekraid_thelostexplorers_cataclysmicinvocation_precast.m2",
+    value = "12fx_ulatekraid_thelostexplorers_cataclysmicinvocation_precast.m2",
+   },
+   {
+    fileId = "6740077",
+    text = "12fx_ulatekraid_thelostexplorers_fungalburst_cast.m2",
+    value = "12fx_ulatekraid_thelostexplorers_fungalburst_cast.m2",
+   },
+   {
+    fileId = "6920504",
+    text = "12fx_ulatekraid_thelostexplorers_fungalburst_precast.m2",
+    value = "12fx_ulatekraid_thelostexplorers_fungalburst_precast.m2",
+   },
+   {
+    fileId = "6372061",
+    text = "12fx_ulatekraid_thetwinfangs_causticdeluge_aura.m2",
+    value = "12fx_ulatekraid_thetwinfangs_causticdeluge_aura.m2",
+   },
+   {
+    fileId = "8039979",
+    text = "12fx_ulatekraid_thetwinfangs_corrosivespit_precast.m2",
+    value = "12fx_ulatekraid_thetwinfangs_corrosivespit_precast.m2",
+   },
+   {
+    fileId = "7752025",
+    text = "12fx_ulatekraid_thetwinfangs_taintedblood_areatrigger.m2",
+    value = "12fx_ulatekraid_thetwinfangs_taintedblood_areatrigger.m2",
+   },
+   {
+    fileId = "7948782",
+    text = "12fx_ulatekraid_thetwinfangs_vileflood_channel.m2",
+    value = "12fx_ulatekraid_thetwinfangs_vileflood_channel.m2",
+   },
+   {
+    fileId = "7725592",
+    text = "12fx_ulatekraid_ulatek_hardened_aura.m2",
+    value = "12fx_ulatekraid_ulatek_hardened_aura.m2",
+   },
+   {
+    fileId = "7725593",
+    text = "12fx_ulatekraid_ulatek_hardened_aura01.m2",
+    value = "12fx_ulatekraid_ulatek_hardened_aura01.m2",
+   },
+   {
+    fileId = "7658585",
+    text = "12fx_ulatekraid_ulatek_motherswrath_precast.m2",
+    value = "12fx_ulatekraid_ulatek_motherswrath_precast.m2",
+   },
+   {
+    fileId = "7967526",
+    text = "12fx_ulatekraid_ulatek_rageoftheshackled_channel.m2",
+    value = "12fx_ulatekraid_ulatek_rageoftheshackled_channel.m2",
+   },
+   {
+    fileId = "7967527",
+    text = "12fx_ulatekraid_ulatek_rageoftheshackled_channel01.m2",
+    value = "12fx_ulatekraid_ulatek_rageoftheshackled_channel01.m2",
+   },
+   {
+    fileId = "7938150",
+    text = "12fx_ulatekraid_ulatek_rageoftheshackled_channel02.m2",
+    value = "12fx_ulatekraid_ulatek_rageoftheshackled_channel02.m2",
+   },
+   {
+    fileId = "7939164",
+    text = "12fx_ulatekraid_ulatek_soulconstrictor_aura.m2",
+    value = "12fx_ulatekraid_ulatek_soulconstrictor_aura.m2",
+   },
+   {
+    fileId = "7658225",
+    text = "12fx_ulatekraid_ulatek_venomousheart_aura.m2",
+    value = "12fx_ulatekraid_ulatek_venomousheart_aura.m2",
+   },
+   {
+    fileId = "7469761",
+    text = "12fx_voidball01.m2",
+    value = "12fx_voidball01.m2",
+   },
+   {
+    fileId = "7476071",
+    text = "12fx_voidscararena_charonus_cosmiccrash_precast.m2",
+    value = "12fx_voidscararena_charonus_cosmiccrash_precast.m2",
+   },
+   {
+    fileId = "7506446",
+    text = "12fx_voidscararena_tazrah_etherealshades_cast.m2",
+    value = "12fx_voidscararena_tazrah_etherealshades_cast.m2",
+   },
+   {
+    fileId = "7713053",
+    text = "12gfx_poison_generic_barrier.m2",
+    value = "12gfx_poison_generic_barrier.m2",
+   },
+   {
+    fileId = "5925305",
+    text = "1fx_manaforgeomega_forgeweaveraraz_arcanesiphon_missile.m2",
+    value = "1fx_manaforgeomega_forgeweaveraraz_arcanesiphon_missile.m2",
+   },
+   {
+    fileId = "5947950",
+    text = "1fx_manaforgeomega_forgeweaveraraz_markofpower_aura.m2",
+    value = "1fx_manaforgeomega_forgeweaveraraz_markofpower_aura.m2",
+   },
+   {
+    fileId = "6194801",
+    text = "1fx_manaforgeomega_forgeweaveraraz_markofpower_aura01.m2",
+    value = "1fx_manaforgeomega_forgeweaveraraz_markofpower_aura01.m2",
+   },
+   {
+    fileId = "6336241",
+    text = "1fx_manaforgeomega_forgeweaveraraz_voidharvest_aura.m2",
+    value = "1fx_manaforgeomega_forgeweaveraraz_voidharvest_aura.m2",
+   },
+   {
+    fileId = "6100301",
+    text = "1fx_manaforgeomega_nexuskingsalhadaar_coalescevoidwing_cast.m2",
+    value = "1fx_manaforgeomega_nexuskingsalhadaar_coalescevoidwing_cast.m2",
+   },
+   {
+    fileId = "6310138",
+    text = "1fx_manaforgeomega_nexuskingsalhadaar_sealtheforge_channel.m2",
+    value = "1fx_manaforgeomega_nexuskingsalhadaar_sealtheforge_channel.m2",
+   },
+   {
+    fileId = "6310137",
+    text = "1fx_manaforgeomega_nexuskingsalhadaar_sealtheforge_channel01.m2",
+    value = "1fx_manaforgeomega_nexuskingsalhadaar_sealtheforge_channel01.m2",
    },
    {
     fileId = "5386426",
@@ -4438,6 +5153,11 @@ AishaddonModelPaths = {
     fileId = "1135154",
     text = "6fx_legendaryring_shield_state.m2",
     value = "6fx_legendaryring_shield_state.m2",
+   },
+   {
+    fileId = "7472158",
+    text = "6fx_skyreach_araknath_heatexhaustion_cast.m2",
+    value = "6fx_skyreach_araknath_heatexhaustion_cast.m2",
    },
    {
     fileId = "937416",
@@ -7930,6 +8650,16 @@ AishaddonModelPaths = {
     value = "7fx_rogue_shadownova_castworld.m2",
    },
    {
+    fileId = "7386631",
+    text = "7fx_seatofthetriumvirate_saprish_rendingvoid_aura.m2",
+    value = "7fx_seatofthetriumvirate_saprish_rendingvoid_aura.m2",
+   },
+   {
+    fileId = "7348806",
+    text = "7fx_seatofthetriumvirate_zuraaltheascended_crashingvoid_cast.m2",
+    value = "7fx_seatofthetriumvirate_zuraaltheascended_crashingvoid_cast.m2",
+   },
+   {
     fileId = "1715596",
     text = "7fx_shadow_explosion_spherical.m2",
     value = "7fx_shadow_explosion_spherical.m2",
@@ -9650,6 +10380,11 @@ AishaddonModelPaths = {
     value = "8fx_generic_oil_vertical_impact.m2",
    },
    {
+    fileId = "3061921",
+    text = "8fx_generic_shadow_impacthigh.m2",
+    value = "8fx_generic_shadow_impacthigh.m2",
+   },
+   {
     fileId = "2499886",
     text = "8fx_generic_shield_purpleshield_state.m2",
     value = "8fx_generic_shield_purpleshield_state.m2",
@@ -10190,9 +10925,24 @@ AishaddonModelPaths = {
     value = "8fx_kinggrong_tantrum_impactworld.m2",
    },
    {
+    fileId = "7637250",
+    text = "8fx_kingsrest_dazarthefirstking_deathlyroar_precast.m2",
+    value = "8fx_kingsrest_dazarthefirstking_deathlyroar_precast.m2",
+   },
+   {
+    fileId = "7244522",
+    text = "8fx_kingsrest_dazarthefirstking_savagemaul_cast.m2",
+    value = "8fx_kingsrest_dazarthefirstking_savagemaul_cast.m2",
+   },
+   {
     fileId = "2165639",
     text = "8fx_kingsrest_purificationconstruct_purificationbeam_channel_hand.m2",
     value = "8fx_kingsrest_purificationconstruct_purificationbeam_channel_hand.m2",
+   },
+   {
+    fileId = "7034066",
+    text = "8fx_kingsrest_thecounciloftribes_poisonnova_cast.m2",
+    value = "8fx_kingsrest_thecounciloftribes_poisonnova_cast.m2",
    },
    {
     fileId = "2746847",
@@ -11505,6 +12255,16 @@ AishaddonModelPaths = {
     value = "8fx_taloc_targetplayer_blood.m2",
    },
    {
+    fileId = "8060335",
+    text = "8fx_templeofsethraliss_adderisandaspix_galeforce_aura.m2",
+    value = "8fx_templeofsethraliss_adderisandaspix_galeforce_aura.m2",
+   },
+   {
+    fileId = "7231425",
+    text = "8fx_templeofsethraliss_adderisandaspix_tempestwinds_precast.m2",
+    value = "8fx_templeofsethraliss_adderisandaspix_tempestwinds_precast.m2",
+   },
+   {
     fileId = "1885126",
     text = "8fx_toldagor_ignitionmage_burningarsenal_precast.m2",
     value = "8fx_toldagor_ignitionmage_burningarsenal_precast.m2",
@@ -11753,6 +12513,11 @@ AishaddonModelPaths = {
     fileId = "2108877",
     text = "8fx_uldir_bloodofghuun_omegavector_precast_hand.m2",
     value = "8fx_uldir_bloodofghuun_omegavector_precast_hand.m2",
+   },
+   {
+    fileId = "7464002",
+    text = "8fx_uldir_door_titan_05.m2",
+    value = "8fx_uldir_door_titan_05.m2",
    },
    {
     fileId = "2132439",
@@ -12405,6 +13170,11 @@ AishaddonModelPaths = {
     value = "9fx_generic_anima_bastion_precast_base.m2",
    },
    {
+    fileId = "6372125",
+    text = "9fx_hallsofatonement_halkiasthesinstainedgoliath_lightofatonement_areatrigger.m2",
+    value = "9fx_hallsofatonement_halkiasthesinstainedgoliath_lightofatonement_areatrigger.m2",
+   },
+   {
     fileId = "3852346",
     text = "9fx_lunar_dark_starfire_missile.m2",
     value = "9fx_lunar_dark_starfire_missile.m2",
@@ -12413,6 +13183,26 @@ AishaddonModelPaths = {
     fileId = "3621948",
     text = "9fx_raid1_noblecouncil_scarletletter_indicator.m2",
     value = "9fx_raid1_noblecouncil_scarletletter_indicator.m2",
+   },
+   {
+    fileId = "7245779",
+    text = "9fx_tazaveshtheveiledmarket_soleah_collapsingstar_areatrigger.m2",
+    value = "9fx_tazaveshtheveiledmarket_soleah_collapsingstar_areatrigger.m2",
+   },
+   {
+    fileId = "6350771",
+    text = "9fx_tazaveshtheveiledmarket_soleah_hyperlightnova_precast.m2",
+    value = "9fx_tazaveshtheveiledmarket_soleah_hyperlightnova_precast.m2",
+   },
+   {
+    fileId = "6350775",
+    text = "9fx_tazaveshtheveiledmarket_thegrandmenagerie_gripofhunger_precast.m2",
+    value = "9fx_tazaveshtheveiledmarket_thegrandmenagerie_gripofhunger_precast.m2",
+   },
+   {
+    fileId = "6385704",
+    text = "9fx_theaterofpain_mordrethatheendlessempress_echoofbattle_precast.m2",
+    value = "9fx_theaterofpain_mordrethatheendlessempress_echoofbattle_precast.m2",
    },
    {
     fileId = "3886939",
@@ -14900,6 +15690,11 @@ AishaddonModelPaths = {
     value = "cfx_deathknight_blightedruneweapon_casthand.m2",
    },
    {
+    fileId = "7111373",
+    text = "cfx_deathknight_blightfall_cast.m2",
+    value = "cfx_deathknight_blightfall_cast.m2",
+   },
+   {
     fileId = "1371079",
     text = "cfx_deathknight_blindingsleet_castbase.m2",
     value = "cfx_deathknight_blindingsleet_castbase.m2",
@@ -15180,6 +15975,16 @@ AishaddonModelPaths = {
     value = "cfx_deathknight_patheticmagic_castbase.m2",
    },
    {
+    fileId = "7011325",
+    text = "cfx_deathknight_remorselesswinter_aura.m2",
+    value = "cfx_deathknight_remorselesswinter_aura.m2",
+   },
+   {
+    fileId = "7016462",
+    text = "cfx_deathknight_remorselesswinter_aura01.m2",
+    value = "cfx_deathknight_remorselesswinter_aura01.m2",
+   },
+   {
     fileId = "1276079",
     text = "cfx_deathknight_scourgestrike_impact.m2",
     value = "cfx_deathknight_scourgestrike_impact.m2",
@@ -15245,9 +16050,69 @@ AishaddonModelPaths = {
     value = "cfx_demonhunter_chaosnova_castbase.m2",
    },
    {
+    fileId = "6652369",
+    text = "cfx_demonhunter_chaosnova_impact.m2",
+    value = "cfx_demonhunter_chaosnova_impact.m2",
+   },
+   {
+    fileId = "6652370",
+    text = "cfx_demonhunter_chaosnova_impact01.m2",
+    value = "cfx_demonhunter_chaosnova_impact01.m2",
+   },
+   {
     fileId = "1290750",
     text = "cfx_demonhunter_chaosstrike_impact.m2",
     value = "cfx_demonhunter_chaosstrike_impact.m2",
+   },
+   {
+    fileId = "7323743",
+    text = "cfx_demonhunter_collapsingstar_impact.m2",
+    value = "cfx_demonhunter_collapsingstar_impact.m2",
+   },
+   {
+    fileId = "7323741",
+    text = "cfx_demonhunter_collapsingstar_missile.m2",
+    value = "cfx_demonhunter_collapsingstar_missile.m2",
+   },
+   {
+    fileId = "7323739",
+    text = "cfx_demonhunter_collapsingstar_precast.m2",
+    value = "cfx_demonhunter_collapsingstar_precast.m2",
+   },
+   {
+    fileId = "7323740",
+    text = "cfx_demonhunter_collapsingstar_precast01.m2",
+    value = "cfx_demonhunter_collapsingstar_precast01.m2",
+   },
+   {
+    fileId = "7323742",
+    text = "cfx_demonhunter_collapsingstar_travele.m2",
+    value = "cfx_demonhunter_collapsingstar_travele.m2",
+   },
+   {
+    fileId = "6860231",
+    text = "cfx_demonhunter_consume_cast.m2",
+    value = "cfx_demonhunter_consume_cast.m2",
+   },
+   {
+    fileId = "6860233",
+    text = "cfx_demonhunter_consume_cast01.m2",
+    value = "cfx_demonhunter_consume_cast01.m2",
+   },
+   {
+    fileId = "6860232",
+    text = "cfx_demonhunter_consume_precast.m2",
+    value = "cfx_demonhunter_consume_precast.m2",
+   },
+   {
+    fileId = "6716840",
+    text = "cfx_demonhunter_consumesoul_impact.m2",
+    value = "cfx_demonhunter_consumesoul_impact.m2",
+   },
+   {
+    fileId = "6716841",
+    text = "cfx_demonhunter_consumesoul_missile.m2",
+    value = "cfx_demonhunter_consumesoul_missile.m2",
    },
    {
     fileId = "1413827",
@@ -15285,6 +16150,21 @@ AishaddonModelPaths = {
     value = "cfx_demonhunter_demonspikes_statechest.m2",
    },
    {
+    fileId = "6652371",
+    text = "cfx_demonhunter_demonsurge_cast.m2",
+    value = "cfx_demonhunter_demonsurge_cast.m2",
+   },
+   {
+    fileId = "6652372",
+    text = "cfx_demonhunter_demonsurge_cast01.m2",
+    value = "cfx_demonhunter_demonsurge_cast01.m2",
+   },
+   {
+    fileId = "6652373",
+    text = "cfx_demonhunter_demonsurge_cast02.m2",
+    value = "cfx_demonhunter_demonsurge_cast02.m2",
+   },
+   {
     fileId = "5152029",
     text = "cfx_demonhunter_elysiandecree_cast.m2",
     value = "cfx_demonhunter_elysiandecree_cast.m2",
@@ -15293,6 +16173,21 @@ AishaddonModelPaths = {
     fileId = "5152028",
     text = "cfx_demonhunter_elysiandecree_cast01.m2",
     value = "cfx_demonhunter_elysiandecree_cast01.m2",
+   },
+   {
+    fileId = "6020252",
+    text = "cfx_demonhunter_empoweredvoidspear_missile.m2",
+    value = "cfx_demonhunter_empoweredvoidspear_missile.m2",
+   },
+   {
+    fileId = "7353313",
+    text = "cfx_demonhunter_eradicate_cast.m2",
+    value = "cfx_demonhunter_eradicate_cast.m2",
+   },
+   {
+    fileId = "7353314",
+    text = "cfx_demonhunter_eradicate_cast01.m2",
+    value = "cfx_demonhunter_eradicate_cast01.m2",
    },
    {
     fileId = "1260181",
@@ -15340,9 +16235,59 @@ AishaddonModelPaths = {
     value = "cfx_demonhunter_fierybrand_impactplayername.m2",
    },
    {
+    fileId = "6890084",
+    text = "cfx_demonhunter_frenzybolt_impact.m2",
+    value = "cfx_demonhunter_frenzybolt_impact.m2",
+   },
+   {
+    fileId = "6891053",
+    text = "cfx_demonhunter_frenzybolt_missile.m2",
+    value = "cfx_demonhunter_frenzybolt_missile.m2",
+   },
+   {
+    fileId = "7263289",
+    text = "cfx_demonhunter_glide_aura.m2",
+    value = "cfx_demonhunter_glide_aura.m2",
+   },
+   {
+    fileId = "7377814",
+    text = "cfx_demonhunter_hungeringslash_cast.m2",
+    value = "cfx_demonhunter_hungeringslash_cast.m2",
+   },
+   {
+    fileId = "7377815",
+    text = "cfx_demonhunter_hungeringslash_cast01.m2",
+    value = "cfx_demonhunter_hungeringslash_cast01.m2",
+   },
+   {
+    fileId = "6382818",
+    text = "cfx_demonhunter_immolationaura_aura.m2",
+    value = "cfx_demonhunter_immolationaura_aura.m2",
+   },
+   {
+    fileId = "6382821",
+    text = "cfx_demonhunter_immolationaura_aura01.m2",
+    value = "cfx_demonhunter_immolationaura_aura01.m2",
+   },
+   {
+    fileId = "6382819",
+    text = "cfx_demonhunter_immolationaura_cast.m2",
+    value = "cfx_demonhunter_immolationaura_cast.m2",
+   },
+   {
+    fileId = "6382820",
+    text = "cfx_demonhunter_immolationaura_cast01.m2",
+    value = "cfx_demonhunter_immolationaura_cast01.m2",
+   },
+   {
     fileId = "1506804",
     text = "cfx_demonhunter_immolationaura_castbase.m2",
     value = "cfx_demonhunter_immolationaura_castbase.m2",
+   },
+   {
+    fileId = "6652381",
+    text = "cfx_demonhunter_immolationaura_impact.m2",
+    value = "cfx_demonhunter_immolationaura_impact.m2",
    },
    {
     fileId = "1342608",
@@ -15365,6 +16310,16 @@ AishaddonModelPaths = {
     value = "cfx_demonhunter_immolationaurafire_statewaist.m2",
    },
    {
+    fileId = "7490667",
+    text = "cfx_demonhunter_imprison_aura.m2",
+    value = "cfx_demonhunter_imprison_aura.m2",
+   },
+   {
+    fileId = "7490668",
+    text = "cfx_demonhunter_imprison_aura01.m2",
+    value = "cfx_demonhunter_imprison_aura01.m2",
+   },
+   {
     fileId = "1414256",
     text = "cfx_demonhunter_imprisondemon_statebase.m2",
     value = "cfx_demonhunter_imprisondemon_statebase.m2",
@@ -15383,6 +16338,36 @@ AishaddonModelPaths = {
     fileId = "1308539",
     text = "cfx_demonhunter_metamorphosisdps_impactbase.m2",
     value = "cfx_demonhunter_metamorphosisdps_impactbase.m2",
+   },
+   {
+    fileId = "7353309",
+    text = "cfx_demonhunter_reap_cast.m2",
+    value = "cfx_demonhunter_reap_cast.m2",
+   },
+   {
+    fileId = "7353310",
+    text = "cfx_demonhunter_reap_cast01.m2",
+    value = "cfx_demonhunter_reap_cast01.m2",
+   },
+   {
+    fileId = "7353312",
+    text = "cfx_demonhunter_reap_impact.m2",
+    value = "cfx_demonhunter_reap_impact.m2",
+   },
+   {
+    fileId = "7353311",
+    text = "cfx_demonhunter_reap_missile.m2",
+    value = "cfx_demonhunter_reap_missile.m2",
+   },
+   {
+    fileId = "6716842",
+    text = "cfx_demonhunter_shatteredsouls_areatrigger.m2",
+    value = "cfx_demonhunter_shatteredsouls_areatrigger.m2",
+   },
+   {
+    fileId = "6716839",
+    text = "cfx_demonhunter_shatteredsouls_cast.m2",
+    value = "cfx_demonhunter_shatteredsouls_cast.m2",
    },
    {
     fileId = "1466549",
@@ -15420,6 +16405,16 @@ AishaddonModelPaths = {
     value = "cfx_demonhunter_shatteredsouls_statebase_03blue.m2",
    },
    {
+    fileId = "7136172",
+    text = "cfx_demonhunter_shift_cast.m2",
+    value = "cfx_demonhunter_shift_cast.m2",
+   },
+   {
+    fileId = "7136173",
+    text = "cfx_demonhunter_shift_cast01.m2",
+    value = "cfx_demonhunter_shift_cast01.m2",
+   },
+   {
     fileId = "1344280",
     text = "cfx_demonhunter_sigilofchains_castworld.m2",
     value = "cfx_demonhunter_sigilofchains_castworld.m2",
@@ -15443,6 +16438,16 @@ AishaddonModelPaths = {
     fileId = "1467585",
     text = "cfx_demonhunter_sigilofflame_castworld_hostile.m2",
     value = "cfx_demonhunter_sigilofflame_castworld_hostile.m2",
+   },
+   {
+    fileId = "6382816",
+    text = "cfx_demonhunter_sigilofflame_impact.m2",
+    value = "cfx_demonhunter_sigilofflame_impact.m2",
+   },
+   {
+    fileId = "6382817",
+    text = "cfx_demonhunter_sigilofflame_impact01.m2",
+    value = "cfx_demonhunter_sigilofflame_impact01.m2",
    },
    {
     fileId = "1344465",
@@ -15480,6 +16485,11 @@ AishaddonModelPaths = {
     value = "cfx_demonhunter_sigilofsilence_impactworld.m2",
    },
    {
+    fileId = "6652375",
+    text = "cfx_demonhunter_sigilofspite_cast.m2",
+    value = "cfx_demonhunter_sigilofspite_cast.m2",
+   },
+   {
     fileId = "1366901",
     text = "cfx_demonhunter_soulturret_missile.m2",
     value = "cfx_demonhunter_soulturret_missile.m2",
@@ -15490,9 +16500,19 @@ AishaddonModelPaths = {
     value = "cfx_demonhunter_thehunt_aura.m2",
    },
    {
+    fileId = "6652377",
+    text = "cfx_demonhunter_thehunt_aura01.m2",
+    value = "cfx_demonhunter_thehunt_aura01.m2",
+   },
+   {
     fileId = "5198665",
     text = "cfx_demonhunter_thehunt_aura02.m2",
     value = "cfx_demonhunter_thehunt_aura02.m2",
+   },
+   {
+    fileId = "6652376",
+    text = "cfx_demonhunter_thehunt_aura03.m2",
+    value = "cfx_demonhunter_thehunt_aura03.m2",
    },
    {
     fileId = "5198669",
@@ -15505,9 +16525,34 @@ AishaddonModelPaths = {
     value = "cfx_demonhunter_thehunt_impact01.m2",
    },
    {
+    fileId = "6652378",
+    text = "cfx_demonhunter_thehunt_impact02.m2",
+    value = "cfx_demonhunter_thehunt_impact02.m2",
+   },
+   {
+    fileId = "6652379",
+    text = "cfx_demonhunter_thehunt_impact03.m2",
+    value = "cfx_demonhunter_thehunt_impact03.m2",
+   },
+   {
     fileId = "5198670",
     text = "cfx_demonhunter_thehunt_precast.m2",
     value = "cfx_demonhunter_thehunt_precast.m2",
+   },
+   {
+    fileId = "6652380",
+    text = "cfx_demonhunter_thehunt_precast02.m2",
+    value = "cfx_demonhunter_thehunt_precast02.m2",
+   },
+   {
+    fileId = "7493577",
+    text = "cfx_demonhunter_throwglaive_missile.m2",
+    value = "cfx_demonhunter_throwglaive_missile.m2",
+   },
+   {
+    fileId = "6984027",
+    text = "cfx_demonhunter_vengefulretreat_cast.m2",
+    value = "cfx_demonhunter_vengefulretreat_cast.m2",
    },
    {
     fileId = "1311263",
@@ -15520,6 +16565,31 @@ AishaddonModelPaths = {
     value = "cfx_demonhunter_vengefulretreatspiralribbon_impactbase.m2",
    },
    {
+    fileId = "7414430",
+    text = "cfx_demonhunter_voidfallmeteor_cast.m2",
+    value = "cfx_demonhunter_voidfallmeteor_cast.m2",
+   },
+   {
+    fileId = "7414432",
+    text = "cfx_demonhunter_voidfallmeteor_impact.m2",
+    value = "cfx_demonhunter_voidfallmeteor_impact.m2",
+   },
+   {
+    fileId = "7009716",
+    text = "cfx_demonhunter_voidmetamorphosis_aura.m2",
+    value = "cfx_demonhunter_voidmetamorphosis_aura.m2",
+   },
+   {
+    fileId = "6860235",
+    text = "cfx_demonhunter_voidray_aura.m2",
+    value = "cfx_demonhunter_voidray_aura.m2",
+   },
+   {
+    fileId = "6860234",
+    text = "cfx_demonhunter_voidray_impact.m2",
+    value = "cfx_demonhunter_voidray_impact.m2",
+   },
+   {
     fileId = "1281773",
     text = "cfx_demonhunter_wings.m2",
     value = "cfx_demonhunter_wings.m2",
@@ -15528,6 +16598,11 @@ AishaddonModelPaths = {
     fileId = "1311764",
     text = "cfx_demonhunter_wingsparticles.m2",
     value = "cfx_demonhunter_wingsparticles.m2",
+   },
+   {
+    fileId = "7414431",
+    text = "cfx_demonhunter_worldkiller_cast.m2",
+    value = "cfx_demonhunter_worldkiller_cast.m2",
    },
    {
     fileId = "4563732",
@@ -16730,6 +17805,11 @@ AishaddonModelPaths = {
     value = "cfx_evoker_zephyr_cast.m2",
    },
    {
+    fileId = "6740075",
+    text = "cfx_fungalgrowth_aura.m2",
+    value = "cfx_fungalgrowth_aura.m2",
+   },
+   {
     fileId = "5273807",
     text = "cfx_fxtestspell_cast.m2",
     value = "cfx_fxtestspell_cast.m2",
@@ -16905,6 +17985,11 @@ AishaddonModelPaths = {
     value = "cfx_hunter_boarcharge_cast.m2",
    },
    {
+    fileId = "7367525",
+    text = "cfx_hunter_boomstick_cast.m2",
+    value = "cfx_hunter_boomstick_cast.m2",
+   },
+   {
     fileId = "1512567",
     text = "cfx_hunter_burstingshot_castbase.m2",
     value = "cfx_hunter_burstingshot_castbase.m2",
@@ -16993,6 +18078,11 @@ AishaddonModelPaths = {
     fileId = "1376441",
     text = "cfx_hunter_exhiliration_impactbase.m2",
     value = "cfx_hunter_exhiliration_impactbase.m2",
+   },
+   {
+    fileId = "8026890",
+    text = "cfx_hunter_explosiveshot_hostile_travele.m2",
+    value = "cfx_hunter_explosiveshot_hostile_travele.m2",
    },
    {
     fileId = "1241134",
@@ -17108,6 +18198,11 @@ AishaddonModelPaths = {
     fileId = "1616088",
     text = "cfx_hunter_scorpidsting_missile.m2",
     value = "cfx_hunter_scorpidsting_missile.m2",
+   },
+   {
+    fileId = "7474261",
+    text = "cfx_hunter_sentinelsmark_aura.m2",
+    value = "cfx_hunter_sentinelsmark_aura.m2",
    },
    {
     fileId = "2157226",
@@ -18115,6 +19210,11 @@ AishaddonModelPaths = {
     value = "cfx_mechagnome_racial_buff_base.m2",
    },
    {
+    fileId = "7793303",
+    text = "cfx_midsummerfire_aura.m2",
+    value = "cfx_midsummerfire_aura.m2",
+   },
+   {
     fileId = "1569453",
     text = "cfx_monk_ancientmistweaverarts_impact.m2",
     value = "cfx_monk_ancientmistweaverarts_impact.m2",
@@ -18163,6 +19263,11 @@ AishaddonModelPaths = {
     fileId = "1545128",
     text = "cfx_monk_domeofmist_statechest.m2",
     value = "cfx_monk_domeofmist_statechest.m2",
+   },
+   {
+    fileId = "7213465",
+    text = "cfx_monk_extrakick_impact.m2",
+    value = "cfx_monk_extrakick_impact.m2",
    },
    {
     fileId = "5411270",
@@ -19045,6 +20150,11 @@ AishaddonModelPaths = {
     value = "cfx_paladin_genericholyflash_casthands.m2",
    },
    {
+    fileId = "7307220",
+    text = "cfx_paladin_gloryofthevanguard_cast.m2",
+    value = "cfx_paladin_gloryofthevanguard_cast.m2",
+   },
+   {
     fileId = "1237495",
     text = "cfx_paladin_hammerofjustice_cast.m2",
     value = "cfx_paladin_hammerofjustice_cast.m2",
@@ -19560,6 +20670,11 @@ AishaddonModelPaths = {
     value = "cfx_priest_premonitionofsolace_aura.m2",
    },
    {
+    fileId = "6035609",
+    text = "cfx_priest_protectedbynature_aura.m2",
+    value = "cfx_priest_protectedbynature_aura.m2",
+   },
+   {
     fileId = "5372439",
     text = "cfx_priest_psychicscream_aura.m2",
     value = "cfx_priest_psychicscream_aura.m2",
@@ -19658,6 +20773,11 @@ AishaddonModelPaths = {
     fileId = "1372784",
     text = "cfx_priest_symbolofhope_impactbase.m2",
     value = "cfx_priest_symbolofhope_impactbase.m2",
+   },
+   {
+    fileId = "6725910",
+    text = "cfx_priest_tentacleslam_cast.m2",
+    value = "cfx_priest_tentacleslam_cast.m2",
    },
    {
     fileId = "1667814",
@@ -19770,6 +20890,21 @@ AishaddonModelPaths = {
     value = "cfx_rogue_backstab_impact.m2",
    },
    {
+    fileId = "7367520",
+    text = "cfx_rogue_betweentheeyes_cast.m2",
+    value = "cfx_rogue_betweentheeyes_cast.m2",
+   },
+   {
+    fileId = "7367526",
+    text = "cfx_rogue_betweentheeyes_cast01.m2",
+    value = "cfx_rogue_betweentheeyes_cast01.m2",
+   },
+   {
+    fileId = "7367521",
+    text = "cfx_rogue_betweentheeyes_missile.m2",
+    value = "cfx_rogue_betweentheeyes_missile.m2",
+   },
+   {
     fileId = "5840974",
     text = "cfx_rogue_coupdegrace_cast.m2",
     value = "cfx_rogue_coupdegrace_cast.m2",
@@ -19875,9 +21010,19 @@ AishaddonModelPaths = {
     value = "cfx_rogue_kick_impact.m2",
    },
    {
+    fileId = "7367524",
+    text = "cfx_rogue_killingspree_cast.m2",
+    value = "cfx_rogue_killingspree_cast.m2",
+   },
+   {
     fileId = "1266995",
     text = "cfx_rogue_killingspree_castworld.m2",
     value = "cfx_rogue_killingspree_castworld.m2",
+   },
+   {
+    fileId = "7367523",
+    text = "cfx_rogue_killingspree_impact.m2",
+    value = "cfx_rogue_killingspree_impact.m2",
    },
    {
     fileId = "1269074",
@@ -20373,6 +21518,16 @@ AishaddonModelPaths = {
     fileId = "3260365",
     text = "cfx_spellvisualplaceholder_08.m2",
     value = "cfx_spellvisualplaceholder_08.m2",
+   },
+   {
+    fileId = "7317263",
+    text = "cfx_umbralsightward_aura.m2",
+    value = "cfx_umbralsightward_aura.m2",
+   },
+   {
+    fileId = "7696849",
+    text = "cfx_umbralsightward_aura01.m2",
+    value = "cfx_umbralsightward_aura01.m2",
    },
    {
     fileId = "3287856",
@@ -21450,6 +22605,16 @@ AishaddonModelPaths = {
     value = "cfx_warrior_victoryrush_impact.m2",
    },
    {
+    fileId = "6389216",
+    text = "cfx_warrior_warbreakerfxtest_cast.m2",
+    value = "cfx_warrior_warbreakerfxtest_cast.m2",
+   },
+   {
+    fileId = "6389217",
+    text = "cfx_warrior_warbreakerfxtest_cast01.m2",
+    value = "cfx_warrior_warbreakerfxtest_cast01.m2",
+   },
+   {
     fileId = "1113658",
     text = "cfx_warrior_whirlwind_castbase.m2",
     value = "cfx_warrior_whirlwind_castbase.m2",
@@ -21643,6 +22808,31 @@ AishaddonModelPaths = {
     fileId = "6641990",
     text = "classic_fx_light_yellow.m2",
     value = "classic_fx_light_yellow.m2",
+   },
+   {
+    fileId = "6641988",
+    text = "classic_fx_scarlet_breath_cast.m2",
+    value = "classic_fx_scarlet_breath_cast.m2",
+   },
+   {
+    fileId = "6641985",
+    text = "classic_fx_scarlet_cast.m2",
+    value = "classic_fx_scarlet_cast.m2",
+   },
+   {
+    fileId = "6641987",
+    text = "classic_fx_scarlet_impact.m2",
+    value = "classic_fx_scarlet_impact.m2",
+   },
+   {
+    fileId = "6641986",
+    text = "classic_fx_scarlet_missile.m2",
+    value = "classic_fx_scarlet_missile.m2",
+   },
+   {
+    fileId = "6641984",
+    text = "classic_fx_scarlet_precast_hand.m2",
+    value = "classic_fx_scarlet_precast_hand.m2",
    },
    {
     fileId = "5593602",
@@ -26507,6 +27697,36 @@ AishaddonModelPaths = {
     value = "fx_11.0z1maxlevel03atotembackpackrps_aura.m2",
    },
    {
+    fileId = "7111367",
+    text = "fx_1205prophuntendofgame_areatrigger.m2",
+    value = "fx_1205prophuntendofgame_areatrigger.m2",
+   },
+   {
+    fileId = "7241288",
+    text = "fx_120darkwellfxchickenpoolauraez_aura.m2",
+    value = "fx_120darkwellfxchickenpoolauraez_aura.m2",
+   },
+   {
+    fileId = "7892996",
+    text = "fx_121delves_hextrolls01_fireballpuddleimpactsmall_cast.m2",
+    value = "fx_121delves_hextrolls01_fireballpuddleimpactsmall_cast.m2",
+   },
+   {
+    fileId = "7644492",
+    text = "fx_121delvestwilightsblade01v04bottomlesspitchangestate_aura.m2",
+    value = "fx_121delvestwilightsblade01v04bottomlesspitchangestate_aura.m2",
+   },
+   {
+    fileId = "7644495",
+    text = "fx_121delvestwilightsblade01v04bottomlesspitspawnspell_aura.m2",
+    value = "fx_121delvestwilightsblade01v04bottomlesspitspawnspell_aura.m2",
+   },
+   {
+    fileId = "8062022",
+    text = "fx_50lbmidnightsalmon_cast.m2",
+    value = "fx_50lbmidnightsalmon_cast.m2",
+   },
+   {
     fileId = "4742037",
     text = "fx_aacollectionsurveyingrelic01riverbed_aura.m2",
     value = "fx_aacollectionsurveyingrelic01riverbed_aura.m2",
@@ -26532,9 +27752,24 @@ AishaddonModelPaths = {
     value = "fx_acidichail_travel.m2",
    },
    {
+    fileId = "7819697",
+    text = "fx_activefountainaura_aura.m2",
+    value = "fx_activefountainaura_aura.m2",
+   },
+   {
+    fileId = "7810781",
+    text = "fx_activefountainaura_aura01.m2",
+    value = "fx_activefountainaura_aura01.m2",
+   },
+   {
     fileId = "4509920",
     text = "fx_activestate_aura.m2",
     value = "fx_activestate_aura.m2",
+   },
+   {
+    fileId = "7637252",
+    text = "fx_addlemind_precast.m2",
+    value = "fx_addlemind_precast.m2",
    },
    {
     fileId = "5705386",
@@ -26547,14 +27782,14 @@ AishaddonModelPaths = {
     value = "fx_aegisoftheelements_aura.m2",
    },
    {
+    fileId = "7013991",
+    text = "fx_aircontrolbrake_cast.m2",
+    value = "fx_aircontrolbrake_cast.m2",
+   },
+   {
     fileId = "4644397",
     text = "fx_aircrescendo.m2",
     value = "fx_aircrescendo.m2",
-   },
-   {
-    fileId = "4508233",
-    text = "fx_airmarker_aura.m2",
-    value = "fx_airmarker_aura.m2",
    },
    {
     fileId = "4550062",
@@ -26577,6 +27812,16 @@ AishaddonModelPaths = {
     value = "fx_alleriashootsbowmissile_aura.m2",
    },
    {
+    fileId = "7757876",
+    text = "fx_amberbackarboon_precast.m2",
+    value = "fx_amberbackarboon_precast.m2",
+   },
+   {
+    fileId = "7515142",
+    text = "fx_anchoredconnection_channel.m2",
+    value = "fx_anchoredconnection_channel.m2",
+   },
+   {
     fileId = "4391487",
     text = "fx_antleredskull_aura.m2",
     value = "fx_antleredskull_aura.m2",
@@ -26587,9 +27832,19 @@ AishaddonModelPaths = {
     value = "fx_anvilvisual_aura.m2",
    },
    {
+    fileId = "7480163",
+    text = "fx_apexcorruption_aura.m2",
+    value = "fx_apexcorruption_aura.m2",
+   },
+   {
     fileId = "5684380",
     text = "fx_applypheromones_precast.m2",
     value = "fx_applypheromones_precast.m2",
+   },
+   {
+    fileId = "7499943",
+    text = "fx_approach_aura.m2",
+    value = "fx_approach_aura.m2",
    },
    {
     fileId = "4485231",
@@ -26617,9 +27872,24 @@ AishaddonModelPaths = {
     value = "fx_arcanebombardment_cast01.m2",
    },
    {
+    fileId = "7149540",
+    text = "fx_arcanedeflection_aura.m2",
+    value = "fx_arcanedeflection_aura.m2",
+   },
+   {
+    fileId = "6020253",
+    text = "fx_arcaneleap_aura.m2",
+    value = "fx_arcaneleap_aura.m2",
+   },
+   {
     fileId = "5841228",
     text = "fx_arcanephoenixdissolvespellstateout_aura.m2",
     value = "fx_arcanephoenixdissolvespellstateout_aura.m2",
+   },
+   {
+    fileId = "6211592",
+    text = "fx_arcaneslash_cast.m2",
+    value = "fx_arcaneslash_cast.m2",
    },
    {
     fileId = "5054328",
@@ -26630,6 +27900,11 @@ AishaddonModelPaths = {
     fileId = "4684676",
     text = "fx_areatriggervisual_aura.m2",
     value = "fx_areatriggervisual_aura.m2",
+   },
+   {
+    fileId = "7798479",
+    text = "fx_areavisuals_areatrigger.m2",
+    value = "fx_areavisuals_areatrigger.m2",
    },
    {
     fileId = "4550069",
@@ -26722,6 +27997,16 @@ AishaddonModelPaths = {
     value = "fx_arvillowavechaser_aura.m2",
    },
    {
+    fileId = "7317246",
+    text = "fx_ashenegg_aura.m2",
+    value = "fx_ashenegg_aura.m2",
+   },
+   {
+    fileId = "6211591",
+    text = "fx_astralbreath_precast.m2",
+    value = "fx_astralbreath_precast.m2",
+   },
+   {
     fileId = "5048227",
     text = "fx_astralformation_aura.m2",
     value = "fx_astralformation_aura.m2",
@@ -26757,9 +28042,19 @@ AishaddonModelPaths = {
     value = "fx_ausgazurcoveredinwax_aura01.m2",
    },
    {
+    fileId = "6983734",
+    text = "fx_awaken_aura.m2",
+    value = "fx_awaken_aura.m2",
+   },
+   {
     fileId = "4495231",
     text = "fx_axebeakholdingfruit_aura.m2",
     value = "fx_axebeakholdingfruit_aura.m2",
+   },
+   {
+    fileId = "8245070",
+    text = "fx_axegrinder_aura.m2",
+    value = "fx_axegrinder_aura.m2",
    },
    {
     fileId = "5684395",
@@ -26785,6 +28080,11 @@ AishaddonModelPaths = {
     fileId = "6192477",
     text = "fx_b.b.b.f.g._precast.m2",
     value = "fx_b.b.b.f.g._precast.m2",
+   },
+   {
+    fileId = "7233274",
+    text = "fx_ballistabolt_aura.m2",
+    value = "fx_ballistabolt_aura.m2",
    },
    {
     fileId = "4558433",
@@ -26837,9 +28137,19 @@ AishaddonModelPaths = {
     value = "fx_banner_aura03.m2",
    },
    {
+    fileId = "7489186",
+    text = "fx_barrage_missile.m2",
+    value = "fx_barrage_missile.m2",
+   },
+   {
     fileId = "5633944",
     text = "fx_barrelroll_aura.m2",
     value = "fx_barrelroll_aura.m2",
+   },
+   {
+    fileId = "8060398",
+    text = "fx_barrelthrough_aura.m2",
+    value = "fx_barrelthrough_aura.m2",
    },
    {
     fileId = "4571814",
@@ -26872,14 +28182,29 @@ AishaddonModelPaths = {
     value = "fx_battleready_impact.m2",
    },
    {
+    fileId = "6129738",
+    text = "fx_bedrockslam_missile.m2",
+    value = "fx_bedrockslam_missile.m2",
+   },
+   {
     fileId = "6403989",
     text = "fx_beeswax_precast.m2",
     value = "fx_beeswax_precast.m2",
    },
    {
+    fileId = "7291377",
+    text = "fx_bindingspear_precast.m2",
+    value = "fx_bindingspear_precast.m2",
+   },
+   {
     fileId = "4550068",
     text = "fx_biscuitgiver_cast.m2",
     value = "fx_biscuitgiver_cast.m2",
+   },
+   {
+    fileId = "7291380",
+    text = "fx_blackenedbile_travel.m2",
+    value = "fx_blackenedbile_travel.m2",
    },
    {
     fileId = "4878485",
@@ -26927,9 +28252,19 @@ AishaddonModelPaths = {
     value = "fx_bladestorm_aura.m2",
    },
    {
+    fileId = "6372122",
+    text = "fx_bladestorm_aura02.m2",
+    value = "fx_bladestorm_aura02.m2",
+   },
+   {
     fileId = "6221498",
     text = "fx_blaringdrop_cast.m2",
     value = "fx_blaringdrop_cast.m2",
+   },
+   {
+    fileId = "8062539",
+    text = "fx_blastwave_areatrigger.m2",
+    value = "fx_blastwave_areatrigger.m2",
    },
    {
     fileId = "4419712",
@@ -26967,9 +28302,24 @@ AishaddonModelPaths = {
     value = "fx_blazingbreath_precast01.m2",
    },
    {
+    fileId = "8038490",
+    text = "fx_blazingrush_areatrigger.m2",
+    value = "fx_blazingrush_areatrigger.m2",
+   },
+   {
     fileId = "4533206",
     text = "fx_blazingtrail_channel.m2",
     value = "fx_blazingtrail_channel.m2",
+   },
+   {
+    fileId = "8038485",
+    text = "fx_blightedsever_aura.m2",
+    value = "fx_blightedsever_aura.m2",
+   },
+   {
+    fileId = "6194794",
+    text = "fx_blinknova_precast.m2",
+    value = "fx_blinknova_precast.m2",
    },
    {
     fileId = "6325134",
@@ -26987,9 +28337,29 @@ AishaddonModelPaths = {
     value = "fx_bloodbolt_cast.m2",
    },
    {
+    fileId = "7810779",
+    text = "fx_bloodfountainactiveaura_aura.m2",
+    value = "fx_bloodfountainactiveaura_aura.m2",
+   },
+   {
+    fileId = "7819696",
+    text = "fx_bloodfountainactiveaura_aura01.m2",
+    value = "fx_bloodfountainactiveaura_aura01.m2",
+   },
+   {
     fileId = "5634007",
     text = "fx_bloodspawndeathvisuals_cast.m2",
     value = "fx_bloodspawndeathvisuals_cast.m2",
+   },
+   {
+    fileId = "7525315",
+    text = "fx_bloodthornroots_areatrigger.m2",
+    value = "fx_bloodthornroots_areatrigger.m2",
+   },
+   {
+    fileId = "7525314",
+    text = "fx_bloodthornroots_aura.m2",
+    value = "fx_bloodthornroots_aura.m2",
    },
    {
     fileId = "5915354",
@@ -27007,6 +28377,21 @@ AishaddonModelPaths = {
     value = "fx_bloom_aura.m2",
    },
    {
+    fileId = "6010873",
+    text = "fx_bloomingbarrier_aura.m2",
+    value = "fx_bloomingbarrier_aura.m2",
+   },
+   {
+    fileId = "6657573",
+    text = "fx_bloomrot_aura.m2",
+    value = "fx_bloomrot_aura.m2",
+   },
+   {
+    fileId = "7757875",
+    text = "fx_blossombackarboon_precast.m2",
+    value = "fx_blossombackarboon_precast.m2",
+   },
+   {
     fileId = "4293075",
     text = "fx_bonetoss_precast.m2",
     value = "fx_bonetoss_precast.m2",
@@ -27022,6 +28407,11 @@ AishaddonModelPaths = {
     value = "fx_boost_impact.m2",
    },
    {
+    fileId = "7839808",
+    text = "fx_bound_aura.m2",
+    value = "fx_bound_aura.m2",
+   },
+   {
     fileId = "5313842",
     text = "fx_bramblebarrier_cast.m2",
     value = "fx_bramblebarrier_cast.m2",
@@ -27035,6 +28425,11 @@ AishaddonModelPaths = {
     fileId = "4317329",
     text = "fx_breakscrollseal_precast.m2",
     value = "fx_breakscrollseal_precast.m2",
+   },
+   {
+    fileId = "7352933",
+    text = "fx_breathofhalazzi_cast.m2",
+    value = "fx_breathofhalazzi_cast.m2",
    },
    {
     fileId = "5368702",
@@ -27092,9 +28487,24 @@ AishaddonModelPaths = {
     value = "fx_brimminglifepod.m2",
    },
    {
+    fileId = "6053880",
+    text = "fx_bristleburst_cast.m2",
+    value = "fx_bristleburst_cast.m2",
+   },
+   {
+    fileId = "6053888",
+    text = "fx_bristleburst_precast.m2",
+    value = "fx_bristleburst_precast.m2",
+   },
+   {
     fileId = "4640539",
     text = "fx_broodkeeper.m2",
     value = "fx_broodkeeper.m2",
+   },
+   {
+    fileId = "7244525",
+    text = "fx_brutalize_channel.m2",
+    value = "fx_brutalize_channel.m2",
    },
    {
     fileId = "6372112",
@@ -27297,9 +28707,29 @@ AishaddonModelPaths = {
     value = "fx_cateringtest_aura.m2",
    },
    {
+    fileId = "7926159",
+    text = "fx_causticwaves_areatrigger.m2",
+    value = "fx_causticwaves_areatrigger.m2",
+   },
+   {
     fileId = "5098023",
     text = "fx_centerconduitactivatevisual01.m2",
     value = "fx_centerconduitactivatevisual01.m2",
+   },
+   {
+    fileId = "7245780",
+    text = "fx_chainofcustody_aura.m2",
+    value = "fx_chainofcustody_aura.m2",
+   },
+   {
+    fileId = "7291375",
+    text = "fx_chakramvortex_areatrigger.m2",
+    value = "fx_chakramvortex_areatrigger.m2",
+   },
+   {
+    fileId = "6403990",
+    text = "fx_challenge04throwfruit_travel.m2",
+    value = "fx_challenge04throwfruit_travel.m2",
    },
    {
     fileId = "4298564",
@@ -27477,6 +28907,21 @@ AishaddonModelPaths = {
     value = "fx_colossalclash_channel02.m2",
    },
    {
+    fileId = "6369012",
+    text = "fx_colossussmash_impact.m2",
+    value = "fx_colossussmash_impact.m2",
+   },
+   {
+    fileId = "8038492",
+    text = "fx_concentratedlightbeam_aura.m2",
+    value = "fx_concentratedlightbeam_aura.m2",
+   },
+   {
+    fileId = "8038493",
+    text = "fx_concentratedlightbeam_aura01.m2",
+    value = "fx_concentratedlightbeam_aura01.m2",
+   },
+   {
     fileId = "4640540",
     text = "fx_conjureboiler_travel.m2",
     value = "fx_conjureboiler_travel.m2",
@@ -27507,9 +28952,54 @@ AishaddonModelPaths = {
     value = "fx_cookingpot_aura.m2",
    },
    {
+    fileId = "7247935",
+    text = "fx_corebreach_aura.m2",
+    value = "fx_corebreach_aura.m2",
+   },
+   {
+    fileId = "6194791",
+    text = "fx_coresparksurge.m2",
+    value = "fx_coresparksurge.m2",
+   },
+   {
     fileId = "4579910",
     text = "fx_corewayspeedupfx_aura.m2",
     value = "fx_corewayspeedupfx_aura.m2",
+   },
+   {
+    fileId = "7644705",
+    text = "fx_corrodingspittle_impact.m2",
+    value = "fx_corrodingspittle_impact.m2",
+   },
+   {
+    fileId = "7644707",
+    text = "fx_corrodingspittle_missile.m2",
+    value = "fx_corrodingspittle_missile.m2",
+   },
+   {
+    fileId = "6316085",
+    text = "fx_corrosiveheat_aura.m2",
+    value = "fx_corrosiveheat_aura.m2",
+   },
+   {
+    fileId = "7678317",
+    text = "fx_corrosivesoul_cast.m2",
+    value = "fx_corrosivesoul_cast.m2",
+   },
+   {
+    fileId = "7362298",
+    text = "fx_corrupteddevastation_aura.m2",
+    value = "fx_corrupteddevastation_aura.m2",
+   },
+   {
+    fileId = "7362303",
+    text = "fx_corrupteddevastation_aura01.m2",
+    value = "fx_corrupteddevastation_aura01.m2",
+   },
+   {
+    fileId = "7941047",
+    text = "fx_corruptedlifeforce_aura.m2",
+    value = "fx_corruptedlifeforce_aura.m2",
    },
    {
     fileId = "5498349",
@@ -27527,6 +29017,16 @@ AishaddonModelPaths = {
     value = "fx_corruption_aura01.m2",
    },
    {
+    fileId = "7013990",
+    text = "fx_cosmeticarcaneteleportin_cast.m2",
+    value = "fx_cosmeticarcaneteleportin_cast.m2",
+   },
+   {
+    fileId = "6935593",
+    text = "fx_cosmeticaurabeargylphgreen_aura.m2",
+    value = "fx_cosmeticaurabeargylphgreen_aura.m2",
+   },
+   {
     fileId = "5244212",
     text = "fx_cosmeticauradenizens1_aura.m2",
     value = "fx_cosmeticauradenizens1_aura.m2",
@@ -27537,6 +29037,16 @@ AishaddonModelPaths = {
     value = "fx_cosmeticauradenizens1_aura01.m2",
    },
    {
+    fileId = "6935590",
+    text = "fx_cosmeticauradragonhawkgylphgreen_aura.m2",
+    value = "fx_cosmeticauradragonhawkgylphgreen_aura.m2",
+   },
+   {
+    fileId = "6935591",
+    text = "fx_cosmeticauraeaglegylphgreen_aura.m2",
+    value = "fx_cosmeticauraeaglegylphgreen_aura.m2",
+   },
+   {
     fileId = "4575531",
     text = "fx_cosmeticaurafish_aura.m2",
     value = "fx_cosmeticaurafish_aura.m2",
@@ -27545,6 +29055,11 @@ AishaddonModelPaths = {
     fileId = "4494591",
     text = "fx_cosmeticaurajar_aura.m2",
     value = "fx_cosmeticaurajar_aura.m2",
+   },
+   {
+    fileId = "6935592",
+    text = "fx_cosmeticauralynxgylphgreen_aura.m2",
+    value = "fx_cosmeticauralynxgylphgreen_aura.m2",
    },
    {
     fileId = "4703523",
@@ -27565,6 +29080,16 @@ AishaddonModelPaths = {
     fileId = "4420700",
     text = "fx_cosmeticholdingrelic_aura.m2",
     value = "fx_cosmeticholdingrelic_aura.m2",
+   },
+   {
+    fileId = "7141693",
+    text = "fx_cosmeticloachanneling_aura.m2",
+    value = "fx_cosmeticloachanneling_aura.m2",
+   },
+   {
+    fileId = "6350773",
+    text = "fx_cosmeticpersonalresponsibilitytargetandtargetrim_aura.m2",
+    value = "fx_cosmeticpersonalresponsibilitytargetandtargetrim_aura.m2",
    },
    {
     fileId = "5387324",
@@ -27627,6 +29152,21 @@ AishaddonModelPaths = {
     value = "fx_creaturestormaura_aura01.m2",
    },
    {
+    fileId = "6653968",
+    text = "fx_crimsonglaive_areatrigger.m2",
+    value = "fx_crimsonglaive_areatrigger.m2",
+   },
+   {
+    fileId = "7244523",
+    text = "fx_crimsonglaive_impact.m2",
+    value = "fx_crimsonglaive_impact.m2",
+   },
+   {
+    fileId = "7244524",
+    text = "fx_crimsonglaive_impact01.m2",
+    value = "fx_crimsonglaive_impact01.m2",
+   },
+   {
     fileId = "6013968",
     text = "fx_crowddivider_precast.m2",
     value = "fx_crowddivider_precast.m2",
@@ -27637,9 +29177,19 @@ AishaddonModelPaths = {
     value = "fx_crucibleinstability_aura.m2",
    },
    {
+    fileId = "7164077",
+    text = "fx_crusaderstrike_precast.m2",
+    value = "fx_crusaderstrike_precast.m2",
+   },
+   {
     fileId = "4731566",
     text = "fx_crystalcargo_aura.m2",
     value = "fx_crystalcargo_aura.m2",
+   },
+   {
+    fileId = "7678319",
+    text = "fx_crystaldamage_aura.m2",
+    value = "fx_crystaldamage_aura.m2",
    },
    {
     fileId = "4320282",
@@ -27660,6 +29210,11 @@ AishaddonModelPaths = {
     fileId = "4254398",
     text = "fx_crystaltuningfork_precast.m2",
     value = "fx_crystaltuningfork_precast.m2",
+   },
+   {
+    fileId = "6194800",
+    text = "fx_curiouscloud_aura.m2",
+    value = "fx_curiouscloud_aura.m2",
    },
    {
     fileId = "4867013",
@@ -27692,6 +29247,11 @@ AishaddonModelPaths = {
     value = "fx_darkbarrage_precast.m2",
    },
    {
+    fileId = "7469760",
+    text = "fx_darkconstellation_areatrigger.m2",
+    value = "fx_darkconstellation_areatrigger.m2",
+   },
+   {
     fileId = "6891198",
     text = "fx_darkenedsky_areatrigger.m2",
     value = "fx_darkenedsky_areatrigger.m2",
@@ -27705,6 +29265,51 @@ AishaddonModelPaths = {
     fileId = "6336240",
     text = "fx_darkglare_channel.m2",
     value = "fx_darkglare_channel.m2",
+   },
+   {
+    fileId = "7421581",
+    text = "fx_darkportal_aura.m2",
+    value = "fx_darkportal_aura.m2",
+   },
+   {
+    fileId = "7355909",
+    text = "fx_darkquasar_areatrigger.m2",
+    value = "fx_darkquasar_areatrigger.m2",
+   },
+   {
+    fileId = "7412056",
+    text = "fx_darkrune_aura.m2",
+    value = "fx_darkrune_aura.m2",
+   },
+   {
+    fileId = "7412057",
+    text = "fx_darkrune_aura01.m2",
+    value = "fx_darkrune_aura01.m2",
+   },
+   {
+    fileId = "7412058",
+    text = "fx_darkrune_aura02.m2",
+    value = "fx_darkrune_aura02.m2",
+   },
+   {
+    fileId = "7412059",
+    text = "fx_darkrune_aura03.m2",
+    value = "fx_darkrune_aura03.m2",
+   },
+   {
+    fileId = "7412060",
+    text = "fx_darkrune_aura04.m2",
+    value = "fx_darkrune_aura04.m2",
+   },
+   {
+    fileId = "7464000",
+    text = "fx_darkrush_areatrigger.m2",
+    value = "fx_darkrush_areatrigger.m2",
+   },
+   {
+    fileId = "7353098",
+    text = "fx_dawnlightbarrier_areatrigger.m2",
+    value = "fx_dawnlightbarrier_areatrigger.m2",
    },
    {
     fileId = "5665189",
@@ -27767,6 +29372,21 @@ AishaddonModelPaths = {
     value = "fx_defenselatticeappearance_aura.m2",
    },
    {
+    fileId = "6325135",
+    text = "fx_defensivestance_cast.m2",
+    value = "fx_defensivestance_cast.m2",
+   },
+   {
+    fileId = "8199050",
+    text = "fx_defilementofthecrucible_aura.m2",
+    value = "fx_defilementofthecrucible_aura.m2",
+   },
+   {
+    fileId = "7935721",
+    text = "fx_defilementofthecrucible_missile.m2",
+    value = "fx_defilementofthecrucible_missile.m2",
+   },
+   {
     fileId = "5936773",
     text = "fx_deployprofitm.a.x.miner9000_aura.m2",
     value = "fx_deployprofitm.a.x.miner9000_aura.m2",
@@ -27787,9 +29407,9 @@ AishaddonModelPaths = {
     value = "fx_desolateblossom_aura01.m2",
    },
    {
-    fileId = "5054341",
-    text = "fx_destabilize_precast.m2",
-    value = "fx_destabilize_precast.m2",
+    fileId = "8129029",
+    text = "fx_destroycenterplatform_aura.m2",
+    value = "fx_destroycenterplatform_aura.m2",
    },
    {
     fileId = "4703497",
@@ -27800,6 +29420,21 @@ AishaddonModelPaths = {
     fileId = "4390033",
     text = "fx_devastatingleap_aura.m2",
     value = "fx_devastatingleap_aura.m2",
+   },
+   {
+    fileId = "7382449",
+    text = "fx_devouringcosmos_areatrigger.m2",
+    value = "fx_devouringcosmos_areatrigger.m2",
+   },
+   {
+    fileId = "7382450",
+    text = "fx_devouringcosmos_areatrigger01.m2",
+    value = "fx_devouringcosmos_areatrigger01.m2",
+   },
+   {
+    fileId = "7382451",
+    text = "fx_devouringcosmos_areatrigger02.m2",
+    value = "fx_devouringcosmos_areatrigger02.m2",
    },
    {
     fileId = "5355796",
@@ -27827,9 +29462,19 @@ AishaddonModelPaths = {
     value = "fx_dimensionalanomaly_aura.m2",
    },
    {
+    fileId = "7355908",
+    text = "fx_dimensionalslash_precast.m2",
+    value = "fx_dimensionalslash_precast.m2",
+   },
+   {
     fileId = "6215911",
     text = "fx_discardeddoomsplosive_aura.m2",
     value = "fx_discardeddoomsplosive_aura.m2",
+   },
+   {
+    fileId = "6983733",
+    text = "fx_disintegrate_areatrigger.m2",
+    value = "fx_disintegrate_areatrigger.m2",
    },
    {
     fileId = "5684381",
@@ -27867,6 +29512,11 @@ AishaddonModelPaths = {
     value = "fx_display_travel.m2",
    },
    {
+    fileId = "7245778",
+    text = "fx_disruptiongrenade_travel.m2",
+    value = "fx_disruptiongrenade_travel.m2",
+   },
+   {
     fileId = "4753002",
     text = "fx_dividingstrike.m2",
     value = "fx_dividingstrike.m2",
@@ -27885,6 +29535,11 @@ AishaddonModelPaths = {
     fileId = "4438970",
     text = "fx_dndfocustest_aura.m2",
     value = "fx_dndfocustest_aura.m2",
+   },
+   {
+    fileId = "6194796",
+    text = "fx_donotuselivingsilkbarrier_precast.m2",
+    value = "fx_donotuselivingsilkbarrier_precast.m2",
    },
    {
     fileId = "4904816",
@@ -27992,6 +29647,11 @@ AishaddonModelPaths = {
     value = "fx_dumpsterdive_areatrigger.m2",
    },
    {
+    fileId = "7317262",
+    text = "fx_duskcrystal_aura.m2",
+    value = "fx_duskcrystal_aura.m2",
+   },
+   {
     fileId = "5364266",
     text = "fx_dwarvenmedicine_impact.m2",
     value = "fx_dwarvenmedicine_impact.m2",
@@ -28012,6 +29672,11 @@ AishaddonModelPaths = {
     value = "fx_eatcookedmeat_aura.m2",
    },
    {
+    fileId = "7013821",
+    text = "fx_eatfruit_aura.m2",
+    value = "fx_eatfruit_aura.m2",
+   },
+   {
     fileId = "4495236",
     text = "fx_eating_cast.m2",
     value = "fx_eating_cast.m2",
@@ -28020,6 +29685,16 @@ AishaddonModelPaths = {
     fileId = "4495232",
     text = "fx_eatingdragonfruit_cast.m2",
     value = "fx_eatingdragonfruit_cast.m2",
+   },
+   {
+    fileId = "7466355",
+    text = "fx_eclipsingstep_aura.m2",
+    value = "fx_eclipsingstep_aura.m2",
+   },
+   {
+    fileId = "7735318",
+    text = "fx_eggspawnspell_aura.m2",
+    value = "fx_eggspawnspell_aura.m2",
    },
    {
     fileId = "4397697",
@@ -28072,6 +29747,11 @@ AishaddonModelPaths = {
     value = "fx_empowertotem_channel.m2",
    },
    {
+    fileId = "7291378",
+    text = "fx_empowerwarbird_aura.m2",
+    value = "fx_empowerwarbird_aura.m2",
+   },
+   {
     fileId = "4732281",
     text = "fx_endexistence_aura.m2",
     value = "fx_endexistence_aura.m2",
@@ -28122,6 +29802,16 @@ AishaddonModelPaths = {
     value = "fx_eonshatter_precast.m2",
    },
    {
+    fileId = "6194792",
+    text = "fx_eradicatingsalvo_aura.m2",
+    value = "fx_eradicatingsalvo_aura.m2",
+   },
+   {
+    fileId = "6056052",
+    text = "fx_erraticritual_areatrigger.m2",
+    value = "fx_erraticritual_areatrigger.m2",
+   },
+   {
     fileId = "5634723",
     text = "fx_eruptingwebs_travel.m2",
     value = "fx_eruptingwebs_travel.m2",
@@ -28137,9 +29827,19 @@ AishaddonModelPaths = {
     value = "fx_essenceoftime.m2",
    },
    {
+    fileId = "6383299",
+    text = "fx_essencetrap_areatrigger.m2",
+    value = "fx_essencetrap_areatrigger.m2",
+   },
+   {
     fileId = "5205169",
     text = "fx_essencevessel_darkheart_aura.m2",
     value = "fx_essencevessel_darkheart_aura.m2",
+   },
+   {
+    fileId = "7892997",
+    text = "fx_evolve_precast.m2",
+    value = "fx_evolve_precast.m2",
    },
    {
     fileId = "4381145",
@@ -28147,9 +29847,24 @@ AishaddonModelPaths = {
     value = "fx_expeditionexplosives_precast.m2",
    },
    {
+    fileId = "7245777",
+    text = "fx_expelintruders_precast.m2",
+    value = "fx_expelintruders_precast.m2",
+   },
+   {
+    fileId = "6020254",
+    text = "fx_experiencinghistoryasatroll_cast.m2",
+    value = "fx_experiencinghistoryasatroll_cast.m2",
+   },
+   {
     fileId = "4620930",
     text = "fx_experimentvisual_aura.m2",
     value = "fx_experimentvisual_aura.m2",
+   },
+   {
+    fileId = "6983738",
+    text = "fx_explosivecombustion_precast.m2",
+    value = "fx_explosivecombustion_precast.m2",
    },
    {
     fileId = "5362107",
@@ -28167,14 +29882,34 @@ AishaddonModelPaths = {
     value = "fx_extremelypumped_precast.m2",
    },
    {
+    fileId = "8060298",
+    text = "fx_eyebeam_precast.m2",
+    value = "fx_eyebeam_precast.m2",
+   },
+   {
     fileId = "5634725",
     text = "fx_eyeoftheswarm_areatrigger.m2",
     value = "fx_eyeoftheswarm_areatrigger.m2",
    },
    {
+    fileId = "6404377",
+    text = "fx_eyeoftheswarm_areatrigger02.m2",
+    value = "fx_eyeoftheswarm_areatrigger02.m2",
+   },
+   {
     fileId = "4618714",
     text = "fx_fakeittilyoumakeit_aura.m2",
     value = "fx_fakeittilyoumakeit_aura.m2",
+   },
+   {
+    fileId = "8199051",
+    text = "fx_fangsofthecrucible_aura.m2",
+    value = "fx_fangsofthecrucible_aura.m2",
+   },
+   {
+    fileId = "7291383",
+    text = "fx_fathomcrash_precast.m2",
+    value = "fx_fathomcrash_precast.m2",
    },
    {
     fileId = "6372113",
@@ -28190,6 +29925,11 @@ AishaddonModelPaths = {
     fileId = "4662353",
     text = "fx_fearsomesnarl_cast.m2",
     value = "fx_fearsomesnarl_cast.m2",
+   },
+   {
+    fileId = "7257806",
+    text = "fx_felinfusion_aura.m2",
+    value = "fx_felinfusion_aura.m2",
    },
    {
     fileId = "4510772",
@@ -28225,6 +29965,11 @@ AishaddonModelPaths = {
     fileId = "4529970",
     text = "fx_fireturret.m2",
     value = "fx_fireturret.m2",
+   },
+   {
+    fileId = "6920499",
+    text = "fx_firevfxtest_aura.m2",
+    value = "fx_firevfxtest_aura.m2",
    },
    {
     fileId = "4575547",
@@ -28272,6 +30017,11 @@ AishaddonModelPaths = {
     value = "fx_flayingtorment_aura.m2",
    },
    {
+    fileId = "7355912",
+    text = "fx_flicker_precast.m2",
+    value = "fx_flicker_precast.m2",
+   },
+   {
     fileId = "5338392",
     text = "fx_floodofthefirelands_travel.m2",
     value = "fx_floodofthefirelands_travel.m2",
@@ -28287,9 +30037,24 @@ AishaddonModelPaths = {
     value = "fx_focusedwinds.m2",
    },
    {
+    fileId = "7464966",
+    text = "fx_focusing_aura.m2",
+    value = "fx_focusing_aura.m2",
+   },
+   {
+    fileId = "7119310",
+    text = "fx_forlornlyre_aura.m2",
+    value = "fx_forlornlyre_aura.m2",
+   },
+   {
     fileId = "4867016",
     text = "fx_fowlplay_impact.m2",
     value = "fx_fowlplay_impact.m2",
+   },
+   {
+    fileId = "7539095",
+    text = "fx_franticblooming_channel.m2",
+    value = "fx_franticblooming_channel.m2",
    },
    {
     fileId = "5777861",
@@ -28307,6 +30072,26 @@ AishaddonModelPaths = {
     value = "fx_funeralboatquestvisual_aura.m2",
    },
    {
+    fileId = "7644497",
+    text = "fx_fungalburst_precast.m2",
+    value = "fx_fungalburst_precast.m2",
+   },
+   {
+    fileId = "7241286",
+    text = "fx_fxhelpersdawnwell01poolauraez_aura.m2",
+    value = "fx_fxhelpersdawnwell01poolauraez_aura.m2",
+   },
+   {
+    fileId = "7467210",
+    text = "fx_fxhelpersvoidspire01poolauraez_aura.m2",
+    value = "fx_fxhelpersvoidspire01poolauraez_aura.m2",
+   },
+   {
+    fileId = "7467213",
+    text = "fx_fxhelpersvoidspire01topperauraez_aura.m2",
+    value = "fx_fxhelpersvoidspire01topperauraez_aura.m2",
+   },
+   {
     fileId = "4703530",
     text = "fx_fxtestbeam_aura.m2",
     value = "fx_fxtestbeam_aura.m2",
@@ -28317,9 +30102,34 @@ AishaddonModelPaths = {
     value = "fx_fxtestbeam_aura01.m2",
    },
    {
+    fileId = "6222480",
+    text = "fx_fxtestscreeneffectbrennan_aura.m2",
+    value = "fx_fxtestscreeneffectbrennan_aura.m2",
+   },
+   {
+    fileId = "6984672",
+    text = "fx_fxtestscreeneffectsk_aura.m2",
+    value = "fx_fxtestscreeneffectsk_aura.m2",
+   },
+   {
+    fileId = "7850886",
+    text = "fx_fxtestwrathoftheshackled_travel.m2",
+    value = "fx_fxtestwrathoftheshackled_travel.m2",
+   },
+   {
     fileId = "4735789",
     text = "fx_fyrakkisapproaching_aura.m2",
     value = "fx_fyrakkisapproaching_aura.m2",
+   },
+   {
+    fileId = "7670485",
+    text = "fx_galacticpressure_cast.m2",
+    value = "fx_galacticpressure_cast.m2",
+   },
+   {
+    fileId = "7750287",
+    text = "fx_galeforce_areatrigger.m2",
+    value = "fx_galeforce_areatrigger.m2",
    },
    {
     fileId = "4498053",
@@ -28385,6 +30195,21 @@ AishaddonModelPaths = {
     fileId = "4416947",
     text = "fx_gladiatorsmaledict_cast.m2",
     value = "fx_gladiatorsmaledict_cast.m2",
+   },
+   {
+    fileId = "7317261",
+    text = "fx_glimmering_aura.m2",
+    value = "fx_glimmering_aura.m2",
+   },
+   {
+    fileId = "7452409",
+    text = "fx_gloom_areatrigger.m2",
+    value = "fx_gloom_areatrigger.m2",
+   },
+   {
+    fileId = "6385707",
+    text = "fx_gloombomb_aura.m2",
+    value = "fx_gloombomb_aura.m2",
    },
    {
     fileId = "4737023",
@@ -28457,6 +30282,21 @@ AishaddonModelPaths = {
     value = "fx_graceofwind_aura.m2",
    },
    {
+    fileId = "6717029",
+    text = "fx_grapplepoint_aura.m2",
+    value = "fx_grapplepoint_aura.m2",
+   },
+   {
+    fileId = "6866897",
+    text = "fx_grapplepoint_aura01.m2",
+    value = "fx_grapplepoint_aura01.m2",
+   },
+   {
+    fileId = "7786724",
+    text = "fx_graspingfangs_channel.m2",
+    value = "fx_graspingfangs_channel.m2",
+   },
+   {
     fileId = "5501481",
     text = "fx_greaterheal_cast.m2",
     value = "fx_greaterheal_cast.m2",
@@ -28470,6 +30310,21 @@ AishaddonModelPaths = {
     fileId = "6325811",
     text = "fx_greenspray_travele.m2",
     value = "fx_greenspray_travele.m2",
+   },
+   {
+    fileId = "7390352",
+    text = "fx_groundcrack_areatrigger.m2",
+    value = "fx_groundcrack_areatrigger.m2",
+   },
+   {
+    fileId = "7390353",
+    text = "fx_groundcrack_areatrigger01.m2",
+    value = "fx_groundcrack_areatrigger01.m2",
+   },
+   {
+    fileId = "7390354",
+    text = "fx_groundcrack_areatrigger02.m2",
+    value = "fx_groundcrack_areatrigger02.m2",
    },
    {
     fileId = "5093936",
@@ -28557,6 +30412,41 @@ AishaddonModelPaths = {
     value = "fx_heartofamirdrassil_aura04.m2",
    },
    {
+    fileId = "7412054",
+    text = "fx_heavensglaives_areatrigger.m2",
+    value = "fx_heavensglaives_areatrigger.m2",
+   },
+   {
+    fileId = "7750288",
+    text = "fx_helicaltoxins_aura.m2",
+    value = "fx_helicaltoxins_aura.m2",
+   },
+   {
+    fileId = "7750289",
+    text = "fx_helicaltoxins_aura01.m2",
+    value = "fx_helicaltoxins_aura01.m2",
+   },
+   {
+    fileId = "7750290",
+    text = "fx_helicaltoxins_aura02.m2",
+    value = "fx_helicaltoxins_aura02.m2",
+   },
+   {
+    fileId = "7765925",
+    text = "fx_helicaltoxins_aura03.m2",
+    value = "fx_helicaltoxins_aura03.m2",
+   },
+   {
+    fileId = "7844901",
+    text = "fx_helicaltoxins_aura04.m2",
+    value = "fx_helicaltoxins_aura04.m2",
+   },
+   {
+    fileId = "7959979",
+    text = "fx_helicaltoxins_aura05.m2",
+    value = "fx_helicaltoxins_aura05.m2",
+   },
+   {
     fileId = "5044441",
     text = "fx_hellsteelcarnage_aura.m2",
     value = "fx_hellsteelcarnage_aura.m2",
@@ -28597,6 +30487,16 @@ AishaddonModelPaths = {
     value = "fx_helpfulwisps_aura.m2",
    },
    {
+    fileId = "8028434",
+    text = "fx_hexlordsdoom_aura.m2",
+    value = "fx_hexlordsdoom_aura.m2",
+   },
+   {
+    fileId = "7644496",
+    text = "fx_highlight_aura.m2",
+    value = "fx_highlight_aura.m2",
+   },
+   {
     fileId = "4543962",
     text = "fx_hightide.m2",
     value = "fx_hightide.m2",
@@ -28620,11 +30520,6 @@ AishaddonModelPaths = {
     fileId = "4298558",
     text = "fx_holdingbook_aura.m2",
     value = "fx_holdingbook_aura.m2",
-   },
-   {
-    fileId = "4508235",
-    text = "fx_holdingfirerune_aura.m2",
-    value = "fx_holdingfirerune_aura.m2",
    },
    {
     fileId = "5203799",
@@ -28675,6 +30570,11 @@ AishaddonModelPaths = {
     fileId = "5834073",
     text = "fx_holobeam_aura.m2",
     value = "fx_holobeam_aura.m2",
+   },
+   {
+    fileId = "7286675",
+    text = "fx_hologramon_aura.m2",
+    value = "fx_hologramon_aura.m2",
    },
    {
     fileId = "5546653",
@@ -28732,6 +30632,26 @@ AishaddonModelPaths = {
     value = "fx_houseofcards_impact.m2",
    },
    {
+    fileId = "7637275",
+    text = "fx_housingareatriggervisualsmediumplot_areatrigger.m2",
+    value = "fx_housingareatriggervisualsmediumplot_areatrigger.m2",
+   },
+   {
+    fileId = "7543859",
+    text = "fx_hoverbob_aura.m2",
+    value = "fx_hoverbob_aura.m2",
+   },
+   {
+    fileId = "7938162",
+    text = "fx_howlingmaelstrom_areatrigger.m2",
+    value = "fx_howlingmaelstrom_areatrigger.m2",
+   },
+   {
+    fileId = "8067723",
+    text = "fx_howlingmaelstrom_areatrigger01.m2",
+    value = "fx_howlingmaelstrom_areatrigger01.m2",
+   },
+   {
     fileId = "4391203",
     text = "fx_hraxiansunbreakablewill_aura.m2",
     value = "fx_hraxiansunbreakablewill_aura.m2",
@@ -28762,9 +30682,34 @@ AishaddonModelPaths = {
     value = "fx_iceholevisualdnd_aura.m2",
    },
    {
+    fileId = "6316084",
+    text = "fx_iceray_aura.m2",
+    value = "fx_iceray_aura.m2",
+   },
+   {
     fileId = "4419110",
     text = "fx_idolofpuredecay.m2",
     value = "fx_idolofpuredecay.m2",
+   },
+   {
+    fileId = "7515144",
+    text = "fx_illusoryadornmentbloominglight_aura.m2",
+    value = "fx_illusoryadornmentbloominglight_aura.m2",
+   },
+   {
+    fileId = "7515145",
+    text = "fx_illusoryadornmentbloominglight_aura01.m2",
+    value = "fx_illusoryadornmentbloominglight_aura01.m2",
+   },
+   {
+    fileId = "7515150",
+    text = "fx_illusoryadornmentnaturesembrace_aura.m2",
+    value = "fx_illusoryadornmentnaturesembrace_aura.m2",
+   },
+   {
+    fileId = "7515151",
+    text = "fx_illusoryadornmentnaturesembrace_aura01.m2",
+    value = "fx_illusoryadornmentnaturesembrace_aura01.m2",
    },
    {
     fileId = "4417263",
@@ -28782,6 +30727,11 @@ AishaddonModelPaths = {
     value = "fx_incarnatedeath_precast01.m2",
    },
    {
+    fileId = "6215912",
+    text = "fx_increasedrumming_cast.m2",
+    value = "fx_increasedrumming_cast.m2",
+   },
+   {
     fileId = "4703525",
     text = "fx_inevitability_channel.m2",
     value = "fx_inevitability_channel.m2",
@@ -28792,9 +30742,19 @@ AishaddonModelPaths = {
     value = "fx_inexorable_aura.m2",
    },
    {
+    fileId = "6372039",
+    text = "fx_infectioussolo_areatrigger.m2",
+    value = "fx_infectioussolo_areatrigger.m2",
+   },
+   {
     fileId = "4737016",
     text = "fx_infest_aura.m2",
     value = "fx_infest_aura.m2",
+   },
+   {
+    fileId = "6920500",
+    text = "fx_infested_aura.m2",
+    value = "fx_infested_aura.m2",
    },
    {
     fileId = "5707637",
@@ -28807,9 +30767,9 @@ AishaddonModelPaths = {
     value = "fx_infiniteannihilation_cast.m2",
    },
    {
-    fileId = "4508234",
-    text = "fx_infusedfallout_aura.m2",
-    value = "fx_infusedfallout_aura.m2",
+    fileId = "7291382",
+    text = "fx_infusedglobule_areatrigger.m2",
+    value = "fx_infusedglobule_areatrigger.m2",
    },
    {
     fileId = "5100941",
@@ -28840,6 +30800,11 @@ AishaddonModelPaths = {
     fileId = "4485228",
     text = "fx_invigoratingfreeholdbrew.m2",
     value = "fx_invigoratingfreeholdbrew.m2",
+   },
+   {
+    fileId = "7881251",
+    text = "fx_invisible_aura.m2",
+    value = "fx_invisible_aura.m2",
    },
    {
     fileId = "4547486",
@@ -28922,6 +30887,11 @@ AishaddonModelPaths = {
     value = "fx_korgranlantern_aura.m2",
    },
    {
+    fileId = "7865048",
+    text = "fx_latentcultist_areatrigger.m2",
+    value = "fx_latentcultist_areatrigger.m2",
+   },
+   {
     fileId = "5098905",
     text = "fx_lavaorbvisual_aura.m2",
     value = "fx_lavaorbvisual_aura.m2",
@@ -28947,9 +30917,44 @@ AishaddonModelPaths = {
     value = "fx_lifeinfusion.m2",
    },
    {
+    fileId = "5927679",
+    text = "fx_lightblessedbolt_missile.m2",
+    value = "fx_lightblessedbolt_missile.m2",
+   },
+   {
+    fileId = "6212392",
+    text = "fx_lightbloombeam_precast.m2",
+    value = "fx_lightbloombeam_precast.m2",
+   },
+   {
+    fileId = "7539096",
+    text = "fx_lightbloomenergy_aura.m2",
+    value = "fx_lightbloomenergy_aura.m2",
+   },
+   {
+    fileId = "6700964",
+    text = "fx_lightbloominfestation_aura.m2",
+    value = "fx_lightbloominfestation_aura.m2",
+   },
+   {
+    fileId = "7539094",
+    text = "fx_lightblossombeam_aura.m2",
+    value = "fx_lightblossombeam_aura.m2",
+   },
+   {
+    fileId = "7524291",
+    text = "fx_lightbolt_cast.m2",
+    value = "fx_lightbolt_cast.m2",
+   },
+   {
     fileId = "4485608",
     text = "fx_lightetchedkey_aura.m2",
     value = "fx_lightetchedkey_aura.m2",
+   },
+   {
+    fileId = "7351367",
+    text = "fx_lightfeather_areatrigger.m2",
+    value = "fx_lightfeather_areatrigger.m2",
    },
    {
     fileId = "5546651",
@@ -28980,6 +30985,11 @@ AishaddonModelPaths = {
     fileId = "4493296",
     text = "fx_lightofcreation_channel.m2",
     value = "fx_lightofcreation_channel.m2",
+   },
+   {
+    fileId = "7377895",
+    text = "fx_lightquill_channel.m2",
+    value = "fx_lightquill_channel.m2",
    },
    {
     fileId = "6310141",
@@ -29027,6 +31037,11 @@ AishaddonModelPaths = {
     value = "fx_lydiarasguidance_precast.m2",
    },
    {
+    fileId = "7291255",
+    text = "fx_lysikasstealth_cast.m2",
+    value = "fx_lysikasstealth_cast.m2",
+   },
+   {
     fileId = "6381218",
     text = "fx_magicalshenanigans_channel.m2",
     value = "fx_magicalshenanigans_channel.m2",
@@ -29052,6 +31067,16 @@ AishaddonModelPaths = {
     value = "fx_magmafist_channel.m2",
    },
    {
+    fileId = "6192478",
+    text = "fx_magmasurge_precast.m2",
+    value = "fx_magmasurge_precast.m2",
+   },
+   {
+    fileId = "8161082",
+    text = "fx_malignantburst_areatrigger.m2",
+    value = "fx_malignantburst_areatrigger.m2",
+   },
+   {
     fileId = "4899398",
     text = "fx_mandibleflurry_channel.m2",
     value = "fx_mandibleflurry_channel.m2",
@@ -29060,6 +31085,16 @@ AishaddonModelPaths = {
     fileId = "4494523",
     text = "fx_markelementalwithfrost_aura.m2",
     value = "fx_markelementalwithfrost_aura.m2",
+   },
+   {
+    fileId = "7658588",
+    text = "fx_maskuerade_precast.m2",
+    value = "fx_maskuerade_precast.m2",
+   },
+   {
+    fileId = "7667245",
+    text = "fx_maskvfx_aura.m2",
+    value = "fx_maskvfx_aura.m2",
    },
    {
     fileId = "4497523",
@@ -29102,14 +31137,29 @@ AishaddonModelPaths = {
     value = "fx_merithrasoffering_aura.m2",
    },
    {
+    fileId = "7658586",
+    text = "fx_mightythud_precast.m2",
+    value = "fx_mightythud_precast.m2",
+   },
+   {
     fileId = "4752999",
     text = "fx_millenniumaid_cast.m2",
     value = "fx_millenniumaid_cast.m2",
    },
    {
+    fileId = "7654432",
+    text = "fx_minderuption_missile.m2",
+    value = "fx_minderuption_missile.m2",
+   },
+   {
     fileId = "4508008",
     text = "fx_miniaturesingingstone_aura.m2",
     value = "fx_miniaturesingingstone_aura.m2",
+   },
+   {
+    fileId = "8025912",
+    text = "fx_minibossdoorlockedfx_aura.m2",
+    value = "fx_minibossdoorlockedfx_aura.m2",
    },
    {
     fileId = "4423375",
@@ -29182,6 +31232,46 @@ AishaddonModelPaths = {
     value = "fx_movingbeam_aura.m2",
    },
    {
+    fileId = "6920502",
+    text = "fx_mycomancershearthspore_areatrigger.m2",
+    value = "fx_mycomancershearthspore_areatrigger.m2",
+   },
+   {
+    fileId = "7701610",
+    text = "fx_mycomancershearthspore_aura.m2",
+    value = "fx_mycomancershearthspore_aura.m2",
+   },
+   {
+    fileId = "7701609",
+    text = "fx_mycomancershearthspore_aura01.m2",
+    value = "fx_mycomancershearthspore_aura01.m2",
+   },
+   {
+    fileId = "6920503",
+    text = "fx_mycomancershearthspore_precast.m2",
+    value = "fx_mycomancershearthspore_precast.m2",
+   },
+   {
+    fileId = "7111368",
+    text = "fx_namechange_aura.m2",
+    value = "fx_namechange_aura.m2",
+   },
+   {
+    fileId = "7141697",
+    text = "fx_naturesbloodthirst_aura.m2",
+    value = "fx_naturesbloodthirst_aura.m2",
+   },
+   {
+    fileId = "6983735",
+    text = "fx_necroticstormcosmetic01_aura.m2",
+    value = "fx_necroticstormcosmetic01_aura.m2",
+   },
+   {
+    fileId = "8060406",
+    text = "fx_netherdash_areatrigger.m2",
+    value = "fx_netherdash_areatrigger.m2",
+   },
+   {
     fileId = "5198710",
     text = "fx_notused_aura.m2",
     value = "fx_notused_aura.m2",
@@ -29205,6 +31295,16 @@ AishaddonModelPaths = {
     fileId = "4699059",
     text = "fx_nullblast_precast.m2",
     value = "fx_nullblast_precast.m2",
+   },
+   {
+    fileId = "7355910",
+    text = "fx_nullwarkblast_cast.m2",
+    value = "fx_nullwarkblast_cast.m2",
+   },
+   {
+    fileId = "6194795",
+    text = "fx_obliterationarcanocannon_aura.m2",
+    value = "fx_obliterationarcanocannon_aura.m2",
    },
    {
     fileId = "4754509",
@@ -29232,6 +31332,16 @@ AishaddonModelPaths = {
     value = "fx_offthepagedespawnvisual_cast.m2",
    },
    {
+    fileId = "6316087",
+    text = "fx_onjumppassengeraura_impact.m2",
+    value = "fx_onjumppassengeraura_impact.m2",
+   },
+   {
+    fileId = "7111369",
+    text = "fx_onthehunt_cast.m2",
+    value = "fx_onthehunt_cast.m2",
+   },
+   {
     fileId = "4895032",
     text = "fx_orderup_aura.m2",
     value = "fx_orderup_aura.m2",
@@ -29250,6 +31360,11 @@ AishaddonModelPaths = {
     fileId = "5244215",
     text = "fx_orderup_aura03.m2",
     value = "fx_orderup_aura03.m2",
+   },
+   {
+    fileId = "7488169",
+    text = "fx_overcomingvoid_cast.m2",
+    value = "fx_overcomingvoid_cast.m2",
    },
    {
     fileId = "5320979",
@@ -29287,9 +31402,19 @@ AishaddonModelPaths = {
     value = "fx_owlpost_aura02.m2",
    },
    {
+    fileId = "7506448",
+    text = "fx_parasiteexpulsion_missile.m2",
+    value = "fx_parasiteexpulsion_missile.m2",
+   },
+   {
     fileId = "4663484",
     text = "fx_pathmarker_aura.m2",
     value = "fx_pathmarker_aura.m2",
+   },
+   {
+    fileId = "6891177",
+    text = "fx_patroltaskbeacon_aura.m2",
+    value = "fx_patroltaskbeacon_aura.m2",
    },
    {
     fileId = "5928236",
@@ -29320,6 +31445,11 @@ AishaddonModelPaths = {
     fileId = "5925304",
     text = "fx_phantomstrikes_impact.m2",
     value = "fx_phantomstrikes_impact.m2",
+   },
+   {
+    fileId = "6020262",
+    text = "fx_phasemodulation_areatrigger.m2",
+    value = "fx_phasemodulation_areatrigger.m2",
    },
    {
     fileId = "5684383",
@@ -29357,6 +31487,26 @@ AishaddonModelPaths = {
     value = "fx_plantspear_precast.m2",
    },
    {
+    fileId = "8199056",
+    text = "fx_platformbdestroyed_impact.m2",
+    value = "fx_platformbdestroyed_impact.m2",
+   },
+   {
+    fileId = "8199057",
+    text = "fx_platformcdestroyed_impact.m2",
+    value = "fx_platformcdestroyed_impact.m2",
+   },
+   {
+    fileId = "8199058",
+    text = "fx_platformddestroyed_impact.m2",
+    value = "fx_platformddestroyed_impact.m2",
+   },
+   {
+    fileId = "8199059",
+    text = "fx_platformedestroyed_impact.m2",
+    value = "fx_platformedestroyed_impact.m2",
+   },
+   {
     fileId = "5247222",
     text = "fx_podlingspear_aura.m2",
     value = "fx_podlingspear_aura.m2",
@@ -29375,6 +31525,11 @@ AishaddonModelPaths = {
     fileId = "5198701",
     text = "fx_poisonousmushroom.m2",
     value = "fx_poisonousmushroom.m2",
+   },
+   {
+    fileId = "7743604",
+    text = "fx_poisonportal_aura.m2",
+    value = "fx_poisonportal_aura.m2",
    },
    {
     fileId = "5330004",
@@ -29417,6 +31572,11 @@ AishaddonModelPaths = {
     value = "fx_portalvisual_areatrigger.m2",
    },
    {
+    fileId = "7734350",
+    text = "fx_portraitframingmode_aura.m2",
+    value = "fx_portraitframingmode_aura.m2",
+   },
+   {
     fileId = "6402407",
     text = "fx_posipolarization_aura.m2",
     value = "fx_posipolarization_aura.m2",
@@ -29425,6 +31585,16 @@ AishaddonModelPaths = {
     fileId = "4497549",
     text = "fx_positivecharge_impact.m2",
     value = "fx_positivecharge_impact.m2",
+   },
+   {
+    fileId = "6728237",
+    text = "fx_predatorynature_precast.m2",
+    value = "fx_predatorynature_precast.m2",
+   },
+   {
+    fileId = "7658587",
+    text = "fx_preyhunterstrophystand_cast.m2",
+    value = "fx_preyhunterstrophystand_cast.m2",
    },
    {
     fileId = "4640537",
@@ -29457,9 +31627,24 @@ AishaddonModelPaths = {
     value = "fx_productdeployment_travel.m2",
    },
    {
+    fileId = "7701606",
+    text = "fx_protectivetoadstools_aura.m2",
+    value = "fx_protectivetoadstools_aura.m2",
+   },
+   {
+    fileId = "6194793",
+    text = "fx_protocolpurge_travel.m2",
+    value = "fx_protocolpurge_travel.m2",
+   },
+   {
     fileId = "4899401",
     text = "fx_prototypeminusattack_cast.m2",
     value = "fx_prototypeminusattack_cast.m2",
+   },
+   {
+    fileId = "7935720",
+    text = "fx_protovenom_areatrigger.m2",
+    value = "fx_protovenom_areatrigger.m2",
    },
    {
     fileId = "5679915",
@@ -29492,6 +31677,21 @@ AishaddonModelPaths = {
     value = "fx_qalashigoulash_precast.m2",
    },
    {
+    fileId = "7950025",
+    text = "fx_questgenericcorefxutilitystandherequestareatrigger.m2",
+    value = "fx_questgenericcorefxutilitystandherequestareatrigger.m2",
+   },
+   {
+    fileId = "8199696",
+    text = "fx_questgenericcorefxutilitystandherequestareatrigger01.m2",
+    value = "fx_questgenericcorefxutilitystandherequestareatrigger01.m2",
+   },
+   {
+    fileId = "7291379",
+    text = "fx_radiantflame_aura.m2",
+    value = "fx_radiantflame_aura.m2",
+   },
+   {
     fileId = "5650084",
     text = "fx_radiantlight_areatrigger.m2",
     value = "fx_radiantlight_areatrigger.m2",
@@ -29510,6 +31710,16 @@ AishaddonModelPaths = {
     fileId = "5362106",
     text = "fx_rageoffyralath_cast.m2",
     value = "fx_rageoffyralath_cast.m2",
+   },
+   {
+    fileId = "7938149",
+    text = "fx_rageoftheshackled_impact.m2",
+    value = "fx_rageoftheshackled_impact.m2",
+   },
+   {
+    fileId = "7938148",
+    text = "fx_rageoftheshackled_travel.m2",
+    value = "fx_rageoftheshackled_travel.m2",
    },
    {
     fileId = "5346308",
@@ -29537,9 +31747,19 @@ AishaddonModelPaths = {
     value = "fx_rallyingshout_cast.m2",
    },
    {
+    fileId = "6129762",
+    text = "fx_rangergeneralscall_cast.m2",
+    value = "fx_rangergeneralscall_cast.m2",
+   },
+   {
     fileId = "4618191",
     text = "fx_rapidincubation_aura.m2",
     value = "fx_rapidincubation_aura.m2",
+   },
+   {
+    fileId = "6403992",
+    text = "fx_ravenousswarm_areatrigger.m2",
+    value = "fx_ravenousswarm_areatrigger.m2",
    },
    {
     fileId = "4955447",
@@ -29575,6 +31795,11 @@ AishaddonModelPaths = {
     fileId = "5758102",
     text = "fx_regicide_aura01.m2",
     value = "fx_regicide_aura01.m2",
+   },
+   {
+    fileId = "7235096",
+    text = "fx_remixdome_aura.m2",
+    value = "fx_remixdome_aura.m2",
    },
    {
     fileId = "4895071",
@@ -29632,9 +31857,49 @@ AishaddonModelPaths = {
     value = "fx_reverberatingonslaught_aura.m2",
    },
    {
+    fileId = "7798074",
+    text = "fx_ribbonpolechannel_channel.m2",
+    value = "fx_ribbonpolechannel_channel.m2",
+   },
+   {
+    fileId = "7412178",
+    text = "fx_riftcataclysm_missile.m2",
+    value = "fx_riftcataclysm_missile.m2",
+   },
+   {
+    fileId = "7362304",
+    text = "fx_riftsickness_aura.m2",
+    value = "fx_riftsickness_aura.m2",
+   },
+   {
+    fileId = "7362299",
+    text = "fx_riftsickness_missile.m2",
+    value = "fx_riftsickness_missile.m2",
+   },
+   {
+    fileId = "7419620",
+    text = "fx_rifttear_aura.m2",
+    value = "fx_rifttear_aura.m2",
+   },
+   {
     fileId = "4612482",
     text = "fx_risingdreamsurge_aura.m2",
     value = "fx_risingdreamsurge_aura.m2",
+   },
+   {
+    fileId = "7828410",
+    text = "fx_ritualbarriervisual_areatrigger.m2",
+    value = "fx_ritualbarriervisual_areatrigger.m2",
+   },
+   {
+    fileId = "7961218",
+    text = "fx_ritualempowerment_cast.m2",
+    value = "fx_ritualempowerment_cast.m2",
+   },
+   {
+    fileId = "7892998",
+    text = "fx_ritualofthefang_aura.m2",
+    value = "fx_ritualofthefang_aura.m2",
    },
    {
     fileId = "4392562",
@@ -29645,6 +31910,11 @@ AishaddonModelPaths = {
     fileId = "4392563",
     text = "fx_rockclimbinggear_aura01.m2",
     value = "fx_rockclimbinggear_aura01.m2",
+   },
+   {
+    fileId = "7302406",
+    text = "fx_rockemsockemsentinelgauntlets_aura.m2",
+    value = "fx_rockemsockemsentinelgauntlets_aura.m2",
    },
    {
     fileId = "4533223",
@@ -29660,6 +31930,11 @@ AishaddonModelPaths = {
     fileId = "5550652",
     text = "fx_rollingacid_aura.m2",
     value = "fx_rollingacid_aura.m2",
+   },
+   {
+    fileId = "6035608",
+    text = "fx_rootrot_aura.m2",
+    value = "fx_rootrot_aura.m2",
    },
    {
     fileId = "4392566",
@@ -29742,6 +32017,11 @@ AishaddonModelPaths = {
     value = "fx_scorchingplume.m2",
    },
    {
+    fileId = "7213464",
+    text = "fx_scorchingvalor_precast.m2",
+    value = "fx_scorchingvalor_precast.m2",
+   },
+   {
     fileId = "5376504",
     text = "fx_scorchtailcrash_precast.m2",
     value = "fx_scorchtailcrash_precast.m2",
@@ -29760,6 +32040,16 @@ AishaddonModelPaths = {
     fileId = "4737026",
     text = "fx_scouringeternity01.m2",
     value = "fx_scouringeternity01.m2",
+   },
+   {
+    fileId = "6372110",
+    text = "fx_scouringsand_precast.m2",
+    value = "fx_scouringsand_precast.m2",
+   },
+   {
+    fileId = "8060322",
+    text = "fx_scouringsand_precast01.m2",
+    value = "fx_scouringsand_precast01.m2",
    },
    {
     fileId = "6321358",
@@ -29785,6 +32075,11 @@ AishaddonModelPaths = {
     fileId = "4529154",
     text = "fx_searingbreath_precast.m2",
     value = "fx_searingbreath_precast.m2",
+   },
+   {
+    fileId = "7231424",
+    text = "fx_searinglight_areatrigger.m2",
+    value = "fx_searinglight_areatrigger.m2",
    },
    {
     fileId = "4390028",
@@ -29817,14 +32112,59 @@ AishaddonModelPaths = {
     value = "fx_seedsofamirdrassil_aura.m2",
    },
    {
+    fileId = "7638980",
+    text = "fx_septicgore_impact.m2",
+    value = "fx_septicgore_impact.m2",
+   },
+   {
+    fileId = "8067721",
+    text = "fx_sermonofulatek_cast.m2",
+    value = "fx_sermonofulatek_cast.m2",
+   },
+   {
+    fileId = "8039975",
+    text = "fx_sermonofulatek_cast01.m2",
+    value = "fx_sermonofulatek_cast01.m2",
+   },
+   {
+    fileId = "8203318",
+    text = "fx_sermonofulatek_cast02.m2",
+    value = "fx_sermonofulatek_cast02.m2",
+   },
+   {
+    fileId = "7462424",
+    text = "fx_serpentburrowbunny_aura.m2",
+    value = "fx_serpentburrowbunny_aura.m2",
+   },
+   {
+    fileId = "8200827",
+    text = "fx_sever_precast.m2",
+    value = "fx_sever_precast.m2",
+   },
+   {
     fileId = "6385701",
     text = "fx_shadowblast_aura.m2",
     value = "fx_shadowblast_aura.m2",
    },
    {
+    fileId = "8060400",
+    text = "fx_shadowbreath_precast.m2",
+    value = "fx_shadowbreath_precast.m2",
+   },
+   {
     fileId = "4505293",
     text = "fx_shadowcanister_precast.m2",
     value = "fx_shadowcanister_precast.m2",
+   },
+   {
+    fileId = "7810783",
+    text = "fx_shadowfirefountainactiveaura_aura.m2",
+    value = "fx_shadowfirefountainactiveaura_aura.m2",
+   },
+   {
+    fileId = "7819698",
+    text = "fx_shadowfirefountainactiveaura_aura01.m2",
+    value = "fx_shadowfirefountainactiveaura_aura01.m2",
    },
    {
     fileId = "4867008",
@@ -29872,9 +32212,19 @@ AishaddonModelPaths = {
     value = "fx_shadowlavablast_precast.m2",
    },
    {
+    fileId = "7495386",
+    text = "fx_shadowstrikes_cast.m2",
+    value = "fx_shadowstrikes_cast.m2",
+   },
+   {
     fileId = "4697843",
     text = "fx_shadowytoss_impact.m2",
     value = "fx_shadowytoss_impact.m2",
+   },
+   {
+    fileId = "6727426",
+    text = "fx_shapeshiftmoonkin_precast.m2",
+    value = "fx_shapeshiftmoonkin_precast.m2",
    },
    {
     fileId = "5403866",
@@ -29887,9 +32237,19 @@ AishaddonModelPaths = {
     value = "fx_shiftinganomalies_areatrigger.m2",
    },
    {
+    fileId = "7658584",
+    text = "fx_shiftingprotovenom_missile.m2",
+    value = "fx_shiftingprotovenom_missile.m2",
+   },
+   {
     fileId = "5012162",
     text = "fx_shockwave_impact.m2",
     value = "fx_shockwave_impact.m2",
+   },
+   {
+    fileId = "6982695",
+    text = "fx_shortsighteddarkness_aura.m2",
+    value = "fx_shortsighteddarkness_aura.m2",
    },
    {
     fileId = "4872840",
@@ -29900,6 +32260,11 @@ AishaddonModelPaths = {
     fileId = "4505434",
     text = "fx_shrubbery_aura.m2",
     value = "fx_shrubbery_aura.m2",
+   },
+   {
+    fileId = "7538128",
+    text = "fx_silverstrikericochet_missile.m2",
+    value = "fx_silverstrikericochet_missile.m2",
    },
    {
     fileId = "5046037",
@@ -29920,6 +32285,11 @@ AishaddonModelPaths = {
     fileId = "4254402",
     text = "fx_siteatmeat_aura.m2",
     value = "fx_siteatmeat_aura.m2",
+   },
+   {
+    fileId = "8200824",
+    text = "fx_skullsplit_precast.m2",
+    value = "fx_skullsplit_precast.m2",
    },
    {
     fileId = "6372124",
@@ -29957,9 +32327,19 @@ AishaddonModelPaths = {
     value = "fx_slimewave_areatrigger.m2",
    },
    {
+    fileId = "7926157",
+    text = "fx_slitheringclutch_missile.m2",
+    value = "fx_slitheringclutch_missile.m2",
+   },
+   {
     fileId = "6221127",
     text = "fx_slotmachine_aura.m2",
     value = "fx_slotmachine_aura.m2",
+   },
+   {
+    fileId = "6194798",
+    text = "fx_slowingfield_travel.m2",
+    value = "fx_slowingfield_travel.m2",
    },
    {
     fileId = "4240491",
@@ -29980,6 +32360,26 @@ AishaddonModelPaths = {
     fileId = "5830212",
     text = "fx_smallegg_aura02.m2",
     value = "fx_smallegg_aura02.m2",
+   },
+   {
+    fileId = "7654235",
+    text = "fx_smash_aura.m2",
+    value = "fx_smash_aura.m2",
+   },
+   {
+    fileId = "7303280",
+    text = "fx_smash_cast.m2",
+    value = "fx_smash_cast.m2",
+   },
+   {
+    fileId = "7463999",
+    text = "fx_smash_cast01.m2",
+    value = "fx_smash_cast01.m2",
+   },
+   {
+    fileId = "8060397",
+    text = "fx_smashingcharge_precast.m2",
+    value = "fx_smashingcharge_precast.m2",
    },
    {
     fileId = "4485598",
@@ -30017,9 +32417,29 @@ AishaddonModelPaths = {
     value = "fx_solarbeam.m2",
    },
    {
+    fileId = "8038489",
+    text = "fx_solarbreath_precast.m2",
+    value = "fx_solarbreath_precast.m2",
+   },
+   {
     fileId = "6372038",
     text = "fx_soniccrush_aura.m2",
     value = "fx_soniccrush_aura.m2",
+   },
+   {
+    fileId = "7880061",
+    text = "fx_soulbinding_areatrigger.m2",
+    value = "fx_soulbinding_areatrigger.m2",
+   },
+   {
+    fileId = "7939165",
+    text = "fx_soulcoilerritualvessel_cast.m2",
+    value = "fx_soulcoilerritualvessel_cast.m2",
+   },
+   {
+    fileId = "8062019",
+    text = "fx_soulcoilfxuncoiling_areatrigger.m2",
+    value = "fx_soulcoilfxuncoiling_areatrigger.m2",
    },
    {
     fileId = "4684352",
@@ -30030,6 +32450,16 @@ AishaddonModelPaths = {
     fileId = "5157543",
     text = "fx_soulstoneinhead_aura.m2",
     value = "fx_soulstoneinhead_aura.m2",
+   },
+   {
+    fileId = "5927964",
+    text = "fx_soulsweep_precast.m2",
+    value = "fx_soulsweep_precast.m2",
+   },
+   {
+    fileId = "7865046",
+    text = "fx_soultransfer_travel.m2",
+    value = "fx_soultransfer_travel.m2",
    },
    {
     fileId = "6242980",
@@ -30045,6 +32475,21 @@ AishaddonModelPaths = {
     fileId = "4776731",
     text = "fx_spawn_cast.m2",
     value = "fx_spawn_cast.m2",
+   },
+   {
+    fileId = "7725595",
+    text = "fx_spawnvfx_aura.m2",
+    value = "fx_spawnvfx_aura.m2",
+   },
+   {
+    fileId = "7111370",
+    text = "fx_spawnvisual_aura.m2",
+    value = "fx_spawnvisual_aura.m2",
+   },
+   {
+    fileId = "7637450",
+    text = "fx_spawnvisualsswarmer_aura.m2",
+    value = "fx_spawnvisualsswarmer_aura.m2",
    },
    {
     fileId = "4550330",
@@ -30147,6 +32592,11 @@ AishaddonModelPaths = {
     value = "fx_spinningreels_aura.m2",
    },
    {
+    fileId = "7291376",
+    text = "fx_spinyleap_precast.m2",
+    value = "fx_spinyleap_precast.m2",
+   },
+   {
     fileId = "5493564",
     text = "fx_spiraltriburstfireworks_cast.m2",
     value = "fx_spiraltriburstfireworks_cast.m2",
@@ -30155,6 +32605,31 @@ AishaddonModelPaths = {
     fileId = "5385467",
     text = "fx_spiritsofthekaldorei_travel.m2",
     value = "fx_spiritsofthekaldorei_travel.m2",
+   },
+   {
+    fileId = "6013964",
+    text = "fx_spiritwalk_aura.m2",
+    value = "fx_spiritwalk_aura.m2",
+   },
+   {
+    fileId = "8038142",
+    text = "fx_spiritwalk_aura01.m2",
+    value = "fx_spiritwalk_aura01.m2",
+   },
+   {
+    fileId = "8038143",
+    text = "fx_spiritwalk_aura02.m2",
+    value = "fx_spiritwalk_aura02.m2",
+   },
+   {
+    fileId = "6372123",
+    text = "fx_splittingclot_travel.m2",
+    value = "fx_splittingclot_travel.m2",
+   },
+   {
+    fileId = "7261436",
+    text = "fx_sporecloud_aura.m2",
+    value = "fx_sporecloud_aura.m2",
    },
    {
     fileId = "5153911",
@@ -30172,6 +32647,16 @@ AishaddonModelPaths = {
     value = "fx_spurgrowth_aura.m2",
    },
    {
+    fileId = "7734349",
+    text = "fx_squareframingmode_aura.m2",
+    value = "fx_squareframingmode_aura.m2",
+   },
+   {
+    fileId = "6872672",
+    text = "fx_staffofserpents_aura.m2",
+    value = "fx_staffofserpents_aura.m2",
+   },
+   {
     fileId = "6372037",
     text = "fx_stagedive_travel.m2",
     value = "fx_stagedive_travel.m2",
@@ -30180,6 +32665,16 @@ AishaddonModelPaths = {
     fileId = "4632572",
     text = "fx_stalagmight_cast.m2",
     value = "fx_stalagmight_cast.m2",
+   },
+   {
+    fileId = "7472157",
+    text = "fx_starsplinter_areatrigger.m2",
+    value = "fx_starsplinter_areatrigger.m2",
+   },
+   {
+    fileId = "7644500",
+    text = "fx_starvationeffigyfx_aura.m2",
+    value = "fx_starvationeffigyfx_aura.m2",
    },
    {
     fileId = "5333673",
@@ -30247,6 +32742,16 @@ AishaddonModelPaths = {
     value = "fx_stickystorm_travele.m2",
    },
    {
+    fileId = "7633280",
+    text = "fx_stickystrands_channel.m2",
+    value = "fx_stickystrands_channel.m2",
+   },
+   {
+    fileId = "7644491",
+    text = "fx_stonebreaker_areatrigger.m2",
+    value = "fx_stonebreaker_areatrigger.m2",
+   },
+   {
     fileId = "5156890",
     text = "fx_stoneofthehearth_cast.m2",
     value = "fx_stoneofthehearth_cast.m2",
@@ -30265,6 +32770,11 @@ AishaddonModelPaths = {
     fileId = "4550333",
     text = "fx_stormbreath_precast.m2",
     value = "fx_stormbreath_precast.m2",
+   },
+   {
+    fileId = "8060262",
+    text = "fx_stormbreath_precast01.m2",
+    value = "fx_stormbreath_precast01.m2",
    },
    {
     fileId = "4547484",
@@ -30307,6 +32817,11 @@ AishaddonModelPaths = {
     value = "fx_suffusedmaterials_aura.m2",
    },
    {
+    fileId = "6194797",
+    text = "fx_summonarcanespark_travel.m2",
+    value = "fx_summonarcanespark_travel.m2",
+   },
+   {
     fileId = "4640541",
     text = "fx_summonfrozenbehemoth_travel.m2",
     value = "fx_summonfrozenbehemoth_travel.m2",
@@ -30337,6 +32852,11 @@ AishaddonModelPaths = {
     value = "fx_supernova.m2",
    },
    {
+    fileId = "7447918",
+    text = "fx_suppressionzone_areatrigger.m2",
+    value = "fx_suppressionzone_areatrigger.m2",
+   },
+   {
     fileId = "5242005",
     text = "fx_surekiandecimation_cast.m2",
     value = "fx_surekiandecimation_cast.m2",
@@ -30347,6 +32867,16 @@ AishaddonModelPaths = {
     value = "fx_surgeforward_impact.m2",
    },
    {
+    fileId = "6321355",
+    text = "fx_surgingtempest_aura.m2",
+    value = "fx_surgingtempest_aura.m2",
+   },
+   {
+    fileId = "6321356",
+    text = "fx_surgingtempest_channel.m2",
+    value = "fx_surgingtempest_channel.m2",
+   },
+   {
     fileId = "5531012",
     text = "fx_surgingwax_aura.m2",
     value = "fx_surgingwax_aura.m2",
@@ -30355,6 +32885,26 @@ AishaddonModelPaths = {
     fileId = "5531016",
     text = "fx_surgingwax_precast.m2",
     value = "fx_surgingwax_precast.m2",
+   },
+   {
+    fileId = "6935582",
+    text = "fx_surrenderingtotheflame_aura.m2",
+    value = "fx_surrenderingtotheflame_aura.m2",
+   },
+   {
+    fileId = "6935584",
+    text = "fx_surrenderingtothehunt_aura.m2",
+    value = "fx_surrenderingtothehunt_aura.m2",
+   },
+   {
+    fileId = "6935583",
+    text = "fx_surrenderingtovictory_aura.m2",
+    value = "fx_surrenderingtovictory_aura.m2",
+   },
+   {
+    fileId = "6935585",
+    text = "fx_surrenderingtowar_aura.m2",
+    value = "fx_surrenderingtowar_aura.m2",
    },
    {
     fileId = "5364090",
@@ -30392,6 +32942,11 @@ AishaddonModelPaths = {
     value = "fx_swoghorn_aura.m2",
    },
    {
+    fileId = "7645846",
+    text = "fx_synchronizedvenom_missile.m2",
+    value = "fx_synchronizedvenom_missile.m2",
+   },
+   {
     fileId = "4420654",
     text = "fx_synthesize_aura.m2",
     value = "fx_synthesize_aura.m2",
@@ -30412,6 +32967,11 @@ AishaddonModelPaths = {
     value = "fx_tailwind_aura.m2",
    },
    {
+    fileId = "6127610",
+    text = "fx_talktolorewalkercho_aura.m2",
+    value = "fx_talktolorewalkercho_aura.m2",
+   },
+   {
     fileId = "4681250",
     text = "fx_tank_aura.m2",
     value = "fx_tank_aura.m2",
@@ -30420,6 +32980,16 @@ AishaddonModelPaths = {
     fileId = "6350777",
     text = "fx_targetingtrigger_areatrigger.m2",
     value = "fx_targetingtrigger_areatrigger.m2",
+   },
+   {
+    fileId = "7469324",
+    text = "fx_tearing_precast.m2",
+    value = "fx_tearing_precast.m2",
+   },
+   {
+    fileId = "7013989",
+    text = "fx_tearingoutwires_travele.m2",
+    value = "fx_tearingoutwires_travele.m2",
    },
    {
     fileId = "4533220",
@@ -30442,9 +33012,19 @@ AishaddonModelPaths = {
     value = "fx_teleportawakeningmachine_impact.m2",
    },
    {
+    fileId = "6127609",
+    text = "fx_teleportcutscene_aura.m2",
+    value = "fx_teleportcutscene_aura.m2",
+   },
+   {
     fileId = "5422312",
     text = "fx_teleportervisual_aura.m2",
     value = "fx_teleportervisual_aura.m2",
+   },
+   {
+    fileId = "7506447",
+    text = "fx_teleporttovoidstorm_aura.m2",
+    value = "fx_teleporttovoidstorm_aura.m2",
    },
    {
     fileId = "4703538",
@@ -30472,6 +33052,31 @@ AishaddonModelPaths = {
     value = "fx_territorialottuk_aura.m2",
    },
    {
+    fileId = "8038486",
+    text = "fx_testfiredestcone_precast.m2",
+    value = "fx_testfiredestcone_precast.m2",
+   },
+   {
+    fileId = "8038487",
+    text = "fx_testfiretargetcone_precast.m2",
+    value = "fx_testfiretargetcone_precast.m2",
+   },
+   {
+    fileId = "8129030",
+    text = "fx_testmainplatformdestruction_impact.m2",
+    value = "fx_testmainplatformdestruction_impact.m2",
+   },
+   {
+    fileId = "7348805",
+    text = "fx_thedarkarchangel_precast.m2",
+    value = "fx_thedarkarchangel_precast.m2",
+   },
+   {
+    fileId = "7410997",
+    text = "fx_thedarkarchangel_precast01.m2",
+    value = "fx_thedarkarchangel_precast01.m2",
+   },
+   {
     fileId = "5355799",
     text = "fx_theshovelinthestone_aura.m2",
     value = "fx_theshovelinthestone_aura.m2",
@@ -30480,6 +33085,21 @@ AishaddonModelPaths = {
     fileId = "4539355",
     text = "fx_thethirdwatcher_aura.m2",
     value = "fx_thethirdwatcher_aura.m2",
+   },
+   {
+    fileId = "7209258",
+    text = "fx_thornbloom_travele.m2",
+    value = "fx_thornbloom_travele.m2",
+   },
+   {
+    fileId = "6377230",
+    text = "fx_thornmawpathmarker_aura01.m2",
+    value = "fx_thornmawpathmarker_aura01.m2",
+   },
+   {
+    fileId = "6694668",
+    text = "fx_thornmawpathmarker_aura02.m2",
+    value = "fx_thornmawpathmarker_aura02.m2",
    },
    {
     fileId = "5362131",
@@ -30617,6 +33237,11 @@ AishaddonModelPaths = {
     value = "fx_torchareatrigger_aura.m2",
    },
    {
+    fileId = "7553791",
+    text = "fx_torchbearer_areatrigger.m2",
+    value = "fx_torchbearer_areatrigger.m2",
+   },
+   {
     fileId = "5098907",
     text = "fx_totemvisual2_aura.m2",
     value = "fx_totemvisual2_aura.m2",
@@ -30640,6 +33265,11 @@ AishaddonModelPaths = {
     fileId = "6404379",
     text = "fx_toxicadditives_aura.m2",
     value = "fx_toxicadditives_aura.m2",
+   },
+   {
+    fileId = "8039978",
+    text = "fx_toxicbeam_areatrigger.m2",
+    value = "fx_toxicbeam_areatrigger.m2",
    },
    {
     fileId = "5550928",
@@ -30687,21 +33317,6 @@ AishaddonModelPaths = {
     value = "fx_tubularsurfboard_aura.m2",
    },
    {
-    fileId = "4575536",
-    text = "fx_tuskarrdinghy_aura.m2",
-    value = "fx_tuskarrdinghy_aura.m2",
-   },
-   {
-    fileId = "4616655",
-    text = "fx_tuskarrdinghy_aura01.m2",
-    value = "fx_tuskarrdinghy_aura01.m2",
-   },
-   {
-    fileId = "4575541",
-    text = "fx_tuskarrdinghy_aura02.m2",
-    value = "fx_tuskarrdinghy_aura02.m2",
-   },
-   {
     fileId = "4640850",
     text = "fx_tuskarrdinghy_aura03.m2",
     value = "fx_tuskarrdinghy_aura03.m2",
@@ -30722,6 +33337,26 @@ AishaddonModelPaths = {
     value = "fx_twistedearth.m2",
    },
    {
+    fileId = "7972793",
+    text = "fx_twistingvenom_aura.m2",
+    value = "fx_twistingvenom_aura.m2",
+   },
+   {
+    fileId = "7141692",
+    text = "fx_ulatekwall_areatrigger.m2",
+    value = "fx_ulatekwall_areatrigger.m2",
+   },
+   {
+    fileId = "7455384",
+    text = "fx_umbralbeams_areatrigger.m2",
+    value = "fx_umbralbeams_areatrigger.m2",
+   },
+   {
+    fileId = "7444050",
+    text = "fx_umbralcollapse_impact.m2",
+    value = "fx_umbralcollapse_impact.m2",
+   },
+   {
     fileId = "4731643",
     text = "fx_umbralsmash_cast.m2",
     value = "fx_umbralsmash_cast.m2",
@@ -30740,6 +33375,11 @@ AishaddonModelPaths = {
     fileId = "5099010",
     text = "fx_unboundsurge_impact.m2",
     value = "fx_unboundsurge_impact.m2",
+   },
+   {
+    fileId = "6372114",
+    text = "fx_unendingsong_areatrigger.m2",
+    value = "fx_unendingsong_areatrigger.m2",
    },
    {
     fileId = "5364269",
@@ -30767,6 +33407,11 @@ AishaddonModelPaths = {
     value = "fx_vengefulfirespirit_areatrigger.m2",
    },
    {
+    fileId = "7633279",
+    text = "fx_venomborntwin_aura.m2",
+    value = "fx_venomborntwin_aura.m2",
+   },
+   {
     fileId = "5758753",
     text = "fx_venomnova_cast.m2",
     value = "fx_venomnova_cast.m2",
@@ -30780,6 +33425,11 @@ AishaddonModelPaths = {
     fileId = "5558663",
     text = "fx_venomouscrunch_cast.m2",
     value = "fx_venomouscrunch_cast.m2",
+   },
+   {
+    fileId = "7669059",
+    text = "fx_venomouseruption_areatrigger.m2",
+    value = "fx_venomouseruption_areatrigger.m2",
    },
    {
     fileId = "4904815",
@@ -30822,6 +33472,16 @@ AishaddonModelPaths = {
     value = "fx_verdantmatrix_aura06.m2",
    },
    {
+    fileId = "7430539",
+    text = "fx_vfxtest_areatrigger.m2",
+    value = "fx_vfxtest_areatrigger.m2",
+   },
+   {
+    fileId = "7362300",
+    text = "fx_vilebreath_precast.m2",
+    value = "fx_vilebreath_precast.m2",
+   },
+   {
     fileId = "5409273",
     text = "fx_vilewebbing_areatrigger.m2",
     value = "fx_vilewebbing_areatrigger.m2",
@@ -30850,6 +33510,11 @@ AishaddonModelPaths = {
     fileId = "5092428",
     text = "fx_visionofthepast_aura.m2",
     value = "fx_visionofthepast_aura.m2",
+   },
+   {
+    fileId = "7209031",
+    text = "fx_visionwalk_aura.m2",
+    value = "fx_visionwalk_aura.m2",
    },
    {
     fileId = "4559059",
@@ -30892,14 +33557,100 @@ AishaddonModelPaths = {
     value = "fx_voidarrowpatch_aura.m2",
    },
    {
+    fileId = "7495477",
+    text = "fx_voidbarrier_areatrigger.m2",
+    value = "fx_voidbarrier_areatrigger.m2",
+   },
+   {
+    fileId = "7436989",
+    text = "fx_voidbreath_channel.m2",
+    value = "fx_voidbreath_channel.m2",
+   },
+   {
+    fileId = "7436990",
+    text = "fx_voidbreath_channel01.m2",
+    value = "fx_voidbreath_channel01.m2",
+   },
+   {
+    children = {
+     {
+      fileId = "7065791",
+      text = "precast_aura.m2",
+      value = "precast_aura.m2",
+     },
+    },
+    text = "fx_voidchanneling",
+    value = "fx_voidchanneling",
+   },
+   {
+    fileId = "6701935",
+    text = "fx_voidcomet_precast.m2",
+    value = "fx_voidcomet_precast.m2",
+   },
+   {
+    fileId = "7525739",
+    text = "fx_voidcrash_precast.m2",
+    value = "fx_voidcrash_precast.m2",
+   },
+   {
     fileId = "5045778",
     text = "fx_voidempowerment_cast.m2",
     value = "fx_voidempowerment_cast.m2",
    },
    {
+    fileId = "6885671",
+    text = "fx_voidgate_aura01.m2",
+    value = "fx_voidgate_aura01.m2",
+   },
+   {
+    fileId = "7291381",
+    text = "fx_voidhowl_aura.m2",
+    value = "fx_voidhowl_aura.m2",
+   },
+   {
+    fileId = "7488170",
+    text = "fx_voidlightconvergence_cast.m2",
+    value = "fx_voidlightconvergence_cast.m2",
+   },
+   {
+    fileId = "7114979",
+    text = "fx_voidlightsurger_cast.m2",
+    value = "fx_voidlightsurger_cast.m2",
+   },
+   {
+    fileId = "7479432",
+    text = "fx_voidportalvisual_aura.m2",
+    value = "fx_voidportalvisual_aura.m2",
+   },
+   {
+    fileId = "7377896",
+    text = "fx_voidquill_channel.m2",
+    value = "fx_voidquill_channel.m2",
+   },
+   {
+    fileId = "6996666",
+    text = "fx_voidscrying_aura.m2",
+    value = "fx_voidscrying_aura.m2",
+   },
+   {
+    fileId = "7515143",
+    text = "fx_voidscrying_aura01.m2",
+    value = "fx_voidscrying_aura01.m2",
+   },
+   {
+    fileId = "7550589",
+    text = "fx_voidscrying_aura02.m2",
+    value = "fx_voidscrying_aura02.m2",
+   },
+   {
     fileId = "5502841",
     text = "fx_voidtest_areatrigger01.m2",
     value = "fx_voidtest_areatrigger01.m2",
+   },
+   {
+    fileId = "7114905",
+    text = "fx_voidwingdragonhawk_precast.m2",
+    value = "fx_voidwingdragonhawk_precast.m2",
    },
    {
     fileId = "5619548",
@@ -30915,6 +33666,11 @@ AishaddonModelPaths = {
     fileId = "6129761",
     text = "fx_volley_cast.m2",
     value = "fx_volley_cast.m2",
+   },
+   {
+    fileId = "7902431",
+    text = "fx_voraciousheartofulatek_cast.m2",
+    value = "fx_voraciousheartofulatek_cast.m2",
    },
    {
     fileId = "4494761",
@@ -30947,9 +33703,9 @@ AishaddonModelPaths = {
     value = "fx_waterelementalareatriggervisuals_aura.m2",
    },
    {
-    fileId = "4508236",
-    text = "fx_watermarker_aura.m2",
-    value = "fx_watermarker_aura.m2",
+    fileId = "8187106",
+    text = "fx_waterjet_precast.m2",
+    value = "fx_waterjet_precast.m2",
    },
    {
     fileId = "4421731",
@@ -31017,9 +33773,24 @@ AishaddonModelPaths = {
     value = "fx_webspray_precast.m2",
    },
    {
+    fileId = "7865047",
+    text = "fx_wellvisual_areatrigger.m2",
+    value = "fx_wellvisual_areatrigger.m2",
+   },
+   {
+    fileId = "6212451",
+    text = "fx_wickinthepot_aura.m2",
+    value = "fx_wickinthepot_aura.m2",
+   },
+   {
     fileId = "4703539",
     text = "fx_wildfire_travel.m2",
     value = "fx_wildfire_travel.m2",
+   },
+   {
+    fileId = "7291374",
+    text = "fx_windblast_travel.m2",
+    value = "fx_windblast_travel.m2",
    },
    {
     fileId = "4208669",
@@ -31120,6 +33891,16 @@ AishaddonModelPaths = {
     fileId = "6216759",
     text = "fx_zeppelintargetingtrigger_areatrigger.m2",
     value = "fx_zeppelintargetingtrigger_areatrigger.m2",
+   },
+   {
+    fileId = "7751439",
+    text = "fx_zothwingdarkseeker_aura.m2",
+    value = "fx_zothwingdarkseeker_aura.m2",
+   },
+   {
+    fileId = "7751438",
+    text = "fx_zothwingdarkseeker_precast.m2",
+    value = "fx_zothwingdarkseeker_precast.m2",
    },
    {
     fileId = "575418",

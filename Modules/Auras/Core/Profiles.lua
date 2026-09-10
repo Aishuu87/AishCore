@@ -1,16 +1,11 @@
 -- AishUIAura/Core/Profiles.lua
--- Gestion des profils : CRUD multi-profils, export/import
--- via LibSerialize + LibDeflate
-------------------------------------------------------------------------
+-- Gestion des profils : CRUD multi-profils, export/import via LibSerialize + LibDeflate.
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 ns.Profiles = {}
 local Prof = ns.Profiles
 
 local EXPORT_HEADER = "AISHA1"  -- header for validation on import
 
-------------------------------------------------------------------------
--- HELPERS
-------------------------------------------------------------------------
 local function GetLibs()
     local LS, LD
     pcall(function()
@@ -25,9 +20,6 @@ function Prof:HasLibs()
     return (LS ~= nil) and (LD ~= nil)
 end
 
-------------------------------------------------------------------------
--- BASE DE DONNÉES
-------------------------------------------------------------------------
 function Prof:InitDB()
     if not AishUIAuraDB then AishUIAuraDB = {} end
     local raw = AishUIAuraDB
@@ -41,9 +33,6 @@ function Prof:InitDB()
     return profile
 end
 
-------------------------------------------------------------------------
--- CRUD (Create / Read / Update / Delete)
-------------------------------------------------------------------------
 function Prof:GetList()
     local db = AishUIAuraDB; if not db or not db.profiles then return {"Default"} end
     local list = {}; for n in pairs(db.profiles) do table.insert(list, n) end
@@ -72,9 +61,7 @@ function Prof:Delete(name)
     db.profiles[name] = nil; if db.activeProfile == name then Prof:SetActive("Default") end; return true
 end
 
-------------------------------------------------------------------------
--- EXPORT — profil → string (LibSerialize + LibDeflate + header)
-------------------------------------------------------------------------
+-- Export : profil -> string (LibSerialize + LibDeflate + header)
 function Prof:Export(name)
     local db = AishUIAuraDB; if not db or not db.profiles then return nil, "Pas de profils" end
     local pName = name or db.activeProfile
@@ -100,9 +87,7 @@ function Prof:Export(name)
     else return nil, "Erreur serialisation" end
 end
 
-------------------------------------------------------------------------
--- IMPORT — string → profil (valide le header + l'intégrité des données)
-------------------------------------------------------------------------
+-- Import : string -> profil (valide le header + l'integrite des donnees)
 function Prof:Import(encoded, targetName, overwrite)
     if not encoded or encoded == "" then return false, "String vide" end
 
@@ -156,6 +141,8 @@ function Prof:Import(encoded, targetName, overwrite)
                 else for sid, info in pairs(sp) do if not db.discoveredSpells[sk][sid] then db.discoveredSpells[sk][sid] = info end end end
             end
         end
+        -- Normalise les cles spec pre-migration vers le format actuel (cf. ns.MigrateSpecKeys, Init.lua)
+        if ns.MigrateSpecKeys then pcall(ns.MigrateSpecKeys, db) end
     end
 
     -- Clean export metadata before saving
@@ -170,7 +157,5 @@ function Prof:Import(encoded, targetName, overwrite)
     return true, tgt
 end
 
-------------------------------------------------------------------------
--- AUTO-SWITCH PAR SPÉCIALISATION
-------------------------------------------------------------------------
+-- Auto-switch par specialisation
 function Prof.ApplySpecProfile() pcall(function() ns.BuildWhitelist(); ns.ScanAuras() end) end

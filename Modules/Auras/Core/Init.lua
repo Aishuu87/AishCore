@@ -1,60 +1,27 @@
 -- AishUIAura/Core/Init.lua
 -- Orchestrateur : DB, état global, helpers de spé, scan dispatch, slash commands
 -- Les modules CDM hooks / whitelist / animation / events sont dans Core/*.lua
-------------------------------------------------------------------------
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 
-------------------------------------------------------------------------
--- UPVALUES (règle perf #15 : mise en cache locale des globales)
-------------------------------------------------------------------------
+-- Upvalues (règle perf #15 : mise en cache locale des globales)
 local wipe, pcall, type, math = wipe, pcall, type, math
 local tonumber, tostring, string = tonumber, tostring, string
 
-------------------------------------------------------------------------
--- ÉTAT GLOBAL
-------------------------------------------------------------------------
+-- État global
 ns._inCombat  = false
 ns.auraData   = {}
 ns.renderFrames = {}
 
-------------------------------------------------------------------------
--- REGISTRE DES FLAGS DE SESSION
--- Documentation de tous les ns._* utilisés dans l'addon.
--- Écrits/lus par les fichiers listés entre crochets.
---
--- État cœur de session :
---   ns._inCombat            bool     État combat via PLAYER_REGEN_* [Core]
---   ns._whitelistBuilt      bool     Flag lazy : whitelist à reconstruire [Core/Scan]
---   ns._playerScanPending   bool     Scan joueur en attente (rate limit) [Core]
---   ns._cdmRescanPending    bool     Rescan CDM en attente [Core]
---
--- Toggles de preview (pilotés par l'UI) :
---   ns._equipmentPreview    bool     Menu Equipment actuellement visible [Equipment OnShow/OnHide]
---   ns._equipment3DPreview  bool     Flag du mode preview 3D Equipment [Menu Effects]
---   ns._aishPreviewOn       bool     Toggle preview du panneau externe [Menu Preview]
---   ns._aishPanelPoint      table    Sauvegarde de la position du panneau externe [Menu Preview]
---
--- État de l'éditeur Effects (par session, non persisté) :
---   ns._selectedFx3dSpell   number   Sort actuellement sélectionné [Menu Effects]
---   ns._selectedFx3dLayerIdx number  Index de couche actuellement sélectionné [Menu Effects]
---   ns._selectedFx3dTab     string   Nom de l'onglet éditeur actif [Menu Effects]
---
--- Caches de données :
---   ns._modelFlat           table    Cache de chemins modèles aplatis [Data/ModelPaths]
---
--- Callbacks enregistrés à l'exécution :
---   ns._rebuildCurrentMenu  function Hook de rebuild complet du menu actif [SettingsPanel]
---
--- Règle : tout nouveau flag ns._* DOIT être ajouté à cette liste avec son owner.
--- À terme, tout ceci devrait migrer vers une table unifiée ns.state.
-------------------------------------------------------------------------
+-- Registre des flags de session ns._* (écrits/lus par les fichiers listés) :
+--   _inCombat, _whitelistBuilt, _playerScanPending, _cdmRescanPending [Core/Scan]
+--   _equipmentPreview, _equipment3DPreview, _aishPreviewOn, _aishPanelPoint [toggles preview UI]
+--   _selectedFx3dSpell, _selectedFx3dLayerIdx, _selectedFx3dTab [Menu Effects, session uniquement]
+--   _modelFlat [cache modèles 3D], _rebuildCurrentMenu [hook rebuild SettingsPanel]
+-- Tout nouveau flag ns._* doit être ajouté ici avec son owner (à terme, migrer vers ns.state).
 
-------------------------------------------------------------------------
--- EFFECTS 3D : flag composite `effectsEnabled` (DB) AND NOT `_effectsSuspended` (runtime)
--- Les modèles 3D sont GPU-intensive : 8 DoTs × 3 modèles par bar = 24 rendus 3D par
--- frame. En raid c'est souvent le vrai goulot. On offre une option auto-disable.
--- Mis à jour par RefreshEffectsSuspension sur PLAYER_ENTERING_WORLD / ZONE_CHANGED.
-------------------------------------------------------------------------
+-- Effects 3D : flag composite `effectsEnabled` (DB) AND NOT `_effectsSuspended` (runtime).
+-- Modèles GPU-intensive (jusqu'à 24 rendus 3D/frame en raid) : option auto-disable, mise à
+-- jour par RefreshEffectsSuspension sur PLAYER_ENTERING_WORLD / ZONE_CHANGED.
 ns._effectsSuspended = false
 
 function ns.EffectsActive()
@@ -80,41 +47,22 @@ function ns.RefreshEffectsSuspension()
     end
 end
 
-------------------------------------------------------------------------
--- ns.Try(tag, fn, ...) — wrapper pcall silencieux (sans log).
--- Retourne comme pcall : (ok, result_or_error).
--- Remplacement direct pour `pcall(function() ... end)`.
-------------------------------------------------------------------------
+-- ns.Try(tag, fn, ...) : wrapper pcall silencieux, remplacement direct de pcall(function() ... end).
 function ns.Try(tag, fn, ...)
     local ok, err = pcall(fn, ...)
     return ok, err
 end
 
-------------------------------------------------------------------------
--- LAZY LOAD DE LA BIBLIOTHÈQUE DE MODÈLES 3D
---
--- La bibliothèque AishUIAuraModelPaths (~19 MB, ~122 000 entrées) est
--- volontairement packagée dans un sous-addon AishUIAuraModels marqué
--- LoadOnDemand. Elle n'est chargée QUE lors de la première ouverture du
--- ModelPicker, ce qui économise ~25 MB de RAM pour les utilisateurs qui
--- n'ouvrent jamais le picker.
---
--- PARTAGE AVEC Aishaddon (économie ~5-10 MB de doublon RAM) :
--- Si l'user a aussi Aishaddon installé, Aishaddon expose sa table
--- aplatie sous _G.AishSharedModelFlat (globale pont). AishUIAura la
--- détecte et la réutilise sans flatten. Dégrade proprement si Aishaddon
--- n'est pas à jour (flatten local classique).
---
--- On expose aussi NOTRE _modelFlat sous _G.AishSharedModelFlat pour que
--- toute version future d'Aishaddon puisse faire le partage inverse.
---
--- Retourne true si la table est prête à l'usage (ns._modelFlat), false sinon.
-------------------------------------------------------------------------
+-- Lazy load de la bibliothèque de modèles 3D (~19 Mo, ~122 000 entrées) : packagée dans le
+-- sous-addon AishUIAuraModels (LoadOnDemand), chargée seulement à la première ouverture du
+-- ModelPicker. Partage avec AishCore via la globale pont _G.AishSharedModelFlat pour éviter le
+-- doublon RAM (~5-10 Mo) ; dégrade proprement (flatten local) si absent. Retourne true si
+-- ns._modelFlat est prêt à l'usage.
 function ns.EnsureModelPaths()
     -- Déjà chargée et aplatie : rien à faire
     if ns._modelFlat and #ns._modelFlat > 0 then return true end
 
-    -- PARTAGE 1 : une table aplatie existe déjà en globale pont (Aishaddon
+    -- PARTAGE 1 : une table aplatie existe déjà en globale pont (AishCore
     -- à jour, ou autre addon partenaire). On la référence directement, 0 copie.
     if _G.AishSharedModelFlat and #_G.AishSharedModelFlat > 0 then
         ns._modelFlat = _G.AishSharedModelFlat
@@ -128,8 +76,8 @@ function ns.EnsureModelPaths()
     end)
 
     -- Fallback : si AishUIAuraModelPaths existe déjà (ex : injection manuelle
-    -- ou présence d'un addon partenaire avec AishaddonModelPaths), on l'utilise directement
-    local rawPaths = AishUIAuraModelPaths or AishaddonModelPaths
+    -- ou présence d'un addon partenaire avec AishCoreModelPaths), on l'utilise directement
+    local rawPaths = AishUIAuraModelPaths or AishCoreModelPaths
     if not rawPaths then
         return false
     end
@@ -150,52 +98,41 @@ function ns.EnsureModelPaths()
     for _, cat in pairs(rawPaths) do Flatten(cat) end
 
     -- Expose notre table aplatie via globale pont, pour partage inverse
-    -- (si Aishaddon ouvre son ModelPicker après le nôtre)
+    -- (si AishCore ouvre son ModelPicker après le nôtre)
     _G.AishSharedModelFlat = ns._modelFlat
 
     -- Libère l'arbre original : on ne garde que la version aplatie
     AishUIAuraModelPaths = nil
-    AishaddonModelPaths = nil
+    AishCoreModelPaths = nil
     collectgarbage("collect")
 
     return true
 end
 
-------------------------------------------------------------------------
--- LIBÉRATION DE LA BIBLIOTHÈQUE DE MODÈLES 3D
---
--- Appelée à la fermeture du ModelPicker pour faire redescendre la RAM.
--- Après appel, ns._modelFlat est vide et la table aplatie est garbage-collected.
--- Le prochain usage (nouvelle ouverture du picker) re-déclenchera EnsureModelPaths
--- qui rechargera via le sous-addon LoadOnDemand.
---
--- PARTAGE : si notre table est en fait la globale pont _G.AishSharedModelFlat
--- (= partagée avec Aishaddon), on NE la libère PAS (car Aishaddon en a besoin).
--- On se contente de lâcher notre référence. Aishaddon la libérera de son côté,
--- et le GC la récupérera quand plus personne ne pointe dessus.
---
--- Coût de ré-ouverture : ~0.3-0.5s (charge + aplatissement) si on a flatten.
--- Gain : libère ~25-30 MB de RAM entre deux usages (ou 0 MB si partagée).
-------------------------------------------------------------------------
+-- Libère la bibliothèque de modèles 3D (appelée à la fermeture du ModelPicker, ~25-30 Mo
+-- récupérés). Si notre table est en fait la globale pont partagée avec AishCore, on ne la
+-- libère pas (juste notre référence) : AishCore la libérera de son côté. Ré-ouverture :
+-- EnsureModelPaths recharge (~0.3-0.5s) via le sous-addon LoadOnDemand.
 function ns.ReleaseModelPaths()
     if not ns._modelFlat then return false end
     local wasShared = (ns._modelFlat == _G.AishSharedModelFlat)
     ns._modelFlat = nil
     -- Si c'était la table partagée, on ne libère PAS la globale pont :
-    -- Aishaddon (ou un autre addon partenaire) pourrait encore en avoir besoin.
+    -- AishCore (ou un autre addon partenaire) pourrait encore en avoir besoin.
     if not wasShared then
         _G.AishSharedModelFlat = nil
     end
     -- Au cas où : nettoie aussi les globales qui pourraient avoir été ré-exposées
     AishUIAuraModelPaths = nil
-    AishaddonModelPaths = nil
+    AishCoreModelPaths = nil
     collectgarbage("collect")
     return true
 end
 
-------------------------------------------------------------------------
--- HELPERS DE SPÉCIALISATION
-------------------------------------------------------------------------
+-- Helpers de spécialisation. Clé = "CLASSE_SPE" uniquement (pas de nom/royaume) : la DB est
+-- partagée tout le compte, donc une liste "Auras à tracker" configurée sur un personnage doit
+-- être retrouvée par tout autre personnage de la même classe/spé. Ancien format (nom-realm
+-- inclus) migré une fois vers ce format par MigrateSpecKeys (cf. ns.InitDB).
 function ns.GetSpecKey()
     local key
     pcall(function()
@@ -206,12 +143,60 @@ function ns.GetSpecKey()
         if not specID then return end
         local m = ns.SPEC_MAP[specID]
         if m then
-            local name = UnitName("player") or "?"
-            local realm = GetRealmName() or "?"
-            key = name .. "-" .. realm .. "_" .. m.class .. "_" .. m.spec
+            key = m.class .. "_" .. m.spec
         end
     end)
     return key
+end
+
+-- Mode admin ("Auras à tracker") : ns.db.adminOverrides[spellID] = { source="debuff"|"buff"|"totem"
+-- (reclassification manuelle, prioritaire sur l'auto-découverte), deleted=true (masque le sort, cf.
+-- Tactics.lua) }. Stockage GLOBAL (pas par spec) car un spellID désigne le même sort partout.
+-- Objectif final : brouillon à exporter (ns.ExportAdminOverrides) puis intégrer en dur -- un addon
+-- ne peut pas réécrire ses .lua, donc ce SavedVariables reste une étape intermédiaire.
+function ns.ApplyAdminOverrides(spells)
+    if not spells then return end
+    -- Baseline codée en dur (SpellClassificationOverrides.lua) pour tous, puis override
+    -- personnel du joueur (ns.db.adminOverrides, /aishadmin) par-dessus qui garde le dernier mot.
+    local hardcoded = ns.SpellClassificationOverrides
+    if hardcoded then
+        for spellID, o in pairs(hardcoded) do
+            local info = spells[spellID]
+            if info then
+                if o.source then info.source = o.source end
+                if o.deleted then info._adminDeleted = true end
+            end
+        end
+    end
+    local ov = ns.db and ns.db.adminOverrides
+    if not ov then return end
+    for spellID, o in pairs(ov) do
+        local info = spells[spellID]
+        if info then
+            if o.source then info.source = o.source end
+            -- o.deleted est toujours un booléen explicite ici (jamais nil, cf. SetAdminDeletedOverride) :
+            -- même décoché (false), ce choix doit prévaloir sur une suppression codée en dur ci-dessus.
+            if o.deleted ~= nil then info._adminDeleted = o.deleted or nil end
+        end
+    end
+end
+
+function ns.SetAdminSourceOverride(spellID, source)
+    if not ns.db then return end
+    ns.db.adminOverrides = ns.db.adminOverrides or {}
+    local o = ns.db.adminOverrides[spellID]
+    if not o then o = {}; ns.db.adminOverrides[spellID] = o end
+    o.source = source
+end
+
+function ns.SetAdminDeletedOverride(spellID, deleted)
+    if not ns.db then return end
+    ns.db.adminOverrides = ns.db.adminOverrides or {}
+    local o = ns.db.adminOverrides[spellID]
+    if not o then o = {}; ns.db.adminOverrides[spellID] = o end
+    -- Booléen explicite (jamais nil) : distingue "jamais touché" (clé absente) de "explicitement
+    -- décoché" (false), pour qu'annuler une suppression hardcodée (SpellClassificationOverrides) tienne.
+    o.deleted = deleted and true or false
 end
 
 function ns.GetSpecSpells()
@@ -219,15 +204,36 @@ function ns.GetSpecSpells()
     if not key or not ns.db then return nil end
     if not ns.db.discoveredSpells then ns.db.discoveredSpells = {} end
     if not ns.db.discoveredSpells[key] then ns.db.discoveredSpells[key] = {} end
-    return ns.db.discoveredSpells[key], key
+    local spells = ns.db.discoveredSpells[key]
+    ns.ApplyAdminOverrides(spells)
+    return spells, key
 end
 
-------------------------------------------------------------------------
--- INIT DB
-------------------------------------------------------------------------
--- Migration v3.9 : renommage des clés internes des 4 renders.
--- Anciens noms (debuffs/buffs/cooldowns/procs) → nouveaux noms sémantiques.
--- Exécutée une seule fois au chargement si les vieilles clés existent encore.
+-- /aishsourcelist : liste les sorts classés source="debuff" (cf. CDMHooks.lua::InitCDMHooks) pour
+-- la spec courante, pour repérer les auto-buffs mal classifiés (ex: Rapidité de la nature/378081).
+SLASH_AISHSOURCELIST1 = "/aishsourcelist"
+SlashCmdList["AISHSOURCELIST"] = function()
+    local P = "|cff00ffff[AishCore]|r "
+    local spells, key = ns.GetSpecSpells()
+    if not spells then
+        print(P .. "GetSpecSpells() indisponible.")
+        return
+    end
+    print(P .. string.format("Spec courante : %s", tostring(key)))
+    local n = 0
+    for spellID, info in pairs(spells) do
+        if info.source == "debuff" then
+            n = n + 1
+            local name = (GetSpellName and GetSpellName(spellID)) or info.name or "?"
+            print(P .. string.format("  %d (%s)", spellID, tostring(name)))
+        end
+    end
+    print(P .. string.format("Total : %d sort(s) classe(s) \"debuff\".", n))
+end
+
+-- Init DB
+-- Migration v3.9 : renommage des clés internes des 4 renders (debuffs/buffs/cooldowns/procs →
+-- noms sémantiques), exécutée une seule fois au chargement si les vieilles clés existent encore.
 local _RENDER_KEY_MAP = { debuffs="iconlist", buffs="freebars", cooldowns="circlebars", procs="icons" }
 local _ENABLED_KEY_MAP = {
     debuffsEnabled="iconlistEnabled", buffsEnabled="freebarsEnabled",
@@ -267,13 +273,167 @@ local function MigrateRenderKeys(raw)
     end
 end
 
+-- Migration : InitCDMHooks (CDMHooks.lua) étiquette tout sort découvert via un viewer
+-- Essentiel/Utilitaire comme source="debuff", ce qui est faux pour les sorts qui s'octroient
+-- un buff à eux-mêmes (Blizzard ne distingue pas les deux au niveau du viewer). Corrige une
+-- bonne fois les sorts concernés (378081, 2825, 61295) déjà découverts sur tous les personnages ;
+-- le hook auto-correcteur dans CDMHooks.lua::SetAuraInstanceInfo évite que ça se reproduise.
+local _MISCLASSIFIED_SELF_BUFFS = { [378081] = true, [2825] = true, [61295] = true }
+local function MigrateMisclassifiedSelfBuffSource(raw)
+    if not raw or not raw.discoveredSpells then return end
+    for _, specSpells in pairs(raw.discoveredSpells) do
+        for spellID, info in pairs(specSpells) do
+            if _MISCLASSIFIED_SELF_BUFFS[spellID] and info.source == "debuff" then
+                info.source = "buff"
+            end
+        end
+    end
+end
+
+-- Migration : Totems.lua::OnTotemSlotChanged reclassifie un sort en source="totem" à la pose
+-- (PLAYER_TOTEM_UPDATE) mais ne nettoyait jusqu'ici jamais ses destinations existantes : plusieurs
+-- vrais totems restaient traqués sur iconlist/circlebars/freebars/icons depuis avant leur
+-- reclassification, invisibles/impossibles à décocher dans l'UI mais actifs -- chaque pose faisait
+-- apparaître des barres fantômes en plus de la barre totem attendue. Fix en place côté Totems.lua
+-- pour le futur ; ceci nettoie une bonne fois les entrées déjà corrompues sur tous les personnages/spés.
+local function MigrateOrphanedTotemDestinations(raw)
+    if not raw or not raw.discoveredSpells then return end
+    for _, specSpells in pairs(raw.discoveredSpells) do
+        for _, info in pairs(specSpells) do
+            if info.source == "totem" and info.destinations then
+                info.destinations.iconlist = false
+                info.destinations.circlebars = false
+                info.destinations.freebars = false
+                info.destinations.icons = false
+            end
+        end
+    end
+end
+
+-- Migration : ns.GetSpecKey() incluait auparavant nom-royaume ("Perso-Royaume_CLASSE_SPE"),
+-- fragmentant par personnage une DB déjà partagée tout le compte. Nouveau format : "CLASSE_SPE"
+-- seul. Fusionne additivement (n'écrase jamais une entrée déjà présente) le contenu de chaque
+-- ancienne clé vers sa nouvelle clé, puis supprime les anciennes clés (mesuré : ~52% de
+-- discoveredSpells sur une DB réelle, fusion sans perte). Exposée sur ns (pas locale, idempotente)
+-- pour être réutilisée par Prof:Import (Profiles.lua) ; ns.InitDB pose son propre flag one-shot.
+function ns.MigrateSpecKeys(raw)
+    if not raw or not raw.discoveredSpells then return end
+
+    local validKeys = {}
+    for _, m in pairs(ns.SPEC_MAP) do
+        validKeys[m.class .. "_" .. m.spec] = true
+    end
+
+    -- Copie des clés avant mutation : la boucle peut créer de nouvelles clés cibles dans
+    -- raw.discoveredSpells, ce qu'un pairs() en cours d'itération ne garantit pas de gérer.
+    local existingKeys = {}
+    for key in pairs(raw.discoveredSpells) do existingKeys[#existingKeys + 1] = key end
+
+    for _, key in ipairs(existingKeys) do
+        if not validKeys[key] then
+            for suffix in pairs(validKeys) do
+                if key:sub(-(#suffix + 1)) == ("_" .. suffix) then
+                    local specSpells = raw.discoveredSpells[key]
+                    if not raw.discoveredSpells[suffix] then raw.discoveredSpells[suffix] = {} end
+                    local target = raw.discoveredSpells[suffix]
+                    for sid, info in pairs(specSpells) do
+                        if target[sid] == nil then target[sid] = info end
+                    end
+                    -- Fusion terminee (additive, aucune perte) : la clé
+                    -- source ne sert plus jamais à rien -- supprimée.
+                    raw.discoveredSpells[key] = nil
+                    break
+                end
+            end
+        end
+    end
+end
+
+-- Checkup mémoire : nettoyage one-shot distinct de _specKeyMigratedV1 (déjà consommé), nécessaire
+-- pour se redéclencher sur les comptes déjà migrés. Nettoie aussi profiles[*].discoveredSpells :
+-- ce champ n'est jamais lu depuis un profil (Prof:InitDB/SetActive et Prof:Export utilisent tous
+-- la référence partagée db.discoveredSpells) mais reste sérialisé en double sur disque -- 100% mort.
+local function CleanupDeadDBBloat(raw)
+    if not raw then return end
+    pcall(ns.MigrateSpecKeys, raw)
+    if raw.profiles then
+        for _, prof in pairs(raw.profiles) do
+            if type(prof) == "table" then prof.discoveredSpells = nil end
+        end
+    end
+end
+
+-- Bulk glow par défaut : bascule le glow de toutes les spés déjà enregistrées dans le profil
+-- "Default" (db.defaultGlowBySpec, cf. GetDefaultGlowCfg dans Tactics.lua) sur idx=6 ("Assist White")
+-- /alpha=0.6, sans toucher couleur/échelle/proc. Met aussi à jour les clés "seed" defaultGlowIdx/Alpha
+-- pour couvrir les spés jamais ouvertes. One-shot (raw._defaultGlowBulkSetV1), profil "Default" only.
+local function BulkSetDefaultGlow(raw)
+    if not raw or not raw.profiles then return end
+    local profile = raw.profiles["Default"]
+    if type(profile) ~= "table" then return end
+    profile.defaultGlowIdx = 6
+    profile.defaultGlowAlpha = 0.6
+    if type(profile.defaultGlowBySpec) == "table" then
+        for _, cfg in pairs(profile.defaultGlowBySpec) do
+            if type(cfg) == "table" then
+                cfg.idx = 6
+                cfg.alpha = 0.6
+            end
+        end
+    end
+end
+
+-- Bulk animation proc par défaut (complément de BulkSetDefaultGlow) : le glow en boucle et
+-- l'animation proc (defaultProcGlowIdx/cfg.procIdx) sont deux réglages séparés, ce dernier
+-- restait à 1 ("Aucun") pour toute spé non personnalisée. Bascule sur idx=75 ("Proc: White Short"
+-- dans ns.GLOW_DEFS). Même portée que BulkSetDefaultGlow (profil "Default", flag one-shot distinct).
+local function BulkSetDefaultProcGlow(raw)
+    if not raw or not raw.profiles then return end
+    local profile = raw.profiles["Default"]
+    if type(profile) ~= "table" then return end
+    profile.defaultProcGlowIdx = 75
+    if type(profile.defaultGlowBySpec) == "table" then
+        for _, cfg in pairs(profile.defaultGlowBySpec) do
+            if type(cfg) == "table" then
+                cfg.procIdx = 75
+            end
+        end
+    end
+end
+
 function ns.InitDB()
     if not AishUIAuraDB then AishUIAuraDB = {} end
     local raw = AishUIAuraDB
     -- Migration des anciennes clés avant tout MergeDefaults
     MigrateRenderKeys(raw)
+    if not raw._specKeyMigratedV1 then
+        ns.MigrateSpecKeys(raw)
+        raw._specKeyMigratedV1 = true
+    end
+    -- Nouveau flag distinct de _specKeyMigratedV1 (déjà consommé) : nécessaire pour redéclencher
+    -- le nettoyage une fois sur les comptes déjà migrés. cf. CleanupDeadDBBloat.
+    if not raw._dbCleanupV1 then
+        CleanupDeadDBBloat(raw)
+        raw._dbCleanupV1 = true
+    end
+    if not raw._defaultGlowBulkSetV1 then
+        BulkSetDefaultGlow(raw)
+        raw._defaultGlowBulkSetV1 = true
+    end
+    if not raw._defaultProcGlowBulkSetV1 then
+        BulkSetDefaultProcGlow(raw)
+        raw._defaultProcGlowBulkSetV1 = true
+    end
+    if not raw._misclassifiedSelfBuffSourceV1 then
+        MigrateMisclassifiedSelfBuffSource(raw)
+        raw._misclassifiedSelfBuffSourceV1 = true
+    end
+    if not raw._orphanedTotemDestinationsV1 then
+        MigrateOrphanedTotemDestinations(raw)
+        raw._orphanedTotemDestinationsV1 = true
+    end
     ns.MergeDefaults(raw, ns.Defaults)
-    for _, key in ipairs({"iconlist","freebars","circlebars","icons","equipment"}) do
+    for _, key in ipairs({"iconlist","freebars","circlebars","icons","equipment","totems"}) do
         if not raw[key] or type(raw[key]) ~= "table" then
             raw[key] = ns.DeepCopy(ns.Defaults[key])
         else
@@ -292,22 +452,35 @@ function ns.InitDB()
             if info.desat == nil then info.desat = false end
             if not info.procGlowIdx then info.procGlowIdx = 1 end
             if not info.procGlowScale then info.procGlowScale = 1.0 end
+            -- Migration _glowCustom (feature glow par défaut) : verrouille (true) tout sort qui avait
+            -- déjà un glow actif pour ne jamais écraser un réglage utilisateur ; sinon suit le défaut.
+            if info._glowCustom == nil then info._glowCustom = (info.glow == true) end
         end
     end
     ns.db = db
 end
 
 
-------------------------------------------------------------------------
--- SCAN / DISPATCH DE REBUILD
-------------------------------------------------------------------------
+-- Scan / dispatch de rebuild
 function ns.ScanAuras()
     if not ns._whitelistBuilt then ns.BuildWhitelist() end
     if ns.Scan then ns.Try("Scan:Run", ns.Scan.Run, ns.Scan) end
+    -- Scan.Run ne réveille l'animDriver que si de vraies auras sont actives ; le mode aperçu
+    -- (fausses barres via ns._previewBars) n'en a aucune donc ne le réveille jamais de lui-même.
+    -- Sans cet appel explicite, le spark de la fausse barre resterait créé mais jamais ancré.
+    if ns._previewBars and ns.WakeAnimDriver then ns.WakeAnimDriver() end
 end
 
 function ns.InitAllRenders()
     if not ns.db or not ns.db.enabled then return end
+    -- Chaque render:Init() recrée ses conteneurs, avec des appels protégés en combat (ex:
+    -- SetPropagateMouseClicks -- confirmé en jeu : ADDON_ACTION_BLOCKED en plein pull après reload).
+    -- On diffère tout le cycle au prochain PLAYER_REGEN_ENABLED (cf. Events.lua) plutôt que
+    -- de laisser chaque render planter un à un.
+    if InCombatLockdown and InCombatLockdown() then
+        ns._pendingRenderInit = true
+        return
+    end
     if ns.db.useNativeCDM then
         for _, rf in pairs(ns.renderFrames) do
             if rf and rf.container then
@@ -324,9 +497,8 @@ end
 
 function ns.RebuildDisplay() ns.InitAllRenders(); ns.ScanAuras() end
 
--- Colorisation de barre avec dégradé (SetGradient sur StatusBarTexture)
--- Helpers top-level pour ApplyBarColor : évite 2 closures pcall par appel.
--- ApplyBarColor est appelé à chaque scan et à chaque Update render.
+-- Colorisation de barre avec dégradé (SetGradient sur StatusBarTexture). Helpers top-level pour
+-- ApplyBarColor (appelé à chaque scan/Update render) : évite 2 closures pcall par appel.
 local function _SetBarGradient(tex, r, g, b, gr, gg, gb)
     if tex.SetGradient then
         tex:SetGradient("HORIZONTAL", CreateColor(r, g, b, 1), CreateColor(gr, gg, gb, 1))
@@ -344,15 +516,10 @@ function ns.ApplyBarColor(bar, renderKey, aura)
     local cfg = ns.db and ns.db[renderKey]
     local r, g, b = ns.barColor[1], ns.barColor[2], ns.barColor[3]
 
-    -- PRIORITE 1 : couleur/gradient par sort (UNIQUEMENT pour le render Buffs).
-    -- Si l'utilisateur a defini un override pour ce sort dans le menu
-    -- Buffs > "COULEUR PAR SORT", il override tout le reste.
-    -- Storage : ns.db.buffs.spellGradients[spellID] = {r1, g1, b1, r2, g2, b2, gradEnabled}
-    --   - gradEnabled = true  → gradient (r1,g1,b1) → (r2,g2,b2)
-    --   - gradEnabled = false ou nil → couleur fixe (r1,g1,b1) — UX plus simple par defaut
-    -- IMPORTANT : pour le mode gradient on flag la barre via _spellGradientActive
-    -- afin que ApplyUrgencyColor (driver d'anim) ne vienne pas ecraser le SetGradient
-    -- via SetStatusBarColor a chaque tick.
+    -- Priorité 1 : couleur/gradient par sort (render Buffs uniquement, menu "Couleur par sort").
+    -- Storage : ns.db.buffs.spellGradients[spellID] = {r1,g1,b1,r2,g2,b2,gradEnabled}.
+    -- gradEnabled=true → gradient (r1,g1,b1)→(r2,g2,b2), sinon couleur fixe (r1,g1,b1).
+    -- Flag _spellGradientActive pour qu'ApplyUrgencyColor n'écrase pas le SetGradient à chaque tick.
     if renderKey == "freebars" and aura and aura.spellID
        and cfg and cfg.spellGradients and cfg.spellGradients[aura.spellID] then
         local sg = cfg.spellGradients[aura.spellID]
@@ -401,9 +568,7 @@ function ns.ApplyBarColor(bar, renderKey, aura)
     end
 end
 
-------------------------------------------------------------------------
--- COMMANDES SLASH
-------------------------------------------------------------------------
+-- Commandes slash
 SLASH_AISHUIAURA1 = "/aa"
 SLASH_AISHUIAURA2 = "/aishaura"
 SlashCmdList["AISHUIAURA"] = function(msg)
@@ -412,25 +577,11 @@ SlashCmdList["AISHUIAURA"] = function(msg)
     end
 end
 
-------------------------------------------------------------------------
--- RAPPEL RELOAD : message chat après modification de modèles 3D.
---
--- Contexte : quand Blizzard charge un .m2 (via PlayerModel:SetModel), ce modèle
--- reste en RAM GPU/CPU pour toute la session WoW. L'API Lua n'expose aucune
--- méthode pour le décharger. Si l'user change plusieurs fois de modèle, la RAM
--- monte progressivement (chaque modèle ajouté = +500 KB à 2 MB permanents).
---
--- Le seul moyen de libérer cette RAM est un /reload qui détruit toute la session
--- Lua et force Blizzard à repartir d'un état propre.
---
--- IMPLÉMENTATION : on UTILISE PAS de StaticPopup car ce système partage des
--- slots avec les popups Blizzard natifs (QUIT_GAME_DIALOG, CAMP, LOGOUT) qui
--- ont des callbacks protégés (ForceQuit, CancelLogout). En cas de collision
--- de slot, notre popup hérite du callback Blizzard → ADDON_ACTION_FORBIDDEN
--- au moindre clic sur OK. Toutes les protections (exclusive, preferredIndex,
--- hook StaticPopup_Show) ont été tentées et ne couvrent pas tous les cas
--- edge. Solution radicale : pas de popup, juste un message chat persistant.
-------------------------------------------------------------------------
+-- Rappel reload : message chat après modification de modèles 3D. Blizzard ne libère jamais un
+-- .m2 chargé (PlayerModel:SetModel) avant un /reload complet -- la RAM monte progressivement.
+-- Pas de StaticPopup : ce système partage des slots avec les popups Blizzard natifs
+-- (QUIT_GAME_DIALOG, CAMP, LOGOUT) et hérite parfois leur callback protégé → ADDON_ACTION_FORBIDDEN.
+-- D'où un simple message chat persistant.
 function ns.ShowReloadPrompt()
     if not ns._fx3dDirty then return end
     -- On affiche une seule fois par session pour ne pas spammer.

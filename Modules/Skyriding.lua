@@ -1,16 +1,11 @@
--- Modules/Skyriding.lua
--- Port natif du WeakAura "[SKYRIDING] - FIXE"
--- Cercle de vitesse, charges de vigueur, second souffle.
--- FX 3D : désactivés pour l'instant (phase ultérieure).
+-- Modules/Skyriding.lua : suivi de la vigueur/vitesse en vol dragon (cercle, charges, second souffle)
 local addonName, ns = ...
 
 local Skyriding = {}
 ns.Modules = ns.Modules or {}
 ns.Modules.Skyriding = Skyriding
 
----------------------------------------------------------------------------
--- CONSTANTES
----------------------------------------------------------------------------
+-- Constantes
 local DR_POWERBAR_ID   = 631        -- Barre de puissance Skyriding
 local MAX_SPEED        = 105.0      -- yd/s max pour remplir le cercle à 100 %
 local SPEED_TEXT_FACTOR = 100 / 7   -- Conversion yd/s → move%
@@ -46,12 +41,12 @@ local SOUFFLE_Y_OFF    = -16.67
 local MODEL_CRAWTH     = 4520560    -- galeforce precast (orbes + souffle)
 
 -- Textures
-local TEX_CIRCLEFLAT   = "Interface\\AddOns\\AishuuMedia\\ElvUI\\circleflat"
-local TEX_CIRCLE_SMOOTH = "Interface\\AddOns\\Aishaddon\\Media\\Skyriding\\Circle_Smooth"
-local TEX_SQUARE_WHITE = "Interface\\AddOns\\Aishaddon\\Media\\Skyriding\\Square_FullWhite"
+local TEX_CIRCLEFLAT   = "Interface\\AddOns\\AishCore\\Media\\Skyriding\\circleflat"
+local TEX_CIRCLE_SMOOTH = "Interface\\AddOns\\AishCore\\Media\\Skyriding\\Circle_Smooth"
+local TEX_SQUARE_WHITE = "Interface\\AddOns\\AishCore\\Media\\Skyriding\\Square_FullWhite"
 local FONT_MONTSERRAT_B = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat-Bold.ttf"
 
--- Couleurs (extraites des données WeakAuras)
+-- Couleurs
 local COL_BG            = { 0.0549, 0.0549, 0.0549, 1 }
 local COL_SPEED_NORMAL  = { 0, 0.8824, 0.5373, 1 }          -- teal (buff actif)
 local COL_SPEED_BOOST   = { 0, 1, 0.8118, 1 }               -- cyan (ascension)
@@ -67,9 +62,7 @@ local COL_ORB_BASE      = { 0.4549, 0.4549, 0.4549, 1 }
 -- Ratio orbe / bgSize (65 / 120 par défaut dans le WA)
 local ORB_RADIUS_RATIO  = 65 / 120
 
----------------------------------------------------------------------------
--- ÉTAT INTERNE
----------------------------------------------------------------------------
+-- État interne
 local container         -- Frame racine
 local ringAnchor        -- Frame d'ancrage du cercle (centre +20 y)
 
@@ -101,9 +94,7 @@ local smoothSpeed   = 0
 local activateTime  = 0      -- horodatage du dernier tick en vol (pour le délai de grâce hideAtLanding)
 local wasAirborne   = false  -- devient true après le premier vrai décollage (speed>1), reset au démontage
 
----------------------------------------------------------------------------
--- DEBUG LOG (buffer circulaire — /aishdebug sky pour afficher)
----------------------------------------------------------------------------
+-- Debug log (buffer circulaire, /aishdebug sky pour afficher)
 local _dbgLog = {}
 local function DbgLog(msg)
   local entry = string.format("[%.2f] %s", GetTime(), msg)
@@ -120,9 +111,7 @@ local mountColorSlow   = nil   -- première couleur du dégradé (vitesse lente)
 local mountColorBuffed = nil   -- deuxième couleur du dégradé (vitesse buffée)
 local lastMountSpellId = nil
 
----------------------------------------------------------------------------
--- HELPERS
----------------------------------------------------------------------------
+-- Helpers
 local function IsDragonriding()
   -- Vérification primaire : power bar ID
   if UnitPowerBarID("player") == DR_POWERBAR_ID then return true end
@@ -141,8 +130,7 @@ local function GetCfg()
   return ns.GetCfg("skyriding") or ns.Defaults.skyriding or {}
 end
 
---- Si le canal le plus fort de la couleur est sous minBright, scale tous les
---- canaux pour l'y amener. Préserve la teinte/saturation, rehausse juste la valeur.
+--- Rehausse la luminosité d'une couleur si trop sombre, sans changer la teinte.
 local function EnforceBrightness(c, minBright, targetBright)
   if not c then return c end
   local maxCh = math.max(c[1], c[2], c[3])
@@ -153,8 +141,7 @@ local function EnforceBrightness(c, minBright, targetBright)
   return c
 end
 
---- Calcule un degré (slow, buffed) {r,g,b,a} depuis un spellId.
---- Retourne deux couleurs : première = gauche du dégradé, seconde = droite.
+--- Calcule le dégradé (couleur slow, couleur buffed) d'un spellId.
 local function ComputeSpellGradient(spellId)
   if not spellId then return nil, nil end
   local SC_SOLID = {
@@ -198,7 +185,8 @@ local function ResolveDisplayColor(hasThrill, boosting, specSlowKey, specFastKey
     local Colors = ns.Modules and ns.Modules.Colors
     cslow   = Colors and Colors.Get(specSlowKey)
     cbuffed = Colors and Colors.Get(specFastKey)
-  elseif mode == "mount" then
+  elseif mode == "mount" and ns.HasHeroicFeatures and ns.HasHeroicFeatures() then
+    -- Reglage reserve (cf. ns.HasHeroicFeatures) ; sinon retombe sur les defauts plus bas
     cslow   = mountColorSlow
     cbuffed = mountColorBuffed
   end
@@ -226,11 +214,7 @@ local function FlyOrbPos(index, orbRadius, startAngle, stepAngle)
   return math.cos(angle) * orbRadius, math.sin(angle) * orbRadius
 end
 
----------------------------------------------------------------------------
--- FABRIQUE DE COUCHE CIRCULAIRE
--- Crée un frame + CircularProgress attaché au ringAnchor.
--- texture = circleflat (plein), color, level dans le parent.
----------------------------------------------------------------------------
+-- Fabrique de couche circulaire : frame + CircularProgress attaché au ringAnchor
 local function MakeCircleLayer(parent, size, color, level, mirror)
   local f = CreateFrame("Frame", nil, parent)
   f:SetSize(size, size)
@@ -251,17 +235,14 @@ local function MakeCircleLayer(parent, size, color, level, mirror)
   return f, cp
 end
 
----------------------------------------------------------------------------
--- ANIMATION (slide-in / scale-in, easing expo-out)
----------------------------------------------------------------------------
+-- Animation (slide-in / scale-in, easing expo-out)
 
 --- Applique l'état courant de l'animation sur le container.
 local function AnimApply()
   if not container then return end
   if isLayoutMode then return end  -- ne pas lutter contre le drag
   local t = anim.progress
-  -- Ease-out-expo : démarre vite, se pose en douceur
-  -- (la même courbe lue à l'envers donne un ease-in naturel pour le hide)
+  -- Ease-out-expo (même courbe inversée pour le hide)
   local eased = (t <= 0) and 0 or (t >= 1) and 1 or (1.0 - 2^(-10.0 * t))
   local cfg    = GetCfg()
   local baseX  = cfg.x     or 0
@@ -308,9 +289,7 @@ local function AnimHide()
   end
 end
 
----------------------------------------------------------------------------
--- MISE À JOUR VITESSE + ASCENSION
----------------------------------------------------------------------------
+-- Mise à jour vitesse + ascension
 local function UpdateSpeed()
   local raw = GetForwardSpeed()
   -- Lissage exponentiel léger
@@ -321,7 +300,7 @@ local function UpdateSpeed()
   local now      = GetTime()
   local boosting = thrill and (now < ascentStart + ASCENT_DURATION)
 
-  -- ── Cercle de vitesse (pie fill) ────────────────────────────────────────
+  -- Cercle de vitesse (pie fill)
   local circleCol, textCol = GetDisplayColor(thrill ~= nil, boosting)
   local fraction = math.max(0, math.min(1, speed / MAX_SPEED))
   if fraction >= 0.005 then
@@ -332,7 +311,7 @@ local function UpdateSpeed()
     speedCP:Hide()
   end
 
-  -- ── Cacher à l'atterrissage ────────────────────────────────────────────
+  -- Cacher à l'atterrissage
   local cfg = GetCfg()
   if cfg.hideAtLanding then
     local isGliding = C_PlayerInfo.GetGlidingInfo()
@@ -342,18 +321,17 @@ local function UpdateSpeed()
       activateTime = GetTime()
       AnimShow()
     elseif wasAirborne and GetTime() < activateTime + 0.3 then
-      -- Micro-grace pour la phase de décollage uniquement (isGliding pas encore true).
-      -- À l'atterrissage isGliding=false immédiatement → on ne passe jamais ici.
+      -- Micro-grace décollage uniquement (à l'atterrissage isGliding=false immédiatement)
       AnimShow()
     else
-      -- Sol : cacher (smoothSpeed ignoré ici pour éviter le délai dû au lissage)
+      -- Sol : cacher (smoothSpeed ignoré pour éviter le délai du lissage)
       AnimHide()
     end
   else
     AnimShow()
   end
 
-  -- ── Texte vitesse (move%) ───────────────────────────────────────────────
+  -- Texte vitesse (move%)
   if speedText then
     if speed >= 1 then
       speedText:SetText(string.format("%.0f", speed * SPEED_TEXT_FACTOR))
@@ -363,7 +341,7 @@ local function UpdateSpeed()
     end
   end
 
-  -- ── Cercle d'ascension (pie fill, drain sur la durée du buff) ───────────
+  -- Cercle d'ascension (pie fill, drain sur la durée du buff)
   if boosting then
     local elapsed = now - ascentStart
     local p = math.max(0, 1 - elapsed / ASCENT_DURATION)
@@ -378,9 +356,7 @@ local function UpdateSpeed()
   end
 end
 
----------------------------------------------------------------------------
--- MISE À JOUR DES CHARGES DE VIGUEUR (6 orbes)
----------------------------------------------------------------------------
+-- Mise à jour des charges de vigueur (6 orbes)
 local function UpdateFlyCharges()
   local info    = C_Spell.GetSpellCharges(SURGE_FORWARD)
   local current = info and info.currentCharges or 0
@@ -404,9 +380,7 @@ local function UpdateFlyCharges()
   end
 end
 
----------------------------------------------------------------------------
--- MISE À JOUR SECOND SOUFFLE
----------------------------------------------------------------------------
+-- Mise à jour Second Souffle
 local function UpdateSecondSouffle()
   local info    = C_Spell.GetSpellCharges(SECOND_SOUFFLE)
   local current = info and info.currentCharges or 0
@@ -443,9 +417,7 @@ local function UpdateSecondSouffle()
   end
 end
 
----------------------------------------------------------------------------
--- TICK
----------------------------------------------------------------------------
+-- Tick
 local function OnTick()
   if not isActive then return end
   UpdateSpeed()
@@ -453,9 +425,7 @@ local function OnTick()
   UpdateSecondSouffle()
 end
 
----------------------------------------------------------------------------
--- VISIBILITÉ
----------------------------------------------------------------------------
+-- Visibilité
 local function ShowAll()
   AnimShow()
 end
@@ -471,18 +441,13 @@ local function Activate()
   wasAirborne  = false   -- pas encore en vol : grace period désactivée jusqu'au premier décollage
   activateTime = 0
   DbgLog("Activate (powerBarID=" .. tostring(UnitPowerBarID("player")) .. ")")
-  -- Si hideAtLanding : ne PAS appeler ShowAll() ici. UpdateSpeed() déclenchera AnimShow()
-  -- dès que la vitesse dépasse 1, évitant l'affichage au sol avant décollage.
+  -- Si hideAtLanding : ne pas ShowAll() ici, UpdateSpeed() déclenchera AnimShow() au décollage
   local cfg = GetCfg()
   if not cfg.hideAtLanding then
     ShowAll()
   end
-  -- container:OnUpdate ne tourne que si le container est visible. Si on n'a pas appelé ShowAll(),
-  -- on s'appuie sur animFrame (qui tourne toujours) pour déclencher le premier UpdateSpeed via
-  -- le flag isActive — sauf que animFrame n'appelle pas UpdateSpeed. Contournement : on Show()
-  -- le container silencieusement (alpha=0 via anim.progress=0) pour que son OnUpdate tourne.
   if cfg.hideAtLanding then
-    container:Show()   -- necessite d'être visible pour que OnUpdate tourne; alpha=0 car anim.progress=0
+    container:Show()   -- nécessaire pour que OnUpdate tourne ; alpha=0 tant que anim.progress=0
   end
   pcall(function()
     if EncounterBar and EncounterBar:IsVisible() then EncounterBar:Hide() end
@@ -516,9 +481,7 @@ local function CheckState()
   if dr then Activate() else Deactivate() end
 end
 
----------------------------------------------------------------------------
--- CRÉATION
----------------------------------------------------------------------------
+-- Création
 function Skyriding.Create()
   if container then return end
   local cfg = GetCfg()
@@ -530,10 +493,8 @@ function Skyriding.Create()
   local m2Size    = cfg.mask2Size or 85
   local txtSize   = cfg.textSize  or 14
 
-  ---------------------------------------------------------------------------
   -- Container
-  ---------------------------------------------------------------------------
-  container = CreateFrame("Frame", "AishaddonSkyridingFrame", UIParent)
+  container = CreateFrame("Frame", "AishCoreSkyridingFrame", UIParent)
   container:SetSize(10, 10)
   container:SetFrameStrata("MEDIUM")
   container:Hide()
@@ -542,9 +503,7 @@ function Skyriding.Create()
   container:SetMovable(true)
   container:EnableMouse(false)
 
-  ---------------------------------------------------------------------------
   -- Ring Anchor (centre du cercle, +20 y par rapport au container)
-  ---------------------------------------------------------------------------
   ringAnchor = CreateFrame("Frame", nil, container)
   ringAnchor:SetSize(bgSize, bgSize)
   ringAnchor:SetPoint("CENTER", container, "CENTER", 0, 20)
@@ -552,16 +511,7 @@ function Skyriding.Create()
 
   local base = ringAnchor:GetFrameLevel()
 
-  ---------------------------------------------------------------------------
-  -- STACKING (du plus bas au plus haut) :
-  --   1. BG               (cercle noir plein)
-  --   2. Speed circle      (cercle coloré, remplissage pie-chart animé)
-  --   3. Mask 1            (cercle noir plein, masque le centre de Speed)
-  --   4. Ascension circle  (cercle coloré, remplissage pie-chart animé)
-  --   5. Mask 2            (cercle noir plein, masque le centre d'Ascension)
-  --   6. Texte vitesse     (par-dessus tout)
-  --   7. Second Souffle    (par-dessus tout)
-  ---------------------------------------------------------------------------
+  -- Stacking (bas→haut) : BG, Speed, Mask1, Ascension, Mask2, Texte, Second Souffle
 
   -- 1 – BG
   bgFrame, bgCP = MakeCircleLayer(ringAnchor, bgSize, COL_BG, base + 1, true)
@@ -660,9 +610,7 @@ function Skyriding.Create()
     end
   end
 
-  ---------------------------------------------------------------------------
-  -- FLY CHARGES (6 orbes autour du cercle BG)
-  ---------------------------------------------------------------------------
+  -- Fly charges (6 orbes autour du cercle BG)
   do
     local orbSz   = cfg.orbSize      or FLY_ORB_SIZE
     local orbRad  = cfg.orbRadius    or (bgSize * ORB_RADIUS_RATIO)
@@ -699,16 +647,13 @@ function Skyriding.Create()
     end
   end
 
-  ---------------------------------------------------------------------------
   -- animFrame : ticker dédié à l'animation show/hide (tourne toujours)
-  ---------------------------------------------------------------------------
   animFrame = CreateFrame("Frame")
   anim.progress = 0
   anim.target   = 0
   local mountPollTimer = 0
   animFrame:SetScript("OnUpdate", function(_, dt)
-    -- ── Fallback de détection mount (si PLAYER_MOUNT_DISPLAY_CHANGED a raté) ──
-    -- Sonde IsDragonriding() toutes les 0.5 s quand le HUD est inactif.
+    -- Fallback détection mount : sonde IsDragonriding() toutes les 0.5s si HUD inactif
     if not isActive then
       mountPollTimer = mountPollTimer + dt
       if mountPollTimer >= 0.5 then
@@ -723,7 +668,7 @@ function Skyriding.Create()
       mountPollTimer = 0
     end
 
-    -- ── Animation du container (slide + scale global) ─────────────────────────
+    -- Animation du container (slide + scale global)
     if anim.progress ~= anim.target then
       local dir = anim.target > anim.progress and 1 or -1
       anim.progress = math.max(0.0, math.min(1.0, anim.progress + dir * anim.speed * dt))
@@ -731,7 +676,7 @@ function Skyriding.Create()
       -- NB : on ne cache JAMAIS via Hide() ici.
     end
 
-    -- ── Animation slide des orbes (ease-circ-out, extérieur → position finale) ──
+    -- Animation slide des orbes (ease-circ-out, extérieur → position finale)
     if not container then return end
     local cfg2       = GetCfg()
     local bgSz2      = cfg2.bgSize       or 120
@@ -763,10 +708,7 @@ function Skyriding.Create()
     end
   end)
 
-  ---------------------------------------------------------------------------
-  -- OnUpdate : animation fluide (chaque frame)
-  -- Fly charges + souffle ne changent pas à 60fps, on les poll moins souvent
-  ---------------------------------------------------------------------------
+  -- OnUpdate : animation fluide chaque frame ; fly charges/souffle pollés moins souvent
   local slowElapsed = 0
   container:SetScript("OnUpdate", function(_, dt)
     if not isActive then return end
@@ -779,9 +721,7 @@ function Skyriding.Create()
     end
   end)
 
-  ---------------------------------------------------------------------------
-  -- ÉVÉNEMENTS
-  ---------------------------------------------------------------------------
+  -- Événements
   local evtFrame = CreateFrame("Frame")
   evtFrame:RegisterEvent("UNIT_POWER_BAR_SHOW")
   evtFrame:RegisterEvent("UNIT_POWER_BAR_HIDE")
@@ -814,15 +754,13 @@ function Skyriding.Create()
     elseif event == "PLAYER_MOUNT_DISPLAY_CHANGED" then
       local _, cg = C_PlayerInfo.GetGlidingInfo()
       DbgLog("EVENT:PLAYER_MOUNT_DISPLAY_CHANGED canGlide=" .. tostring(cg))
-      -- L'API GetGlidingInfo peut ne pas être à jour au moment exact où l'event fire.
-      -- Re-vérifier après un court délai pour attraper le cas où canGlide devient true un frame plus tard.
+      -- GetGlidingInfo pas toujours à jour immédiatement : re-vérifier après un court délai
       C_Timer.After(0.5, CheckState)
     elseif event == "PLAYER_ENTERING_WORLD" then
       local isLogin, isReload = ...
       DbgLog("EVENT:PLAYER_ENTERING_WORLD login=" .. tostring(isLogin) .. " reload=" .. tostring(isReload))
     end
-    -- Au décollage : capturer les deux couleurs du dégradé de la monture
-    -- (UNIT_POWER_BAR_SHOW ne fire plus depuis un hotfix Blizzard → fallback sur PLAYER_MOUNT_DISPLAY_CHANGED)
+    -- Au décollage : capturer les couleurs du dégradé de la monture
     if (event == "UNIT_POWER_BAR_SHOW" or event == "PLAYER_MOUNT_DISPLAY_CHANGED") and IsDragonriding() and lastMountSpellId then
       local cs, cb = ComputeSpellGradient(lastMountSpellId)
       if cs then mountColorSlow   = EnforceBrightness(cs, 0.55, 0.72) end
@@ -835,17 +773,19 @@ function Skyriding.Create()
   CheckState()
 end
 
----------------------------------------------------------------------------
--- APPLY SETTINGS  (appelé lors de changements de config)
----------------------------------------------------------------------------
+-- Apply settings (appelé lors de changements de config)
 function Skyriding.IsActive()
   return isActive
 end
 
--- Vrai si le HUD Skyriding (notre roue) est actuellement affiché.
--- Suit le flag hudVisible (mis à jour par AnimShow/AnimHide avec debounce).
+-- Vrai si le HUD Skyriding est actuellement affiché (flag hudVisible, debounce)
 function Skyriding.HUDIsVisible()
   return hudVisible
+end
+
+-- Frame de survol (ModuleHoverOverlay) : ringAnchor, pas container (10x10 technique)
+function Skyriding.GetHoverFrame()
+  return ringAnchor
 end
 
 function Skyriding.ApplySettings()
@@ -940,9 +880,7 @@ function Skyriding.ApplySettings()
   CheckState()
 end
 
----------------------------------------------------------------------------
--- MODE LAYOUT (repositionnement par drag)
----------------------------------------------------------------------------
+-- Mode layout (repositionnement par drag)
 local layoutHighlight = nil
 
 function Skyriding.SetLayoutMode(enable)
@@ -975,9 +913,7 @@ function Skyriding.SetLayoutMode(enable)
     end
     layoutHighlight:Show()
 
-    -- Drag manuel via delta curseur : évite tout problème de conversion de
-    -- coordonnées lié au scale du container (StartMoving/StopMovingOrSizing
-    -- retournent des valeurs dans l'espace local du frame, pas UIParent).
+    -- Drag manuel via delta curseur (StartMoving retourne des coords locales, pas UIParent)
     layoutHighlight:EnableMouse(true)
     local dragging     = false
     local dMouseX0, dMouseY0 = 0, 0   -- position curseur au début du drag (pixels écran)
@@ -995,13 +931,12 @@ function Skyriding.SetLayoutMode(enable)
     layoutHighlight:SetScript("OnMouseUp", function(self, btn)
       if btn ~= "LeftButton" then return end
       dragging = false
-      -- Les valeurs DB sont déjà à jour (écrites au fil du OnUpdate).
-      -- Mettre à jour les champs X/Y du panneau de config.
+      -- Valeurs DB déjà à jour (écrites au fil du OnUpdate) ; sync les champs X/Y du panneau
       local db = ns.DB.skyriding or {}
-      local xEb = _G["AishaddonSRXEditBox"]
-      local yEb = _G["AishaddonSRYEditBox"]
-      if xEb then xEb:SetText(tostring(db.x or 0)) end
-      if yEb then yEb:SetText(tostring(db.y or 0)) end
+      local xSl = _G["AishCoreSRPosXSlider"]
+      local ySl = _G["AishCoreSRPosYSlider"]
+      if xSl then xSl:SetValue(db.x or 0) end
+      if ySl then ySl:SetValue(db.y or 0) end
     end)
 
     layoutHighlight:SetScript("OnUpdate", function()
@@ -1029,9 +964,7 @@ function Skyriding.SetLayoutMode(enable)
   end
 end
 
----------------------------------------------------------------------------
--- PREVIEW (affiché lors de l'ouverture du panneau de configuration)
----------------------------------------------------------------------------
+-- Preview (affiché lors de l'ouverture du panneau de configuration)
 function Skyriding.SetPreview(on)
   if not container then return end
   previewActive = on
@@ -1086,9 +1019,7 @@ function Skyriding.SetPreview(on)
   end
 end
 
----------------------------------------------------------------------------
--- DEBUG DUMP  (/aishdebug sky)
----------------------------------------------------------------------------
+-- Debug dump (/aishdebug sky)
 function Skyriding.DebugDump()
   local function yn(v) return v and "|cff00ff00OUI|r" or "|cffff4444NON|r" end
   local sep = "|cff00ccff[Sky Debug]|r"

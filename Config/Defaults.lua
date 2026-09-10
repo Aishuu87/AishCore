@@ -40,6 +40,9 @@ ns.Defaults = {
     -- Arc circulaire (circle_piecrop) + overlay masque centre
     arcSizeRatio = 1.0,  -- taille de l'arc par rapport a cfg.size
     overlayRatio = 0.75, -- taille de l'overlay par rapport a l'arc (0.0 - 0.99)
+    -- [EXPERIMENTAL] Remplissage radial (horaire, depuis midi) au lieu du
+    -- remplissage vertical bas->haut. Bascule via /rcradial. Voir ResourceCircle.lua.
+    radialFillTest = false,
     -- Arc secondaire de stagger (Moine Brasseur)
     staggerArcRatio     = 0.72,  -- taille relative a arcPx (doit tenir dans le trou de l'overlay)
     staggerOverlayRatio = 0.76,  -- overlay interne du cercle de stagger
@@ -48,16 +51,31 @@ ns.Defaults = {
     consecrationArcEnabled = true,  -- Pala Prot (specID 66) : Consécration
     ignorePainArcEnabled   = true,  -- Guerrier Prot (specID 73) : Dur au mal
     dndArcEnabled          = true,  -- DK Sang (specID 250) : sort 188290
+    manaTeaArcEnabled      = true,  -- Moine Mistweaver (specID 270) : Thé de Mana
+    -- Devourer (specID 1480) : opt-in, feature neuve pas encore confirmee en jeu
+    devourerArcEnabled     = false,
+    -- Evoker Augmentation (specID 1473) : idem, opt-in par defaut
+    ebonyPowerArcEnabled   = false,
     durationArcRatio        = 0.72, -- taille de l'arc de durée (identique au stagger par défaut)
     durationArcOverlayRatio = 0.76, -- épaisseur (overlay intérieur)
     durationArcColorR = nil,  -- nil = couleur par défaut du spec
     durationArcColorG = nil,
     durationArcColorB = nil,
+    -- Contenu de l'arc de durée pour Guerrier Prot (specID 73) : false (défaut) =
+    -- décompte le temps restant ; true = rempli selon le nombre de stacks de
+    -- Dur au Mal (approximation de l'absorption restante, cf. CenterArc.lua)
+    ignorePainArcAbsorb = false,
     -- Texte de ressource secondaire (Bone Shield, Soul Fragments, Dévoreur…)
     secResTextSize    = 11,  -- taille police
     secResTextOffsetX =  0,  -- décalage horizontal par rapport au texte de ressource
     secResTextOffsetY = -2,  -- décalage vertical (négatif = vers le bas)
     secResFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    secResDecoStyle   = "dash", -- cf. ns.SEC_RES_DECO_STYLES dans ResourceCircle.lua
+    secResDecoSpacing = 4,      -- espace (px) entre le texte et chaque déco
+    secResDecoFont    = nil,    -- nil = reprend secResFont
+    -- Abrège les grands nombres de la ressource secondaire (ex: absorb Dur au Mal :
+    -- 12345 -> "12.3k") via AbbreviateNumbers. false = nombre brut.
+    secResAbsorbAbbreviate = false,
     -- Globes de Puissance Sacrée en spé Protection / Vindicte
     holyPowerAllSpecs = false,
     -- Globes d'Essence en spé Dévastation / Augmentation
@@ -125,6 +143,8 @@ ns.Defaults = {
     -- Arc circulaire (circle_piecrop) + overlay masque centre
     arcSizeRatio = 1.0,  -- taille de l'arc par rapport a cfg.size (0.5 - 1.0)
     overlayRatio = 0.75, -- taille de l'overlay par rapport a l'arc (0.0 - 0.99)
+    -- [EXPERIMENTAL] Remplissage radial (comme resourceCircle) au lieu du vertical.
+    radialFillTest = false,
     -- Globes de Puissance Sacrée en spé Protection / Vindicte (hors combat)
     holyPowerAllSpecs = false,
     -- Globes d'Essence en spé Dévastation / Augmentation (hors combat)
@@ -155,11 +175,97 @@ ns.Defaults = {
       bgRot = 14, bgW = 244, bgH = 97, bgOffX = -100, bgOffY = 37,
     },
     fontLevel = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    levelOutlineStyle = "OUTLINE",
+  },
+
+  -- Fiche de personnage enrichie : agrandissement + fond derriere le modele,
+  -- recoloration ilvl/enchant + gemmes/durabilite/alertes, indicateur de transmog.
+  characterArmory = {
+    enabled = true,
+
+    -- zoneWidth = delta ajoute entre les 2 colonnes d'equipement (translate, pas resize)
+    layoutEnabled = true,
+    zoneWidth   = 0,    -- ecart AJOUTE entre les 2 colonnes d'equipement (0 = disposition Blizzard par defaut)
+    -- 444 = hauteur "expanded" native Blizzard, slider resserre autour de cette valeur
+    frameHeight = 444,
+    modelScale  = 1.0,
+    hideCorners = true, -- masque les coins de fond par defaut de Blizzard
+
+    showWarning = true, -- SLE : toggle unique "Affiche l'icone d'avertissement"
+
+    -- Niveau d'objet
+    ilvl = {
+      colorType = "QUALITY", -- "NONE" | "QUALITY" | "GRADIENT" (vs ilvl moyen equipe)
+      xOffset = 0, yOffset = 0,
+      font = nil, fontSize = 12, fontStyle = "OUTLINE", -- font nil = ns.Media.fontGui
+    },
+
+    -- Niveau d'objet GLOBAL (texte agrege natif Blizzard, distinct du ilvl par objet ci-dessus)
+    globalIlvl = {
+      enabled = false,
+      font = nil, fontSize = 14, fontStyle = "OUTLINE", -- font/fontStyle nil = valeurs natives Blizzard
+      color = nil, -- nil = couleur native Blizzard
+      useSpecColor = false, -- force Couleurs > Cercle de Puissance a la place de "color"
+    },
+
+    -- Chaine d'enchantement
+    enchant = {
+      showReal = true, -- texte "reel" (avec icone de qualite crafting) via scan tooltip, au lieu du texte court de Blizzard
+      iconOnly = false, -- si showReal : masque le nom de l'enchant, garde uniquement l'icone de qualite
+      font = nil, fontSize = 12, fontStyle = "OUTLINE",
+      xOffset = 0, yOffset = 0,
+    },
+
+    -- Base de gemme
+    gem = {
+      size = 14, xOffset = 0, yOffset = 0,
+      showTooltips = true, -- pas de toggle chez SLE (tooltip toujours actif) ; garde d'AishCore
+    },
+
+    -- Transmogrification
+    transmog = {
+      enableArrow = true,  -- icone cliquable sur le slot
+      enableGlow  = true,
+      glowStyleIdx = 2,    -- index dans ns.GLOW_DEFS (1 = "Aucun" = pas de glow)
+      glowOffset  = 1,
+      glowColor   = { 1, 0.82, 0, 0.8 },
+      iconSize    = 14,
+    },
+
+    -- Degrade : quad teinte derriere l'icone, distinct de la couleur du texte ilvl
+    gradient = {
+      enable = true,
+      color = { 0.41, 0.83, 1 },
+      quality = false,          -- true = couleur de rarete de l'objet au lieu de `color`
+      setArmor = false, setArmorColor = { 0, 1, 0 },
+      warningColor    = { 1, 0.2, 0.2 }, -- teinte du quad quand une alerte est active sur le slot
+      warningBarColor = { 1, 0.2, 0.2 }, -- couleur de la barre d'alerte elle-meme
+    },
+
+    -- Durabilite
+    durability = {
+      display = "Always", -- "Always" | "DamagedOnly" | "Hide"
+      font = nil, fontSize = 10, fontStyle = "OUTLINE",
+      xOffset = 0, yOffset = 0,
+      warnPct = 30, -- en dessous de ce %, le texte de durabilite passe en rouge
+    },
+
+    -- Fond (derriere le modele 3D)
+    background = {
+      selectedBG = "Space", -- HIDE | CUSTOM | CLASS | Arena-bliz | Space | TheEmpire | Castle | Alliance-text | Horde-text
+      customTexture = "",
+    },
   },
 
   -- Effets 3D de spells (Animations)
   spellEffects = {
     enabled = true,
+    -- Décorations "Orbes" (globes autour du cercle de ressource selon l'état
+    -- de la ressource de classe : combo points, runes, essence...) : flag
+    -- indépendant de `enabled` ci-dessus (qui couvre aussi les animations
+    -- d'impact de sort) pour permettre de couper l'un sans l'autre depuis la
+    -- page "Modules". Lu par GetValidOrbKeys() dans SpellEffects.lua.
+    orbsEnabled = true,
     modelSize = 200,
     -- Ancien format compat (sera ignoré si combos existe)
     spells = {},  -- vide par défaut ; les anciens IDs (8004, 17364) ont été retirés
@@ -174,21 +280,25 @@ ns.Defaults = {
     oocCombos = {},
   },
 
-  -- Assistant de rotation : icones des sorts highlightes
+  -- Assistant de rotation : icone du sort highlighte, miroir du highlight Blizzard
   rotationHelper = {
-    enabled = false,
+    enabled = true,
     iconSize = 40,
-    iconSpacing = 4,
-    maxIcons = 8,
     anchor = "TOP",
     x = 0,
     y = -220,
-    growDirection = "RIGHT",  -- RIGHT ou LEFT
+    -- Glow : meme systeme que priorityBar (LOOP_GLOW_TYPES). 2="Pulse" (texture fixe,
+    -- toujours presente) car les types flipbook atlas ne sont pas garantis sur tous les clients.
+    loopGlowIndex = 2,
+    glowColor = { 1, 0.85, 0, 0.8 },
+    glowSize = 4,
+    useSpecGlowColor = false,  -- si true, utilise la couleur Glow du module Couleurs (spec active)
+    -- Visibilite : memes reglages que priorityBar
+    visibilityMode = "combat",
+    alwaysInInstance = false,
+    ignoreWhileResting = false,  -- zone de repos : meme logique que MissingBuffs.lua, opt-in
   },
 
-  -- Priority Slots : 4 icones fixes autour du cercle de ressource
-  -- Chaque slot contient une liste de spellIDs ordonnes par priorite
-  -- Le sort highlight prend la priorite d'affichage, sinon le premier est affiche
   -- Priority Bar : 4 icones fixes (2 gauche + 2 droite du cercle de ressource)
   priorityBar = {
     enabled = true,
@@ -234,6 +344,111 @@ ns.Defaults = {
     slotsBySpec = {},
     -- Layout par specialisation (specID → layout ID string, e.g. "2x2")
     layoutBySpec = {},
+    -- Tooltip au survol des icones de buff/debuff (module Auras) : par defaut
+    -- toujours visible. Si true, en combat le tooltip n'apparait que tant
+    -- qu'ALT est maintenu (evite de saturer l'ecran de tooltips en plein
+    -- combat) ; hors combat, il reste toujours visible au survol.
+    tooltipAltCombatOnly = false,
+  },
+
+  -- Cooldown Manager Essentiels / Utilitaires : personnalisation des viewers natifs Blizzard
+  -- (meme forme pour cdmEssential / cdmUtility, valeurs independantes)
+  cdmEssential = {
+    enabled = false,  -- opt-in : evite un changement de comportement surprise a l'install
+    -- Layout / grille
+    growUp = true, growRight = false,
+    gridLayoutType = 3,      -- 1=centre / 2=standard / 3=standard (garde l'espace vide)
+    hideWhenInactive = 1,    -- 1=jamais masquer / 2=sauf aura / 3=sauf CD/aura/charges
+    strideOverride = 0,      -- 0=stride natif Blizzard / N=force N icones par ligne (evite le retour a la ligne)
+    useItemSize = false, itemSize = 40,
+    -- Couleurs par etat (icone)
+    useNormalColor = false, normalColor = { 1, 1, 1, 1 },             normalDesaturate = false,
+    useCdColor     = false, cdColor     = { 0.6, 0.6, 0.6, 1 },       cdDesaturate     = true,
+    useGcdColor    = false, gcdColor    = { 0.8, 0.8, 0.8, 1 },       gcdDesaturate    = false,
+    useOorColor    = false, oorColor    = { 0.64, 0.15, 0.15, 1 },    oorDesaturate    = false,
+    useOomColor    = false, oomColor    = { 0.5, 0.5, 1.0, 1 },       oomDesaturate    = false,
+    useNouseColor  = false, nouseColor  = { 0.4, 0.4, 0.4, 1 },       nouseDesaturate  = true,
+    useAuraColor   = false, auraColor   = { 0.3, 0.8, 0.0, 1 },       auraDesaturate   = false,
+    -- Bordure / backdrop
+    useBackdrop = false, backdropSize = 1, backdropColor = { 0, 0, 0, 1 },
+    useBackdropAuraColor = false, backdropAuraColor = { 0.3, 0.8, 0.0, 1 },
+    useBackdropPandemicColor = false, backdropPandemicColor = { 0.8, 0.3, 0.0, 1 },
+    -- Cooldown swipe
+    useCooldownColor = false, cooldownColor = { 0, 0, 0, 0.5 },
+    useCooldownAuraColor = false, cooldownAuraColor = { 0, 0, 0, 0.5 },
+    reverseSwipe = false, auraReverseSwipe = false,
+    removeGCDSwipe = false, auraRemoveSwipe = false,
+    -- Pandemie
+    removePandemic = false,
+    -- Decompte (Cooldown:GetCountdownFontString())
+    useCooldownFontColor = false, cooldownFontColor = { 1, 1, 1, 1 },
+    cooldownFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    useCooldownFontSize = false, cooldownFontSize = 17,
+    cooldownPoint = "CENTER", cooldownOffsetX = 0, cooldownOffsetY = 0,
+    -- Stacks (child.Applications -- compteur de stacks d'aura)
+    useStacksColor = false, stacksColor = { 1, 1, 1, 1 },
+    stacksFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    useStacksFontSize = false, stacksFontSize = 16,
+    stacksPoint = "BOTTOMRIGHT", stacksOffsetX = 0, stacksOffsetY = 0,
+    -- Charges (child.ChargeCount -- compteur de charges de sort)
+    useChargesColor = false, chargesColor = { 1, 1, 1, 1 },
+    chargesFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    useChargesFontSize = false, chargesFontSize = 16,
+    chargesPoint = "BOTTOMRIGHT", chargesOffsetX = 0, chargesOffsetY = 0,
+    showCountdownNumbersForCharges = true,
+    -- Masque d'icone (1..5, atlas Blizzard uniquement)
+    iconMaskIndex = 1,
+    -- Fondu (fading) : opacite selon combat / cible / incantation / survol
+    useFading = false, fadeAlpha = 0.35,
+    fadeInCombat = false, fadeOnTarget = false, fadeOnCasting = false, fadeOnHover = true,
+  },
+  cdmUtility = {
+    enabled = false,
+    growUp = true, growRight = false,
+    gridLayoutType = 3,
+    hideWhenInactive = 1,
+    strideOverride = 0,
+    useItemSize = false, itemSize = 40,
+    useNormalColor = false, normalColor = { 1, 1, 1, 1 },             normalDesaturate = false,
+    useCdColor     = false, cdColor     = { 0.6, 0.6, 0.6, 1 },       cdDesaturate     = true,
+    useGcdColor    = false, gcdColor    = { 0.8, 0.8, 0.8, 1 },       gcdDesaturate    = false,
+    useOorColor    = false, oorColor    = { 0.64, 0.15, 0.15, 1 },    oorDesaturate    = false,
+    useOomColor    = false, oomColor    = { 0.5, 0.5, 1.0, 1 },       oomDesaturate    = false,
+    useNouseColor  = false, nouseColor  = { 0.4, 0.4, 0.4, 1 },       nouseDesaturate  = true,
+    useAuraColor   = false, auraColor   = { 0.3, 0.8, 0.0, 1 },       auraDesaturate   = false,
+    useBackdrop = false, backdropSize = 1, backdropColor = { 0, 0, 0, 1 },
+    useBackdropAuraColor = false, backdropAuraColor = { 0.3, 0.8, 0.0, 1 },
+    useBackdropPandemicColor = false, backdropPandemicColor = { 0.8, 0.3, 0.0, 1 },
+    useCooldownColor = false, cooldownColor = { 0, 0, 0, 0.5 },
+    useCooldownAuraColor = false, cooldownAuraColor = { 0, 0, 0, 0.5 },
+    reverseSwipe = false, auraReverseSwipe = false,
+    removeGCDSwipe = false, auraRemoveSwipe = false,
+    removePandemic = false,
+    useCooldownFontColor = false, cooldownFontColor = { 1, 1, 1, 1 },
+    cooldownFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    useCooldownFontSize = false, cooldownFontSize = 17,
+    cooldownPoint = "CENTER", cooldownOffsetX = 0, cooldownOffsetY = 0,
+    useStacksColor = false, stacksColor = { 1, 1, 1, 1 },
+    stacksFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    useStacksFontSize = false, stacksFontSize = 16,
+    stacksPoint = "BOTTOMRIGHT", stacksOffsetX = 0, stacksOffsetY = 0,
+    useChargesColor = false, chargesColor = { 1, 1, 1, 1 },
+    chargesFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    useChargesFontSize = false, chargesFontSize = 16,
+    chargesPoint = "BOTTOMRIGHT", chargesOffsetX = 0, chargesOffsetY = 0,
+    showCountdownNumbersForCharges = true,
+    iconMaskIndex = 1,
+    useFading = false, fadeAlpha = 0.35,
+    fadeInCombat = false, fadeOnTarget = false, fadeOnCasting = false, fadeOnHover = true,
+  },
+
+  -- Visibilite : opacite d'elements tiers (ElvUI...) ajustee via SetAlpha (pas de lockdown combat)
+  visibility = {
+    -- Zone de buffs ElvUI (ElvuiPlayerBuffs)
+    elvuiBuffsEnabled       = true,
+    elvuiBuffsOocAlpha      = 0.2,  -- opacite hors combat
+    elvuiBuffsCombatAlpha   = 1.0,  -- opacite en combat
+    elvuiBuffsHoverReveal   = true, -- survol = 100% temporairement
   },
 
   -- Barre de cast joueur
@@ -255,7 +470,9 @@ ns.Defaults = {
     colorBySchool = false,
     barColor      = { 0.471, 0.392, 0.271, 1 },
     font          = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    nameOutlineStyle = "OUTLINE",
     timerFont     = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    timerOutlineStyle = "OUTLINE",
   },
 
   -- Barre de cast cible
@@ -276,7 +493,9 @@ ns.Defaults = {
     timerOffY     = 2,
     timerJustify  = "RIGHT",
     font          = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    nameOutlineStyle = "OUTLINE",
     timerFont     = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    timerOutlineStyle = "OUTLINE",
     colorInterruptible    = { 0, 0.78, 0.78, 1 },        -- turquoise
     colorImportant        = { 0.855, 0.239, 1, 1 },       -- #DA3DFF
     colorNotInterruptible = { 0.765, 0.294, 0.290, 1 },   -- #C34B4A
@@ -300,9 +519,11 @@ ns.Defaults = {
     dotGap           = 3,
     textSize         = 8,
     font             = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    hpOutlineStyle   = "OUTLINE",
     hpDisplayMode    = "pct",  -- "pct" = pourcentage 0-100, "value" = valeur abreviee
     nameSize         = 14,
     nameFont         = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    nameOutlineStyle = "OUTLINE",
     useTankHeight    = false,
     tankHeight       = 8,
     bgColor = { 0.0549, 0.0549, 0.0549, 1 },  -- #0e0e0e
@@ -338,6 +559,28 @@ ns.Defaults = {
         nameOffX = 0, nameOffY = 2,
       },
     },
+  },
+
+  -- Numero de sous-groupe de raid (1-8), overlay RAID uniquement (jamais solo/groupe simple)
+  groupNumber = {
+    enabled = true,
+    badgeSize = 28,
+    badgePosition = "TOP",  -- ancrage sur le conteneur de groupe ElvUI (mode multi-vignettes)
+    badgeX = -260, badgeY = -95, -- pres de la barre "player" par defaut
+    badgeColor = { 0, 0, 0, 0.85 },
+    font = nil, -- nil = ns.Media.font
+    textSize = 16,
+    textOutlineStyle = "OUTLINE",
+    textColor = { 1, 1, 1, 1 },
+    textOffsetX = 0, textOffsetY = 0,
+  },
+
+  -- Curseur en combat, cf. Modules/BigCursor.lua. cursorSize est un INDEX
+  -- Blizzard (pas un facteur d'echelle continu), valeurs valides 1-4
+  -- (CooldownFrameSize[-1..4] = 64,64,96,128,192,256px -- 2 = taille par defaut).
+  bigCursor = {
+    enabled = true,
+    cursorSize = 2,
   },
 
   -- Barre de cible détaillée (haut d'écran) + cible de la cible
@@ -404,6 +647,7 @@ ns.Defaults = {
       -- Police stacks
       countFont        = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Bold.ttf",
       countFontSize    = 10,
+      countOutlineStyle = "OUTLINE",
       countColor       = { 1, 1, 1, 1 },
       countAnchor      = "BOTTOMRIGHT",
       countRelPoint    = "BOTTOMRIGHT",
@@ -442,6 +686,7 @@ ns.Defaults = {
       -- Police stacks
       countFont        = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Bold.ttf",
       countFontSize    = 10,
+      countOutlineStyle = "OUTLINE",
       countColor       = { 1, 1, 1, 1 },
       countAnchor      = "BOTTOMRIGHT",
       countRelPoint    = "BOTTOMRIGHT",
@@ -481,6 +726,64 @@ ns.Defaults = {
     mask2Size     = 85,   -- masque 2 (couvre le centre de l'ascension)
     textSize      = 14,   -- taille police vitesse
     font          = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+  },
+
+  -- Mode AFK : ecran plein ecran affiche quand le joueur passe AFK, remplace l'ecran natif.
+  -- "elements" : config par item (texte/blason), anchor = point standard sur l'ECRAN ENTIER.
+  afkMode = {
+    enabled = true,
+
+    -- Panneaux haut/bas + animation d'entree
+    animType          = "slideIn", -- "none" | "slideIn" | "slideSide"
+    animTime          = 0.3,       -- secondes (0 = pas d'animation)
+    animBounce        = true,
+    panelTopHeight    = 60,
+    panelBottomHeight = 100,
+    panelBgColor      = { 0, 0, 0, 0.85 },
+
+    -- Modele 3D du joueur
+    modelEnabled  = true,
+    modelAnim     = "wave", -- wave | dance | salute | talk | shy | roar | lean | random
+    modelDistance = 4.5,
+    modelRotation = 0,
+    modelXOffset  = -60,  -- decalage du support du modele (coin bas-droit du panneau bas)
+    modelYOffset  = 0,
+
+    timerCountdown = false, -- false = chrono qui monte, true = compte a rebours (deconnexion 30 min)
+    tipThrottle    = 12,    -- secondes entre 2 astuces
+
+    -- Couleur d'accent (date, ":" de l'heure, chevrons de guilde...) — pas
+    -- un "element" (pas de position/taille propre, juste une teinte reutilisee
+    -- a plusieurs endroits). useThemeColors=true l'ignore et reutilise la
+    -- couleur "texte de puissance" (Colors.Get("powertext")) de la spe active.
+    accentColor    = { 0, 0.667, 1, 1 }, -- bleu clair par defaut (= 00AAFF)
+    useThemeColors = false,
+    themeColorKey  = "powertext", -- quel element du module Couleurs utiliser quand useThemeColors=true
+
+    -- Divers
+    cameraSpin     = true,
+    chatShow       = true,
+    exitOnKeypress = true,
+
+    -- Elements individuels (textes + blasons/logos). useSpecColor/specColorKey : pioche la
+    -- couleur dans le module Couleurs (ELEMENT_KEYS) au lieu d'une couleur fixe.
+    elements = {
+      timer       = { enable = true, font = nil, size = 20, color = {1,1,1,1},       anchor = "TOP",         x = 0,   y = -8,  outlineStyle = "OUTLINE", useSpecColor = false, specColorKey = "powercircle" },
+      playerName  = { enable = true, font = nil, size = 16, color = {1,1,1,1},       anchor = "BOTTOMLEFT",  x = 12,  y = 60,  outlineStyle = "OUTLINE", useSpecColor = false, specColorKey = "powercircle" },
+      playerClass = { enable = true, font = nil, size = 13, color = {1,1,1,1},       anchor = "BOTTOMLEFT",  x = 12,  y = 44,  outlineStyle = "OUTLINE", useSpecColor = false, specColorKey = "powercircle" },
+      playerLevel = { enable = true, font = nil, size = 13, color = {1,1,1,1},       anchor = "BOTTOMLEFT",  x = 12,  y = 28,  outlineStyle = "OUTLINE", useSpecColor = false, specColorKey = "powercircle" },
+      guild       = { enable = true, font = nil, size = 12, color = {0.7,0.7,0.7,1}, anchor = "BOTTOMLEFT",  x = 12,  y = 12,  outlineStyle = "OUTLINE", useSpecColor = false, specColorKey = "powercircle" },
+      date        = { enable = true, font = nil, size = 12, color = {1,1,1,1},       anchor = "TOPRIGHT",    x = -12, y = -8,  format = "dayMonth", outlineStyle = "OUTLINE", useSpecColor = false, specColorKey = "powercircle" }, -- "dayMonth" ("28 Aout, Vendredi") | "monthDay" ("Aout 28, Vendredi")
+      time        = { enable = true, font = nil, size = 12, color = {1,1,1,1},       anchor = "TOPRIGHT",    x = -12, y = -24, outlineStyle = "OUTLINE", useSpecColor = false, specColorKey = "powercircle" },
+      tips        = { enable = true, font = nil, size = 11, color = {1,1,1,1},       anchor = "BOTTOM",      x = 0,   y = 8,   lineWidth = 500, useSpecColor = false, specColorKey = "powercircle" }, -- largeur de retour a la ligne (ScrollingMessageFrame)
+
+      crestClass    = { enable = true,  style = "sltheme",  anchor = "BOTTOMRIGHT", x = -220, y = 8, width = 40, height = 40 },
+      crestFaction  = { enable = true,  style = "blizzard", anchor = "BOTTOMRIGHT", x = -176, y = 8, width = 40, height = 40 },
+      logoFaction   = { enable = false, style = "blizzard", anchor = "BOTTOMLEFT",  x = 12,   y = 8, width = 64, height = 64 },
+      crestRace     = { enable = true,  style = "blizzard", anchor = "BOTTOMRIGHT", x = -132, y = 8, width = 40, height = 40 },
+      logoExpansion = { enable = true,  style = "auto",     anchor = "TOPLEFT",     x = 12,   y = -8, width = 96, height = 32 },
+      aishLogo      = { enable = false,                     anchor = "TOPRIGHT",    x = -12,  y = -44, width = 48, height = 48 }, -- texture fixe, pas de "style"
+    },
   },
 
   -- Thèmes par spécialisation (specID)
@@ -524,5 +827,12 @@ ns.Defaults = {
   minimapButton = {
     angle = 225,   -- position angulaire en degrés autour de la minimap
     hidden = false,
+  },
+
+  -- Etat de la page "Modules" : categoryOff = categories desactivees en bloc,
+  -- snapshot = etat individuel sauvegarde pour restaurer au lieu de tout remettre ON
+  modulesPanel = {
+    categoryOff = {},
+    snapshot = {},
   },
 }

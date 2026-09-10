@@ -1,6 +1,4 @@
--- AishUIAura/Features/Auras/Debuffs.lua
--- Aegis (miroir) + Berserk (dual) — layouts centraux sous le cercle
-------------------------------------------------------------------------
+-- Debuffs.lua : Aegis (miroir) + Berserk (dual), layouts centraux sous le cercle
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 local Debuffs = {}
@@ -14,30 +12,14 @@ local function Dims()
            c.gap or 12, c.pairGap or 6, c.rowGap or 3
 end
 
--- Helper top-level : évite closure pcall à chaque survol souris.
-local function _SetUnitAuraTooltip(unit, instID, filter)
-    GameTooltip:SetUnitAura(unit, instID, filter)
-end
-
-local function OnEnter(self)
-    if GameTooltip:IsForbidden() or not self:IsVisible() then return end
-    GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT", 5, -5)
-    if self.unit and self.auraInstanceID then
-        pcall(_SetUnitAuraTooltip, self.unit, self.auraInstanceID,
-            self.unit == "player" and "HELPFUL" or "HARMFUL")
-    end
-    GameTooltip:Show()
-end
-local function OnLeave()
-    if not GameTooltip:IsForbidden() then GameTooltip:Hide() end
-end
-
 local function MakeIcon(parent, w, h)
     local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
     local ib = CreateFrame("Button", nil, parent)
     ib:SetSize(w, h)
-    ib:SetScript("OnEnter", OnEnter)
-    ib:SetScript("OnLeave", OnLeave)
+    -- Insets négatifs : élargit la zone de survol pour éviter une fine bande morte au tooltip
+    ib:SetHitRectInsets(-1, -1, -1, -1)
+    ib:SetScript("OnEnter", ns.AuraIconOnEnter)
+    ib:SetScript("OnLeave", ns.AuraIconOnLeave)
 
     local icon = ib:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
@@ -45,6 +27,7 @@ local function MakeIcon(parent, w, h)
 
     local cd = CreateFrame("Cooldown", nil, ib, "CooldownFrameTemplate")
     cd:SetAllPoints(ib)
+    cd:EnableMouse(false) -- purement visuel (swipe) : ne doit jamais intercepter le survol de ib
     cd:SetHideCountdownNumbers(true); cd:SetReverse(true)
     cd:SetDrawSwipe(cfg.swipeEnabled == true); cd:SetDrawEdge(cfg.swipeEnabled == true)
 
@@ -69,8 +52,7 @@ local function MakeIcon(parent, w, h)
     st:Hide()
     ib._stackText = st
 
-    -- Charges text (sublevel 7, configurable font) — charges de sort (Ice Barrier, Blink, etc.)
-    -- Position et couleur indépendantes des stacks pour différencier visuellement
+    -- Charges text (sublevel 7) — charges de sort, position/couleur indépendantes des stacks
     local ct = ib:CreateFontString(nil, "OVERLAY", nil, 7)
     ns.ApplyFont(ct, cfg.chargesFont or ns.Media.font, cfg.chargesSize or 10, "OUTLINE")
     ct:SetPoint(cfg.chargesPos or "TOPLEFT", ib, cfg.chargesPos or "TOPLEFT", cfg.chargesOffX or 0, cfg.chargesOffY or 0)
@@ -123,11 +105,7 @@ local function MakeSpark(parent)
     local r, g, b = ns.sparkColor[1], ns.sparkColor[2], ns.sparkColor[3]
     local userOverride = cfg.sparkColorR ~= nil
     if userOverride then r, g, b = cfg.sparkColorR, cfg.sparkColorG or 0.5, cfg.sparkColorB or 0.5 end
-    -- CRITICAL : quand l'utilisateur force une couleur (via le color picker ou le gradient),
-    -- il faut désaturer l'atlas pour que SetVertexColor donne vraiment la couleur demandée.
-    -- Sans ça, SetVertexColor(1,0,0) sur le honor spark (jaune-doré natif) donne du rouge
-    -- très sombre car les canaux sont multipliés avec la teinte native de l'atlas.
-    -- On désature seulement si override actif pour garder le look natif par défaut.
+    -- Désature l'atlas avant teinte, sinon SetVertexColor se multiplie avec sa couleur native
     if userOverride or cfg.sparkGradient then
         pcall(function() s:SetDesaturated(true) end)
     end
@@ -145,55 +123,55 @@ local function MakeSpark(parent)
     else
         s:SetVertexColor(r, g, b, cfg.sparkAlpha or 0.9)
     end
-    -- Memorise la ref du spark 2D sur le barWrap pour que le spark FX3D
-    -- (ShowSparkModel dans SpellEffects.lua) puisse s'ancrer dessous.
+    -- Memorise la ref pour que le spark FX3D (ShowSparkModel) puisse s'ancrer dessous
     parent._spark2D = s
     return s
 end
 
-------------------------------------------------------------------------
--- GLOW (design pattern)
-------------------------------------------------------------------------
 local function EnsureGlow(ib)
     if ib._glowSetup then return end
-    ib._glowSetup = true
-    local gc = CreateFrame("Frame", nil, ib)
-    gc:SetFrameLevel(ib:GetFrameLevel() + 2)
-    ib._glowContainer = gc
-    local pulse = gc:CreateTexture(nil, "OVERLAY", nil, 1)
-    pulse:SetBlendMode("ADD"); pulse:SetAlpha(0); pulse:Hide()
-    ib._glowPulse = pulse
-    local ag = pulse:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
-    local anim = ag:CreateAnimation("Alpha"); anim:SetSmoothing("IN_OUT")
-    ib._glowPulseAG = ag; ib._glowPulseAnim = anim
-    local flip = gc:CreateTexture(nil, "OVERLAY", nil, 2)
-    flip:SetAlpha(0); flip:Hide(); flip:SetBlendMode("ADD")
-    ib._glowFlip = flip
-    local fag = flip:CreateAnimationGroup(); fag:SetLooping("REPEAT")
-    local fa = fag:CreateAnimation("FlipBook"); fa:SetOrder(1)
-    ib._glowFlipAG = fag; ib._glowFlipAnim = fa
+    -- Ne marque _glowSetup=true qu'apres succes : un echec avant marquerait le glow mort a jamais
+    local ok = pcall(function()
+        local gc = CreateFrame("Frame", nil, ib)
+        gc:SetFrameLevel(ib:GetFrameLevel() + 2)
+        ib._glowContainer = gc
+        local pulse = gc:CreateTexture(nil, "OVERLAY", nil, 1)
+        pulse:SetBlendMode("ADD"); pulse:SetAlpha(0); pulse:Hide()
+        ib._glowPulse = pulse
+        local ag = pulse:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
+        local anim = ag:CreateAnimation("Alpha"); anim:SetSmoothing("IN_OUT")
+        ib._glowPulseAG = ag; ib._glowPulseAnim = anim
+        local flip = gc:CreateTexture(nil, "OVERLAY", nil, 2)
+        flip:SetAlpha(0); flip:Hide(); flip:SetBlendMode("ADD")
+        ib._glowFlip = flip
+        local fag = flip:CreateAnimationGroup(); fag:SetLooping("REPEAT")
+        local fa = fag:CreateAnimation("FlipBook"); fa:SetOrder(1)
+        ib._glowFlipAG = fag; ib._glowFlipAnim = fa
+    end)
+    ib._glowSetup = ok
 end
 
-local function ShowGlow(ib, idx, color, alpha, scale)
+local function ShowGlow(ib, idx, color, alpha, scale, sizeW, sizeH)
     if not ib then return end
     local def = ns.GLOW_DEFS[idx or 1]
     if not def or def.name == "Aucun" then return end
     color = color or ns.barColor; alpha = alpha or 0.7; scale = scale or 1.0
     EnsureGlow(ib)
 
-    -- Guard : ne pas redémarrer l'animation si le même type de glow tourne déjà.
-    -- Sans ce guard, ShowGlow appelé à chaque scan (plusieurs fois/seconde) redémarre
-    -- l'AnimationGroup depuis le début à chaque fois, causant un reset visible en boucle.
+    -- Guard anti-redemarrage si meme type de glow deja actif (evite un reset visible a chaque scan)
+    local sameTypePlaying = false
     if ib._glowActiveIdx == idx then
         if def.useAlphaPulse then
-            if ib._glowPulseAG:IsPlaying() then return end
+            sameTypePlaying = ib._glowPulseAG:IsPlaying()
         else
-            if ib._glowFlipAG:IsPlaying() then return end
+            sameTypePlaying = ib._glowFlipAG:IsPlaying()
         end
     end
     ib._glowActiveIdx = idx
 
-    local iw, ih = ib:GetSize()
+    -- sizeW/sizeH optionnels : sur un auraButton natif lie, ib:GetSize() peut renvoyer une valeur secrete
+    local iw, ih = sizeW, sizeH
+    if not (iw and ih) then iw, ih = ib:GetSize() end
     -- Marges aware de l'aspect : proportionnelles à chaque dimension
     local mx = math.max(4, math.floor(iw * 0.3 * scale))
     local my = math.max(4, math.floor(ih * 0.3 * scale))
@@ -213,10 +191,13 @@ local function ShowGlow(ib, idx, color, alpha, scale)
         p:ClearAllPoints()
         p:SetPoint("TOPLEFT", ib, -mx, my)
         p:SetPoint("BOTTOMRIGHT", ib, mx, -my)
-        ib._glowPulseAnim:SetFromAlpha(def.fromAlpha or 0.3)
-        ib._glowPulseAnim:SetToAlpha(def.toAlpha or 0.7)
-        ib._glowPulseAnim:SetDuration(def.duration or 0.8)
-        p:Show(); p:SetAlpha(def.fromAlpha or 0.3); ib._glowPulseAG:Play()
+        if not sameTypePlaying then
+            ib._glowPulseAnim:SetFromAlpha(def.fromAlpha or 0.3)
+            ib._glowPulseAnim:SetToAlpha(def.toAlpha or 0.7)
+            ib._glowPulseAnim:SetDuration(def.duration or 0.8)
+            p:SetAlpha(def.fromAlpha or 0.3); ib._glowPulseAG:Play()
+        end
+        p:Show()
     else
         ib._glowPulseAG:Stop(); ib._glowPulse:SetAlpha(0); ib._glowPulse:Hide()
         local f = ib._glowFlip
@@ -227,12 +208,15 @@ local function ShowGlow(ib, idx, color, alpha, scale)
         local sh = ih * sc + my * 2
         f:ClearAllPoints(); f:SetSize(sw, sh); f:SetPoint("CENTER", ib, 0, 0)
         f:SetVertexColor(color[1], color[2], color[3], alpha); f:SetBlendMode("ADD")
-        local fa = ib._glowFlipAnim
-        fa:SetFlipBookRows(def.rows or 6); fa:SetFlipBookColumns(def.columns or 5)
-        fa:SetFlipBookFrames(def.frames or 30); fa:SetDuration(def.duration or 1.0)
-        pcall(function() fa:SetFlipBookFrameWidth(def.frameW or 0) end)
-        pcall(function() fa:SetFlipBookFrameHeight(def.frameH or 0) end)
-        f:Show(); f:SetAlpha(alpha); ib._glowFlipAG:Play()
+        if not sameTypePlaying then
+            local fa = ib._glowFlipAnim
+            fa:SetFlipBookRows(def.rows or 6); fa:SetFlipBookColumns(def.columns or 5)
+            fa:SetFlipBookFrames(def.frames or 30); fa:SetDuration(def.duration or 1.0)
+            pcall(function() fa:SetFlipBookFrameWidth(def.frameW or 0) end)
+            pcall(function() fa:SetFlipBookFrameHeight(def.frameH or 0) end)
+            ib._glowFlipAG:Play()
+        end
+        f:Show()
     end
 end
 
@@ -246,15 +230,89 @@ end
 -- Expose for settings panel preview
 ns.ShowGlow = ShowGlow; ns.HideGlow = HideGlow
 
-------------------------------------------------------------------------
--- APPLY AURA  (FUSION: design + motor durObj swipe)
-------------------------------------------------------------------------
--- Helpers top-level : évitent closures pcall dans ApplyAura (appelé par aura par scan).
--- Exposés sur ns pour partage entre les 3 renders (Debuffs, Cooldowns, Procs).
--- Fallback icon (question mark) si la texture demandée est nil/invalide :
--- sinon SetTexture(nil) laisse la TEXTURE PRÉCÉDENTE de l'icône, ce qui cause
--- des "icônes fantômes" quand une row est réutilisée pour une aura dont le
--- spellID est stale (typique : données obsolètes dans la SavedVariable).
+-- Animation d'entree jouee une fois (proc inactif->actif), meme moteur que ShowGlow/HideGlow
+-- mais AnimationGroup sans loop et textures dediees (_procPulse/_procFlip) pour jouer en parallele
+local function EnsureProcStart(ib)
+    if ib._procSetup then return end
+    ib._procSetup = true
+    local pc = CreateFrame("Frame", nil, ib)
+    pc:SetFrameLevel(ib:GetFrameLevel() + 3)  -- au-dessus du glow boucle (+2, cf. EnsureGlow)
+    ib._procContainer = pc
+    local pulse = pc:CreateTexture(nil, "OVERLAY", nil, 1)
+    pulse:SetBlendMode("ADD"); pulse:SetAlpha(0); pulse:Hide()
+    ib._procPulse = pulse
+    local ag = pulse:CreateAnimationGroup()  -- pas de SetLooping : joue une fois
+    local anim = ag:CreateAnimation("Alpha"); anim:SetSmoothing("OUT")
+    ib._procPulseAG = ag; ib._procPulseAnim = anim
+    ag:SetScript("OnFinished", function() pulse:SetAlpha(0); pulse:Hide() end)
+    local flip = pc:CreateTexture(nil, "OVERLAY", nil, 2)
+    flip:SetAlpha(0); flip:Hide(); flip:SetBlendMode("ADD")
+    ib._procFlip = flip
+    local fag = flip:CreateAnimationGroup()  -- pas de SetLooping : joue une fois
+    local fa = fag:CreateAnimation("FlipBook"); fa:SetOrder(1)
+    ib._procFlipAG = fag; ib._procFlipAnim = fa
+    fag:SetScript("OnFinished", function() flip:SetAlpha(0); flip:Hide() end)
+end
+
+local function PlayProcStart(ib, idx, color, scale)
+    if not ib then return end
+    local def = ns.GLOW_DEFS[idx or 1]
+    if not def or def.name == "Aucun" then return end
+    color = color or ns.barColor; scale = scale or 1.0
+    EnsureProcStart(ib)
+
+    local iw, ih = ib:GetSize()
+    -- Filet : la frame preview du popup de test peut ne pas avoir sa taille resolue au premier appel
+    if not iw or iw <= 0 then iw = 32 end
+    if not ih or ih <= 0 then ih = 32 end
+    local mx = math.max(4, math.floor(iw * 0.3 * scale))
+    local my = math.max(4, math.floor(ih * 0.3 * scale))
+    local pc = ib._procContainer
+    pc:ClearAllPoints()
+    pc:SetPoint("TOPLEFT", ib, -mx, my)
+    pc:SetPoint("BOTTOMRIGHT", ib, mx, -my)
+
+    if def.useAlphaPulse then
+        ib._procFlipAG:Stop(); ib._procFlip:SetAlpha(0); ib._procFlip:Hide()
+        local p = ib._procPulse
+        if def.atlas then p:SetTexture(nil); p:SetAtlas(def.atlas); p:SetTexCoord(0,1,0,1)
+        else p:SetTexture(def.texture)
+            if def.texCoord then p:SetTexCoord(unpack(def.texCoord)) else p:SetTexCoord(0,1,0,1) end
+        end
+        p:SetBlendMode(def.blendMode or "ADD")
+        p:SetVertexColor(color[1], color[2], color[3], 1)
+        p:ClearAllPoints()
+        p:SetPoint("TOPLEFT", ib, -mx, my)
+        p:SetPoint("BOTTOMRIGHT", ib, mx, -my)
+        ib._procPulseAnim:SetFromAlpha(def.fromAlpha or 0)
+        ib._procPulseAnim:SetToAlpha(def.toAlpha or 1)
+        ib._procPulseAnim:SetDuration(def.duration or 0.2)
+        p:Show(); p:SetAlpha(def.fromAlpha or 0)
+        ib._procPulseAG:Stop(); ib._procPulseAG:Play()
+    else
+        ib._procPulseAG:Stop(); ib._procPulse:SetAlpha(0); ib._procPulse:Hide()
+        local f = ib._procFlip
+        if def.atlas then f:SetTexture(nil); f:SetAtlas(def.atlas)
+        elseif def.texture then f:SetTexture(def.texture) end
+        local sc = (def.scale or 1) * scale
+        local sw = iw * sc + mx * 2
+        local sh = ih * sc + my * 2
+        f:ClearAllPoints(); f:SetSize(sw, sh); f:SetPoint("CENTER", ib, 0, 0)
+        f:SetVertexColor(color[1], color[2], color[3], 1); f:SetBlendMode("ADD")
+        local fa = ib._procFlipAnim
+        fa:SetFlipBookRows(def.rows or 6); fa:SetFlipBookColumns(def.columns or 5)
+        fa:SetFlipBookFrames(def.frames or 30); fa:SetDuration(def.duration or 0.5)
+        pcall(function() fa:SetFlipBookFrameWidth(def.frameW or 0) end)
+        pcall(function() fa:SetFlipBookFrameHeight(def.frameH or 0) end)
+        f:Show(); f:SetAlpha(1)
+        ib._procFlipAG:Stop(); ib._procFlipAG:Play()
+    end
+end
+
+ns.PlayProcStart = PlayProcStart
+
+-- Helpers top-level partagés entre Debuffs/Cooldowns/Procs, évitent des closures pcall par scan.
+-- Fallback icon si texture nil/invalide : sinon SetTexture(nil) garde l'icône fantôme précédente
 local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 local function _SetIconTexture(icon, tex) icon:SetTexture(tex or FALLBACK_ICON) end
 local function _SetIconTextureFromSpellID(icon, spellID)
@@ -266,34 +324,99 @@ ns._SetIconTexture = _SetIconTexture
 ns._SetIconTextureFromSpellID = _SetIconTextureFromSpellID
 ns._SetCDFromDurObj = _SetCDFromDurObj
 
--- Cherche et cache le FontString du cooldown countdown natif Blizzard.
--- Blizzard ne l'expose pas directement, on doit le retrouver par GetRegions().
--- On cache la référence sur le cd frame lui-même (cd._aishCountdownFS) pour
--- éviter de rescanner à chaque ApplyAura.
-local function GetCooldownCountdownFS(cd)
-    if cd._aishCountdownFS then return cd._aishCountdownFS end
-    for _, region in pairs({cd:GetRegions()}) do
-        if region.GetText and region:GetObjectType() == "FontString" then
-            cd._aishCountdownFS = region
-            return region
+-- Swipe CDM (aura.useCDMSwipe) : repli event-driven quand GetAuraDuration echoue en combat sans durObj
+local function ApplyCDMSwipe(ib, cd, aura)
+    local newID = aura.useCDMSwipe and aura.spellID or nil
+    if ib._cdmSwipeSpellID and ib._cdmSwipeSpellID ~= newID then
+        if ns.UnsubscribeCDMAuraSwipe then ns.UnsubscribeCDMAuraSwipe(ib._cdmSwipeSpellID, ib) end
+        ib._cdmSwipeSpellID = nil
+    end
+    if newID and ib._cdmSwipeSpellID ~= newID then
+        if ns.SubscribeCDMAuraSwipe then ns.SubscribeCDMAuraSwipe(newID, ib, cd) end
+        ib._cdmSwipeSpellID = newID
+    end
+end
+ns._ApplyCDMSwipe = ApplyCDMSwipe
+
+-- Clone CDM des stacks : filet combat-safe si la lecture directe echoue. Le reset au changement
+-- de sort doit rester ICI (avant ApplyStackCharges) pour ne pas ecraser la valeur just-pushee
+local function ApplyCDMStackSwipe(ib, aura)
+    local newID = aura.spellID
+    if ib._cdmStackSpellID and ib._cdmStackSpellID ~= newID then
+        if ns.UnsubscribeCDMAuraStack then ns.UnsubscribeCDMAuraStack(ib._cdmStackSpellID, ib) end
+        ib._cdmStackSpellID = nil
+        -- Nettoyage avant re-abonnement : part d'un etat propre plutot que garder le stack precedent
+        if ib._stackText then ib._stackText:Hide() end
+    end
+    if newID and ib._cdmStackSpellID ~= newID and ib._stackText then
+        if ns.SubscribeCDMAuraStack then ns.SubscribeCDMAuraStack(newID, ib, ib._stackText) end
+        ib._cdmStackSpellID = newID
+    end
+end
+ns._ApplyCDMStackSwipe = ApplyCDMStackSwipe
+
+-- Clone CDM du remplissage de barre : StatusBar:SetValue accepte le relais secret, vraiment combat-safe.
+-- Requiert que le sort soit épinglé sur le viewer "Barres" du Cooldown Manager Blizzard
+local function ApplyCDMBarSwipe(statusBar, aura)
+    if not statusBar then return end
+    local newID = aura.spellID
+    if statusBar._cdmBarSpellID and statusBar._cdmBarSpellID ~= newID then
+        if ns.UnsubscribeCDMAuraBar then ns.UnsubscribeCDMAuraBar(statusBar._cdmBarSpellID, statusBar) end
+        statusBar._cdmBarSpellID = nil
+        pcall(statusBar.SetValue, statusBar, 0)
+    end
+    if newID and statusBar._cdmBarSpellID ~= newID then
+        if ns.SubscribeCDMAuraBar then ns.SubscribeCDMAuraBar(newID, statusBar, statusBar) end
+        statusBar._cdmBarSpellID = newID
+    end
+end
+ns._ApplyCDMBarSwipe = ApplyCDMBarSwipe
+
+-- Binding natif (AuraTrackerContainer.lua) : source prioritaire, Blizzard anime Cooldown/stacks
+-- lui-meme sans valeur secrete transitant par Lua. Rebind uniquement au changement de spellID
+local function ApplyNativeAuraBindings(ib, cd, aura)
+    local spellID = aura.spellID
+    if ib._nativeBoundSpellID == spellID then return end
+    if not spellID or not ns.GetNativeAuraButton then return end
+    local nativeBtn = ns.GetNativeAuraButton(aura.unit, spellID)
+    if not nativeBtn then return end
+    pcall(nativeBtn.SetDurationCooldown, nativeBtn, cd)
+    if ib._stackText then pcall(nativeBtn.SetApplicationCount, nativeBtn, ib._stackText) end
+    ib._nativeBoundSpellID = spellID
+end
+ns._ApplyNativeAuraBindings = ApplyNativeAuraBindings
+
+-- Style + repositionne le FontString natif du countdown Blizzard (jamais la valeur, secrete possible).
+-- Cherche dans les regions ET les enfants (CooldownDisplay selon version client)
+local function _StyleCountdownFS(cd, font, size, r, g, b, anchor, relFrame, relPoint, offX, offY)
+    local function styleFS(fs)
+        if not fs or not fs.SetFont then return end
+        pcall(ns.ApplyFont, fs, font, size, "OUTLINE")
+        if r then pcall(fs.SetTextColor, fs, r, g or 1, b or 1) end
+        fs:ClearAllPoints()
+        fs:SetPoint(anchor or "CENTER", relFrame or cd, relPoint or anchor or "CENTER", offX or 0, offY or 0)
+        fs:SetJustifyH("CENTER")
+    end
+    for i = 1, cd:GetNumRegions() do
+        local region = select(i, cd:GetRegions())
+        if region and region.GetObjectType and region:IsObjectType("FontString") then
+            styleFS(region)
+        end
+    end
+    for i = 1, cd:GetNumChildren() do
+        local child = select(i, cd:GetChildren())
+        if child then
+            for j = 1, child:GetNumRegions() do
+                local region = select(j, child:GetRegions())
+                if region and region.GetObjectType and region:IsObjectType("FontString") then
+                    styleFS(region)
+                end
+            end
         end
     end
 end
-
-local function _StyleCountdownFS(cd, font, size, r, g, b, offX, offY)
-    local region = GetCooldownCountdownFS(cd)
-    if not region then return end
-    ns.ApplyFont(region, font, size, "OUTLINE")
-    if r then region:SetTextColor(r, g or 1, b or 1) end
-    region:ClearAllPoints()
-    region:SetPoint("CENTER", cd, "CENTER", offX or 0, offY or 0)
-end
 ns._StyleCountdownFS = _StyleCountdownFS
 
--- Helpers hoist pour stacks/charges : évitent closure pcall par aura par scan.
-local function _SetStackText(fs, unit, instID)
-    fs:SetText(C_UnitAuras.GetAuraApplicationDisplayCount(unit, instID, 2, 999))
-end
 local function _ReadSpellCharges(spellID)
     return C_Spell.GetSpellCharges(spellID)
 end
@@ -301,15 +424,29 @@ end
 local function ApplyStackCharges(ib, aura, cfg)
     if ib._stackText then
         if aura and aura._isPreview and aura.stacks and aura.stacks > 0 then
-            -- Entree preview : l'API Blizzard ne reconnait pas l'instID factice,
-            -- on affiche directement la valeur fictive stockee dans entry.stacks.
+            -- Entree preview : instID factice non reconnu par l'API, on affiche la valeur fictive
             ib._stackText:SetText(aura.stacks)
             ib._stackText:Show()
-        elseif cfg.stackEnabled ~= false and ib.unit and ib.auraInstanceID
-           and C_UnitAuras and C_UnitAuras.GetAuraApplicationDisplayCount then
-            pcall(_SetStackText, ib._stackText, ib.unit, ib.auraInstanceID)
-            ib._stackText:Show()
+        elseif ib._nativeBoundSpellID == aura.spellID then
+            -- Binding natif actif pour ce spellID : Blizzard reste seul maitre de ib._stackText, ne pas y toucher
+
+        elseif cfg.stackEnabled ~= false and aura.spellID and ib.unit == "player" then
+            -- Repli avant binding natif : en combat, ne jamais Hide() ici, laisser le canal CDM-forward decider
+            local stacks = aura.stacks
+            if stacks and stacks > 1 then
+                if ns.MarkStackCapable then ns.MarkStackCapable(aura.spellID) end
+                ib._stackText:SetText(stacks)
+                ib._stackText:Show()
+            elseif not (InCombatLockdown and InCombatLockdown()) then
+                if stacks == 0 and ns.MarkStackNotCapable then
+                    ns.MarkStackNotCapable(aura.spellID)
+                end
+                ib._stackText:Hide()
+            end
+        elseif cfg.stackEnabled ~= false and aura.spellID and ib.unit then
+            -- Cible : seul le canal CDM-forward met a jour ib._stackText ici, ne pas y toucher
         else
+            ib._lastStackSpellID = nil
             ib._stackText:Hide()
         end
     end
@@ -336,6 +473,7 @@ local function ApplyAura(ib, icon, cd, aura, glowOn)
     end
     ib.unit = aura.unit or "target"
     ib.auraInstanceID = aura.auraInstanceID
+    ib.spellID = aura.spellID
     cd:SetReverse(true)
     local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
     -- Desaturation (per-render override)
@@ -347,7 +485,16 @@ local function ApplyAura(ib, icon, cd, aura, glowOn)
     -- Blizzard gere l'idempotence cote C++ : pas besoin de cache _lastStart/_lastDur.
     if aura.durObj then
         pcall(_SetCDFromDurObj, cd, aura.durObj)
+    elseif aura.directStart and aura.directDuration then
+        -- Repli : duration/expirationTime lus directement sur l'AuraData plutot qu'un durObj
+        pcall(cd.SetCooldown, cd, aura.directStart, aura.directDuration)
+    elseif aura._isPreview then
+        -- Entrees preview sans durObj ni direct* : cycle 12s synthetique pour lier le Cooldown
+        pcall(cd.SetCooldown, cd, GetTime(), 12)
     end
+    pcall(ApplyCDMSwipe, ib, cd, aura)
+    pcall(ApplyCDMStackSwipe, ib, aura)
+    pcall(ApplyNativeAuraBindings, ib, cd, aura)
     cd:SetDrawSwipe(cfg.swipeEnabled == true); cd:SetDrawEdge(cfg.swipeEnabled == true)
     -- Native countdown timer
     cd:SetHideCountdownNumbers(not (cfg.timerIconEnabled))
@@ -355,6 +502,7 @@ local function ApplyAura(ib, icon, cd, aura, glowOn)
         pcall(_StyleCountdownFS, cd,
             cfg.timerFont or ns.Media.font, cfg.timerSize or 12,
             cfg.timerColorR, cfg.timerColorG, cfg.timerColorB,
+            cfg.timerPos or "CENTER", ib, cfg.timerPos or "CENTER",
             cfg.timerIconOffX or 0, cfg.timerIconOffY or 0)
     end
 
@@ -364,7 +512,8 @@ local function ApplyAura(ib, icon, cd, aura, glowOn)
     local glAlpha = aura.glowAlpha
     local glScale = aura.glowScale or 1.0
     local hasGlow = aura.spellGlow and glIdx and glIdx > 1
-    if cfg.glowOverrideIdx and cfg.glowOverrideIdx > 1 then
+    -- Override render desactive via `false and`, cf. AuraTrackerContainer.lua::ApplySpellGlow
+    if false and cfg.glowOverrideIdx and cfg.glowOverrideIdx > 1 then
         glIdx = cfg.glowOverrideIdx; hasGlow = true
         if cfg.glowOverrideR then glColor = {cfg.glowOverrideR, cfg.glowOverrideG or 0.5, cfg.glowOverrideB or 0.5} end
         glScale = cfg.glowOverrideScale or glScale; glAlpha = cfg.glowOverrideAlpha or glAlpha
@@ -381,11 +530,7 @@ local function SetBarColor(bar, aura)
     ns.ApplyBarColor(bar, "iconlist", aura)
 end
 
-------------------------------------------------------------------------
--- 3D MODEL APPLY (Step 4)
-------------------------------------------------------------------------
--- Scratch tables réutilisées pour ShowIconModel/ShowBarModel/ShowSparkModel.
--- Évite l'allocation d'une nouvelle table par aura par scan quand fx3d activé.
+-- Scratch tables réutilisées pour ShowIconModel/ShowBarModel/ShowSparkModel (évite alloc par scan)
 local _iconModelCfg = {}
 local _barModelCfg = {}
 local _sparkModelCfg = {}
@@ -417,13 +562,10 @@ end
 
 local function ApplyBarModels(barWrap, aura)
     if not barWrap or not ns.db or not ns.EffectsActive() or not ns.SpellFX then return end
-    -- Cache : si la meme aura est re-appliquee sur ce wrap, pas besoin de
-    -- redo Show. Evite le cycle "Show -> rien faire -> Show -> ..." a chaque
-    -- scan qui spammait avant. Le spellID est utilise comme cle stable.
+    -- Cache par spellID : evite de re-Show la meme aura a chaque scan
     local spellID = aura.spellID
     local prevID = barWrap._fxAuraID
-    -- Mode FOND (front) : PlayerModel 3D plein largeur derriere la barre
-    -- Mode REMPLISSAGE (mid) : Texture 2D qui se tronque avec la barre (pattern WA)
+    -- Mode "front"/"back" = PlayerModel 3D, "mid" = texture 2D qui se tronque avec la barre
     local mode = aura.barModelMode or "front"
     if (mode == "front" or mode == "back") and aura.barModelID and aura.barModelID ~= 0 then
         -- Cache eventuel Fill 2D si on switch vers 3D
@@ -463,10 +605,7 @@ local function ApplyBarModels(barWrap, aura)
             ns.SpellFX:ShowFill2D(barWrap._fx2dFill, _fill2DCfg)
         end
     elseif prevID ~= spellID then
-        -- L'aura courante n'a NI 3D Fond NI Fill 2D configure, ET ce n'est pas
-        -- la meme aura que la precedente sur ce wrap (changement d'aura via
-        -- recyclage de row). On cache les FX heritage de l'aura precedente
-        -- pour ne pas afficher de texture / 3D fantome.
+        -- Changement d'aura sans FX configure : on cache les FX herites de l'aura precedente
         if barWrap._fx3dBar then ns.SpellFX:HideBarModel(barWrap._fx3dBar) end
         if barWrap._fx2dFill then ns.SpellFX:HideFill2D(barWrap._fx2dFill) end
     end
@@ -499,9 +638,6 @@ local function ApplyBarModels(barWrap, aura)
     elseif barWrap._barOverlay then ns.SpellFX:HideBarOverlay(barWrap._barOverlay) end
 end
 
-------------------------------------------------------------------------
--- ROW CREATORS
-------------------------------------------------------------------------
 local function CreateAegisRow(cont, i)
     local bw, bh, iw, ih, gp = Dims()
     local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
@@ -519,10 +655,7 @@ local function CreateAegisRow(cont, i)
     row.iconBtn = ib; row.icon = icon; row.iconCD = cd
     row.barL = bL; row.barR = bR; row.wrapL = wL; row.wrapR = wR
     row.sparkL = sL; row.sparkR = sR
-    -- Callback de cleanup FX3D appele par DeferHideRow juste avant row:Hide().
-    -- Cache les PlayerModels qui ne suivent pas toujours Hide() de leur parent
-    -- (quirk Blizzard). Necessaire quand un sort est decoche de la liste de
-    -- tracking pendant que l'aura est encore active.
+    -- Cleanup FX3D avant row:Hide() : les PlayerModels ne suivent pas toujours le Hide() du parent
     row._aishHideCleanup = function()
         if not ns.SpellFX then return end
         if row.iconBtn and row.iconBtn._fx3dIcon then ns.SpellFX:HideIconModel(row.iconBtn._fx3dIcon) end
@@ -569,8 +702,7 @@ local function CreateBerserkRow(cont, i)
     row.wrapBarL = wBL; row.wrapBarR = wBR
     row.sparkL = sL; row.sparkR = sR
     row._isDual = true
-    -- Callback de cleanup FX3D appele par DeferHideRow juste avant row:Hide().
-    -- Voir commentaire du callback dans CreateRow normal.
+    -- Cleanup FX3D avant row:Hide() (meme pattern que CreateAegisRow)
     row._aishHideCleanup = function()
         if not ns.SpellFX then return end
         if ibL and ibL._fx3dIcon then ns.SpellFX:HideIconModel(ibL._fx3dIcon) end
@@ -591,9 +723,6 @@ local function CreateBerserkRow(cont, i)
     return row
 end
 
-------------------------------------------------------------------------
--- INIT
-------------------------------------------------------------------------
 function Debuffs:Init()
     local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
     if not ns.db or (not ns.db.iconlistEnabled) then return end
@@ -615,7 +744,7 @@ function Debuffs:Init()
     if isH then cont:SetSize(numRows * (rowW + rg), ih)
     else cont:SetSize(rowW, numRows * (ih + rg)) end
     cont:SetFrameStrata("BACKGROUND")
-    cont:SetMovable(true); cont:SetClampedToScreen(true); cont:EnableMouse(true)
+    cont:SetMovable(true); cont:SetClampedToScreen(true); _addon.EnableMouseOnlyOnAlt(cont)
     cont:SetPropagateMouseClicks(true)  -- click-through par défaut (caméra, sélection, etc.)
 
     local rows = {}
@@ -635,11 +764,13 @@ function Debuffs:Init()
     lbl:SetText("|cffffcc00"..L["AURASFEAT_ALT_DRAG_HINT"].."|r"); lbl:Hide()
     cont:SetScript("OnMouseDown", function(s, b)
         if b == "LeftButton" and IsAltKeyDown() then
+            s._aishDragging = true
             s:SetPropagateMouseClicks(false)  -- bloquer la propagation pendant le drag
             s:StartMoving(); lbl:Show()
         end
     end)
     cont:SetScript("OnMouseUp", function(s)
+        s._aishDragging = false
         s:StopMovingOrSizing()
         s:SetPropagateMouseClicks(true)  -- rétablir le click-through
         lbl:Hide()
@@ -661,6 +792,7 @@ function Debuffs:Init()
         end
     end)
     cont:SetScript("OnHide", function(s)
+        s._aishDragging = false
         s:StopMovingOrSizing()
         s:SetPropagateMouseClicks(true)
         lbl:Hide()
@@ -670,25 +802,17 @@ function Debuffs:Init()
     ns.UpdateRenderFade("iconlist")
 end
 
-------------------------------------------------------------------------
--- UPDATE
-------------------------------------------------------------------------
+-- Rendu reel remplace par le systeme AddAuraGroup natif ; cette fonction sert juste au preview du menu
 function Debuffs:Update(auras)
-    -- TRACE : entree Update + nb auras + premiers spellIDs
-    -- INIT FLAG : tant que l'addon n'a pas fini son init, on cache
-    -- le container et on early-return. Évite les flashes pendant le /reload.
-    if not ns._initComplete then
+    local previewActive = ns._previewBars and (ns._previewMode == "all" or ns._previewMode == "iconlist")
+    if not previewActive then
         if ns.renderFrames.iconlist and ns.renderFrames.iconlist.container then
             ns.renderFrames.iconlist.container:SetAlpha(0)
+            ns.renderFrames.iconlist.container:Hide()
         end
         return
     end
-    if ns.db and (not ns.db.iconlistEnabled or ns.db.useNativeCDM) then
-        if ns.renderFrames.iconlist and ns.renderFrames.iconlist.container then
-            ns.renderFrames.iconlist.container:SetAlpha(0)
-        end
-        return
-    end
+
     local gfx = ns.renderFrames.iconlist; if not gfx then return end
     local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
     local rows = gfx.rows
@@ -699,41 +823,23 @@ function Debuffs:Update(auras)
     local bw, _, iw, ih, gp, pg, rg = Dims()
     local rowW = isDual and (bw + gp + iw + pg + iw + gp + bw) or (bw * 2 + iw + gp * 2)
 
-    -- Pattern anti-flicker : on NE cache PAS immédiatement les rows.
-    -- On les marque inactive et on programme un Hide différé de 100ms. Les rows qui
-    -- sont re-activées plus bas dans la boucle appelleront CancelDeferredHide et
-    -- seront show()+SetAlpha(1) direct. Les rows qui restent inactives pendant 100ms+
-    -- seront vraiment cachées (ce qui trigge OnHide + reset timerMode correctement).
-    -- Sans ce defer, un refresh rapide de Rip/Rake (30-50ms entre le remove et le
-    -- re-add) causait un flash visible.
-    --
-    -- ApplyBarModels gere les transitions FX 3D via le cache _fxAuraID :
-    --   - meme aura -> rien faire (cache hit)
-    --   - row recyclee pour autre aura -> hide + show propres
-    --   - row vraiment inactive -> row:Hide() cache automatiquement les enfants 3D
     for _, r in ipairs(rows) do
         ns.MarkRowInactive(r)
     end
 
     local wl = ns.whitelistByDest and ns.whitelistByDest.iconlist
-    if not wl then return end
 
-    -- Double-buffer pour éviter l'allocation de curIDs à chaque scan :
-    -- on alterne entre 2 tables persistantes. La "curIDs" du scan précédent
-    -- devient "prevIDs" du scan suivant, et vice versa.
     if not ns._debuffsIDsA then ns._debuffsIDsA = {}; ns._debuffsIDsB = {}; ns._debuffsIDsUseA = true end
     local prevIDs = ns._debuffsIDsUseA and ns._debuffsIDsB or ns._debuffsIDsA
     local curIDs  = ns._debuffsIDsUseA and ns._debuffsIDsA or ns._debuffsIDsB
     wipe(curIDs)
     ns._debuffsIDsUseA = not ns._debuffsIDsUseA
-    -- Set des instIDs vues pendant ce scan (pour LearnedDurations)
-    -- Permet de detecter quelles auras ont DISPARU au prochain scan.
     if not ns._dbgSeenInstIDsA then ns._dbgSeenInstIDsA = {}; ns._dbgSeenInstIDsB = {}; ns._dbgSeenUseA = true end
     local seenInstIDs = ns._dbgSeenUseA and ns._dbgSeenInstIDsA or ns._dbgSeenInstIDsB
     local prevSeenInstIDs = ns._dbgSeenUseA and ns._dbgSeenInstIDsB or ns._dbgSeenInstIDsA
     wipe(seenInstIDs)
     ns._dbgSeenUseA = not ns._dbgSeenUseA
-    ns._dbgPrevSeenInstIDs = prevSeenInstIDs  -- expose pour MaybePop (detection refresh)
+    ns._dbgPrevSeenInstIDs = prevSeenInstIDs
 
     local function ok(a) return a and a.spellID and (a.spellID > 900000 or (wl and wl[a.spellID])) end
 
@@ -746,50 +852,10 @@ function Debuffs:Update(auras)
         end
     end
 
-    -- Helper local : declenche l'animation d'apparition (pop) si l'auraInstanceID
-    -- a change sur la row. Utilise auraInstanceID (et non IsShown) car le pattern
-    -- DeferHideRow rend IsShown peu fiable. On track 1 seul instID par row : pour
-    -- les rows dual, on prend l'aura du side gauche (compromis simple, l'animation
-    -- se declenche sur les 2 wraps en meme temps, ce qui est correct dans 95% des cas).
-    -- En plus de l'anim pop, on notifie LearnedDurations pour le pattern de
-    -- durees apprises (combat-safe Midnight 12.0).
     local function MaybePop(row, aura, wraps, targetW)
         if not aura or not aura.auraInstanceID then return end
         local instID = aura.auraInstanceID
-        seenInstIDs[instID] = true  -- pour cleanup LearnedDurations
-        -- Notifie LearnedDurations : detection refresh via _seenInstIDs
-        if ns.LearnedDurations and ns.LearnedDurations.OnAuraAppeared then
-            local isRefresh = ns._dbgPrevSeenInstIDs and ns._dbgPrevSeenInstIDs[instID] == true
-            -- Priorite : cdmData (clean) -> SafeSpellID -> aura.spellID brut (peut etre secret)
-            -- Idem pour le nom : cdmData a le nom propre, sinon on tente aura.name
-            local cleanSpellID, cleanName
-            if ns.cdmData and ns.cdmData.target then
-                local entry = ns.cdmData.target[instID]
-                if entry and entry.spellId then
-                    cleanSpellID = entry.spellId
-                    cleanName = entry.name
-                end
-            end
-            -- Fallback hors-CDM : aura.spellID via SafeSpellID (gere les secrets)
-            if not cleanSpellID and ns.SafeSpellID then
-                cleanSpellID = ns.SafeSpellID(aura)
-            end
-            -- Fallback nom : aura.name peut etre secret en combat, on protege
-            if not cleanName and aura.name then
-                pcall(function()
-                    if not (issecretvalue and issecretvalue(aura.name)) then
-                        cleanName = aura.name
-                    end
-                end)
-            end
-            -- Dernier fallback : tostring du spellID
-            if not cleanName and cleanSpellID then
-                cleanName = tostring(cleanSpellID)
-            end
-            if cleanSpellID then
-                ns.LearnedDurations.OnAuraAppeared(instID, cleanSpellID, cleanName, isRefresh)
-            end
-        end
+        seenInstIDs[instID] = true
         if row._popInstID == instID then return end
         row._popInstID = instID
         if ns.StartPopAnim then
@@ -798,9 +864,6 @@ function Debuffs:Update(auras)
     end
 
     local function Pos(row, idx)
-        -- Skip le SetPoint si la row est déjà à la bonne position.
-        -- SetPoint déclenche un reflow Blizzard qui peut causer une frame de lag
-        -- sur les rows voisines. En multi-rows, on économise N-1 reflows par scan.
         if row._aishPosIdx == idx and row._aishPosGrowth == growth then return end
         row._aishPosIdx = idx
         row._aishPosGrowth = growth
@@ -818,10 +881,6 @@ function Debuffs:Update(auras)
         for _, row in ipairs(rows) do
             if not ok(auras[ai]) then break end
             vis = vis + 1; Pos(row, vis)
-            -- IMPORTANT : row:Show() AVANT les ApplyIconModels/ApplyBarModels.
-            -- Sinon les PlayerModels 3D sont Show() alors que leur parent (row)
-            -- est encore Hide -> IsVisible=false -> invisibles a l'ecran jusqu'au
-            -- prochain scan. Bug observe : "le 3D apparait quand je pose une 2e aura".
             row:Show(); row:SetAlpha(1); ns.CancelDeferredHide(row)
             row.halfL:Show()
             ApplyAura(row.iconBtnL, row.iconL, row.iconCDL, auras[ai], glowOn)
@@ -837,6 +896,7 @@ function Debuffs:Update(auras)
             end
             row.barL:Show(); SetBarColor(row.barL, auras[ai])
             if row.wrapBarL then row.wrapBarL:Show(); row.wrapBarL:SetAlpha(cfg.barAlpha or 1); ApplyBarModels(row.wrapBarL, auras[ai]) end
+            pcall(ns._ApplyCDMBarSwipe, row.barL, auras[ai])
             if ok(auras[ai + 1]) then
                 row.halfR:Show()
                 ApplyAura(row.iconBtnR, row.iconR, row.iconCDR, auras[ai + 1], glowOn)
@@ -852,8 +912,8 @@ function Debuffs:Update(auras)
                 end
                 row.barR:Show(); SetBarColor(row.barR, auras[ai + 1])
                 if row.wrapBarR then row.wrapBarR:Show(); row.wrapBarR:SetAlpha(cfg.barAlpha or 1); ApplyBarModels(row.wrapBarR, auras[ai + 1]) end
+                pcall(ns._ApplyCDMBarSwipe, row.barR, auras[ai + 1])
             else row.halfR:Hide() end
-            -- Pop animation sur les wraps des barres (icones non animees)
             MaybePop(row, auras[ai], {row.wrapBarL, row.wrapBarR}, bw)
             ai = ai + 2
         end
@@ -861,10 +921,6 @@ function Debuffs:Update(auras)
         for i, row in ipairs(rows) do
             if not ok(auras[i]) then break end
             vis = vis + 1; Pos(row, vis)
-            -- IMPORTANT : row:Show() AVANT les ApplyIconModels/ApplyBarModels.
-            -- Sinon les PlayerModels 3D sont Show() alors que leur parent (row)
-            -- est encore Hide -> IsVisible=false -> invisibles a l'ecran jusqu'au
-            -- prochain scan. Bug observe : "le 3D apparait quand je pose une 2e aura".
             row:Show(); row:SetAlpha(1); ns.CancelDeferredHide(row)
             ApplyAura(row.iconBtn, row.icon, row.iconCD, auras[i], glowOn)
             ApplyIconModels(row.iconBtn, auras[i])
@@ -878,26 +934,21 @@ function Debuffs:Update(auras)
                 end
             end
             if row.barL then row.barL:Show(); SetBarColor(row.barL, auras[i])
-                row.wrapL:Show(); row.wrapL:SetAlpha(cfg.barAlpha or 1); ApplyBarModels(row.wrapL, auras[i]) end
+                row.wrapL:Show(); row.wrapL:SetAlpha(cfg.barAlpha or 1); ApplyBarModels(row.wrapL, auras[i])
+                pcall(ns._ApplyCDMBarSwipe, row.barL, auras[i]) end
             if row.barR then row.barR:Show(); SetBarColor(row.barR, auras[i])
-                row.wrapR:Show(); row.wrapR:SetAlpha(cfg.barAlpha or 1); ApplyBarModels(row.wrapR, auras[i]) end
-            -- Pop animation sur les barres miroir (mode Aegis)
+                row.wrapR:Show(); row.wrapR:SetAlpha(cfg.barAlpha or 1); ApplyBarModels(row.wrapR, auras[i])
+                pcall(ns._ApplyCDMBarSwipe, row.barR, auras[i]) end
             MaybePop(row, auras[i], {row.wrapL, row.wrapR}, bw)
         end
     end
 
-    -- Defer hide : les rows qui n'ont PAS été CancelDeferredHide'd dans la boucle
-    -- ci-dessus sont désormais réellement inactives. On programme leur Hide dans 100ms.
-    -- Si la prochaine Update() les rend actives avant, le Cancel s'en chargera.
     for _, r in ipairs(rows) do
         if not r._aishActiveNow then
             ns.DeferHideRow(r, 0.1)
         end
     end
 
-    -- LearnedDurations : auras qui ont disparu depuis le scan precedent
-    -- (etaient dans prevSeenInstIDs, plus dans seenInstIDs) => OnAuraDisappeared.
-    -- C'est ce qui declenche StopLearning et donc le stockage de la duree apprise.
     if ns.LearnedDurations and ns.LearnedDurations.OnAuraDisappeared then
         for instID in pairs(prevSeenInstIDs) do
             if not seenInstIDs[instID] then
@@ -906,16 +957,8 @@ function Debuffs:Update(auras)
         end
     end
 
-    -- curIDs sera lu comme prevIDs au prochain scan (gestion double-buffer ci-dessus)
+    -- SetAlpha(1) explicite : ns.UpdateRenderFade route vers le conteneur natif, pas celui-ci
     gfx.container:Show()
-    -- FIX v269 : on appelle TOUJOURS UpdateRenderFade qui respecte fadeIC/fadeOOC.
-    -- Avant, quand vis==0 on faisait FadeTo(container, 0, 0.05) brutal -> en combat
-    -- sur sort CDM, le scan peut intermittemment ne pas voir l'aura (secret values),
-    -- ce qui causait : aura visible -> scan vide -> fade out 50ms -> aura redetectee
-    -- au scan suivant -> fade in. Resultat : la barre clignotait apparait/disparait.
-    --
-    -- Maintenant le container reste a alpha fadeIC (1.0 par defaut) en combat. Les
-    -- rows individuelles sont gerees par DeferHideRow (100ms de delai avant Hide())
-    -- ce qui filtre les disparitions intermittentes.
-    ns.UpdateRenderFade("iconlist")
+    gfx.container:SetAlpha(1)
 end
+

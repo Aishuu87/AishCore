@@ -1,20 +1,11 @@
----------------------------------------------------------------------------
--- Config/Profiles.lua
--- Système de profils Aishaddon :
---   • Profils nommés multiples (CRUD complet)
---   • Liaison par personnage optionnelle
---   • Sérialisation texte (export / import / partage Patreon)
---   • Zero breaking-change : ns.DB pointe toujours sur le profil actif
----------------------------------------------------------------------------
+-- Config/Profiles.lua : profils nommés (CRUD), liaison par personnage, export/import texte
 local addonName, ns = ...
 local L = ns.L
 
 ns.Profiles = {}
 local P = ns.Profiles
 
----------------------------------------------------------------------------
 -- Helpers internes
----------------------------------------------------------------------------
 
 local function CharKey()
   local name  = UnitName("player")  or "Unknown"
@@ -46,11 +37,7 @@ local function ApplyAllSettings()
   SafeApply(M.Colors,                    "Colors")
 end
 
----------------------------------------------------------------------------
--- Sérialisation (table Lua → chaîne texte)
--- Produit un constructeur de table pur (nombres, chaînes, booléens, tables).
--- L'import utilise load() dans un environnement vide pour sécuriser la lecture.
----------------------------------------------------------------------------
+-- Sérialisation (table Lua → chaîne texte). L'import utilise load() en environnement vide.
 
 local function Serialize(val, depth)
   depth = depth or 0
@@ -110,7 +97,7 @@ end
 local function Deserialize(str)
   if type(str) ~= "string" then return nil, L["PROFILE_DESERIALIZE_NOT_STRING"] end
   -- loadstring() : API Lua 5.1 disponible dans WoW (load() 4-args non garanti)
-  local fn, err = loadstring("return " .. str, "aishaddon_profile_import")
+  local fn, err = loadstring("return " .. str, "aishcore_profile_import")
   if not fn then return nil, tostring(err) end
   local ok, result = pcall(fn)
   if not ok then return nil, tostring(result) end
@@ -118,22 +105,16 @@ local function Deserialize(str)
   return result
 end
 
----------------------------------------------------------------------------
 -- VERSION marker dans les exports
----------------------------------------------------------------------------
-local EXPORT_PREFIX = "AISHADDON_PROFILE_V1:"
+local EXPORT_PREFIX = "AISHCORE_PROFILE_V1:"
+local LEGACY_EXPORT_PREFIX = "AISHADDON_PROFILE_V1:" -- compat imports faits avant le renommage AishCore
 
----------------------------------------------------------------------------
--- InitDB — appelé par LoadDatabase() dans Aishaddon.lua
--- Remplace l'ancien code « ns.DB = ns.MergeDefaults(AishaddonDB, ns.Defaults) »
----------------------------------------------------------------------------
+-- InitDB — appelé par LoadDatabase() dans AishCore.lua
 function P.InitDB()
   AishaddonDB = AishaddonDB or {}
   local root = AishaddonDB
 
-  --------------------------------------------------------------------------
   -- Migration : ancien format plat → format à profils
-  --------------------------------------------------------------------------
   if not root._profiles then
     local legacy = {}
     -- Récupère toutes les clés de config (non-underscore)
@@ -151,16 +132,12 @@ function P.InitDB()
     root._version       = 1
   end
 
-  --------------------------------------------------------------------------
   -- Garantir l'existence du profil "Default"
-  --------------------------------------------------------------------------
   if not root._profiles["Default"] then
     root._profiles["Default"] = {}
   end
 
-  --------------------------------------------------------------------------
   -- Déterminer le profil actif
-  --------------------------------------------------------------------------
   local charKey    = CharKey()
   local activeName = (root._charProfiles and root._charProfiles[charKey])
                   or root._globalProfile
@@ -175,14 +152,8 @@ function P.InitDB()
     root._globalProfile = "Default"
   end
 
-  --------------------------------------------------------------------------
-  -- Migration v2 : normaliser tous les profils créés avant les nouvelles
-  -- valeurs par défaut (useClassDefaults=true, slotsBySpec vide).
-  -- MergeDefaults ne touche pas les clés déjà présentes, donc on corrige
-  -- explicitement les profils dont les overrides sont encore vides et qui
-  -- ont useClassDefaults=false (état "avant changement de Defaults").
-  -- Gardé par _migratedV2 pour ne s'exécuter qu'une seule fois.
-  --------------------------------------------------------------------------
+  -- Migration v2 : normalise les profils créés avant les nouvelles valeurs par défaut
+  -- (useClassDefaults=true, slotsBySpec vide). One-shot via _migratedV2.
   if not root._migratedV2 then
   for _, prof in pairs(root._profiles) do
     -- Colors : si pas d'overrides (table vide ou absente) → forcer mode classe
@@ -196,8 +167,7 @@ function P.InitDB()
         col.useClassDefaults = true
       end
     end
-    -- PriorityBar : migration sideOffset V2 (ancre bord externe au lieu du centre).
-    -- Formule : new = old + iconSpacing/2 + iconSize/2
+    -- PriorityBar : migration sideOffset V2 (ancre bord externe), new = old + iconSpacing/2 + iconSize/2
     local pb = prof.priorityBar
     if pb and type(pb.sideOffset) == "number" and not pb._sideOffsetV2 then
       local size    = type(pb.iconSize)    == "number" and pb.iconSize    or 34
@@ -205,18 +175,14 @@ function P.InitDB()
       pb.sideOffset = math.floor(pb.sideOffset + spacing / 2 + size / 2 + 0.5)
       pb._sideOffsetV2 = true
     end
-    -- PriorityBar : migration loopGlowIndex après insertion de "Aucun" à l'index 1.
-    -- Avant ce changement il n'existait pas d'index "Aucun" : tous les index
-    -- stockés doivent être décalés de +1 (sauf si la migration a déjà eu lieu).
+    -- PriorityBar : migration loopGlowIndex après insertion de "Aucun" à l'index 1 (décalage +1)
     if pb and pb.loopGlowIndex and not pb._loopGlowTypeMigrated then
       if type(pb.loopGlowIndex) == "number" then
         pb.loopGlowIndex = pb.loopGlowIndex + 1
       end
       pb._loopGlowTypeMigrated = true
     end
-    -- SpellEffects : retirer les deux spells résiduels des anciens Defaults
-    -- (8004 = Afflux de soins, 17364 = Coup éclair) qui ont été copiés dans
-    -- tous les profils créés avant ce nettoyage.
+    -- SpellEffects : retirer les 2 spells résiduels des anciens Defaults (8004, 17364)
     local se = prof.spellEffects
     if se and type(se.spells) == "table" then
       se.spells[8004]  = nil
@@ -226,18 +192,31 @@ function P.InitDB()
   root._migratedV2 = true
   end -- if not root._migratedV2
 
-  --------------------------------------------------------------------------
   -- Pointer ns.DB sur le profil actif (merge defaults)
-  --------------------------------------------------------------------------
   root._profiles[activeName] = ns.MergeDefaults(root._profiles[activeName], ns.Defaults)
+
+  -- Purge retroactive des entrees VIDES de spellEffects.auraCombos (ancien bug de creation
+  -- au simple clic dans SettingsPanel, deja corrige). One-shot PAR PROFIL.
+  do
+      local prof = root._profiles[activeName]
+      if not prof._auraCombosCleanupV1 then
+          if prof.spellEffects and prof.spellEffects.auraCombos then
+              for auraID, combo in pairs(prof.spellEffects.auraCombos) do
+                  if not (combo and #combo > 0) then
+                      prof.spellEffects.auraCombos[auraID] = nil
+                  end
+              end
+          end
+          prof._auraCombosCleanupV1 = true
+      end
+  end
+
   ns.DB                 = root._profiles[activeName]
   ns._activeProfileName = activeName
   ns._charKey           = charKey
 end
 
----------------------------------------------------------------------------
 -- API publique
----------------------------------------------------------------------------
 
 --- Retourne la liste triée des noms de profils.
 function P.List()
@@ -318,9 +297,7 @@ function P.Create(name, copyFrom)
   if copyFrom and root._profiles[copyFrom] then
     root._profiles[name] = ns.DeepCopy(root._profiles[copyFrom])
   else
-    -- Partir du template de référence (profil neutre pré-configuré), puis combler
-    -- toute clé absente avec ns.Defaults (nouvelles options ajoutées après la création
-    -- du template).
+    -- Partir du template de référence, combler les clés absentes avec ns.Defaults
     local base = ns.ProfileTemplate and ns.DeepCopy(ns.ProfileTemplate) or {}
     root._profiles[name] = ns.MergeDefaults(base, ns.Defaults)
   end
@@ -417,6 +394,7 @@ function P.Import(str, newName)
   str = str:match("^%s*(.-)%s*$")
 
   local payload = str:match("^" .. EXPORT_PREFIX .. "(.+)$")
+    or str:match("^" .. LEGACY_EXPORT_PREFIX .. "(.+)$")
   if not payload then
     return false, string.format(L["PROFILE_IMPORT_FORMAT_UNRECOGNIZED"], EXPORT_PREFIX)
   end
@@ -440,9 +418,7 @@ function P.Import(str, newName)
   return true
 end
 
----------------------------------------------------------------------------
 -- CopyFrom — écrase le profil actif avec une copie du profil source
----------------------------------------------------------------------------
 function P.CopyFrom(sourceName)
   local root = AishaddonDB
   if not root._profiles[sourceName] then return false, L["PROFILE_SOURCE_NOT_FOUND"] end
@@ -456,10 +432,7 @@ function P.CopyFrom(sourceName)
   return true
 end
 
----------------------------------------------------------------------------
--- Profils de spécialisation  (stockés dans AishaddonDB._specProfiles)
--- Structure : { enabled = bool, [specID] = profileName, ... }
----------------------------------------------------------------------------
+-- Profils de spécialisation (AishaddonDB._specProfiles = { enabled, [specID] = profileName })
 function P.GetSpecProfilesEnabled()
   local sp = AishaddonDB._specProfiles
   return sp ~= nil and sp.enabled == true
@@ -480,9 +453,7 @@ function P.SetSpecProfile(specID, profileName)
   AishaddonDB._specProfiles[specID] = profileName
 end
 
----------------------------------------------------------------------------
 -- Basculement automatique lors d'un changement de spécialisation
----------------------------------------------------------------------------
 local function ApplySpecProfile()
   if not P.GetSpecProfilesEnabled() then return end
   local specIndex = GetSpecialization()
@@ -499,10 +470,113 @@ local function ApplySpecProfile()
 end
 P.ApplySpecProfile = ApplySpecProfile
 
+-- Cooldown Manager par spécialisation, stocké DANS le profil actif (ns.DB.cdmBySpec[specID])
+-- pour transiter automatiquement par l'export/import de profil existant. Utilise l'API
+-- publique C_CooldownViewer.GetLayoutData()/SetLayoutData() (blob opaque).
+function P.GetCDMAutoApplyEnabled()
+  if ns.DB.cdmAutoApply == nil then return true end  -- actif par defaut : un profil importe doit "juste marcher"
+  return ns.DB.cdmAutoApply == true
+end
+
+function P.SetCDMAutoApplyEnabled(val)
+  ns.DB.cdmAutoApply = val and true or false
+end
+
+--- Sauvegarde l'etat CDM actuel (tel que configure en jeu, cf. Edit Mode /
+--- ns.Auras.SyncCDMPins) comme profil CDM de specID dans le profil AishCore
+--- ACTIF. Ecrase silencieusement une precedente sauvegarde pour ce specID.
+function P.SaveCDMForSpec(specID)
+  if not specID then return false, "specID manquant" end
+  if not (C_CooldownViewer and C_CooldownViewer.GetLayoutData) then
+    return false, "API C_CooldownViewer indisponible"
+  end
+  local ok, data = pcall(C_CooldownViewer.GetLayoutData)
+  if not ok or not data or data == "" then
+    return false, "aucune donnee CDM a sauvegarder (configure le Cooldown Manager d'abord)"
+  end
+  ns.DB.cdmBySpec = ns.DB.cdmBySpec or {}
+  ns.DB.cdmBySpec[specID] = { data = data, savedAt = time() }
+  return true
+end
+
+--- Renvoie l'entree CDM sauvegardee pour specID dans le profil ACTIF (ou nil).
+function P.GetCDMForSpec(specID)
+  return ns.DB.cdmBySpec and ns.DB.cdmBySpec[specID]
+end
+
+--- Liste les specID pour lesquels le profil ACTIF a une sauvegarde CDM.
+function P.ListCDMSpecs()
+  local ids = {}
+  if ns.DB.cdmBySpec then
+    for specID in pairs(ns.DB.cdmBySpec) do ids[#ids + 1] = specID end
+    table.sort(ids)
+  end
+  return ids
+end
+
+local pendingCDMSpecApply
+--- Applique le profil CDM sauvegarde pour specID (si auto-apply actif + sauvegarde existante).
+-- DESACTIVE : SetLayoutData/SyncCDMPins taintent l'execution et font planter le CooldownViewer
+-- natif Blizzard ("secret boolean value" sur allowAvailableAlert). Ne pas retirer ce garde
+-- sans comprendre la cause exacte du taint.
+function P.ApplyCDMForSpec(specID)
+  do return end
+  if not specID then return end
+  if not P.GetCDMAutoApplyEnabled() then return end
+  local entry = P.GetCDMForSpec(specID)
+  if not entry or not entry.data or entry.data == "" then return end
+  if not (C_CooldownViewer and C_CooldownViewer.SetLayoutData and C_CooldownViewer.GetLayoutData) then return end
+  if InCombatLockdown and InCombatLockdown() then
+    pendingCDMSpecApply = specID
+    return
+  end
+  -- Déjà appliqué cette version du snapshot (entry._appliedData persisté) : ne pas
+  -- réappliquer, sinon SyncCDMPins qui épingle un sort absent du snapshot déclenche
+  -- une boucle infinie de reload (le vieux snapshot écrase le pin à chaque connexion).
+  if entry._appliedData == entry.data then return end
+  -- Skip si deja applique (meme blob) : evite un reload inutile a chaque connexion
+  local okCur, curData = pcall(C_CooldownViewer.GetLayoutData)
+  if okCur and curData == entry.data then
+    entry._appliedData = entry.data
+    return
+  end
+  local ok = pcall(C_CooldownViewer.SetLayoutData, entry.data)
+  if ok then
+    entry._appliedData = entry.data
+    if ns.Auras and ns.Auras.MarkCDMReloadPending then
+      ns.Auras.MarkCDMReloadPending(1)
+    end
+    -- Rattrape tout sort de la whitelist active absent de ce snapshot (ex: import
+    -- d'un profil partagé où la whitelist a évolué depuis la sauvegarde)
+    if ns.Auras and ns.Auras.SyncCDMPins then
+      pcall(ns.Auras.SyncCDMPins)
+    end
+  end
+end
+
 local specEventFrame = CreateFrame("Frame")
 specEventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 specEventFrame:RegisterEvent("PLAYER_LOGIN")
+specEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 specEventFrame:SetScript("OnEvent", function(_, event)
+  if event == "PLAYER_REGEN_ENABLED" then
+    if pendingCDMSpecApply then
+      local specID = pendingCDMSpecApply
+      pendingCDMSpecApply = nil
+      P.ApplyCDMForSpec(specID)
+    end
+    return
+  end
   ApplySpecProfile()
+  local specIndex = GetSpecialization()
+  local specID = specIndex and GetSpecializationInfo(specIndex)
+  if specID then
+    if event == "PLAYER_LOGIN" then
+      -- Le Cooldown Manager natif n'est pas forcement pret au tout premier login
+      C_Timer.After(3, function() P.ApplyCDMForSpec(specID) end)
+    else
+      P.ApplyCDMForSpec(specID)
+    end
+  end
   ns.CallbackRegistry:Trigger("SPEC_CHANGED")
 end)

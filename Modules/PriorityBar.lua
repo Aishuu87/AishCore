@@ -7,10 +7,11 @@ local L = ns.L
 local PriorityBar = {}
 ns.Modules.PriorityBar = PriorityBar
 
----------------------------------------------------------------------------
--- Noms des boutons d'action standard Blizzard
--- (meme liste que RotationHelper pour scanner les highlights)
----------------------------------------------------------------------------
+-- TWW 12.0 : plusieurs globals de sorts ont migré vers des namespaces C_* ;
+-- GetMacroSpell suit potentiellement le même sort côté macros.
+local GetMacroSpellID = (C_Macro and C_Macro.GetMacroSpell) or GetMacroSpell
+
+-- Noms des boutons d'action Blizzard + ElvUI (meme template, on scanne les deux jeux de noms)
 local BUTTON_PREFIXES = {
   "ActionButton",
   "MultiBarBottomLeftButton",
@@ -20,13 +21,23 @@ local BUTTON_PREFIXES = {
   "MultiBar5Button",
   "MultiBar6Button",
   "MultiBar7Button",
+  "ElvUI_Bar1Button",
+  "ElvUI_Bar2Button",
+  "ElvUI_Bar3Button",
+  "ElvUI_Bar4Button",
+  "ElvUI_Bar5Button",
+  "ElvUI_Bar6Button",
+  "ElvUI_Bar7Button",
+  "ElvUI_Bar8Button",
+  "ElvUI_Bar9Button",
+  "ElvUI_Bar10Button",
+  "ElvUI_Bar13Button",
+  "ElvUI_Bar14Button",
+  "ElvUI_Bar15Button",
 }
 
----------------------------------------------------------------------------
--- Types de glow (loop) — flipbook sprite-sheet animations
--- Les textures ABE sont chargées depuis l'addon ActionBarsEnhanced/assets.
----------------------------------------------------------------------------
-local ABE_ASSETS = "Interface/addons/ActionBarsEnhanced/assets/"
+-- Types de glow (loop) — flipbook sprite-sheet animations, textures bundlees dans Media/Glows/
+local ABE_ASSETS = "Interface/AddOns/AishCore/Media/Glows/"
 
 local LOOP_GLOW_TYPES = {
   -- 1 : Aucun
@@ -167,9 +178,7 @@ local LOOP_GLOW_TYPES = {
     rows = 3, columns = 5, frames = 15, duration = 0.7, scale = 0.9 },
 }
 
----------------------------------------------------------------------------
 -- Types de proc start (one-shot entry animation)
----------------------------------------------------------------------------
 local PROC_START_TYPES = {
   -- 1 : Aucun
   { name = L["PRIO_GLOW_NONE"] },
@@ -236,13 +245,7 @@ local PROC_START_TYPES = {
 PriorityBar.LOOP_GLOW_TYPES  = LOOP_GLOW_TYPES
 PriorityBar.PROC_START_TYPES = PROC_START_TYPES
 
----------------------------------------------------------------------------
--- Layouts disponibles (2 conteneurs symétriques gauche/droite)
--- rows/cols : grille de chaque côté
--- leftNames : noms des slots dans l'ordre gauche (haut-gauche → bas-droite)
--- rightNames : noms des slots dans l'ordre droite (haut-gauche → bas-droite)
--- totalSlots : leftNames + rightNames
----------------------------------------------------------------------------
+-- Layouts disponibles (2 conteneurs symétriques gauche/droite) : rows/cols par côté, totalSlots = leftNames + rightNames
 local LAYOUT_DEFS = {
   { id = "2x2",     name = L["PRIO_LAYOUT_2X2"],        totalSlots = 4,  rows = 1, cols = 2,
     leftNames  = {"A", "B"},
@@ -264,19 +267,25 @@ PriorityBar.LAYOUT_DEFS = LAYOUT_DEFS
 
 local MAX_SLOTS = 12  -- nombre maximum de slots (layout 6x6)
 
----------------------------------------------------------------------------
 -- State
----------------------------------------------------------------------------
 local slotFrames = {}          -- { [1..MAX_SLOTS] = frame }
 local leftContainer = nil      -- conteneur gauche
 local rightContainer = nil     -- conteneur droite
 local pbFadeTicker  = nil      -- ticker pour l'animation fade in/out combat
 local initialized = false
+local _initTime = nil  -- GetTime() au moment de Init() (PLAYER_ENTERING_WORLD)
 local pollTicker = nil
 local cdViewerTicker = nil  -- ticker isole pour ScanCooldownViewer (evite taint propagation)
 local debugMode = false
 local testMode = false
 local dragEnabled = false
+-- Kill-switch canal event-driven ChargeCount (cf. CDMHooks.lua) ; false = fallback poll+estimation
+local CDM_CHARGE_HOOK_ENABLED = true
+-- Kill-switch isolation swipe/desat (cf. ScanLiveSwipeState) ; desactive, ticker partage pas assez isole
+local CD_SWIPE_ISOLATION_ENABLED = false
+-- Kill-switch auto-guerison _realCDEndTimes ; desactive, isRealCD pas assez fiable comme source
+local CD_STALE_AUTOHEAL_ENABLED = false
+local _liveSwipeState    = {}  -- spellID → { isActive=bool, durObj=handle } (ticker isole, propre)
 local chargeCache        = {}  -- spellID → maxCharges (construit hors combat)
 local overrideToBase     = {}  -- overrideSpellID → baseSpellID (reverse map)
 local learnedSpells      = {}  -- spellID → true si IsPlayerSpell (construit hors combat, jamais tainted)
@@ -297,17 +306,59 @@ local _cdViewerAvail     = false  -- true si le dernier scan CDViewer a trouvé 
 local _cvDbgSnap         = ""   -- fingerprint du dernier état CDViewer logué
 local _swipeDbg          = {}   -- [slot] → dernier état logué (swipeRunning|spellOnCD|spellID)
 local _lastSuccessTime   = {}  -- spellName → GetTime() du dernier UNIT_SPELLCAST_SUCCEEDED (dedupe)
+
+-- Sorts affichant des STACKS (buff cumulatif) plutot que des charges. Clé = spellID affiché, valeur = spellID de l'aura à lire.
+local STACK_SPELLS = {
+  [399491] = 399491, -- Don de Sheilun (Moine Mistweaver)
+}
+
+-- 2 mécaniques possibles (aura qui stack, ou compteur natif sans aura type Don de Sheilun) ; valeur passée telle quelle à SetText (jamais tonumber/comparaison, secrète possible en combat).
+-- Masquage à 0 testé via pcall (comparaison directe planterait sur une valeur secrète) ; si ça plante on affiche quand même par sécurité.
+local function IsConfirmedZero(val)
+  if val == nil then return false end
+  local ok, isZero = pcall(function() return val == 0 end)
+  return ok and isZero == true
+end
+
+local function ApplyStackToText(fontString, auraSpellID)
+  local A = ns.Auras
+  local cdmPlayer = A and A.cdmData and A.cdmData.player
+  local cdmEntry = cdmPlayer and cdmPlayer[auraSpellID]
+  if cdmEntry and cdmEntry.instID then
+    local ok, disp = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, cdmEntry.instID, 1, 999)
+    if ok and disp ~= nil and not IsConfirmedZero(disp) then
+      local okSet = pcall(fontString.SetText, fontString, disp)
+      if okSet then return true end
+    end
+    -- Instance périmée (cdmData n'est jamais nettoyé) : on tombe dans les fallbacks.
+  end
+
+  -- Fallback 1 : GetPlayerAuraBySpellID (fonctionne même sans config Cooldown Manager)
+  local okAura, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, auraSpellID)
+  if okAura and aura and aura.auraInstanceID then
+    local ok2, disp2 = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, aura.auraInstanceID, 1, 999)
+    if ok2 and disp2 ~= nil and not IsConfirmedZero(disp2) then
+      local okSet2 = pcall(fontString.SetText, fontString, disp2)
+      if okSet2 then return true end
+    end
+  end
+
+  -- Fallback 2 : compteur natif sans aura (ex : Don de Sheilun)
+  if C_Spell and C_Spell.GetSpellCastCount then
+    local ok3, count = pcall(C_Spell.GetSpellCastCount, auraSpellID)
+    if ok3 and count ~= nil and not IsConfirmedZero(count) then
+      local okSet3 = pcall(fontString.SetText, fontString, count)
+      if okSet3 then return true end
+    end
+  end
+
+  return false
+end
+
 -- Forward declarations (définitions effectives plus bas dans le fichier)
 local GetCurrentLayoutDef
 
----------------------------------------------------------------------------
--- Utility : convertir un nombre (potentiellement un secret number TWW)
--- en vrai nombre Lua. Fonctionne UNIQUEMENT hors combat (OOC).
--- En combat, les secret numbers TWW bloquent TOUTE opération Lua :
--- arithmétique, comparaison, tonumber, string ops, même SetID/GetID
--- retourne des valeurs taintées. Pour le combat, utiliser GetSpellName()
--- pour les comparaisons (retourne des strings propres).
----------------------------------------------------------------------------
+-- Convertit un secret number TWW en nombre Lua clean (OOC uniquement ; en combat, comparer via GetSpellName())
 local function SecretToNumber(val)
   if val == nil then return nil end
   if type(val) == "number" then
@@ -322,20 +373,12 @@ local function SecretToNumber(val)
   return nil
 end
 
--- Extraire un entier PROPRE (0-20) à partir d'une valeur potentiellement tainted.
--- Utilise pcall(==) contre chaque entier candidat pour trouver la valeur exacte
--- et retourne un nombre Lua natif (jamais tainted).
+-- Extraire un entier PROPRE (0-20) à partir d'une valeur potentiellement tainted, via pcall(==) contre chaque littéral.
 local function CleanInt(val)
   if type(val) ~= "number" then return nil end
-  -- En TWW, les secret numbers ne peuvent pas être comparés (même ==, ~=, <, >, etc.)
-  -- mais les opérations arithmétiques (+, floor, etc.) sont autorisées. PROBLÈME :
-  -- math.floor(secret + 0) peut encore renvoyer un secret number (la taint se
-  -- propage dans les chaînes taintées). type(n) == "number" passe quand même.
-  -- SOLUTION : tester pcall(==) contre un littéral. Si ça crash, c'est un secret
-  -- et on doit abandonner. Si ça réussit, on retourne le littéral propre.
+  -- math.floor(secret+0) peut encore être secret : on valide via pcall(==) contre un littéral.
   local ok, n = pcall(function() return math.floor(val + 0) end)
   if not ok or type(n) ~= "number" then return nil end
-  -- Vérification de propreté via comparaison littérale + retour du littéral
   for i = 0, 20 do
     local okEq, eq = pcall(function() return n == i end)
     if not okEq then return nil end  -- n est secret → abandon total
@@ -344,18 +387,14 @@ local function CleanInt(val)
   return nil  -- hors range (ne devrait pas arriver pour des charges)
 end
 
----------------------------------------------------------------------------
 -- Debug
----------------------------------------------------------------------------
 local function Debug(msg)
   if debugMode then
     print("|cff00b0ff[PB]|r " .. tostring(msg))
   end
 end
 
----------------------------------------------------------------------------
 -- Utilitaires
----------------------------------------------------------------------------
 local function GetSpellIcon(spellID)
   if C_Spell and C_Spell.GetSpellTexture then
     local ok, tex = pcall(C_Spell.GetSpellTexture, spellID)
@@ -382,34 +421,19 @@ local function FormatCooldown(remaining)
   end
 end
 
----------------------------------------------------------------------------
--- Cache bouton → spellID  (reconstruit HORS combat uniquement)
--- Evite d'appeler GetActionInfo en combat (taint propagation).
--- cachedSpellToAction permet de retrouver le slot d'action depuis un spellID.
----------------------------------------------------------------------------
+-- Cache bouton → spellID (reconstruit HORS combat, évite GetActionInfo en combat/taint)
 local cachedButtonData = {}        -- buttonKey → { button, spellID }
 local cachedSpellToAction = {}     -- spellID → actionSlotNumber
 local cachedSpellToButton = {}     -- spellID → ActionButton frame (pour lire le Count FontString)
 
--- [12.0.5] Interception directe du nombre de charges via hook SetText.
--- Blizzard appelle button.Count:SetText("2") depuis du code natif NON tainté ;
--- en hookant SetText on capture le nombre propre AVANT toute propagation de
--- taint, éliminant le problème des "secret strings" en combat.
--- liveChargeByButton[button] = number (ou 0 si vide)
+-- Interception du nombre de charges via hook SetText : capture le nombre propre avant taint en combat.
 local liveChargeByButton = {}
 local _hookedCountTexts  = {}      -- éviter de re-hooker le même FontString
 
--- [12.0.5] Cache des charges alimenté par un ticker DÉDIÉ (stack propre).
--- Diagnostic empirique : `C_Spell.GetSpellCharges` retourne un secret number
--- quand appelé depuis une stack taintée par notre addon (ex: PollSlots qui a
--- fait ScanHighlights/UpdateSlot avant). Mais la MÊME API appelée depuis un
--- contexte isolé (slash command, ticker minimaliste) renvoie un nombre propre.
--- On exploite ça en faisant tourner un ticker séparé qui ne fait QUE lire les
--- charges et rien d'autre — sa stack reste propre, l'API reste clean.
--- liveChargesByID[spellID] = number (dernière valeur clean lue)
+-- Cache des charges alimenté par un ticker dédié isolé (stack propre → API clean, cf. RebuildSpellButtonCache).
 local liveChargesByID = {}
 local _chargesTicker  = nil
--- [12.0.5 diag] compteurs pour savoir quelle source alimente liveChargesByID
+-- Compteurs diag : quelle source alimente liveChargesByID
 local _chargesStats = {
   eventFires     = 0,  -- SPELL_UPDATE_CHARGES firé
   eventWrites    = 0,  -- écriture effective depuis l'event
@@ -419,26 +443,29 @@ local _chargesStats = {
   lastTickerTime = 0,
 }
 
--- Snapshot du cache pris juste avant le décollage en Skyriding.
--- Pendant le vol la barre d'action affiche les sorts du véhicule : on préserve
--- la dernière version "combat" ici pour pouvoir la restaurer au dismount,
--- même si on est déjà en combat à ce moment-là.
+-- Snapshot du cache pris avant décollage Skyriding, pour restaurer la version "combat" au dismount.
 local _preDrakeButtonData     = {}   -- snapshot buttonKey → { button, spellID }
 local _preDrakeSpellToAction  = {}   -- snapshot spellID → actionSlotNumber
+local _preDrakeSpellToButton  = {}   -- snapshot spellID → button (frame ref, jamais un secret number)
 local _hasDrakeSnapshot       = false
+
+-- true si le cache bouton→sort n'a pas pu être reconstruit proprement (combat/Dragonriding) : peut refléter des barres périmées.
+-- Initialisé à true : au chargement, aucun scan n'a encore eu lieu (évite un faux positif au premier combat après /reload).
+local _actionBarCacheStale = true
 
 local function RebuildSpellButtonCache()
   if InCombatLockdown() then
     Debug("RebuildSpellButtonCache SKIPPED (InCombat)")
+    _actionBarCacheStale = true
     return
   end
-  -- Ne jamais écraser le cache avec les sorts de montée (Dragonriding/Skyriding).
-  -- UnitPowerBarID 631 = barre Dragonriding active (fiable, pas de nil).
-  -- La dernière version construite AVANT le décollage est correcte et reste valide.
+  -- Ne jamais écraser le cache avec les sorts de montée (UnitPowerBarID 631 = Dragonriding actif)
   if UnitPowerBarID("player") == 631 then
     Debug("RebuildSpellButtonCache SKIPPED (Dragonriding actif)")
+    _actionBarCacheStale = true
     return
   end
+  _actionBarCacheStale = false
   _hasDrakeSnapshot = false   -- snapshot obsolète, on vient de reconstruire proprement
   wipe(cachedButtonData)
   wipe(cachedSpellToAction)
@@ -448,8 +475,26 @@ local function RebuildSpellButtonCache()
       local bName = prefix .. i
       local button = _G[bName]
       if button and button.action and type(button.action) == "number" then
-        local aType, id = GetActionInfo(button.action)
-        if aType == "spell" and id and id > 0 then
+        local id = nil
+        -- 1) GetSpellID() résout aussi les macros mono-sort (healers), que GetActionInfo ne résout pas
+        if button.GetSpellID then
+          local ok, sid = pcall(button.GetSpellID, button)
+          if ok and sid and type(sid) == "number" and sid > 0 then id = sid end
+        end
+        -- 2) Fallback GetActionInfo (sorts liés directement, ou si GetSpellID absent)
+        if not id then
+          local aType, aId = GetActionInfo(button.action)
+          if aType == "spell" and aId and aId > 0 then id = aId end
+        end
+        -- 3) Fallback macro explicite
+        if not id then
+          local aType, aId = GetActionInfo(button.action)
+          if aType == "macro" and aId and GetMacroSpellID then
+            local ok, macroSid = pcall(GetMacroSpellID, aId)
+            if ok and macroSid and macroSid > 0 then id = macroSid end
+          end
+        end
+        if id then
           cachedButtonData[bName] = { button = button, spellID = id }
           cachedSpellToAction[id] = button.action
           cachedSpellToButton[id] = button
@@ -462,60 +507,9 @@ local function RebuildSpellButtonCache()
   Debug("Button cache rebuilt: " .. count .. " entrees")
 end
 
----------------------------------------------------------------------------
--- Alerte chat : sorts de la Priority Bar absents des barres d'action.
--- Appelé après RebuildSpellButtonCache + ConfigureSlots (hors combat).
--- Si aucun des spellIDs d'un slot n'est trouvé dans le cache, le joueur
--- est averti — sans action bar, highlights et rotation ne fonctionnent pas.
----------------------------------------------------------------------------
-local function CheckMissingSpellsFromActionBars()
-  local missing = {}
-  for i = 1, MAX_SLOTS do
-    local slot = slotFrames[i]
-    if slot and not slot._hidden and slot.spellIDs and #slot.spellIDs > 0 then
-      -- Skip si le joueur ne connaît aucun des sorts du slot (build différent, talent non pris)
-      local known = false
-      for _, sid in ipairs(slot.spellIDs) do
-        if IsSpellKnown and IsSpellKnown(sid) then known = true; break end
-      end
-      if known then
-        local found = false
-        for _, sid in ipairs(slot.spellIDs) do
-          if cachedSpellToButton[sid] then found = true; break end
-          -- vérifie aussi le sort override (forme de voyage, etc.)
-          if C_Spell and C_Spell.GetOverrideSpell then
-            local ok, ov = pcall(C_Spell.GetOverrideSpell, sid)
-            if ok and ov and ov ~= sid and ov > 0 and cachedSpellToButton[ov] then
-              found = true; break
-            end
-          end
-        end
-        if not found then
-          local name = GetSpellName(slot.spellIDs[1]) or string.format(L["PRIO_SPELL_FALLBACK_NAME"], slot.spellIDs[1])
-          missing[#missing + 1] = { num = i, name = name, slotName = slot.slotName or string.format(L["PRIO_SLOT_FALLBACK_NAME"], i) }
-        end
-      end
-    end
-  end
 
-  if #missing > 0 then
-    local P = "|cffff6600[Aishaddon]|r "
-    print(P .. L["PRIO_MISSING_HEADER"])
-    for _, m in ipairs(missing) do
-      print(P .. "  |cffff9900•|r " .. m.slotName .. " — |cffffffff" .. m.name .. "|r")
-    end
-    print(P .. L["PRIO_MISSING_FOOTER"])
-  end
-end
-
----------------------------------------------------------------------------
--- Cache des charges (construit hors combat uniquement)
--- On stocke le maxCharges pour chaque spellID configure.
--- En combat les API de charges retournent des secret numbers,
--- donc on se base sur ce cache pour savoir quels sorts ont des charges.
--- On synchronise aussi les charges ACTUELLES (estimatedCharges) et le
--- temps de recharge (chargeRechargeTime) hors combat.
----------------------------------------------------------------------------
+-- Cache des charges (hors combat uniquement, les API de charges retournent des secret numbers en combat).
+-- Synchronise aussi les charges actuelles (estimatedCharges) et le temps de recharge (chargeRechargeTime).
 local function RebuildChargeCache()
   if InCombatLockdown() then return end
   wipe(chargeCache)
@@ -566,10 +560,8 @@ local function RebuildChargeCache()
   Debug("Charge cache rebuilt (" .. (next(chargeCache) and "OK" or "empty") .. ")")
 end
 
----------------------------------------------------------------------------
 -- Programmation de recharge d'une charge (timer-based, en combat)
 -- Quand le joueur utilise une charge, on programme un C_Timer pour la regen.
----------------------------------------------------------------------------
 local ScheduleChargeRecharge  -- forward decl
 
 ScheduleChargeRecharge = function(spellID)
@@ -581,7 +573,7 @@ ScheduleChargeRecharge = function(spellID)
   if not rechargeTime or rechargeTime <= 0 or not maxC then return end
   local clean = CleanInt(estimatedCharges[spellID]) or 0
   if clean >= maxC then return end
-  _chargeRechargeStartedAt[spellID] = GetTime()  -- timestamp de début de cette recharge
+  _chargeRechargeStartedAt[spellID] = GetTime()
   chargeTimers[spellID] = C_Timer.NewTimer(rechargeTime, function()
     chargeTimers[spellID] = nil
     local prev = CleanInt(estimatedCharges[spellID]) or 0
@@ -618,19 +610,10 @@ ScheduleChargeRecharge = function(spellID)
   end)
 end
 
----------------------------------------------------------------------------
--- Cache des CD de base (construit hors combat uniquement)
--- GetSpellBaseCooldown retourne le CD de base en millisecondes.
--- On stocke en secondes. Sert a savoir quels sorts ont un vrai CD (> GCD).
--- NOTE : PAS de wipe(spellCDBase) ! Les CD appris par SyncCooldownsOOC ou
--- par observation in-combat doivent persister entre les rebuilds, car
--- GetSpellBaseCooldown ne fonctionne pas pour tous les sorts en TWW.
--- Le wipe ne se fait qu'au changement de spec (ConfigureSlots path).
----------------------------------------------------------------------------
+-- Cache des CD de base en secondes (hors combat). Pas de wipe : les CD appris persistent entre rebuilds
+-- car GetSpellBaseCooldown ne marche pas pour tous les sorts en TWW (wipe seulement au changement de spec).
 local function RebuildCooldownCache()
   if InCombatLockdown() then return end
-  -- PAS de wipe : on merge par-dessus les valeurs existantes.
-  -- GetSpellBaseCooldown est prioritaire quand il retourne un resultat valide.
   for i = 1, MAX_SLOTS do
     local slot = slotFrames[i]
     if slot and slot.spellIDs then
@@ -676,15 +659,8 @@ local function RebuildCooldownCache()
   Debug("Cooldown cache rebuilt (" .. (next(spellCDBase) and "OK" or "empty") .. ")")
 end
 
----------------------------------------------------------------------------
--- Synchronisation OOC des charges (appele a la sortie du combat)
--- Relit les valeurs reelles et corrige toute derive des estimations.
----------------------------------------------------------------------------
+-- Synchronisation OOC des charges (sortie de combat) : relit les valeurs réelles, annule les timers prédictifs devenus inutiles.
 local function SyncChargesOOC()
-  -- [fix] C_Spell.GetSpellCharges fonctionne en combat (prouvé empiriquement).
-  -- Quand on a une valeur réelle de l'API, on annule TOUJOURS les timers prédictifs
-  -- (en et hors combat). Le timer est un filet de secours ; si l'API donne la vraie
-  -- valeur, le timer ne doit plus interférer sous peine de sur-compter.
   for sid, maxC in pairs(chargeCache) do
     if C_Spell and C_Spell.GetSpellCharges then
       local ok, info = pcall(C_Spell.GetSpellCharges, sid)
@@ -701,44 +677,20 @@ local function SyncChargesOOC()
   end
 end
 
----------------------------------------------------------------------------
--- [12.0.5] Live-read tentatif des charges en combat.
--- Stratégie : on essaie d'extraire une valeur CLEAN (Lua natif) via CleanInt.
--- Si la 12.0.5 expose les charges comme non-secret en combat → on obtient
--- une valeur autoritative. Si Blizzard continue à retourner un secret number,
--- CleanInt renvoie nil et on retombe sur l'estimation prédictive.
---
--- Zéro risque : comportement identique à avant si l'API reste taintée.
--- Gain potentiel : précision parfaite (pas de drift par procs, CDR, haste…).
---
--- Utilise aussi cooldownDuration == 0 pour détecter "at max" (nouveau en 12.0.5 :
--- "Duration APIs now return a zero-span duration when a spell is at maximum charges").
---
+-- Live-read tentatif des charges en combat via CleanInt ; retombe sur l'estimation prédictive si secret number.
 -- @param spellID number
 -- @return number? current, number? max (ou nil, nil si illisible)
----------------------------------------------------------------------------
 local function TryLiveReadCharges(spellID)
   local maxC = chargeCache[spellID]
 
-  -- [fix] C_Spell.GetSpellCharges fonctionne en et hors combat (prouvé via
-  -- TestCharges.lua sur Stormstrike 17364). CleanInt gère les secret numbers
-  -- résiduels : si la valeur est taintée elle renvoie nil et on retombe sur
-  -- estimatedCharges dans le caller. Pas de perte de sécurité.
   if not (C_Spell and C_Spell.GetSpellCharges) then return nil, maxC end
   local ok, info = pcall(C_Spell.GetSpellCharges, spellID)
   if not ok or not info then return nil, maxC end
-  -- [fix] tonumber(tostring()) fonctionne dans TOUS les contextes d'exécution
-  -- (event handler ET C_Timer ticker), contrairement à CleanInt qui utilise
-  -- pcall(n == i) — la comparaison peut échouer silencieusement si la stack
-  -- est taintée par d'autres opérations du ticker (ex: GetOverrideSpell, etc.).
-  -- tostring() sur un secret number retourne sa valeur décimale correcte ;
-  -- tonumber() dessus donne un entier clean et non-tainté.
-  -- Prouvé équivalent au SetText(info.currentCharges) direct du TestCharges.lua.
+  -- tonumber(tostring()) marche partout, contrairement à CleanInt (pcall peut échouer si stack taintée)
   local cur = tonumber(tostring(info.currentCharges))
   local max = tonumber(tostring(info.maxCharges)) or maxC
 
-  -- Filet de secours "at max" si currentCharges est nil (normalement impossible
-  -- avec tonumber/tostring, mais garde la robustesse).
+  -- Filet de secours "at max" si currentCharges est nil
   if cur == nil and max ~= nil then
     if info.cooldownDuration ~= nil then
       local okDur, isZero = pcall(function() return info.cooldownDuration + 0 == 0 end)
@@ -755,21 +707,13 @@ local function TryLiveReadCharges(spellID)
   return cur, max
 end
 
--- Accès rapide : combien de charges actuellement, en privilégiant le live read.
--- Retourne un entier ou nil. Met à jour silencieusement estimatedCharges si on
--- obtient une valeur live (permet aussi aux autres call sites basés sur
--- estimatedCharges de profiter de la correction automatique).
+-- Combien de charges actuellement, en privilégiant le live read ; met à jour estimatedCharges si valeur live obtenue.
 local function GetAuthoritativeCharges(spellID)
   local cur, _max = TryLiveReadCharges(spellID)
   if cur ~= nil then
-    -- [12.0.5] Écriture INCONDITIONNELLE. La comparaison `~=` contre
-    -- estimatedCharges[spellID] peut crasher si la valeur stockée est un
-    -- reliquat de secret number (placé par un CleanInt précédent qui
-    -- n'aurait pas pu l'extraire proprement). Le pcall ci-dessous protège
-    -- aussi contre tout futur edge case.
+    -- Écriture inconditionnelle via pcall : estimatedCharges peut contenir un reliquat de secret number.
     pcall(function() estimatedCharges[spellID] = cur end)
-    -- Si on est au max, annuler le timer de recharge prédictif pour éviter
-    -- qu'il ne re-incrémente et dépasse le max à son tick suivant.
+    -- Si au max, annuler le timer de recharge prédictif (éviter qu'il dépasse le max)
     local maxC = chargeCache[spellID]
     if maxC and cur >= maxC and chargeTimers[spellID] then
       chargeTimers[spellID]:Cancel(); chargeTimers[spellID] = nil
@@ -779,10 +723,8 @@ local function GetAuthoritativeCharges(spellID)
   return CleanInt(estimatedCharges[spellID])
 end
 
----------------------------------------------------------------------------
 -- Synchronisation OOC des CD en cours (appele a la sortie du combat)
 -- Relit les vrais CD et corrige _realCDEndTimes pour les sorts encore en CD.
----------------------------------------------------------------------------
 local function SyncCooldownsOOC()
   if InCombatLockdown() then return end
   -- 1) Corriger _realCDEndTimes pour les sorts encore en CD
@@ -809,9 +751,7 @@ local function SyncCooldownsOOC()
       _realCDEndTimes[sid] = nil
     end
   end
-  -- 2) Apprendre spellCDBase depuis les sorts actuellement en CD (OOC = clean)
-  --    C'est le mecanisme principal d'apprentissage pour les sorts dont
-  --    GetSpellBaseCooldown ne fonctionne pas (retire en TWW pour certains sorts).
+  -- 2) Apprendre spellCDBase depuis les sorts en CD (OOC=clean) : couvre les sorts où GetSpellBaseCooldown ne marche pas
   if C_Spell and C_Spell.GetSpellCooldown then
     for i = 1, MAX_SLOTS do
       local slot = slotFrames[i]
@@ -847,21 +787,12 @@ local function SyncCooldownsOOC()
   end
 end
 
----------------------------------------------------------------------------
--- Scan du CooldownViewer Blizzard (UtilityCooldownViewer)
--- Seule source fiable de l'état CD en combat dans TWW :
---   • Cooldown:IsShown() = true → sort en CD, false → prêt
---   • ChargeCount.Current:GetText() → charges lisibles (nil si non-charge)
--- Appelé à chaque tick de PollSlots (0.15s).
--- Si le CDViewer n'est pas disponible, _cdViewerAvail reste false
--- et UpdateSlotExtras tombe sur le fallback event-driven.
----------------------------------------------------------------------------
+-- Scan du CooldownViewer Blizzard (seule source fiable de l'état CD en combat en TWW), appelé à chaque tick de PollSlots.
+-- Si indisponible, _cdViewerAvail reste false et UpdateSlotExtras tombe sur le fallback event-driven.
 local function ScanCooldownViewer()
   wipe(_cdViewerState)
   _cdViewerAvail = false
-  -- Sorts à charges : lire la durée du CD depuis GetSpellCooldown (ticker isolé = propre).
-  -- d > 1.5s → vrai CD (recharge ~7.5s) ; d ≤ 1.5s → GCD seul ; nil → inconnu.
-  -- Stocké dans _chargeIsOnRealCD[chSid] et utilisé par UpdateSlotExtras (hideGCDSwipe).
+  -- Sorts à charges : durée > 1.5s = vrai CD, sinon GCD seul. Stocké dans _chargeIsOnRealCD (utilisé par UpdateSlotExtras).
   wipe(_chargeRechargeData)
   if C_Spell and C_Spell.GetSpellCooldown then
     for chSid in pairs(chargeCache) do
@@ -891,8 +822,7 @@ local function ScanCooldownViewer()
         if not isGCDFrame and itemFrame.Cooldown then
           local okS, shown = pcall(itemFrame.Cooldown.IsShown, itemFrame.Cooldown)
           if okS and shown then onCD = true end
-          -- Lire les temps exacts du swipe via GetCooldownTimes (retourne ms → conversion en s)
-          -- C'est la source la plus fiable, même principe que ChargeCount:GetText() pour les charges.
+          -- Temps exacts du swipe via GetCooldownTimes (ms → s)
           local okT, s, d = pcall(itemFrame.Cooldown.GetCooldownTimes, itemFrame.Cooldown)
           if okT and s and d and d > 500 then
             cdStart   = s / 1000
@@ -911,18 +841,13 @@ local function ScanCooldownViewer()
           if okC then charges = txt end
         end
 
-        -- Stocker en préférant la durée la plus longue : quand deux frames existent
-        -- pour le même sort (ex: frame GCD + frame vrai CD), garder le vrai CD.
-        -- Frame GCD (isOnGCD=true) → cdDuration=nil ; frame vrai CD → cdDuration=12s.
-        -- Frame GCD (isOnGCD=false) → cdDuration=1.5s ; frame vrai CD → cdDuration=12s.
-        -- "prefer longer" garantit que _cdViewerState reflète toujours le vrai CD.
+        -- Préférer la durée la plus longue si deux frames existent pour le même sort (GCD vs vrai CD)
         local _prev = _cdViewerState[spellID]
         local _useNew = not _prev
                      or (cdDuration and (not _prev.cdDuration or cdDuration > _prev.cdDuration))
         if _useNew then
           _cdViewerState[spellID] = { onCD = onCD, charges = charges, cdStart = cdStart, cdDuration = cdDuration }
-          -- Apprendre spellCDBase depuis le CDViewer (couvre les sorts où
-          -- GetSpellBaseCooldown renvoie nil en TWW, ex: Crash Lightning).
+          -- Apprendre spellCDBase depuis le CDViewer (couvre les sorts sans GetSpellBaseCooldown en TWW)
           if cdDuration and cdDuration > 1.5 and not spellCDBase[spellID] then
             spellCDBase[spellID] = cdDuration
           end
@@ -942,9 +867,7 @@ local function ScanCooldownViewer()
           end
         end
 
-        -- Indexer aussi sous l'override LIVE (ex: Voidform → Attaque Mentale 8092
-        -- devient Trait de Vide). GetOverrideSpell retourne l'override actuel
-        -- meme en combat, car c'est un simple lookup pas un secret number.
+        -- Indexer aussi sous l'override LIVE (GetOverrideSpell reste lisible en combat, simple lookup)
         if C_Spell and C_Spell.GetOverrideSpell then
           local okOv2, ovID2 = pcall(C_Spell.GetOverrideSpell, spellID)
           if okOv2 and ovID2 and ovID2 ~= spellID and ovID2 > 0 then
@@ -952,10 +875,7 @@ local function ScanCooldownViewer()
           end
         end
 
-        -- Indexer aussi sous le spellID DE BASE si le CDViewer utilise l'override
-        -- comme clé. overrideToBase[override] = base, donc si spellID est un
-        -- override, on stocke aussi sous la clé base pour que FindCDViewerState
-        -- trouve l'entrée quand slot.spellIDs contient le sort de base.
+        -- Indexer aussi sous le spellID DE BASE, pour retrouver l'entrée quand slot.spellIDs contient le sort de base
         local baseOfCD = overrideToBase[spellID]
         if baseOfCD and baseOfCD ~= spellID then
           _cdViewerState[baseOfCD] = _cdViewerState[spellID]
@@ -993,21 +913,11 @@ local function ScanCooldownViewer()
     end
   end
 
-  -- NOTE : GetSpellCharges retourne des secret numbers en combat TWW.
-  -- Impossible de les extraire (taint bloque arithmetic, comparison,
-  -- tonumber, string ops, et même SetID/GetID). Le tracking des charges
-  -- repose donc sur SPELLCAST_SUCCEEDED + ScheduleChargeRecharge timers.
-  -- SyncChargesOOC corrige toute dérive à la sortie du combat.
+  -- GetSpellCharges retourne des secret numbers en combat : tracking basé sur SPELLCAST_SUCCEEDED + ScheduleChargeRecharge, corrigé OOC.
 end
 
----------------------------------------------------------------------------
--- Cache des sorts appris (construit hors combat uniquement)
--- IsPlayerSpell peut retourner un secret boolean en combat → on n'appelle
--- jamais cette API dans le polling tick. Le cache est rebuild :
---   • au login / reload
---   • à la sortie du combat (PLAYER_REGEN_ENABLED)
---   • au changement de spé (ACTIVE_TALENT_GROUP_CHANGED)
----------------------------------------------------------------------------
+-- Cache des sorts appris (hors combat, IsPlayerSpell peut retourner un secret boolean en combat).
+-- Rebuild : login/reload, sortie de combat, changement de spé.
 local function RebuildLearnedCache()
   if InCombatLockdown() then
     Debug("RebuildLearnedCache SKIPPED (InCombat)")
@@ -1048,42 +958,35 @@ local function RebuildLearnedCache()
   Debug("Learned cache rebuilt (" .. (next(learnedSpells) and "OK" or "empty") .. ")")
 end
 
----------------------------------------------------------------------------
--- Detection des highlights
--- Trois sources possibles de glow sur un bouton Blizzard :
---   1. AssistedCombatHighlightFrame  : rotation assistant (conseille le prochain sort)
---   2. SpellHighlightTexture         : proc highlight (talent, buff, etc.)
---   3. SpellHighlightAnim            : animation de proc (confirme si SHT frozen/buggé)
--- Selon la classe et le build, seul l'un de ces systèmes peut être utilisé.
--- BM Hunter par exemple : les procs passent par SHT, jamais par ACHF.
--- On vérifie les trois via pcall pour éviter tout taint.
----------------------------------------------------------------------------
+-- Suit uniquement le highlight de l'Assistant de rotation Blizzard (pas les procs de sort, autre widget)
 local function ButtonHasGlow(button)
   if not button then return false end
-  -- 1) Rotation assistant
   if button.AssistedCombatHighlightFrame then
     local ok, shown = pcall(button.AssistedCombatHighlightFrame.IsShown, button.AssistedCombatHighlightFrame)
     if ok and shown then return true end
   end
-  -- 2) Proc highlight texture
-  if button.SpellHighlightTexture then
-    local ok, shown = pcall(button.SpellHighlightTexture.IsShown, button.SpellHighlightTexture)
-    if ok and shown then return true end
-  end
-  -- 3) Proc highlight animation (fallback si texture visible mais IsFrozen)
-  if button.SpellHighlightAnim then
-    local ok, playing = pcall(button.SpellHighlightAnim.IsPlaying, button.SpellHighlightAnim)
-    if ok and playing then return true end
-  end
   return false
+end
+
+-- API Blizzard directe pour le sort suggere par l'Assistant, independante de l'addon de barres (ABE/ElvUI/Bartender/etc.)
+local C_AC_GetNextCastSpell = C_AssistedCombat and C_AssistedCombat.GetNextCastSpell
+
+local function GetAssistedCombatHighlightSpell()
+  if not C_AC_GetNextCastSpell then return nil end
+  local ok, sid = pcall(C_AC_GetNextCastSpell)
+  if not ok or not sid or sid == 0 then return nil end
+  -- Une valeur retournee depuis une pile taintee peut etre secrete
+  if type(issecretvalue) == "function" then
+    local okSec, isSec = pcall(issecretvalue, sid)
+    if okSec and isSec then return nil end
+  end
+  return sid
 end
 
 -- Table réutilisable pour éviter une allocation par tick
 local _glowedSpells = {}
 
--- Lit le spellID LIVE d'un bouton d'action (safe en combat via pcall).
--- Utilisé par CollectGlowedSpells pour les boutons dont le contenu a changé
--- après un changement de forme Druide (action bar paging).
+-- Lit le spellID LIVE d'un bouton (safe en combat via pcall) : couvre les changements de forme Druide (action bar paging).
 local function GetLiveButtonSpellID(button)
   if not button then return nil end
   -- 1) Via GetSpellID method (TWW buttons) — API propre, préférée
@@ -1127,9 +1030,14 @@ local function CollectGlowedSpells()
   local foundAny = false
   local scannedButtons = {}
 
-  -- Passe 1 : boutons du cache (ou snapshot Dragonriding).
-  -- Pour chaque bouton avec glow, on lit le spellID LIVE pour couvrir les
-  -- changements de forme Druide (action bar paging change le contenu du bouton).
+  -- Passe 0 : sort suggere par l'Assistant via l'API directe, independante de tout bouton d'action
+  local assistedSid = GetAssistedCombatHighlightSpell()
+  if assistedSid then
+    foundAny = true
+    AddGlowedSpell(glowed, assistedSid, "assisted-combat-direct")
+  end
+
+  -- Passe 1 : boutons du cache (ou snapshot Dragonriding), spellID live pour couvrir les changements de forme Druide
   local sourceData = (_hasDrakeSnapshot and next(_preDrakeButtonData) ~= nil) and _preDrakeButtonData or cachedButtonData
   for bName, data in pairs(sourceData) do
     scannedButtons[bName] = true
@@ -1147,9 +1055,7 @@ local function CollectGlowedSpells()
     end
   end
 
-  -- Passe 2 : scanner TOUS les boutons non encore vérifiés.
-  -- Couvre les boutons qui n'étaient pas dans le cache (slots vides dans la
-  -- forme précédente, remplis après un changement de forme Druide en combat).
+  -- Passe 2 : scanner tous les boutons non encore vérifiés (slots remplis après un changement de forme en combat)
   for _, prefix in ipairs(BUTTON_PREFIXES) do
     for i = 1, 12 do
       local bName = prefix .. i
@@ -1173,9 +1079,7 @@ local function CollectGlowedSpells()
   return glowed
 end
 
----------------------------------------------------------------------------
 -- Creation des conteneurs (gauche et droite)
----------------------------------------------------------------------------
 local function CreateContainer(name)
   local cfg = ns.GetCfg("priorityBar") or {}
   local size = cfg.iconSize or 34
@@ -1192,29 +1096,46 @@ local function CreateContainer(name)
   return container
 end
 
----------------------------------------------------------------------------
+-- Tooltip des slots : mêmes règles ALT/combat que les icônes d'auras (ns.ShouldShowSpellTooltip), refresh immédiat sur ALT/combat.
+local hoveredPBFrame
+local function RefreshPBTooltip()
+  if not hoveredPBFrame or GameTooltip:IsForbidden() then return end
+  if not ns.ShouldShowSpellTooltip() then
+    GameTooltip:Hide()
+    return
+  end
+  if hoveredPBFrame.currentSpellID then
+    GameTooltip:SetOwner(hoveredPBFrame, "ANCHOR_BOTTOM", 0, -4)
+    GameTooltip:SetSpellByID(hoveredPBFrame.currentSpellID)
+    GameTooltip:Show()
+  end
+end
+
+local _pbTooltipWatcher = CreateFrame("Frame")
+_pbTooltipWatcher:RegisterEvent("MODIFIER_STATE_CHANGED")
+_pbTooltipWatcher:RegisterEvent("PLAYER_REGEN_DISABLED")
+_pbTooltipWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+_pbTooltipWatcher:SetScript("OnEvent", RefreshPBTooltip)
+
 -- Creation d'un slot
----------------------------------------------------------------------------
 local function CreateSlotFrame(index, parent)
   local cfg = ns.GetCfg("priorityBar") or {}
   local size = cfg.iconSize or 34
 
   -- SecureActionButton : cliquable pour caster le sort
-  local frame = CreateFrame("Button", "AishaddonPriorityBarSlot" .. index, parent, "SecureActionButtonTemplate")
+  local frame = CreateFrame("Button", "AishCorePriorityBarSlot" .. index, parent, "SecureActionButtonTemplate")
   frame:SetSize(size, size)
   frame:SetFrameStrata("MEDIUM")
   frame:SetFrameLevel(60)
   frame:RegisterForClicks("AnyDown", "AnyUp")
 
-  -- Conteneur interne : icone, cooldown, glows et texte de charges sont parentes ici.
-  -- La bordure reste sur le button frame et ne glisse pas. C'est ce frame qu'on anime.
-  local inner = CreateFrame("Frame", "AishaddonPBInner" .. index, frame)
+  -- Conteneur interne (icone/cooldown/glows/charges) : c'est ce frame qu'on anime, la bordure reste sur le button frame
+  local inner = CreateFrame("Frame", "AishCorePBInner" .. index, frame)
   inner:SetAllPoints()
   inner:SetFrameLevel(frame:GetFrameLevel() + 1)
   frame.innerFrame = inner
 
-  -- Texture de fond : affiche l'ancienne icone pendant le slide-in de la nouvelle.
-  -- Ancree au slot frame (pas a inner) pour rester fixe pendant l'animation.
+  -- Texture de fond : affiche l'ancienne icone pendant le slide-in, ancree au slot frame pour rester fixe
   frame.iconBg = frame:CreateTexture(nil, "ARTWORK", nil, -1)
   frame.iconBg:SetAllPoints()
   frame.iconBg:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -1229,7 +1150,7 @@ local function CreateSlotFrame(index, parent)
   frame.slideAnimFrame = CreateFrame("Frame", nil, frame)
 
   -- Cooldown swipe – parente a inner pour suivre le slide
-  frame.cooldown = CreateFrame("Cooldown", "AishaddonPBCD" .. index, inner, "CooldownFrameTemplate")
+  frame.cooldown = CreateFrame("Cooldown", "AishCorePBCD" .. index, inner, "CooldownFrameTemplate")
   frame.cooldown:SetAllPoints()
   frame.cooldown:SetDrawSwipe(true)
   frame.cooldown:SetDrawEdge(false)
@@ -1237,20 +1158,11 @@ local function CreateSlotFrame(index, parent)
   frame.cooldown:SetHideCountdownNumbers(false)
   frame.cooldown:SetFrameLevel(frame:GetFrameLevel() + 2)
 
-  -- Callback quand le cooldown swipe se termine.
-  -- Se déclenche aussi quand le GCD expire, OU quand un CD est reset (wipe).
-  -- C'est le mécanisme PRINCIPAL pour savoir qu'un sort n'est plus en CD.
-  -- En combat, les secret numbers empêchent toute lecture directe : seule
-  -- cette callback C-side nous informe fiablement de la fin du CD.
+  -- Callback fin de cooldown swipe : mécanisme principal pour savoir qu'un sort n'est plus en CD (secret numbers bloquent la lecture directe en combat)
   frame.cooldown:SetScript("OnCooldownDone", function()
     frame._onCooldown = false
     frame._swipeSpellName = nil  -- swipe terminé → libérer pour restart
-    -- Nettoyer _realCDEndTimes UNIQUEMENT si le CD est vraiment terminé.
-    -- Si le swipe s'est arrêté prématurément (durée pessimiste 3s, ou swipe GCD
-    -- qui finit avant le vrai CD), _realCDEndTimes contient encore le bon end-time
-    -- du sort — on le préserve pour que UpdateSlotExtras puisse redémarrer le swipe.
-    -- Sans ce guard, le clear prématuré effaçait la source de vérité et le swipe
-    -- ne redémarrait pas, laissant le sort désaturé sans animation visible.
+    -- Nettoyer _realCDEndTimes seulement si le CD est vraiment fini (préserve l'end-time si le swipe s'est arrêté prématurément)
     if frame.currentSpellID then
       local endTime = _realCDEndTimes[frame.currentSpellID]
       if not endTime or endTime <= GetTime() + 0.3 then
@@ -1347,7 +1259,7 @@ local function CreateSlotFrame(index, parent)
   ApplyBorder()
   frame.ApplyBorder = ApplyBorder
 
-  -- =========== Glow system (pulse fallback + flipbook) ===========
+  -- Glow system (pulse fallback + flipbook)
 
   -- Container frame for the glow overlays (above icon, below cooldown)
   local glowContainer = CreateFrame("Frame", nil, inner)
@@ -1497,14 +1409,12 @@ local function CreateSlotFrame(index, parent)
   -- Tooltip
   frame:EnableMouse(true)
   frame:SetScript("OnEnter", function(self)
-    if self.currentSpellID then
-      GameTooltip:SetOwner(self, "ANCHOR_BOTTOM", 0, -4)
-      GameTooltip:SetSpellByID(self.currentSpellID)
-      GameTooltip:Show()
-    end
+    hoveredPBFrame = self
+    RefreshPBTooltip()
   end)
-  frame:SetScript("OnLeave", function()
-    GameTooltip:Hide()
+  frame:SetScript("OnLeave", function(self)
+    if hoveredPBFrame == self then hoveredPBFrame = nil end
+    if not GameTooltip:IsForbidden() then GameTooltip:Hide() end
   end)
 
   -- State
@@ -1520,15 +1430,9 @@ local function CreateSlotFrame(index, parent)
   return frame
 end
 
----------------------------------------------------------------------------
 -- Glow ON / OFF
----------------------------------------------------------------------------
 local function StartSlotGlow(slot)
-  -- Ré-appliquer systématiquement le frame level du glowContainer à chaque activation,
-  -- même si le glow est déjà actif pour le même sort. Corrige toute dérive Z-order
-  -- provoquée par PlaySlideIn (ClearAllPoints/SetPoint sur inner) ou un SetParent
-  -- WoW interne en cours de combat. Sans ce refresh, l'early return ci-dessous fait
-  -- qu'un glow peut rester "caché" indéfiniment derrière l'icône d'un slot voisin.
+  -- Ré-appliquer le frame level du glowContainer à chaque activation : corrige la dérive Z-order après PlaySlideIn/SetParent
   if slot.glowContainer and slot.innerFrame then
     slot.glowContainer:SetFrameLevel(slot.innerFrame:GetFrameLevel() + 1)
   end
@@ -1588,9 +1492,7 @@ local function StopSlotGlow(slot)
   Debug("Slot " .. slot.slotIndex .. " GLOW OFF")
 end
 
----------------------------------------------------------------------------
 -- Positionnement des slots
----------------------------------------------------------------------------
 local function LayoutSlots()
   local cfg = ns.GetCfg("priorityBar") or {}
   local size = cfg.iconSize or 34
@@ -1610,8 +1512,7 @@ local function LayoutSlots()
   if leftContainer  then leftContainer:SetSize(containerW, containerH)  end
   if rightContainer then rightContainer:SetSize(containerW, containerH) end
 
-  -- Position : position custom du profil actif si disponible, sinon sideOffset par défaut.
-  -- On relit toujours cfg depuis GetCfg pour que les changements de profil soient appliqués.
+  -- Position custom du profil actif si disponible, sinon sideOffset par défaut
   local pbCfg = ns.GetCfg("priorityBar") or {}
   if leftContainer then
     leftContainer:ClearAllPoints()
@@ -1664,8 +1565,7 @@ local function LayoutSlots()
       f:ClearAllPoints()
       f:SetPoint("TOPLEFT", leftContainer, "TOPLEFT",
                  col0 * (size + spacing), -row0 * (size + spacing))
-      -- La visibilité réelle est gérée par ConfigureSlots (slot vide → caché)
-      -- On ne montre ici que si le slot n'est pas explicitement caché par _hidden
+      -- Visibilité réelle gérée par ConfigureSlots ; on ne montre que si pas explicitement caché
       if not f._hidden then f:Show() end
     end
   end
@@ -1689,15 +1589,7 @@ local function LayoutSlots()
   end
 end
 
----------------------------------------------------------------------------
--- Cherche si un spellID du slot est highlight
--- On compare EXACTEMENT le spellID du slot avec les IDs detectes
--- (pas d'expansion base/override — on fait confiance au scan brut
--- comme le RotationHelper qui fonctionne).
--- Si ca ne matche pas, on teste aussi l'override courant du sort
--- configure (ex: si le slot a FlameShock 188389, et le bouton affiche
--- Voltaic Blaze 470057 qui est un override → on checke aussi).
----------------------------------------------------------------------------
+-- Cherche si un spellID du slot est highlight : match direct, puis override courant, puis lien inverse override→base
 local function FindHighlightedSpell(slot, glowedSpells)
   if not slot or not slot.spellIDs then return nil end
   for _, spellID in ipairs(slot.spellIDs) do
@@ -1706,7 +1598,6 @@ local function FindHighlightedSpell(slot, glowedSpells)
       return spellID
     end
     -- Le bouton pourrait montrer l'override du sort configure
-    -- Ex: slot a 188389 (Flame Shock), bouton montre 470057 (Voltaic Blaze)
     if C_Spell and C_Spell.GetOverrideSpell then
       local ok, overrideID = pcall(C_Spell.GetOverrideSpell, spellID)
       if ok and overrideID and overrideID ~= spellID and overrideID > 0 then
@@ -1715,8 +1606,7 @@ local function FindHighlightedSpell(slot, glowedSpells)
         end
       end
     end
-    -- Lien inverse : le sort config est l'override d'un base spell glowé
-    -- Ex: slot a 444995 (Totem déferlant), glow sur 1221348 (base spell)
+    -- Lien inverse : le sort configuré est l'override d'un base spell glowé
     if FindBaseSpellByID then
       local ok, baseID = pcall(FindBaseSpellByID, spellID)
       if ok and baseID and baseID ~= spellID and baseID > 0 then
@@ -1726,8 +1616,7 @@ local function FindHighlightedSpell(slot, glowedSpells)
       end
     end
   end
-  -- Recherche inverse : un spell glowé est le base d'un sort configuré
-  -- Couvre le cas où GetOverrideSpell(glowedBase) → sort configuré
+  -- Recherche inverse : un spell glowé est le base d'un sort configuré (GetOverrideSpell(glowedBase) → sort configuré)
   if C_Spell and C_Spell.GetOverrideSpell then
     for glowedID in pairs(glowedSpells) do
       local ok, ov = pcall(C_Spell.GetOverrideSpell, glowedID)
@@ -1743,11 +1632,7 @@ local function FindHighlightedSpell(slot, glowedSpells)
   return nil
 end
 
----------------------------------------------------------------------------
--- Animation slide-in : l'icone entre par le haut quand le sort affiche change.
--- OnUpdate pur Lua sur une frame dummy → zero taint, zero secret number.
--- Le yOffset passe de +DIST a 0, l'alpha de 0 a 1, avec un ease-out quadratique.
----------------------------------------------------------------------------
+-- Animation slide-in : l'icone entre par le haut au changement de sort affiché (OnUpdate pur Lua, zero taint)
 local SLIDE_DIST = 20    -- pixels depuis le haut
 local SLIDE_DUR  = 0.26 -- secondes
 
@@ -1788,9 +1673,7 @@ local function PlaySlideIn(slot)
   end)
 end
 
----------------------------------------------------------------------------
 -- Retrouve le slot d'action dans le cache pour un slot de la PriorityBar
----------------------------------------------------------------------------
 local function FindActionSlotForSpell(slot)
   if not slot then return nil end
   -- 1) Match sur le spell actuellement affiche
@@ -1814,27 +1697,15 @@ local function FindActionSlotForSpell(slot)
   return nil
 end
 
----------------------------------------------------------------------------
--- Recherche CDViewer state pour un slot.
--- Sources, par ordre de priorité :
---   1. ns.Auras.cdmCDData (event-driven : hooks SetCooldown/Clear sur frames CDM)
---      → onCD + cdStart + cdDuration fiables, mis à jour instantanément
---   2. _cdViewerState (polling ScanCooldownViewer, 0.15s)
---      → fournit charges en supplément
--- Le CDViewer indexe par spellID de base (ex: Attaque mentale 8092),
--- mais le PB peut afficher un override (ex: Trait de Vide).
--- On cherche sous : displayedID, baseDisplayed, puis tous les spellIDs
--- configures du slot + leurs overrides inverses (overrideToBase).
----------------------------------------------------------------------------
+-- Recherche CDViewer state pour un slot. Priorité : ns.Auras.cdmCDData (event-driven, instantané) puis
+-- _cdViewerState (polling, fournit les charges). Cherche sous displayedID/baseDisplayed puis tous les spellIDs + overrides du slot.
 local function FindCDViewerState(slot)
   -- Source event-driven (plus fiable que IsShown polling)
   local cdmEventData = ns.Auras and ns.Auras.cdmCDData
   local displayedID   = slot.currentSpellID
   local baseDisplayed = overrideToBase[displayedID] or displayedID
 
-  -- Auto-expire une entrée cdmCDData si son timing est dépassé.
-  -- Couvre le cas "pool return sans Clear()" : quand un sort à charges repasse
-  -- à max charges, le CDM retourne la frame au pool sans forcément appeler Clear().
+  -- Auto-expire une entrée cdmCDData si son timing est dépassé (cas "pool return sans Clear()")
   local function autoExpire(ev)
     if ev and ev.onCD and ev.cdStart and ev.cdDuration then
       if ev.cdStart + ev.cdDuration <= GetTime() + 0.15 then
@@ -1843,11 +1714,7 @@ local function FindCDViewerState(slot)
     end
   end
 
-  -- Helper interne : pour un ID donné, construit un résultat fusionné.
-  -- Préfère cdmEventData pour onCD+timing ; enrichit avec les charges du polling.
-  -- Retourne { onCD=false } explicitement quand CDM a signé la fin du CD : signal
-  -- clair qui empêche le polling stale ou d'autres spellIDs du slot de retourner
-  -- un faux onCD=true pour ce sort.
+  -- Pour un ID donné : préfère cdmEventData pour onCD+timing, enrichit avec les charges du polling.
   local function tryID(id)
     local evEntry = cdmEventData and cdmEventData[id]
     if evEntry then autoExpire(evEntry) end
@@ -1862,7 +1729,7 @@ local function FindCDViewerState(slot)
           charges    = pollEntry.charges,
         }
       end
-      -- Retourner même si onCD=false (signal "pas en CD" explicite).
+      -- Retourner même si onCD=false (signal explicite "pas en CD")
       return { onCD=evEntry.onCD, cdStart=evEntry.cdStart, cdDuration=evEntry.cdDuration }
     end
 
@@ -1897,11 +1764,8 @@ local function FindCDViewerState(slot)
     if cv then return cv end
   end
 
-  -- 2) Chercher sous les spellIDs du slot, UNIQUEMENT ceux qui sont des variantes
-  --    du sort affiché (même sort, ID différent via override/base connu).
-  --    Filtre "isRelated" : évite de retourner le CD d'un sort INDÉPENDANT du slot
-  --    (ex : Lava Lash dans un slot Stormstrike) qui polluerait la durée ou
-  --    déclencherait un faux swipe. Ce filtrage est la clé pour les mauvaises durées.
+  -- 2) Chercher sous les spellIDs du slot, uniquement les variantes du sort affiché (filtre isRelated,
+  -- évite de retourner le CD d'un sort indépendant du slot type Lava Lash dans un slot Stormstrike)
   if slot.spellIDs then
     for _, sid in ipairs(slot.spellIDs) do
       if sid ~= displayedID and sid ~= baseDisplayed then
@@ -1909,9 +1773,6 @@ local function FindCDViewerState(slot)
         local isRelated = (overrideToBase[sid] == displayedID)
                        or (overrideToBase[sid] == baseDisplayed)
         if not isRelated and C_Spell and C_Spell.GetOverrideSpell then
-          -- GetOverrideSpell(sid) retourne le sort actif de sid pendant les
-          -- transformations (ex : GetOverrideSpell(Stormstrike)=Windstrike).
-          -- Si l'override de sid EST le sort affiché, sid est bien une variante.
           local ok, ovSid = pcall(C_Spell.GetOverrideSpell, sid)
           if ok and ovSid and (ovSid == displayedID or ovSid == baseDisplayed) then
             isRelated = true
@@ -1932,12 +1793,8 @@ local function FindCDViewerState(slot)
   return nil
 end
 
----------------------------------------------------------------------------
--- Mise a jour cooldown / charges / desaturation
--- Approche hybride : cooldown SWIPE en C-to-C (SetCooldown avec secret
--- numbers), mais desaturation et charges en EVENT-DRIVEN.
----------------------------------------------------------------------------
--- Désabonnement CDM swipe pour un slot (appelé à la mise à nil de currentSpellID).
+-- Mise a jour cooldown/charges/desaturation : swipe en C-to-C (secret numbers), desat/charges event-driven
+-- Désabonnement CDM swipe pour un slot (appelé à la mise à nil de currentSpellID)
 local function ClearSlotCDMSubscription(slot)
   if not (ns.Auras and ns.Auras.UnsubscribeCDMCooldown) then return end
   if slot.currentSpellID then
@@ -1955,11 +1812,7 @@ local function UpdateSlotExtras(slot)
 
   local actionSlot = FindActionSlotForSpell(slot)
 
-  -- 1) Cooldown swipe : GetSpellCooldownDuration → SetCooldownFromDurationObject
-  --    (chemin combat-safe, aucune comparaison de secret number en Lua).
-  --    Uniquement pour slot.currentSpellID (sort affiché).
-  --    Si showCooldownSwipe == false, on force Clear+Hide a chaque tick.
-  --    Si le sort est highlighted (proc/reset), on annule le swipe et le tracking.
+  -- Cooldown swipe : GetSpellCooldownDuration→SetCooldownFromDurationObject (combat-safe, pas de comparaison secret number)
   if slot.cooldown then
     local showSwipe = cfg.showCooldownSwipe ~= false
     local showText  = cfg.showCooldownText  ~= false
@@ -1979,26 +1832,34 @@ local function UpdateSlotExtras(slot)
         _realCDEndTimes[base] = nil
       end
     else
-      -- CD swipe : C_Spell.GetSpellCooldown (nombres propres) pour détecter GCD vs vrai CD.
-      -- SetCooldownFromDurationObject pour l'animation (durObj opaque → aucune lecture Lua).
-      -- On utilise UNIQUEMENT slot.currentSpellID (sort affiché) pour ne jamais
-      -- déclencher le swipe d'un sort caché du même slot.
+      -- CD swipe : GetSpellCooldown pour isActive (GCD vs vrai CD), SetCooldownFromDurationObject pour l'animation (durObj opaque).
+      -- Uniquement slot.currentSpellID, pour ne jamais déclencher le swipe d'un sort caché du même slot.
       local curID  = slot.currentSpellID
       local baseID = curID and (overrideToBase[curID] or curID)
 
-      -- isActive est un booléen (safe) : true = vrai CD de sort, false = GCD seul.
-      -- En TWW isActive peut être vrai même pour un GCD pur sur certains sorts.
-      local spellCD  = C_Spell and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(curID)
-      if not spellCD and baseID and baseID ~= curID then
-        spellCD = C_Spell.GetSpellCooldown(baseID)
+      -- _liveSwipeState (ticker isolé, cf. ScanLiveSwipeState) est prioritaire : la même lecture dans la stack PollSlots peut être taintée.
+      local liveEntry = CD_SWIPE_ISOLATION_ENABLED
+                         and (_liveSwipeState[curID] or (baseID ~= curID and _liveSwipeState[baseID]))
+      local isRealCD
+      if liveEntry then
+        isRealCD = liveEntry.isActive
+      else
+        local spellCD = C_Spell and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(curID)
+        if not spellCD and baseID and baseID ~= curID then
+          spellCD = C_Spell.GetSpellCooldown(baseID)
+        end
+        isRealCD = spellCD and spellCD.isActive
       end
-      local isRealCD = spellCD and spellCD.isActive
+
+      -- Auto-guérison _realCDEndTimes : si isRealCD dit "pas en CD" alors qu'une prédiction UNIT_SPELLCAST_SUCCEEDED est encore armée (proc qui reset le CD), on la nettoie immédiatement.
+      if CD_STALE_AUTOHEAL_ENABLED and curID and not isRealCD then
+        if _realCDEndTimes[curID] then _realCDEndTimes[curID] = nil end
+        if baseID and baseID ~= curID and _realCDEndTimes[baseID] then _realCDEndTimes[baseID] = nil end
+      end
+
       local _chSwipeSid = chargeCache[curID] and curID
                        or (baseID ~= curID and chargeCache[baseID] and baseID)
-      -- hideGCDSwipe : sorts normaux uniquement (pas les sorts à charges).
-      -- Pour les charges, GetSpellCooldown.duration retourne 0 en TWW (pas la durée
-      -- de recharge) → impossible de distinguer GCD de recharge via durée.
-      -- Les sorts à charges utilisent isActive + SetCooldownFromDurationObject naturellement.
+      -- hideGCDSwipe : sorts normaux uniquement (les sorts à charges utilisent isActive nativement, duration=0 en TWW pour eux).
       if cfg.hideGCDSwipe and isRealCD and not _chSwipeSid then
         local _cdmD = ns.Auras and ns.Auras.cdmCDData
         local _cdmE = _cdmD and (_cdmD[curID] or (baseID ~= curID and _cdmD[baseID]) or nil)
@@ -2006,8 +1867,9 @@ local function UpdateSlotExtras(slot)
       end
 
       if isRealCD then
-        -- Vrai CD : alimenter le frame avec le durObj opaque (aucune lecture en Lua)
-        local durObj = C_Spell.GetSpellCooldownDuration(curID)
+        -- Vrai CD : durObj opaque (même préférence liveEntry isolé, sinon fallback direct)
+        local durObj = (liveEntry and liveEntry.durObj)
+                       or C_Spell.GetSpellCooldownDuration(curID)
                        or (baseID ~= curID and C_Spell.GetSpellCooldownDuration(baseID))
         if durObj then
           pcall(slot.cooldown.SetCooldownFromDurationObject, slot.cooldown, durObj)
@@ -2029,13 +1891,8 @@ local function UpdateSlotExtras(slot)
     end
   end
 
-  -- 2) Desaturation : CDViewer est la source de verite en combat.
-  --    Sort a charges : desat quand CDViewer charges == 0, ou fallback estimatedCharges == 0
-  --    Sort normal    : desat quand CDViewer onCD == true, ou fallback _realCDEndTimes actif
-  --    IMPORTANT : on ne consulte le CDViewer QUE pour les sorts avec un vrai CD
-  --    connu (spellCDBase > 1.5s) ou un sort a charges.  Les fillers sans CD
-  --    (ex: Fouet Mental) apparaissent aussi dans le CDViewer pendant leur
-  --    cast/channel (bordure verte = buff) mais ne doivent PAS etre desatures.
+  -- Désaturation : CDViewer source de vérité en combat (charges==0 ou onCD==true), fallback estimatedCharges/_realCDEndTimes.
+  -- Consulté uniquement pour sorts à vrai CD (>1.5s) ou à charges : les fillers sans CD apparaissent aussi dans le CDViewer pendant cast/channel mais ne doivent pas être désaturés.
   if cfg.desaturateOnCooldown then
     local desat = false
 
@@ -2043,9 +1900,7 @@ local function UpdateSlotExtras(slot)
       local displayedID   = slot.currentSpellID
       local baseDisplayed = overrideToBase[displayedID] or displayedID
 
-      -- isChargeSpell : uniquement pour le sort AFFICHÉ (displayedID / baseDisplayed).
-      -- Ne pas itérer slot.spellIDs : un sort caché à charges ne doit jamais
-      -- provoquer la désaturation du sort affiché qui, lui, est disponible.
+      -- isChargeSpell : uniquement le sort AFFICHÉ, jamais un sort caché du slot (qui ne doit pas désaturer le sort affiché disponible).
       local isChargeSpell = chargeCache[displayedID] or chargeCache[baseDisplayed]
       local chargeSid     = chargeCache[displayedID] and displayedID
                          or (chargeCache[baseDisplayed] and baseDisplayed or nil)
@@ -2053,41 +1908,35 @@ local function UpdateSlotExtras(slot)
       local _cdmData  = ns.Auras and ns.Auras.cdmCDData
       local hasRealCD = (spellCDBase[displayedID] and spellCDBase[displayedID] > 1.5)
                      or (spellCDBase[baseDisplayed] and spellCDBase[baseDisplayed] > 1.5)
-                     -- Fallback live : le sort est dans _cdViewerState (CDM utility viewer)
-                     -- avec onCD=true → il est sur un vrai CD, même si spellCDBase l'ignore.
+                     -- Fallback live : CDViewer onCD==true même si spellCDBase l'ignore
                      or (_cdViewerAvail
                          and (_cdViewerState[displayedID] and _cdViewerState[displayedID].onCD
                               or _cdViewerState[baseDisplayed] and _cdViewerState[baseDisplayed].onCD)
                          and true or false)
-                     -- Fallback event-driven : cdmCDData signale un vrai CD (wasSetFromCooldown+!isOnGCD).
-                     -- Couvre le cas où spellCDBase est nil et le CDViewer n'a pas encore scanné.
+                     -- Fallback event-driven : cdmCDData signale un vrai CD (couvre le cas spellCDBase nil)
                      or (_cdmData and (_cdmData[displayedID] or _cdmData[baseDisplayed]) and true or false)
       local cvState = (hasRealCD or isChargeSpell) and FindCDViewerState(slot) or nil
 
       if isChargeSpell then
-        -- Desat uniquement si charges == 0 CONFIRMÉES.
-        -- On évite toute lecture via GetSpellCharges (contexte tainté PollSlots :
-        -- tonumber/tostring peut retourner nil → ancienne faute) et
-        -- GetAuthoritativeCharges/TryLiveReadCharges (fallback "cooldownDuration==0"
-        -- peut corrompre estimatedCharges si l'arithmétique sur secret number
-        -- retourne 0 de façon incorrecte).
-        --
-        -- Source 1 : cvState.charges (CDViewer via GetText sur FontString Blizzard
-        --   = valeur propre garantie, ticker isolé)
-        -- Source 2 : estimatedCharges (maintenu par SyncChargesOOC appelé depuis
-        --   les event handlers SPELL_UPDATE_CHARGES en contexte propre)
-        -- Si aucune source fiable : pas de désaturation (optimiste).
+        -- Desat uniquement si charges==0 confirmées : jamais via GetSpellCharges direct (tainté dans PollSlots),
+        -- seulement cvState.charges (CDViewer, ticker isolé) ou estimatedCharges (SyncChargesOOC). Sinon pas de désaturation (optimiste).
         if chargeSid then
           local cur = nil
-          if cvState and type(cvState.charges) == "number" then
+          -- Source prioritaire : canal event-driven ChargeCount (CDMHooks.lua), zéro-lag vs le poll 0.15s.
+          if CDM_CHARGE_HOOK_ENABLED then
+            local cdmChg = ns.Auras and ns.Auras.cdmChargeData
+            local txt = cdmChg and cdmChg[chargeSid]
+            if txt ~= nil then
+              local okNum, num = pcall(tonumber, txt)
+              if okNum and num then cur = num end
+            end
+          end
+          if cur == nil and cvState and type(cvState.charges) == "number" then
             -- Valeur directe : 0, 1, 2 … issue du ChargeCount FontString Blizzard
             cur = cvState.charges
           end
           if cur == nil then
-            -- Fallback : estimatedCharges maintenu par SyncChargesOOC + event handlers.
-            -- On N'utilise PAS cvState.onCD comme proxy pour charges==0 : quand
-            -- le sort a 1 charge restante et qu'une 2ème recharge, onCD=true mais
-            -- le sort est utilisable → désaturation incorrecte si on assume cur=0.
+            -- Fallback estimatedCharges : ne jamais utiliser cvState.onCD comme proxy (onCD=true avec 1 charge restante ≠ désaturé).
             cur = CleanInt(estimatedCharges[chargeSid])
           end
           if cur ~= nil then
@@ -2095,11 +1944,7 @@ local function UpdateSlotExtras(slot)
           end
         end
       else
-        -- Sort normal (pas de charges) : vrai CD uniquement, jamais GCD seul.
-        -- Source 1 : cvState (event-driven cdmCDData, filtré wasSetFromCooldown+!isOnGCD).
-        --   Prioritaire car zéro-lag et fiable sur toute la durée du CD.
-        -- Source 2 : _cdViewerState polling (filtre isOnGCD → GCDs exclus).
-        -- Source 3 : _realCDEndTimes (set par SPELLCAST_SUCCEEDED, jamais GCD).
+        -- Sort normal : vrai CD uniquement, jamais GCD. Priorité cvState (event-driven) > _cdViewerState (polling) > _realCDEndTimes.
         if cvState then
           desat = cvState.onCD
         else
@@ -2119,10 +1964,7 @@ local function UpdateSlotExtras(slot)
     slot.icon:SetDesaturated(false)
   end
 
-  -- 3) Charges : afficher uniquement quand le sort AFFICHE est le sort a charges
-  --    (ou son override live). Ne pas afficher quand un AUTRE sort du slot a des
-  --    charges mais que c'est un sort different qui est affiche (ex: Torrent du Vide
-  --    affiche dans le slot Y ne doit pas montrer les charges d'Attaque Mentale).
+  -- Charges : afficher uniquement pour le sort AFFICHÉ (ou son override live), jamais celles d'un autre sort du même slot.
   if slot.chargeText and cfg.showCharges then
     local displayedID   = slot.currentSpellID
     local baseDisplayed = overrideToBase[displayedID] or displayedID
@@ -2132,8 +1974,7 @@ local function UpdateSlotExtras(slot)
     local chargeSid     = chargeCache[displayedID] and displayedID
                        or (chargeCache[baseDisplayed] and baseDisplayed or nil)
 
-    -- Match override live : le sort affiche est l'override actuel d'un sort a charges
-    -- Ex: Attaque Mentale (8092) → Trait de Vide pendant Voidform
+    -- Match override live : le sort affiché est l'override actuel d'un sort à charges (ex: Attaque Mentale → Trait de Vide)
     if not isChargeSpell and slot.spellIDs and C_Spell and C_Spell.GetOverrideSpell then
       for _, sid in ipairs(slot.spellIDs) do
         if chargeCache[sid] then
@@ -2146,9 +1987,7 @@ local function UpdateSlotExtras(slot)
     end
 
     if isChargeSpell and chargeSid and C_Spell and C_Spell.GetSpellCharges then
-      -- Lecture directe, identique à TestCharges.lua.
-      -- SetText accepte la valeur brute : pas de conversion, pas d'estimation,
-      -- pas de fallback. Si pcall échoue (API indisponible), on cache.
+      -- Lecture directe : SetText accepte la valeur brute, pas de conversion/fallback.
       local ok, cInfo = pcall(C_Spell.GetSpellCharges, chargeSid)
       if ok and cInfo then
         slot.chargeText:SetText(cInfo.currentCharges)
@@ -2157,16 +1996,20 @@ local function UpdateSlotExtras(slot)
         slot.chargeText:Hide()
       end
     else
-      slot.chargeText:Hide()
+      -- Pas un sort à charges : certains sorts (ex: Don de Sheilun) affichent des STACKS de buff via le même widget (cf. STACK_SPELLS).
+      local auraSpellID = STACK_SPELLS[displayedID] or STACK_SPELLS[baseDisplayed]
+      if auraSpellID and ApplyStackToText(slot.chargeText, auraSpellID) then
+        slot.chargeText:Show()
+      else
+        slot.chargeText:Hide()
+      end
     end
   elseif slot.chargeText then
     slot.chargeText:Hide()
   end
 end
 
----------------------------------------------------------------------------
 -- Mise a jour d'un slot : icone + glow
----------------------------------------------------------------------------
 local function UpdateSlot(slot, glowedSpells)
   if not slot or not slot.spellIDs or #slot.spellIDs == 0 then
     -- Slot vide : cacher la frame entière (pas seulement la texture)
@@ -2174,9 +2017,7 @@ local function UpdateSlot(slot, glowedSpells)
     return
   end
 
-  -- Hide unlearned : utilise le cache learnedSpells (construit hors combat uniquement).
-  -- On ne teste JAMAIS IsPlayerSpell ici pour eviter les secret booleans en combat.
-  -- Fail-open si le cache est vide (pas encore construit au premier tick).
+  -- Hide unlearned via learnedSpells cache (jamais IsPlayerSpell direct, secret boolean en combat) ; fail-open si cache vide
   local cfg = ns.GetCfg("priorityBar") or {}
   if cfg.hideUnlearned and next(learnedSpells) ~= nil then
     local anyKnown = false
@@ -2198,9 +2039,7 @@ local function UpdateSlot(slot, glowedSpells)
 
   local highlightedID = FindHighlightedSpell(slot, glowedSpells)
 
-  -- Sort a afficher par defaut : premier sort APPRIS de la liste.
-  -- Si le cache est vide (pas encore construit), fallback sur spellIDs[1].
-  -- Résout aussi l'override pour afficher l'icone live (ex: proc qui remplace).
+  -- Sort par défaut : premier sort appris de la liste (fallback spellIDs[1] si cache vide), résout l'override pour l'icône live
   local defaultID = nil
   local cacheReady = next(learnedSpells) ~= nil
   for _, sid in ipairs(slot.spellIDs) do
@@ -2220,24 +2059,12 @@ local function UpdateSlot(slot, glowedSpells)
 
   local displayID = highlightedID or defaultID
 
-  -- Changer l'icone si necessaire + rafraichir pour les proc icon swaps.
-  -- GetActionTexture(slot) retourne l'icone LIVE de la barre d'action, incluant
-  -- les procs qui remplacent l'icone (ex : Ravage proc sur Druid Guardian remplace
-  -- l'icone de Mutiler/Destruction Massive).  GetSpellTexture lui est statique.
-  -- IMPORTANT : GetActionTexture n'est utilise QUE pour les sorts highlighted,
-  -- car le bouton Blizzard peut etre visuellement override par un autre sort
-  -- (ex: Voidform remplace Mot de l'ombre:Folie par Torrent du Vide sur le
-  -- meme bouton). Pour les sorts non-highlighted, on utilise GetSpellIcon
-  -- qui retourne toujours l'icone du spellID demande.
+  -- Icône : GetActionTexture (live, capte les proc swaps) si highlighted, sinon GetSpellIcon (statique)
   do
     local tex
     if highlightedID then
-      -- Sort highlighted : utiliser GetActionTexture pour le proc icon swap
-      -- (ex: Ravage remplace Mutiler sur le même bouton sans changer le spellID).
-      -- On n'utilise QUE le lookup direct displayID→actionSlot.
-      -- Le fallback sur d'autres spellIDs du slot est dangereux après un
-      -- changement de forme Druide : le slot caché pointe vers un bouton
-      -- qui affiche maintenant un sort complètement différent.
+      -- Sort highlighted : GetActionTexture pour le proc icon swap (ex: Ravage remplace Mutiler sans changer le spellID).
+      -- Lookup direct displayID→actionSlot uniquement : un fallback vers un autre spellID du slot est dangereux après un changement de forme Druide.
       local actionSlotForIcon = cachedSpellToAction[displayID]
       if actionSlotForIcon then
         local ok, actionTex = pcall(GetActionTexture, actionSlotForIcon)
@@ -2256,9 +2083,7 @@ local function UpdateSlot(slot, glowedSpells)
     end
     if displayID ~= slot.currentSpellID then
       local hadSpell = slot.currentSpellID ~= nil
-      -- Mise à jour de l'abonnement CDM swipe clone : désabonner l'ancien sort,
-      -- s'abonner au nouveau. On s'abonne sous displayID ET sous son ID de base
-      -- (overrideToBase) car le CDM peut indexer le CD sous l'un ou l'autre.
+      -- Réabonnement CDM swipe : désabonner l'ancien sort, s'abonner au nouveau sous displayID ET son ID de base (le CDM peut indexer l'un ou l'autre).
       if ns.Auras and ns.Auras.UnsubscribeCDMCooldown then
         if slot.currentSpellID then
           ns.Auras.UnsubscribeCDMCooldown(slot.currentSpellID, slot)
@@ -2267,14 +2092,10 @@ local function UpdateSlot(slot, glowedSpells)
             ns.Auras.UnsubscribeCDMCooldown(oldBase, slot)
           end
         end
-        -- forDisplayID = displayID : guard qui empêche les sorts cachés du même
-        -- slot de déclencher le swipe du sort affiché.
+        -- forDisplayID=displayID : empêche un sort caché du même slot de déclencher le swipe du sort affiché.
         ns.Auras.SubscribeCDMCooldown(displayID, slot, slot.cooldown, slot, displayID)
         local newBase = overrideToBase[displayID] or displayID
         if newBase ~= displayID then
-          -- Le CDM track le CD sous l'ID de base (ex: StormStrike) même quand
-          -- le sort affiché est l'override (ex: WindStrike). forDisplayID reste
-          -- displayID pour que le guard slot.currentSpellID == forDisplayID soit valide.
           ns.Auras.SubscribeCDMCooldown(newBase, slot, slot.cooldown, slot, displayID)
         end
       end
@@ -2310,9 +2131,25 @@ local function UpdateSlot(slot, glowedSpells)
   UpdateSlotExtras(slot)
 end
 
----------------------------------------------------------------------------
+-- Scan isolé de l'état CD live par slot (même ticker que ScanCooldownViewer) pour éviter le taint entre lectures C_Spell
+local function ScanLiveSwipeState()
+  wipe(_liveSwipeState)
+  if not (C_Spell and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldownDuration) then return end
+  for i = 1, MAX_SLOTS do
+    local slot = slotFrames[i]
+    local sid = slot and slot.currentSpellID
+    if sid and not _liveSwipeState[sid] then
+      local okCD, cd     = pcall(C_Spell.GetSpellCooldown, sid)
+      local okDur, durObj = pcall(C_Spell.GetSpellCooldownDuration, sid)
+      _liveSwipeState[sid] = {
+        isActive = (okCD and cd and cd.isActive) or false,
+        durObj   = (okDur and durObj) or nil,
+      }
+    end
+  end
+end
+
 -- Polling : scan les highlights et met a jour les 4 slots
----------------------------------------------------------------------------
 local function PollSlots()
   if testMode then return end
   -- Skip si aucun conteneur visible : pas la peine de scanner les glows
@@ -2332,11 +2169,12 @@ end
 local function StartPolling()
   if pollTicker then return end
   pollTicker = C_Timer.NewTicker(0.15, PollSlots)
-  -- Ticker isole pour le scan CDViewer : s'execute dans un contexte
-  -- d'execution separe pour eviter toute propagation de taint vers
-  -- les fonctions de PollSlots (GetOverrideSpell, GetActionTexture, etc.)
+  -- Ticker isolé pour le scan CDViewer : évite la propagation de taint vers PollSlots
   if not cdViewerTicker then
-    cdViewerTicker = C_Timer.NewTicker(0.15, ScanCooldownViewer)
+    cdViewerTicker = C_Timer.NewTicker(0.15, function()
+      ScanCooldownViewer()
+      if CD_SWIPE_ISOLATION_ENABLED then ScanLiveSwipeState() end
+    end)
   end
   Debug("Polling started")
 end
@@ -2347,23 +2185,30 @@ local function StopPolling()
   Debug("Polling stopped")
 end
 
----------------------------------------------------------------------------
--- Helpers securises pour Show/Hide les conteneurs
----------------------------------------------------------------------------
+-- Helpers Show/Hide conteneurs. SetSlotsMouseEnabled : sync EnableMouse avec la visibilité (sinon tooltip au survol même masqué)
+local function SetSlotsMouseEnabled(enabled)
+  -- EnableMouse protégé : skip si InCombatLockdown (cutscenes), rattrapé au prochain UpdateVisibility OOC
+  if InCombatLockdown() then return end
+  for i = 1, MAX_SLOTS do
+    local slot = slotFrames[i]
+    if slot then slot:EnableMouse(enabled) end
+  end
+end
+
 local function SafeShowContainers()
   if leftContainer  then leftContainer:SetAlpha(1)  end
   if rightContainer then rightContainer:SetAlpha(1) end
+  SetSlotsMouseEnabled(true)
 end
 
 local function SafeHideContainers()
   if leftContainer  then leftContainer:SetAlpha(0)  end
   if rightContainer then rightContainer:SetAlpha(0) end
+  SetSlotsMouseEnabled(false)
 end
 
----------------------------------------------------------------------------
 -- Visibilité pure Lua (même pattern que ResourceCircle) :
 -- ShouldShow → lastVisState debounce → AnimatePB fade
----------------------------------------------------------------------------
 local pbLastVisState       = nil   -- true/false/nil — dernier état connu
 local pbHiddenForSkyriding = false -- masqué explicitement pour le skyriding
 local pbHiddenForGui       = false -- masqué quand le panneau Animations 3D est ouvert
@@ -2375,6 +2220,9 @@ local function PBShouldShow()
   if cfg.enabled == false then return false end
   if ns.IsInBlockedState() then return false end
   if dragEnabled then return true end
+  -- "Toujours actif en instance" : ignore les transitions combat tant qu'on
+  -- est en donjon/raid (ns.inInstance, cf. Core.lua).
+  if cfg.alwaysInInstance and ns.inInstance then return true end
   local vMode = cfg.visibilityMode or "combat"
   if vMode == "always" then return true end
   if vMode == "target"  then return UnitExists("target") end
@@ -2384,6 +2232,7 @@ end
 
 local function AnimatePB(shouldShow)
   if pbFadeTicker then pbFadeTicker:Cancel(); pbFadeTicker = nil end
+  SetSlotsMouseEnabled(shouldShow)
   if shouldShow then
     -- Déjà complètement visible : rien à faire
     if leftContainer and leftContainer:GetAlpha() >= 1 then return end
@@ -2440,9 +2289,7 @@ function PriorityBar.UpdateVisibility()
   AnimatePB(shouldShow)
 end
 
----------------------------------------------------------------------------
 -- Configuration des slots
----------------------------------------------------------------------------
 function PriorityBar.ConfigureSlots(slotConfigs)
   if InCombatLockdown() then
     Debug("ConfigureSlots skipped (in combat)")
@@ -2517,9 +2364,7 @@ function PriorityBar.ConfigureSlots(slotConfigs)
   RebuildLearnedCache()
 end
 
----------------------------------------------------------------------------
 -- API publique
----------------------------------------------------------------------------
 -- Exposer slotFrames pour le debug (/aishdebug pbslots)
 PriorityBar._debug_slotFrames = slotFrames
 -- Exposer les tables internes pour le debug (/aishdebug pbcharges)
@@ -2535,8 +2380,7 @@ PriorityBar._debug_internals = {
 -- _cdViewerAvail est un boolean plain → getter pour accès live
 PriorityBar._debug_getCdViewerAvail = function() return _cdViewerAvail end
 
--- [12.0.5] Helpers pour /aish charges : accès aux tables internes depuis
--- le slash command sans exposer les tables complètes.
+-- Helpers pour /aish charges : accès aux tables internes depuis le slash command.
 function PriorityBar._GetCachedBtn(spellID)
   return cachedSpellToButton and cachedSpellToButton[spellID] or nil
 end
@@ -2559,9 +2403,7 @@ function PriorityBar._GetActionSlot(spellID)
   return cachedSpellToAction and cachedSpellToAction[spellID] or nil
 end
 
--- [12.0.5 diag] Dump instantané de chaque slot qui référence spellID :
--- affiche slot index, visible?, currentSpellID (= ce qui s'affiche), liste des
--- spellIDs, détecte si le render aurait reconnu "isChargeSpell".
+-- Dump instantané de chaque slot référençant spellID (index, visible, currentSpellID, isChargeSpell détecté).
 function PriorityBar._DumpSlotsForSpell(spellID)
   print("|cff00ccff  -- Slots PB référençant " .. tostring(spellID) .. " --|r")
   local anyFound = false
@@ -2608,9 +2450,10 @@ end
 function PriorityBar.Init()
   if initialized then return end
   initialized = true
+  _initTime = GetTime()
 
-  leftContainer = CreateContainer("AishaddonPBLeft")
-  rightContainer = CreateContainer("AishaddonPBRight")
+  leftContainer = CreateContainer("AishCorePBLeft")
+  rightContainer = CreateContainer("AishCorePBRight")
 
   slotFrames[1] = CreateSlotFrame(1, leftContainer)
   slotFrames[2] = CreateSlotFrame(2, leftContainer)
@@ -2657,53 +2500,35 @@ function PriorityBar.Init()
   eventFrame:RegisterEvent("UPDATE_MACROS")
   eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
   eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
-  -- Snapshot du cache au décollage Dragonriding :
-  -- UNIT_POWER_BAR_SHOW/HIDE sont des unit-events : RegisterUnitEvent obligatoire.
-  -- UNIT_POWER_BAR_SHOW se déclenche quand la barre Dragonriding (ID 631) apparaît.
-  -- UNIT_POWER_BAR_HIDE = dismount → restaurer immédiatement, même en combat.
+  -- Snapshot du cache au décollage Dragonriding : UNIT_POWER_BAR_SHOW (montée)/HIDE (dismount, restaure même en combat)
   eventFrame:RegisterUnitEvent("UNIT_POWER_BAR_SHOW", "player")
   eventFrame:RegisterUnitEvent("UNIT_POWER_BAR_HIDE", "player")
-  -- UNIT_SPELLCAST_START sur le joueur : prendre le snapshot AVANT que la barre
-  -- change. C'est le signal le plus precoce du montage (avant ACTIONBAR_SLOT_CHANGED).
-  -- On prend un snapshot preventif pour tout cast ; il sera ecrase ou valide selon
-  -- que UNIT_POWER_BAR_SHOW suit dans les prochains frames.
+  -- UNIT_SPELLCAST_START : snapshot préventif avant tout cast (signal le plus précoce du montage), validé/écrasé ensuite
   eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
   -- UNIT_SPELLCAST_SUCCEEDED : savoir quand le joueur lance un sort.
   -- C'est le mecanisme PRINCIPAL pour detecter les CD en combat (event-driven).
   eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
-  -- SPELL_UPDATE_COOLDOWN : detecter les CD resets (wipes) en combat.
-  -- On ne peut pas lire les valeurs, mais le prochain tick de polling passera
-  -- GetActionCooldown(0,0) a SetCooldown → OnCooldownDone fire → un-desat.
+  -- SPELL_UPDATE_COOLDOWN : détecte les CD resets, géré par le polling suivant (SetCooldown(0,0) → un-desat)
   eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
   -- SPELL_UPDATE_CHARGES : backup pour re-sync les charges si notre estimation derive.
   eventFrame:RegisterEvent("SPELL_UPDATE_CHARGES")
   eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
-    -- UNIT_SPELLCAST_START : snapshot préventif avant que la barre d'action change.
-    -- Couvre le cas où ACTIONBAR_SLOT_CHANGED arrive avant UNIT_POWER_BAR_SHOW.
-    -- On snap à chaque début de cast (overhead minimal, juste copie de tables).
-    -- Le snapshot sera validé par UNIT_POWER_BAR_SHOW, ou ignoré si c'est un cast normal.
+    -- Snapshot préventif à chaque cast (overhead minimal), validé par UNIT_POWER_BAR_SHOW ou ignoré si cast normal
     if event == "UNIT_SPELLCAST_START" then
       if not InCombatLockdown() and not _hasDrakeSnapshot then
         wipe(_preDrakeButtonData)
         wipe(_preDrakeSpellToAction)
+        wipe(_preDrakeSpellToButton)
         for k, v in pairs(cachedButtonData)    do _preDrakeButtonData[k]   = { button = v.button, spellID = v.spellID } end
         for k, v in pairs(cachedSpellToAction) do _preDrakeSpellToAction[k] = v end
+        for k, v in pairs(cachedSpellToButton) do _preDrakeSpellToButton[k] = v end
         Debug("UNIT_SPELLCAST_START : snapshot preventif (" .. (function() local n=0; for _ in pairs(_preDrakeButtonData) do n=n+1 end; return n end)() .. " entrees)")
       end
       return
     end
 
-    ---------------------------------------------------------------------------
-    -- UNIT_SPELLCAST_SUCCEEDED : le joueur a lance un sort avec succes.
-    -- C'est le signal pour tracker les CD et les charges en combat.
-    -- arg2 = castGUID (inutile), arg3 = spellID
-    --
-    -- DEDUPE : certains sorts fire UNIT_SPELLCAST_SUCCEEDED plusieurs fois
-    -- pour un seul cast logique (ex: Stormstrike Chaman Amélioration → 2x le
-    -- même spellID en quelques ms + un autre event "(main gauche)" avec un
-    -- NOM différent). Sans dedupe on décrémente les charges 2x par clic.
-    -- Fenêtre 100ms = tolérance large vs GCD min (~750ms).
-    ---------------------------------------------------------------------------
+    -- UNIT_SPELLCAST_SUCCEEDED (arg3=spellID) : signal pour tracker CD/charges en combat.
+    -- Dédupe par nom sur une fenêtre de 100ms : certains sorts fire l'event 2x pour un seul cast (ex: Stormstrike).
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
       local castSpellID = arg3
       if not castSpellID then return end
@@ -2720,9 +2545,7 @@ function PriorityBar.Init()
           _lastSuccessTime[rawName] = now
         end
       end
-      -- STRATEGY : GetSpellName retourne TOUJOURS une string propre (clean),
-      -- même en combat TWW. On compare les NOMS au lieu des spellIDs
-      -- (qui sont des secret numbers impossibles à manipuler en Lua).
+      -- On compare les NOMS (GetSpellName, toujours clean) plutôt que les spellIDs (secret numbers en combat)
       local castName = GetSpellName(castSpellID)
       if not castName then return end
       local anyMatch = false
@@ -2732,10 +2555,7 @@ function PriorityBar.Init()
           local displayName = GetSpellName(slot.currentSpellID)
           if castName == displayName then
             anyMatch = true
-            -- Résoudre si c'est un sort à charges.
-            -- slot.spellIDs contient des IDs PROPRES (configurés hors combat).
-            -- chargeCache utilise aussi des clés propres (construit OOC).
-            -- On cherche quel spellID de la config correspond au cast.
+            -- Résoudre si c'est un sort à charges : chercher quel spellID de la config (IDs propres, OOC) correspond au cast
             local isChargeSpell, chSid = nil, nil
             if slot.spellIDs then
               for _, sid in ipairs(slot.spellIDs) do
@@ -2764,13 +2584,9 @@ function PriorityBar.Init()
             end
             Debug("SPELLCAST slot" .. i .. ": cast=" .. castName .. " isCharge=" .. tostring(isChargeSpell) .. " chSid=" .. tostring(chSid))
             if isChargeSpell and chSid then
-              -- Enregistrer le timestamp du cast pour le swipe de recharge.
-              -- Utilisé par UpdateSlotExtras (hideGCDSwipe) avec chargeRechargeTime
-              -- pour savoir si une recharge est en cours (valeurs propres, pas d'API taintée).
+              -- Timestamp du cast pour le swipe de recharge (utilisé par UpdateSlotExtras avec chargeRechargeTime)
               _chargeSwipeStartTime[chSid] = GetTime()
-              -- Sort à charges : animer le swipe CD si on vient du max de charges.
-              -- Le display des charges est géré par lecture directe dans UpdateSlotExtras
-              -- (identique à TestCharges.lua), pas d'estimation ici.
+              -- Sort à charges : animer le swipe si on vient du max (le display des charges est lu directement dans UpdateSlotExtras)
               local maxC = chargeCache[chSid] or 2
               local wasAtMax = false
               if C_Spell and C_Spell.GetSpellCharges then
@@ -2826,9 +2642,7 @@ function PriorityBar.Init()
                   end
                 end
                 local now = GetTime()
-                -- Stocker UNIQUEMENT pour le sort casté (matchedSid) et son override.
-                -- Ne pas écrire pour tous les spellIDs du slot : les autres sorts ont
-                -- leurs propres CDs et seraient incorrectement désaturés/non-désaturés.
+                -- Stocker uniquement pour le sort casté et son override (les autres sorts du slot ont leurs propres CDs)
                 if matchedSid then
                   _realCDEndTimes[matchedSid] = now + adjustedCD
                   if matchedOvID then
@@ -2854,37 +2668,22 @@ function PriorityBar.Init()
       return
     end
 
-    ---------------------------------------------------------------------------
-    -- SPELL_UPDATE_COOLDOWN : quelque chose a change dans les cooldowns.
-    -- Potentiellement un CD reset/wipe. On ne peut pas lire les valeurs,
-    -- mais le prochain tick de polling passera GetActionCooldown a SetCooldown.
-    -- Si le CD a ete reset, SetCooldown recevra (0,0) → OnCooldownDone fire.
-    -- Aucune action directe necessaire ici, le polling s'en charge.
-    ---------------------------------------------------------------------------
+    -- SPELL_UPDATE_COOLDOWN : CD potentiellement reset/wipe, géré par le prochain tick de polling (aucune action directe ici).
     if event == "SPELL_UPDATE_COOLDOWN" then
       -- Pas d'action : le polling + OnCooldownDone gerent les resets
       return
     end
 
-    ---------------------------------------------------------------------------
-    -- SPELL_UPDATE_CHARGES : les charges ont change pour un sort.
-    -- OOC : resync complet via SyncChargesOOC (comportement historique).
-    -- [12.0.5] En combat : tentative de live-read ; si l'API expose maintenant
-    -- des valeurs clean, on corrige immédiatement toutes les estimations et on
-    -- annule les timers pour éviter les double-incréments.
-    ---------------------------------------------------------------------------
+    -- SPELL_UPDATE_CHARGES : OOC → resync complet (SyncChargesOOC) ; en combat → tentative de live-read pour corriger estimatedCharges et annuler les timers redondants.
     if event == "SPELL_UPDATE_CHARGES" then
       _chargesStats.eventFires = _chargesStats.eventFires + 1
       _chargesStats.lastEventTime = GetTime()
-      -- [fix] SyncChargesOOC lit maintenant les charges en et hors combat.
-      -- Corrige immédiatement toute dérive (procs de reset, CDR, maîtrise, etc.).
+      -- SyncChargesOOC lit les charges en et hors combat, corrige immédiatement toute dérive (procs de reset, CDR, maîtrise, etc.).
       SyncChargesOOC()
       return
     end
 
-    -- UNIT_POWER_BAR_SHOW : la barre Dragonriding (ID 631) vient d'apparaître.
-    -- Valider le snapshot préventif pris sur UNIT_SPELLCAST_START, ou en prendre
-    -- un nouveau si le snapshot préventif est vide / manquant.
+    -- UNIT_POWER_BAR_SHOW (Dragonriding) : valider le snapshot préventif, ou en prendre un nouveau si absent
     if event == "UNIT_POWER_BAR_SHOW" then
       if next(_preDrakeButtonData) ~= nil then
         -- Snapshot préventif déjà en place, juste le valider
@@ -2895,38 +2694,40 @@ function PriorityBar.Init()
         -- Prendre un snapshot du cache actuel, même s'il peut déjà être partiellement corrompu
         wipe(_preDrakeButtonData)
         wipe(_preDrakeSpellToAction)
+        wipe(_preDrakeSpellToButton)
         for k, v in pairs(cachedButtonData)    do _preDrakeButtonData[k]   = { button = v.button, spellID = v.spellID } end
         for k, v in pairs(cachedSpellToAction) do _preDrakeSpellToAction[k] = v end
+        for k, v in pairs(cachedSpellToButton) do _preDrakeSpellToButton[k] = v end
         _hasDrakeSnapshot = true
         Debug("UNIT_POWER_BAR_SHOW : nouveau snapshot (" .. (function() local n=0; for _ in pairs(_preDrakeButtonData) do n=n+1 end; return n end)() .. " entrees)")
       end
       return
     end
 
-    -- UNIT_POWER_BAR_HIDE : dismount.
-    -- Restaurer le snapshot immédiatement, MÊME en combat.
-    -- cachedButtonData = frame-refs + nombres normaux, zéro secret number.
+    -- UNIT_POWER_BAR_HIDE (dismount) : restaure le snapshot, force stale=true jusqu'au rebuild différé (0.75s, boutons pas encore repeuplés)
     if event == "UNIT_POWER_BAR_HIDE" then
+      _actionBarCacheStale = true
       if _hasDrakeSnapshot then
         wipe(cachedButtonData)
         wipe(cachedSpellToAction)
+        wipe(cachedSpellToButton)
         for k, v in pairs(_preDrakeButtonData)    do cachedButtonData[k]    = { button = v.button, spellID = v.spellID } end
         for k, v in pairs(_preDrakeSpellToAction) do cachedSpellToAction[k] = v end
+        for k, v in pairs(_preDrakeSpellToButton) do cachedSpellToButton[k] = v end
         _hasDrakeSnapshot = false
-        Debug("UNIT_POWER_BAR_HIDE : cache restauré (" .. (function() local n=0; for _ in pairs(cachedButtonData) do n=n+1 end; return n end)() .. " entrees)")
+        Debug("UNIT_POWER_BAR_HIDE : cache restauré provisoirement, re-vérification différée (" .. (function() local n=0; for _ in pairs(cachedButtonData) do n=n+1 end; return n end)() .. " entrees)")
       end
-      if not InCombatLockdown() then
-        C_Timer.After(0, RebuildSpellButtonCache)
-      end
+      C_Timer.After(0.75, function()
+        if not InCombatLockdown() then
+          RebuildSpellButtonCache()
+        end
+      end)
       return
     end
 
     -- Combat enter : UpdateVisibility calcule ShouldShow → true → AnimatePB fade-in
     if event == "PLAYER_REGEN_DISABLED" then
-      -- Wipe partiel de cdmCDData : supprimer uniquement les entrées onCD=false
-      -- (CD déjà expiré → pas de fantôme possible). Garder les onCD=true :
-      -- le sort est encore en CD au début du combat, swipe et désaturation doivent
-      -- continuer sans coupure. Le CDM remettra onCD=false via Clear() quand il expire.
+      -- Wipe partiel cdmCDData : supprimer les entrées onCD=false uniquement, garder onCD=true pour continuité swipe/désat
       local cdmEventData = ns.Auras and ns.Auras.cdmCDData
       if cdmEventData then
         local _toRemove = {}
@@ -2936,14 +2737,6 @@ function PriorityBar.Init()
         for _, sid in ipairs(_toRemove) do cdmEventData[sid] = nil end
       end
       PriorityBar.UpdateVisibility()
-      -- Ne pas alerter si le combat démarre en Skyriding (barre Dragonriding
-      -- active, UnitPowerBarID 631) : cachedSpellToButton reflète alors les
-      -- "vraies" barres d'avant décollage (RebuildSpellButtonCache les gèle),
-      -- mais elles ne sont pas affichées/utilisables tant qu'on est monté →
-      -- l'alerte n'a de sens qu'une fois les vraies barres actives au sol.
-      if UnitPowerBarID("player") ~= 631 then
-        CheckMissingSpellsFromActionBars()
-      end
       return
     end
 
@@ -2959,9 +2752,7 @@ function PriorityBar.Init()
       -- Synchroniser les CD et charges depuis l'API (hors combat = clean)
       SyncCooldownsOOC()
       SyncChargesOOC()
-      -- Reconstruire le cache bouton après chaque combat : garantit un état
-      -- propre avant le prochain pull (couvre les upgrades talent qui changent
-      -- GetActionInfo sans déclencher ACTIONBAR_SLOT_CHANGED).
+      -- Reconstruire le cache bouton après chaque combat (couvre les upgrades talent sans ACTIONBAR_SLOT_CHANGED)
       C_Timer.After(0, function()
         if not InCombatLockdown() then
           RebuildSpellButtonCache()
@@ -2972,9 +2763,7 @@ function PriorityBar.Init()
     RebuildSpellButtonCache()
     RebuildChargeCache()
     RebuildCooldownCache()
-    -- Ne pas appeler RebuildLearnedCache ici : les sorts appris ne changent qu'au
-    -- changement de spec/login. Le faire ici provoque une race condition avec
-    -- ACTIVE_TALENT_GROUP_CHANGED (cache reconstruit avec les anciens spellIDs).
+    -- Ne pas appeler RebuildLearnedCache ici : provoquerait une race condition avec ACTIVE_TALENT_GROUP_CHANGED
   end)
 
   -- Rechargement des slots a chaque changement de spec
@@ -2993,7 +2782,6 @@ function PriorityBar.Init()
       wipe(_realCDEndTimes)
       RebuildCooldownCache()
       RebuildSpellButtonCache()
-      CheckMissingSpellsFromActionBars()
       if ns.CallbackRegistry then
         ns.CallbackRegistry:Trigger("PriorityBar.SpecChanged")
       end
@@ -3013,7 +2801,6 @@ function PriorityBar.Init()
     RebuildChargeCache()
     RebuildCooldownCache()
     RebuildLearnedCache()
-    CheckMissingSpellsFromActionBars()
   end)
 
   StartPolling()
@@ -3053,11 +2840,7 @@ function PriorityBar.Init()
     end
   end
 
-  ---------------------------------------------------------------------------
-  -- /pbcharges : dump complet du système de charges
-  -- Affiche chargeCache, estimatedCharges, lecture live de l'API, et ce que
-  -- chaque slot afficherait. A lancer IN ou HORS combat.
-  ---------------------------------------------------------------------------
+  -- /pbcharges : dump chargeCache/estimatedCharges/lecture live + affichage par slot (IN ou HORS combat)
   SLASH_PBCHARGES1 = "/pbcharges"
   SlashCmdList["PBCHARGES"] = function()
     local P = "|cffff8800[PB-CHG]|r "
@@ -3140,6 +2923,81 @@ function PriorityBar.Init()
     print(P .. "=== FIN DIAGNOSTIC ===")
   end
 
+  -- /pbstacks : diagnostic de l'affichage de stacks (STACK_SPELLS / ApplyStackToText)
+  SLASH_PBSTACKS1 = "/pbstacks"
+  SlashCmdList["PBSTACKS"] = function()
+    local P = "|cffff8800[PB-STK]|r "
+    print(P .. "=== DIAGNOSTIC STACKS (InCombat=" .. tostring(InCombatLockdown()) .. ") ===")
+    print(P .. "cfg.showCharges=" .. tostring(ns.GetCfg("priorityBar").showCharges))
+
+    print(P .. "STACK_SPELLS enregistrés :")
+    for sid, auraSid in pairs(STACK_SPELLS) do
+      print(string.format("%s  [%d] %s -> aura %d", P, sid, GetSpellName(sid) or "?", auraSid))
+    end
+
+    local A = ns.Auras
+    print(P .. string.format("ns.Auras présent=%s  cdmData.player présent=%s",
+      tostring(A ~= nil), tostring(A and A.cdmData and A.cdmData.player ~= nil)))
+    local cdmPlayer = A and A.cdmData and A.cdmData.player
+
+    for sid, auraSid in pairs(STACK_SPELLS) do
+      local cdmEntry = cdmPlayer and cdmPlayer[auraSid]
+      local foundInstID = cdmEntry and cdmEntry.instID
+      print(string.format("%s  aura %d : instID trouvé dans cdmData = %s", P, auraSid, tostring(foundInstID)))
+      if foundInstID then
+        local ok, disp = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, foundInstID, 1, 999)
+        print(string.format("%s  GetAuraApplicationDisplayCount ok=%s value=%s type=%s",
+          P, tostring(ok), tostring(disp), type(disp)))
+      end
+      -- Fallback GetPlayerAuraBySpellID (utilisé si cdmData n'a rien trouvé)
+      local okAura, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, auraSid)
+      print(string.format("%s  GetPlayerAuraBySpellID(%d) ok=%s aura=%s auraInstanceID=%s",
+        P, auraSid, tostring(okAura), tostring(aura ~= nil),
+        tostring(aura and aura.auraInstanceID)))
+      if okAura and aura and aura.auraInstanceID then
+        local ok2, disp2 = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, aura.auraInstanceID, 1, 999)
+        print(string.format("%s  (fallback1) GetAuraApplicationDisplayCount ok=%s value=%s type=%s",
+          P, tostring(ok2), tostring(disp2), type(disp2)))
+      end
+      if C_Spell and C_Spell.GetSpellCastCount then
+        local ok3, count = pcall(C_Spell.GetSpellCastCount, auraSid)
+        print(string.format("%s  (fallback2) GetSpellCastCount ok=%s value=%s type=%s",
+          P, tostring(ok3), tostring(count), type(count)))
+        if ok3 then
+          local hasIsSecret = type(issecretvalue) == "function"
+          if hasIsSecret then
+            local okSec, isSec = pcall(issecretvalue, count)
+            print(string.format("%s  issecretvalue(count) ok=%s isSecret=%s", P, tostring(okSec), tostring(isSec)))
+          end
+          local okCmp, isZero = pcall(function() return count == 0 end)
+          print(string.format("%s  pcall(count==0) ok=%s result=%s", P, tostring(okCmp), tostring(isZero)))
+          local okStr, strIsZero = pcall(function() return tostring(count) == "0" end)
+          print(string.format("%s  pcall(tostring(count)==\"0\") ok=%s result=%s", P, tostring(okStr), tostring(strIsZero)))
+          local okFloor, floored = pcall(function() return math.floor(count) end)
+          print(string.format("%s  pcall(math.floor(count)) ok=%s issecret=%s", P, tostring(okFloor),
+            tostring(hasIsSecret and select(2, pcall(issecretvalue, floored)))))
+        end
+      end
+    end
+
+    print(P .. "Slots (displayed / base / match STACK_SPELLS / chargeText) :")
+    for i = 1, MAX_SLOTS do
+      local slot = slotFrames[i]
+      if slot then
+        local dispID = slot.currentSpellID
+        local baseD  = dispID and (overrideToBase[dispID] or dispID)
+        local auraSid = dispID and (STACK_SPELLS[dispID] or (baseD and STACK_SPELLS[baseD]))
+        local shown  = slot.chargeText and slot.chargeText:IsShown()
+        local txt    = slot.chargeText and slot.chargeText:GetText()
+        print(string.format(
+          "%s  slot%d: displayed=%s(%s) base=%s auraMatch=%s  chargeText shown=%s txt=%s",
+          P, i, tostring(dispID), dispID and (GetSpellName(dispID) or "?") or "nil",
+          tostring(baseD), tostring(auraSid), tostring(shown), tostring(txt)))
+      end
+    end
+    print(P .. "=== FIN DIAGNOSTIC ===")
+  end
+
   -- /pbcache : affiche le cache et les slots configures
   SLASH_PBCACHE1 = "/pbcache"
   SlashCmdList["PBCACHE"] = function()
@@ -3168,9 +3026,7 @@ function PriorityBar.Init()
     end
   end
 
-  -- /pbscan : scanne TOUS les boutons d'action (pas seulement ceux du cache) pour
-  -- trouver les glows actifs et les sorts non mappes. A utiliser quand le cache semble
-  -- vide ou incorrect (ex: apres un dismount, pour voir quel bouton est en glow).
+  -- /pbscan : scanne tous les boutons d'action pour trouver glows actifs et sorts non mappés (cache vide/incorrect)
   SLASH_PBSCAN1 = "/pbscan"
   SlashCmdList["PBSCAN"] = function()
     print("|cffff9900[PB-SCAN]|r Scan complet de TOUS les boutons d'action")
@@ -3183,18 +3039,11 @@ function PriorityBar.Init()
         local bName = prefix .. i
         local button = _G[bName]
         if button then
-          -- Verifier si ce bouton a un glow actif
+          -- Verifier si ce bouton a le highlight de l'Assistant de rotation actif
+          -- (PAS le proc glow — SpellHighlightTexture/Anim volontairement ignores, cf. ButtonHasGlow)
           local glow = false
           if button.AssistedCombatHighlightFrame then
             local ok, s = pcall(button.AssistedCombatHighlightFrame.IsShown, button.AssistedCombatHighlightFrame)
-            if ok and s then glow = true end
-          end
-          if not glow and button.SpellHighlightTexture then
-            local ok, s = pcall(button.SpellHighlightTexture.IsShown, button.SpellHighlightTexture)
-            if ok and s then glow = true end
-          end
-          if not glow and button.SpellHighlightAnim then
-            local ok, s = pcall(button.SpellHighlightAnim.IsPlaying, button.SpellHighlightAnim)
             if ok and s then glow = true end
           end
           -- Lire le spellID du bouton
@@ -3236,6 +3085,10 @@ function PriorityBar.Init()
         print("|cffff9900[PB-SCAN]|r  slot" .. i .. ": " .. table.concat(parts, ", "))
       end
     end
+    -- API directe (GetNextCastSpell) : marche même quand le scan de boutons est aveugle (widget pas encore créé)
+    local assistedSid = GetAssistedCombatHighlightSpell()
+    print("|cffff9900[PB-SCAN]|r GetAssistedCombatHighlightSpell() (API directe) = "
+      .. (assistedSid and (assistedSid .. "(" .. (GetSpellName(assistedSid) or "?") .. ")") or "nil"))
   end
 
   -- /pbovr : dump complet des maps override + simulation CollectGlowedSpells + FindHighlightedSpell
@@ -3265,51 +3118,9 @@ function PriorityBar.Init()
         end
       end
     end
-    -- 4) Simulation CollectGlowedSpells (avec scan complet)
-    print(P .. "CollectGlowedSpells() simulation:")
-    local sourceData = (_hasDrakeSnapshot and next(_preDrakeButtonData) ~= nil) and _preDrakeButtonData or cachedButtonData
-    local simGlowed = {}
-    local scannedSim = {}
-    -- Passe 1 : boutons du cache
-    for bName, data in pairs(sourceData) do
-      scannedSim[bName] = true
-      local button = data.button
-      if button and ButtonHasGlow(button) then
-        local liveID = GetLiveButtonSpellID(button)
-        local sid = liveID or data.spellID
-        simGlowed[sid] = true
-        if liveID and liveID ~= data.spellID then
-          simGlowed[data.spellID] = true
-        end
-        local base = overrideToBase[sid]
-        local liveOv = nil
-        if C_Spell and C_Spell.GetOverrideSpell then
-          local ok, ov = pcall(C_Spell.GetOverrideSpell, sid)
-          if ok and ov and ov ~= sid and ov > 0 then liveOv = ov end
-        end
-        print(string.format("%s  GLOW btn=%s sid=%d(%s) cached=%d liveOv=%s",
-          P, bName, sid, GetSpellName(sid) or "?", data.spellID,
-          liveOv and (liveOv .. "(" .. (GetSpellName(liveOv) or "?") .. ")") or "nil"))
-        if base then simGlowed[base] = true end
-        if liveOv then simGlowed[liveOv] = true end
-      end
-    end
-    -- Passe 2 : boutons non-cachés
-    for _, prefix in ipairs(BUTTON_PREFIXES) do
-      for ii = 1, 12 do
-        local bName2 = prefix .. ii
-        if not scannedSim[bName2] then
-          local button2 = _G[bName2]
-          if button2 and ButtonHasGlow(button2) then
-            local sid2 = GetLiveButtonSpellID(button2)
-            if sid2 then
-              simGlowed[sid2] = true
-              print(string.format("%s  GLOW btn=%s(uncached) sid=%d(%s)", P, bName2, sid2, GetSpellName(sid2) or "?"))
-            end
-          end
-        end
-      end
-    end
+    -- CollectGlowedSpells() réel (pas une réimplémentation, pour ne pas que ce diagnostic mente si l'algo évolue)
+    print(P .. "CollectGlowedSpells() (source reelle):")
+    local simGlowed = CollectGlowedSpells()
     local ng = 0; for _ in pairs(simGlowed) do ng = ng + 1 end
     if ng == 0 then
       print(P .. "  (aucun glow actif)")
@@ -3336,6 +3147,10 @@ function PriorityBar.Init()
   SlashCmdList["PBGLOW"] = function()
     local P = "|cffffff00[PB-GLOW]|r "
     print(P .. "InCombat=" .. tostring(InCombatLockdown()) .. " cache=" .. (function() local n=0; for _ in pairs(cachedButtonData) do n=n+1 end; return n end)() .. " entrees")
+    local assistedSid = GetAssistedCombatHighlightSpell()
+    print(P .. "GetAssistedCombatHighlightSpell() (API directe) = "
+      .. (assistedSid and (assistedSid .. "(" .. (GetSpellName(assistedSid) or "?") .. ")") or "nil")
+      .. "  (rappel : SHT/SHA ci-dessous sont des procs, PLUS utilises pour la decision — informatif seulement)")
     local function DumpButton(bName, button, cachedSpell)
       if not button then
         print(P .. bName .. ": button=NIL")
@@ -3419,11 +3234,7 @@ function PriorityBar.Init()
     end
   end
 
-  ---------------------------------------------------------------------------
-  -- /pbcddbg : diagnostic event-driven CD/charges/desat pour chaque slot.
-  -- Montre l'etat interne : spellCDBase, _realCDEndTimes, estimatedCharges,
-  -- chargeRechargeTime, chargeTimers, et l'etat visuel actuel.
-  ---------------------------------------------------------------------------
+  -- /pbcddbg : diagnostic event-driven CD/charges/desat par slot (état interne + état visuel)
   SLASH_PBCDDBG1 = "/pbcddbg"
   SlashCmdList["PBCDDBG"] = function()
     local P = "|cffff8800[PB-CDDBG]|r "
@@ -3445,6 +3256,37 @@ function PriorityBar.Init()
         -- CD base
         local baseCD = spellCDBase[sid] or spellCDBase[base]
         print(P .. "  baseCD=" .. tostring(baseCD and string.format("%.1fs", baseCD) or "nil"))
+
+        -- Etat LIVE de l'API qui pilote le swipe + sources CDM consultees par la desaturation (print-only, diagnostic)
+        for _, qinfo in ipairs({ {"sid", sid}, {"base", base} }) do
+          local label, qid = qinfo[1], qinfo[2]
+          if not (label == "base" and base == sid) then
+            local ok, cd = false, nil
+            if C_Spell and C_Spell.GetSpellCooldown then
+              ok, cd = pcall(C_Spell.GetSpellCooldown, qid)
+            end
+            if ok and cd then
+              print(P .. "  live[" .. label .. "=" .. qid .. "] isActive=" .. tostring(cd.isActive)
+                .. " isEnabled=" .. tostring(cd.isEnabled) .. " duration=" .. tostring(cd.duration)
+                .. " startTime=" .. tostring(cd.startTime))
+            else
+              print(P .. "  live[" .. label .. "=" .. qid .. "] GetSpellCooldown pcall FAILED")
+            end
+            local cdmD = ns.Auras and ns.Auras.cdmCDData
+            local cdmE = cdmD and cdmD[qid]
+            print(P .. "  cdmCDData[" .. label .. "=" .. qid .. "]=" .. (cdmE and ("onCD=" .. tostring(cdmE.onCD)) or "nil"))
+            local cvE = _cdViewerState[qid]
+            print(P .. "  _cdViewerState[" .. label .. "=" .. qid .. "]=" .. (cvE and
+              ("onCD=" .. tostring(cvE.onCD) .. " cdStart=" .. tostring(cvE.cdStart) .. " cdDuration=" .. tostring(cvE.cdDuration))
+              or "nil"))
+            -- GetSpellCooldownDuration (pas GetSpellCooldown) alimente le swipe reel ; nil ici alors que isActive=true => swipe jamais affiché
+            if C_Spell and C_Spell.GetSpellCooldownDuration then
+              local okD, durObj = pcall(C_Spell.GetSpellCooldownDuration, qid)
+              print(P .. "  GetSpellCooldownDuration[" .. label .. "=" .. qid .. "] ok=" .. tostring(okD)
+                .. " durObj=" .. tostring(durObj ~= nil))
+            end
+          end
+        end
 
         -- CD end time (event-driven)
         local cdEnd = _realCDEndTimes[sid] or _realCDEndTimes[base]
@@ -3472,12 +3314,7 @@ function PriorityBar.Init()
     end
   end
 
-  ---------------------------------------------------------------------------
-  -- /pbzdbg : diagnostic Z-order pour le bug "glow caché derrière une icône".
-  -- Usage : /pbzdbg           → dump immédiat de tous les frame levels + état glow
-  --         /pbzdbg watch     → surveillance 0.3 s — auto-report si anomalie
-  --         /pbzdbg watch off → arrête la surveillance
-  ---------------------------------------------------------------------------
+  -- /pbzdbg : diagnostic Z-order (glow caché derrière l'icône). Dump immédiat ; "watch" surveille en continu (0.3s) ; "watch off" arrête.
   local _zdbgWatcher = nil
 
   local function DumpZOrder(prefix)
@@ -3867,9 +3704,7 @@ function PriorityBar.LoadEnhancementPreset()
   end
 end
 
----------------------------------------------------------------------------
 -- Drag
----------------------------------------------------------------------------
 function PriorityBar.EnableDrag(enable)
   if InCombatLockdown() then return end
   dragEnabled = enable
@@ -3937,6 +3772,11 @@ function PriorityBar.SetDraggable(on)
   PriorityBar.EnableDrag(on)
 end
 
+-- leftContainer/rightContainer sont locales (pas de nom global) : accesseur pour le survol GUI (ModuleHoverOverlay.lua)
+function PriorityBar.GetContainers()
+  return { left = leftContainer, right = rightContainer }
+end
+
 function PriorityBar.SetPreview(on)
   if InCombatLockdown() then return end
   if on then
@@ -3975,9 +3815,7 @@ function PriorityBar.ResetPositions()
   LayoutSlots()
 end
 
----------------------------------------------------------------------------
 -- Gestion per-spec des slots
----------------------------------------------------------------------------
 
 local function GetCurrentSpecID_Internal()
   if GetSpecialization then
@@ -4151,9 +3989,7 @@ function PriorityBar.SetSlotSpells(slotIndex, newSpellIDs)
   PriorityBar.SaveCurrentSpecSlots()
 end
 
----------------------------------------------------------------------------
 -- Detection de la surbrillance d'aide (Spell Activation Overlay)
----------------------------------------------------------------------------
 
 -- Retourne la liste des sorts de la spec active (depuis le spellbook)
 -- Filtre : uniquement les sorts avec surbrillance d'aide (Spell Activation Overlay)
@@ -4258,6 +4094,8 @@ function PriorityBar.GetSpecSpells()
     end
   end
 
-  table.sort(spells, function(a, b) return a.name < b.name end)
+  -- ns.FoldAccentsLower (Core.lua) : cf. Tactics.lua -- strcmputf8i seul ne
+  -- suffisait pas pour ce client (toujours classé après Z).
+  table.sort(spells, function(a, b) return ns.FoldAccentsLower(a.name) < ns.FoldAccentsLower(b.name) end)
   return spells
 end

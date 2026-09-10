@@ -1,0 +1,104 @@
+## Interface: 120100
+## Title: AishCore
+## Notes: Custom UI overlay - resource & health circles, spell effects, auras & procs
+## Author: Aishuu
+## Version: 4.0
+## X-Curse-Project-ID: 1689788
+## SavedVariables: AishaddonDB AishUIAuraDB
+## SavedVariablesPerCharacter: AishUILearnDB
+
+# Core
+Core.lua
+Debug.lua
+Config\Defaults.lua
+Config\ProfileTemplate.lua
+Config\ResourceMap.lua
+Config\Profiles.lua
+
+# Locales
+Locales\enUS.lua
+Locales\frFR.lua
+Locales\Debug.lua
+
+# Data
+Data\ModelPaths.lua
+
+# Engine
+CircularProgress.lua
+
+# Modules
+Modules\ResourceCircle.lua
+Modules\HealthCircle.lua
+Modules\OutOfCombatResourceCircle.lua
+Modules\SpellEffects.lua
+Modules\RotationHelper.lua
+Modules\PriorityBar.lua
+Modules\CooldownManagerEnhanced.lua
+Modules\XPBar.lua
+Modules\UnitBars.lua
+Modules\GroupNumber.lua
+Libs\SpellSchools.lua
+Modules\CastBar.lua
+Modules\TargetCastBar.lua
+Modules\TopTargetBar.lua
+Modules\TargetAuras.lua
+Modules\Colors.lua
+Modules\Skyriding.lua
+Modules\Visibility.lua
+Modules\CharacterArmory.lua
+Modules\AFKMode.lua
+Modules\BigCursor.lua
+
+# Auras & Procs — Core (anciennement AishUIAura)
+Modules\Auras\Core\Config.lua
+Modules\Auras\Core\Categories.lua
+Modules\Auras\Core\ClassColors.lua
+Modules\Auras\Core\Defaults.lua
+Modules\Auras\Core\SpellClassificationOverrides.lua
+Modules\Auras\Data\Presets.lua
+Modules\Auras\Data\FillTextures.lua
+Modules\Auras\Data\AishUITemplates.lua
+Modules\Auras\Core\Init.lua
+Modules\Auras\Core\LearnedDurations.lua
+Modules\Auras\Core\Whitelist.lua
+Modules\Auras\Core\MissingBuffsData.lua
+Modules\Auras\Core\MissingBuffs.lua
+Modules\Auras\Core\CDMHooks.lua
+Modules\Auras\Core\Totems.lua
+Modules\Auras\Core\AuraTextRelay.lua
+Modules\Auras\Core\AuraTrackerContainer.lua
+Modules\Auras\Core\Animation.lua
+Modules\Auras\Core\Events.lua
+Modules\Auras\Core\Scan.lua
+Modules\Auras\Features\Equipment\Providers.lua
+Modules\Auras\Core\Profiles.lua
+Modules\Auras\Features\Preview\AishUIPreview.lua
+Modules\Auras\Features\Auras\Debuffs.lua
+Modules\Auras\Features\Auras\Buffs.lua
+Modules\Auras\Features\Auras\Cooldowns.lua
+Modules\Auras\Features\Auras\Procs.lua
+Modules\Auras\Features\Auras\CenterArc.lua
+
+# Auras & Procs — UI
+Modules\Auras\UI\SharedWidgets.lua
+Modules\Auras\UI\Animations.lua
+Modules\Auras\UI\ScrollBar.lua
+Modules\Auras\UI\InfoPanel.lua
+Modules\Auras\UI\Menus\Profiles.lua
+Modules\Auras\UI\Menus\Preview.lua
+Modules\Auras\UI\Menus\Equipment.lua
+Modules\Auras\UI\Menus\Tactics.lua
+Modules\Auras\UI\Menus\MissingBuffs.lua
+Modules\Auras\UI\Menus\Render.lua
+Modules\Auras\UI\Menus\Effects.lua
+Modules\Auras\UI\CategoryDispatcher.lua
+
+# UI
+UI\SharedWidgets.lua
+UI\MinimapButton.lua
+UI\SettingsPanel.lua
+UI\ModuleHoverOverlay.lua
+
+# Init
+AishCore.lua
+AishCore.xml

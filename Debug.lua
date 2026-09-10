@@ -1,11 +1,4 @@
----------------------------------------------------------------------------
--- Aishaddon Debug — profiler léger pour identifier les sources de ticks.
--- Activé via:  /aishdebug on        (démarre le profiling)
---              /aishdebug off       (arrête + rapport final)
---              /aishdebug report    (rapport immédiat)
---              /aishdebug reset     (remet les compteurs à zéro)
---              /aishdebug ticker    (toggle suivi NewTicker séparé)
----------------------------------------------------------------------------
+-- Debug.lua : profiler léger pour identifier les sources de ticks (/aishdebug)
 local _, ns = ...
 
 local _active       = false
@@ -15,9 +8,7 @@ local _origAfter    = C_Timer.After
 local _origTicker   = C_Timer.NewTicker
 local _reportTicker = nil  -- le ticker de rapport automatique
 
--- Extrait une clé lisible depuis debugstack.
--- Montre toutes les sources (pas seulement Aishaddon) pour identifier
--- si c'est ElvUI / WoW / un autre addon qui génère les appels.
+-- Extrait une clé lisible depuis debugstack (toutes sources, pas juste AishCore)
 local function CleanStack(raw)
     local out = {}
     for line in raw:gmatch("[^\n]+") do
@@ -50,8 +41,7 @@ local function CleanStack(raw)
             if file then table.insert(out, "Blizzard/" .. file .. ":" .. lineno) end
         end
     end
-    -- Fallback : retourner la première ligne non-vide et non-C de la stack brute
-    -- pour identifier les appels qui ne matchent pas les patterns AddOns/Blizzard.
+    -- Fallback : première ligne non-vide/non-C de la stack brute
     if #out == 0 then
         for line in raw:gmatch("[^\n]+") do
             if line:find("Debug%.lua") then
@@ -91,9 +81,7 @@ local function UnhookTimers()
     C_Timer.NewTicker = _origTicker
 end
 
----------------------------------------------------------------------------
 -- Rapport
----------------------------------------------------------------------------
 local function SortedPairs(t)
     local keys = {}
     for k in pairs(t) do keys[#keys+1] = k end
@@ -105,7 +93,7 @@ local function PrintReport()
     local total = 0
     for _, v in pairs(_afterCounts) do total = total + v end
 
-    print("|cff00ccffAishaddon Debug|r — C_Timer.After depuis le dernier reset (total : " .. total .. ")")
+    print("|cff00ccffAishCore Debug|r — C_Timer.After depuis le dernier reset (total : " .. total .. ")")
 
     local keys = SortedPairs(_afterCounts)
     if #keys == 0 then
@@ -122,7 +110,7 @@ local function PrintReport()
     local totalT = 0
     for _, v in pairs(_tickerCounts) do totalT = totalT + v end
     if totalT > 0 then
-        print("|cff00ccffAishaddon Debug|r — C_Timer.NewTicker créés (total : " .. totalT .. ")")
+        print("|cff00ccffAishCore Debug|r — C_Timer.NewTicker créés (total : " .. totalT .. ")")
         local tkeys = SortedPairs(_tickerCounts)
         for i = 1, math.min(#tkeys, 10) do
             local k = tkeys[i]
@@ -131,16 +119,14 @@ local function PrintReport()
     end
 end
 
----------------------------------------------------------------------------
 -- Slash command
----------------------------------------------------------------------------
 SLASH_AISHDEBUG1 = "/aishdebug"
 SlashCmdList["AISHDEBUG"] = function(msg)
     msg = (msg or ""):lower():match("^%s*(.-)%s*$")
 
     if msg == "on" then
         if _active then
-            print("|cff00ccffAishaddon Debug|r Déjà actif.")
+            print("|cff00ccffAishCore Debug|r Déjà actif.")
             return
         end
         _active = true
@@ -151,18 +137,18 @@ SlashCmdList["AISHDEBUG"] = function(msg)
         _reportTicker = _origTicker(5, function()
             if _active then PrintReport() end
         end)
-        print("|cff00ccffAishaddon Debug|r |cff00ff00DÉMARRÉ|r — rapport toutes les 5s. /aishdebug off pour arrêter.")
+        print("|cff00ccffAishCore Debug|r |cff00ff00DÉMARRÉ|r — rapport toutes les 5s. /aishdebug off pour arrêter.")
 
     elseif msg == "off" then
         if not _active then
-            print("|cff00ccffAishaddon Debug|r Pas actif.")
+            print("|cff00ccffAishCore Debug|r Pas actif.")
             return
         end
         _active = false
         if _reportTicker then _reportTicker:Cancel(); _reportTicker = nil end
         UnhookTimers()
         PrintReport()
-        print("|cff00ccffAishaddon Debug|r |cffff0000ARRÊTÉ|r.")
+        print("|cff00ccffAishCore Debug|r |cffff0000ARRÊTÉ|r.")
 
     elseif msg == "report" then
         PrintReport()
@@ -170,26 +156,37 @@ SlashCmdList["AISHDEBUG"] = function(msg)
     elseif msg == "reset" then
         wipe(_afterCounts)
         wipe(_tickerCounts)
-        print("|cff00ccffAishaddon Debug|r Compteurs remis à zéro.")
+        print("|cff00ccffAishCore Debug|r Compteurs remis à zéro.")
 
     elseif msg == "sky" then
         local sky = ns.Modules and ns.Modules.Skyriding
         if sky and sky.DebugDump then
             sky.DebugDump()
         else
-            print("|cff00ccffAishaddon Debug|r |cffff4444Module Skyriding introuvable (pas encore chargé ?).|r")
+            print("|cff00ccffAishCore Debug|r |cffff4444Module Skyriding introuvable (pas encore chargé ?).|r")
         end
 
     elseif msg == "cdm" then
         DumpCooldownViewer()
 
+    elseif msg == "cdmbuff" then
+        DumpBuffCooldownViewer()
+
+    elseif msg == "bars" then
+        local auras = ns.Auras
+        if auras and auras.DebugDurationBars then
+            auras.DebugDurationBars()
+        else
+            print("|cff00ccffAishCore Debug|r |cffff4444DebugDurationBars introuvable (ns.Auras absent ou pas encore charge).|r")
+        end
+
     elseif msg == "cdvoff" then
         ns._cdViewerDisabled = true
-        print("|cff00ccffAishaddon Debug|r CDViewer scan |cffff0000DÉSACTIVÉ|r. /aishdebug cdvon pour réactiver.")
+        print("|cff00ccffAishCore Debug|r CDViewer scan |cffff0000DÉSACTIVÉ|r. /aishdebug cdvon pour réactiver.")
 
     elseif msg == "cdvon" then
         ns._cdViewerDisabled = false
-        print("|cff00ccffAishaddon Debug|r CDViewer scan |cff00ff00ACTIVÉ|r.")
+        print("|cff00ccffAishCore Debug|r CDViewer scan |cff00ff00ACTIVÉ|r.")
 
     elseif msg == "pbslots" then
         DumpPBSlots()
@@ -197,24 +194,232 @@ SlashCmdList["AISHDEBUG"] = function(msg)
     elseif msg == "pbcharges" then
         DumpPBCharges()
 
+    elseif msg == "buffs" then
+        local vis = ns.Modules and ns.Modules.Visibility
+        if vis and vis.Debug then
+            vis.Debug()
+        else
+            print("|cff00ccffAishCore Debug|r |cffff4444Module Visibility introuvable (pas encore chargé ?).|r")
+        end
+
+    elseif msg:match("^pin%s+%d+") then
+        local spellIDStr, mode = msg:match("^pin%s+(%d+)%s*(%a*)$")
+        local spellID = tonumber(spellIDStr)
+        local auras = ns.Auras
+        if not (auras and auras.PinAuraToCDM) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.PinAuraToCDM introuvable (module pas chargé ?).|r")
+        elseif not spellID then
+            print("|cff00ccffAishCore Debug|r usage : /aishdebug pin <spellID> [icon]")
+        else
+            local asBar = (mode ~= "icon")
+            local success, statusMsg = auras.PinAuraToCDM(spellID, asBar)
+            local color = success and "|cff00ff00" or "|cffff4444"
+            print(string.format("|cff00ccffAishCore Debug|r pin %d (%s) -> %s%s|r",
+                spellID, asBar and "barre" or "icone", color, tostring(statusMsg)))
+            if success and auras.PromptCDMReloadIfPending then auras.PromptCDMReloadIfPending() end
+        end
+
+    elseif msg == "syncpins" then
+        local auras = ns.Auras
+        if not (auras and auras.SyncCDMPins) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.SyncCDMPins introuvable (module pas chargé ?).|r")
+        else
+            local ok, a, b, c = auras.SyncCDMPins()
+            if not ok then
+                print("|cff00ccffAishCore Debug|r |cffff4444Sync refusée : " .. tostring(a) .. "|r")
+            else
+                local pinned, skipped, failures = a, b, c
+                print(string.format("|cff00ccffAishCore Debug|r Sync CDM : |cff00ff00%d épinglé(s)|r, |cffffff00%d ignoré(s)|r",
+                    pinned, skipped))
+                if failures and #failures > 0 then
+                    for _, line in ipairs(failures) do
+                        print("  |cffff8800" .. line .. "|r")
+                    end
+                end
+                if pinned > 0 and auras.PromptCDMReloadIfPending then auras.PromptCDMReloadIfPending() end
+            end
+        end
+
+    elseif msg:match("^auratrace%s+%d+") then
+        local spellIDStr = msg:match("^auratrace%s+(%d+)$")
+        local spellID = tonumber(spellIDStr)
+        local auras = ns.Auras
+        if not (auras and auras.DebugTraceAura) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugTraceAura introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugTraceAura(spellID)
+        end
+
+    elseif msg == "cdmreload" then
+        local auras = ns.Auras
+        if not (auras and auras.GetCDMReloadPendingCount) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.GetCDMReloadPendingCount introuvable (module pas chargé ?).|r")
+        else
+            print(string.format("|cff00ccffAishCore Debug|r pendingCDMReloadCount = |cffffff00%d|r", auras.GetCDMReloadPendingCount()))
+            local log = auras._cdmReloadMarkLog
+            if log and #log > 0 then
+                print("  Historique des increments (plus recent en premier) :")
+                for _, e in ipairs(log) do
+                    print(string.format("  +%d -> total=%d  il y a %.1fs  |cff888888%s|r",
+                        e.count, e.total, GetTime() - e.t, tostring(e.src):gsub("\n", " | ")))
+                end
+            else
+                print("  Aucun increment enregistre cette session.")
+            end
+        end
+
+    elseif msg == "iconsflow" then
+        local auras = ns.Auras
+        if not (auras and auras.DebugDumpIconsFlow) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugDumpIconsFlow introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugDumpIconsFlow()
+        end
+
+    elseif msg == "circlebarsflow" then
+        local auras = ns.Auras
+        if not (auras and auras.DebugDumpCircleBarsFlow) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugDumpCircleBarsFlow introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugDumpCircleBarsFlow()
+        end
+
+    elseif msg == "totem" then
+        local auras = ns.Auras
+        if not (auras and auras.DebugDumpTotems) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugDumpTotems introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugDumpTotems()
+        end
+
+    elseif msg == "groups" then
+        local auras = ns.Auras
+        if not (auras and auras.DebugDumpGroupCounts) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugDumpGroupCounts introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugDumpGroupCounts()
+        end
+        -- Memoire Lua totale (UpdateAddOnMemoryUsage doit avoir tourné récemment)
+        if UpdateAddOnMemoryUsage and GetAddOnMemoryUsage then
+            UpdateAddOnMemoryUsage()
+            local mem = GetAddOnMemoryUsage("AishCore")
+            print(string.format("|cff00ccffAishCore Debug|r Memoire Lua totale addon (instantanee) : %.2f Mo", (mem or 0) / 1024))
+        end
+
+    elseif msg == "iconlistrows" then
+        local auras = ns.Auras
+        if not (auras and auras.DebugDumpIconListRows) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugDumpIconListRows introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugDumpIconListRows()
+        end
+
+    elseif msg:match("^spell%s+%d") then
+        local argsStr = msg:match("^spell%s+(.+)$")
+        local spellIDs = {}
+        for numStr in argsStr:gmatch("%d+") do
+            spellIDs[#spellIDs + 1] = tonumber(numStr)
+        end
+        local auras = ns.Auras
+        if not (auras and auras.DebugDumpSpellTracking) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugDumpSpellTracking introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugDumpSpellTracking(unpack(spellIDs))
+        end
+
+    elseif msg == "circlebarswatch" then
+        local auras = ns.Auras
+        if not (auras and auras.DebugCircleBarsWatchToggle) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugCircleBarsWatchToggle introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugCircleBarsWatchToggle()
+        end
+
+    elseif msg:match("^testcontainer%s+%d") then
+        local argsStr = msg:match("^testcontainer%s+(.+)$")
+        local spellIDs = {}
+        for numStr in argsStr:gmatch("%d+") do
+            spellIDs[#spellIDs + 1] = tonumber(numStr)
+        end
+        local auras = ns.Auras
+        if not (auras and auras.DebugTestNativeContainer) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugTestNativeContainer introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugTestNativeContainer(spellIDs)
+        end
+
+    elseif msg:match("^testbar%s+%d") then
+        local argsStr = msg:match("^testbar%s+(.+)$")
+        local spellIDs = {}
+        for numStr in argsStr:gmatch("%d+") do
+            spellIDs[#spellIDs + 1] = tonumber(numStr)
+        end
+        local auras = ns.Auras
+        if not (auras and auras.DebugTestBarOnlyGroup) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugTestBarOnlyGroup introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugTestBarOnlyGroup(spellIDs)
+        end
+
+    elseif msg:match("^testmulti%s+%d") then
+        local argsStr = msg:match("^testmulti%s+(.+)$")
+        local spellIDs = {}
+        for numStr in argsStr:gmatch("%d+") do
+            spellIDs[#spellIDs + 1] = tonumber(numStr)
+        end
+        local auras = ns.Auras
+        if not (auras and auras.DebugTestMultiGroup) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugTestMultiGroup introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugTestMultiGroup(spellIDs)
+        end
+
+    elseif msg:match("^testpercolor%s+%d") then
+        local argsStr = msg:match("^testpercolor%s+(.+)$")
+        local spellIDs = {}
+        for numStr in argsStr:gmatch("%d+") do
+            spellIDs[#spellIDs + 1] = tonumber(numStr)
+        end
+        local auras = ns.Auras
+        if not (auras and auras.DebugTestPerSpellGroup) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugTestPerSpellGroup introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugTestPerSpellGroup(spellIDs)
+        end
+
     else
-        print("|cff00ccffAishaddon Debug|r commandes :")
+        print("|cff00ccffAishCore Debug|r commandes :")
         print("  /aishdebug |cff00ff00on|r      — démarre le profiling (rapport auto /5s)")
         print("  /aishdebug |cffff0000off|r     — arrête + rapport final")
         print("  /aishdebug |cffffff00report|r  — rapport immédiat")
         print("  /aishdebug |cffffff00reset|r   — remet les compteurs à zéro")
         print("  /aishdebug |cffffff00sky|r     — état complet du HUD Skyriding + journal")
         print("  /aishdebug |cffffff00cdm|r     — dump Blizzard CooldownViewer (Utility)")
+        print("  /aishdebug |cffffff00cdmbuff|r — dump BuffIcon/BuffBar CooldownViewer (duree buffs)")
+        print("  /aishdebug |cffffff00bars|r    — etat interne des barres de duree (binding natif)")
         print("  /aishdebug |cffffff00cdvoff|r  — désactive le scan CDViewer (test icones)")
         print("  /aishdebug |cffffff00cdvon|r   — réactive le scan CDViewer")
         print("  /aishdebug |cffffff00pbslots|r — dump état des 4 slots PriorityBar")
         print("  /aishdebug |cffffff00pbcharges|r — trace résolution charges par slot")
+        print("  /aishdebug |cffffff00buffs|r   — diagnostic fade zone de buffs ElvUI")
+        print("  /aishdebug |cffffff00pin <spellID> [icon]|r — [EXPÉRIMENTAL v3] épingle un sort dans le CDM natif, reload forcé ensuite (hors combat uniquement)")
+        print("  /aishdebug |cffffff00syncpins|r — [EXPÉRIMENTAL v3] épingle en masse la whitelist de la spec active, reload forcé ensuite (hors combat uniquement)")
+        print("  /aishdebug |cffffff00auratrace <spellID>|r — trace pas-a-pas la detection de presence pour ce sort (player+target)")
+        print("  /aishdebug |cffffff00cdmreload|r — affiche le compteur de reload CDM en attente + historique des increments")
+        print("  /aishdebug |cffffff00iconlistrows|r — dump direct des boutons Liste d'icones reellement crees (joueur+cible), spellID assigne, visible ou non")
+        print("  /aishdebug |cffffff00testcontainer <spellID> [spellID2...]|r — [TEST] cree un AuraContainer natif isole (icone+stacks+cooldown) pour valider l'approche, hors combat uniquement")
+        print("  /aishdebug |cffffff00testbar <spellID> [spellID2...]|r — [TEST] AddAuraGroup sans icone/sans flow layout, juste une StatusBar via SetDurationBar (prepare la migration Circle Bars)")
+        print("  /aishdebug |cffffff00testmulti <spellID1> <spellID2>|r — [TEST] AddAuraGroup maxFrameCount=3, 2+ sorts DIFFERENTS -- verifie si 2 candidats simultanes peuvent s'afficher en meme temps (isole de Circle Bars)")
+        print("  /aishdebug |cffffff00testpercolor <spellID1> <spellID2>|r — [TEST] UN AddAuraGroup DEDIE par sort (maxFrameCount=1) -- verifie si la couleur/glow PAR SORT est possible avec le systeme natif")
+        print("  /aishdebug |cffffff00iconsflow|r — [DEBUG] dump complet de l'etat du rendu natif 'icons' (conteneur/groupe/boutons/layout)")
+        print("  /aishdebug |cffffff00circlebarsflow|r — [DEBUG] dump complet de l'etat du rendu natif 'Circle Bars' (Buffs.lua/freebars)")
+        print("  /aishdebug |cffffff00circlebarswatch|r — [DEBUG] force UpdateAllAuras toutes les 0.5s + log les changements (bascule on/off)")
+        print("  /aishdebug |cffffff00groups|r — [CHECKUP MEMOIRE] compte les AddAuraGroup dedies crees (jamais liberables) sur les 4 destinations + memoire Lua totale de l'addon")
+        print("  /aishdebug |cffffff00totem|r — [DEBUG] dump complet de l'etat totems (sorts traques, scan GetTotemInfo brut, conteneur/widgets)")
     end
 end
 
----------------------------------------------------------------------------
 -- /aishdebug pbslots — Dump l'état actuel des 4 slots PriorityBar
----------------------------------------------------------------------------
 function DumpPBSlots()
     local P = function(s) print("|cffFF8800[PB]|r " .. s) end
     local PB = ns.Modules and ns.Modules.PriorityBar
@@ -262,11 +467,7 @@ function DumpPBSlots()
     end
 end
 
----------------------------------------------------------------------------
--- /aishdebug pbcharges — Trace la résolution des charges pour chaque slot
--- Montre exactement quel chemin le code prend : CDViewer vs fallback,
--- sous quel spellID on cherche, ce qu'on trouve.
----------------------------------------------------------------------------
+-- /aishdebug pbcharges — Trace la résolution des charges pour chaque slot (CDViewer vs fallback)
 function DumpPBCharges()
     local P = function(s) print("|cffFF8800[CHG]|r " .. s) end
     local PB = ns.Modules and ns.Modules.PriorityBar
@@ -400,11 +601,7 @@ function DumpPBCharges()
     end
 end
 
----------------------------------------------------------------------------
--- /aishdebug cdm — Dump complet du Blizzard UtilityCooldownViewer
--- Lit les champs publics de chaque item frame actif pour vérifier qu'on
--- peut s'en servir comme source de vérité pour CD/charges.
----------------------------------------------------------------------------
+-- /aishdebug cdm — Dump du UtilityCooldownViewer Blizzard (champs publics CD/charges)
 function DumpCooldownViewer()
     local P = function(s) print("|cffFF8800[CDM]|r " .. s) end
 
@@ -550,5 +747,93 @@ function DumpCooldownViewer()
     P("--- Fin V6 ---")
 end
 
+-- /aishdebug cdmbuff — Meme sondage que DumpCooldownViewer mais sur BuffIcon/BuffBarCooldownViewer
+-- (buffs traqués, pas debuffs cible). Vérifie si Cooldown:GetCooldownTimes()/
+-- GetCooldownDisplayDuration() sont lisibles (non secrètes) sur un buff en combat.
+function DumpBuffCooldownViewer()
+    local P = function(s) print("|cffFF8800[CDMBUFF]|r " .. s) end
+
+    local function M1_CooldownText(itemFrame)
+        local ok, text = pcall(function()
+            if itemFrame.Cooldown then
+                for _, region in ipairs({ itemFrame.Cooldown:GetRegions() }) do
+                    if region.GetText then
+                        local t = region:GetText()
+                        if t then local _ = t .. ""; return t end
+                    end
+                end
+            end
+            return nil
+        end)
+        if ok then return text end
+        return "<secret>"
+    end
+
+    local function M3_CooldownTimes(itemFrame)
+        local ok, result = pcall(function()
+            if itemFrame.Cooldown and itemFrame.Cooldown.GetCooldownTimes then
+                local start, dur = itemFrame.Cooldown:GetCooldownTimes()
+                if start and dur then
+                    if start > 0 then return string.format("s=%.0f d=%.0f", start, dur) end
+                    return "0/0"
+                end
+            end
+            return "noAPI"
+        end)
+        if ok then return result end
+        return "secret"
+    end
+
+    local function M4_DisplayDuration(itemFrame)
+        local ok, result = pcall(function()
+            if itemFrame.Cooldown and itemFrame.Cooldown.GetCooldownDisplayDuration then
+                local d = itemFrame.Cooldown:GetCooldownDisplayDuration()
+                if d and d > 0 then return string.format("%.1f", d) end
+                return "0"
+            end
+            return "noAPI"
+        end)
+        if ok then return result end
+        return "secret"
+    end
+
+    local function M6_CooldownAlpha(itemFrame)
+        local ok, val = pcall(function()
+            if itemFrame.Cooldown then
+                return string.format("%.2f", itemFrame.Cooldown:GetAlpha())
+            end
+            return "noCD"
+        end)
+        if ok then return val end
+        return "secret"
+    end
+
+    for _, viewerName in ipairs({ "BuffIconCooldownViewer", "BuffBarCooldownViewer" }) do
+        local viewer = _G[viewerName]
+        if not viewer or not viewer.itemFramePool then
+            P(viewerName .. " introuvable")
+        else
+            P("--- " .. viewerName .. " ---")
+            local ok_enum, err_enum = pcall(function()
+                for itemFrame in viewer.itemFramePool:EnumerateActive() do
+                    local info = itemFrame.cooldownInfo
+                    local spellID = info and info.spellID
+                    local spellName = "?"
+                    if spellID then
+                        local okN, v = pcall(C_Spell.GetSpellName, spellID)
+                        if okN and v then spellName = v end
+                    end
+                    P(string.format("%s (%s)  txt=%s  times=%s  disp=%s  alpha=%s",
+                        spellName, tostring(spellID),
+                        tostring(M1_CooldownText(itemFrame)),
+                        M3_CooldownTimes(itemFrame),
+                        M4_DisplayDuration(itemFrame),
+                        M6_CooldownAlpha(itemFrame)))
+                end
+            end)
+            if not ok_enum then P("|cffff4444ERREUR : " .. tostring(err_enum) .. "|r") end
+        end
+    end
+end
 
 

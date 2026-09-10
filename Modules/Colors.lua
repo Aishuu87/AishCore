@@ -1,5 +1,4 @@
-﻿-- Modules/Colors.lua
--- Gestion centralisée des couleurs par spécialisation
+﻿-- Modules/Colors.lua : gestion centralisée des couleurs par spécialisation
 local addonName, ns = ...
 local L = ns.L
 
@@ -7,9 +6,7 @@ ns.Modules = ns.Modules or {}
 local Colors = {}
 ns.Modules.Colors = Colors
 
----------------------------------------------------------------------------
 -- Éléments colorables : clés internes + labels UI
----------------------------------------------------------------------------
 Colors.ELEMENT_KEYS = {
     "powercircle", "powertext", "powerdotsa", "powerdotsb",
     "glow", "oochealth", "oocdot", "xpbar",
@@ -32,9 +29,7 @@ Colors.ELEMENT_LABELS = {
     misc            = L["COLORSMOD_ELEM_MISC"],
 }
 
----------------------------------------------------------------------------
 -- Fallback absolu : couleur de classe (quand aucune donnée de spé)
----------------------------------------------------------------------------
 Colors.CLASS_FALLBACK = {
     DEATHKNIGHT = { 0.769, 0.122, 0.231, 1 },
     DEMONHUNTER = { 0.639, 0.188, 0.788, 1 },
@@ -51,9 +46,7 @@ Colors.CLASS_FALLBACK = {
     WARRIOR     = { 0.780, 0.612, 0.431, 1 },
 }
 
----------------------------------------------------------------------------
 -- Métadonnées classes / spés (noms FR, clés EN pour la DB)
----------------------------------------------------------------------------
 Colors.CLASSES = {
     { key = "deathknight", file = "DEATHKNIGHT", name = L["COLORSMOD_CLASS_DEATHKNIGHT"],
       specs = { {id=250,name=L["COLORSMOD_SPEC_SANG"]}, {id=251,name=L["COLORSMOD_SPEC_GIVRE"]}, {id=252,name=L["COLORSMOD_SPEC_IMPIE"]} } },
@@ -100,24 +93,15 @@ for _, c in ipairs(Colors.CLASSES) do
     Colors._classKeyMap[c.key]   = c
 end
 
----------------------------------------------------------------------------
--- Couleurs par défaut par spécialisation
--- Source : COLOR MASTER - AISHUI (WeakAuras export)
--- Vide par défaut — chargé depuis ns.DB.specDefaults au PLAYER_LOGIN (version Adept)
--- Les utilisateurs standard auront le fallback couleur de classe.
----------------------------------------------------------------------------
+-- Couleurs par défaut par spécialisation, chargées depuis ns.DB.specDefaults au PLAYER_LOGIN
 Colors.SPEC_DEFAULTS = {}
 
----------------------------------------------------------------------------
 -- API publique
----------------------------------------------------------------------------
 
 --- Couleur de l'élément pour le joueur actuel (spé courante).
 --- Chaîne de priorité : override DB → défaut de spé → couleur de classe.
 function Colors.Get(element)
-    -- Utilise le cache ns._playerClass / ns._specID (mis à jour par CachePlayerSpec
-    -- au login et sur PLAYER_SPECIALIZATION_CHANGED). Fallback sur API directe si
-    -- le cache n'est pas encore initialisé (appels avant PLAYER_ENTERING_WORLD).
+    -- Cache ns._playerClass/ns._specID (CachePlayerSpec), fallback API directe si pas encore init
     local classFile = ns._playerClass
     if not classFile or classFile == "" then
         local _, cls = UnitClass("player")
@@ -181,9 +165,7 @@ function Colors.ResetOverride(classKey, specID, element)
     Colors.Broadcast()
 end
 
----------------------------------------------------------------------------
 -- Système de callbacks (notifie les modules quand les couleurs changent)
----------------------------------------------------------------------------
 Colors._callbacks = {}
 
 function Colors.RegisterCallback(fn)
@@ -199,18 +181,22 @@ end
 -- Alias pour compatibilité avec ApplyAllSettings() du système de profils
 Colors.ApplySettings = Colors.Broadcast
 
----------------------------------------------------------------------------
 -- Réagir aux changements de spécialisation
----------------------------------------------------------------------------
 local _colEvt = CreateFrame("Frame")
 _colEvt:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 _colEvt:RegisterEvent("PLAYER_LOGIN")
 _colEvt:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_SPECIALIZATION_CHANGED" then
         C_Timer.After(0.1, Colors.Broadcast)
+        -- Le container "resourceCircle" du panneau d'options est cache pour la session,
+        -- son contenu spec-dependant ne se remet pas a jour seul : invalider explicitement
+        local SP = ns.SettingsPanel
+        if SP and SP.InvalidateCategory then
+            C_Timer.After(0.1, function() pcall(SP.InvalidateCategory, "resourceCircle") end)
+        end
     elseif event == "PLAYER_LOGIN" then
         self:UnregisterEvent("PLAYER_LOGIN")
-        -- Merge des couleurs de spés depuis SavedVariables (version Adept)
+        -- Merge des couleurs de spés depuis SavedVariables
         local sd = ns.DB and ns.DB.specDefaults
         if sd then
             for classKey, specs in pairs(sd) do
@@ -221,16 +207,13 @@ _colEvt:SetScript("OnEvent", function(self, event)
                     Colors.SPEC_DEFAULTS[classKey][specID] = elements
                 end
             end
-            C_Timer.After(0.1, Colors.Broadcast)
         end
+        -- Broadcast systematique : initialise Theme.gold/accent sur la bonne couleur de spe des le 1er affichage
+        C_Timer.After(0.1, Colors.Broadcast)
     end
 end)
 
----------------------------------------------------------------------------
--- Câblage : propagation du Broadcast vers les modules visuels
--- Chaque module lit Colors.Get() dans sa propre fonction de couleur ;
--- ici on déclenche le re-rendu quand les couleurs changent.
----------------------------------------------------------------------------
+-- Câblage : propagation du Broadcast vers les modules visuels (chacun relit Colors.Get())
 Colors.RegisterCallback(function()
     local RC = ns.Modules.ResourceCircle
     if RC and RC.UpdateResourceColors  then pcall(RC.UpdateResourceColors)  end
@@ -248,14 +231,28 @@ Colors.RegisterCallback(function()
 
     local XB = ns.Modules.XPBar
     if XB and XB.ApplySettings then pcall(XB.ApplySettings) end
+
+    -- Niveau d'objet global et Nom du joueur (AFK) : toggle "Couleur de specialisation"
+    local CA = ns.Modules.CharacterArmory
+    if CA and CA.ApplySettings then pcall(CA.ApplySettings) end
+
+    local AM = ns.Modules.AFKMode
+    if AM and AM.ApplySettings then pcall(AM.ApplySettings) end
+
+    -- Glow par defaut des auras trackees (stocke par spe) : re-applique + resync le menu Tactics
+    local AurasNS = ns.Auras
+    if AurasNS and AurasNS.RollDefaultGlow then pcall(AurasNS.RollDefaultGlow) end
+    if AurasNS and AurasNS.RefreshDefaultGlowWidgets then pcall(AurasNS.RefreshDefaultGlowWidgets) end
+
+    -- Accent thematique du panneau d'options (Theme.gold/accent, ~60 accents dores)
+    local SW = ns.SharedWidgets
+    if SW and SW.RefreshAccentTheme then pcall(SW.RefreshAccentTheme) end
+
+    -- Meme accent, namespace separe du module Auras (sinon headers figes en blanc)
+    if AurasNS and AurasNS.RefreshAccentTheme then pcall(AurasNS.RefreshAccentTheme) end
 end)
 
----------------------------------------------------------------------------
--- Rechargement de SPEC_DEFAULTS lors d'un changement de profil.
--- Ce cache est peuplé une seule fois au PLAYER_LOGIN ; sans cette
--- resynchronisation, Colors.GetForSpec() retourne les couleurs de
--- l'ancien profil après un switch sans /reload.
----------------------------------------------------------------------------
+-- Rechargement de SPEC_DEFAULTS au changement de profil (sinon couleurs de l'ancien profil sans /reload)
 ns.CallbackRegistry:Register("PROFILE_CHANGED", function()
     wipe(Colors.SPEC_DEFAULTS)
     local sd = ns.DB and ns.DB.specDefaults
