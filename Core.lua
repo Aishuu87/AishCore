@@ -116,8 +116,6 @@ end
 -- Chemins media
 ns.Media = {
   circle    = "Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2.tga",
-  arcLeft   = "Interface\\AddOns\\AishCore\\arc_left.tga",
-  arcRight  = "Interface\\AddOns\\AishCore\\arc_right.tga",
   font      = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
   fontGui   = "Fonts\\FRIZQT__.TTF",
   fontTitle = "Fonts\\FRIZQT__.TTF",

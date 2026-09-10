@@ -4,7 +4,7 @@ local AP = {}; ns.AishUIPreview = AP
 local frames = {}
 local FONT = "Fonts\\FRIZQT__.TTF"
 local CIRCLE_TEX = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMaskSmall"
-local GLOW_TEX = "Interface\\AddOns\\AishCore\\GlowTex"
+local GLOW_TEX = "Interface\\AddOns\\AishCore\\Media\\UI\\GlowTex"
 local GLOW_FALLBACK = "Interface\\SpellActivationOverlay\\IconAlert"
 
 local function GlowTex()
