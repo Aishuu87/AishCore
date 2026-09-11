@@ -84,7 +84,11 @@ ns.MISSING_CLASS_BUFFS = {
           specIds = { 1473 }, text = "MISSING" },
     },
     MAGE = {
-        { spellId = 1459,   settingsId = 5, learned = true, whitelist = true, showRaidCount = true, text = "MISSING" },
+        -- extraBuffSpellIds 432778 : meme cas que l'Harmonie du Bosquet du druide (1126/432661) --
+        -- l'Intelligence arcanique posee sur un allie porte un spellID different de celui qu'on voit
+        -- sur soi, et l'alerte "MANQUANT" se declenchait donc a tort alors que le buff etait bien la.
+        { spellId = 1459,   settingsId = 5, learned = true, whitelist = true, showRaidCount = true, text = "MISSING",
+          extraBuffSpellIds = { 432778 } },
         { spellId = 210126, spellbookId = 205022, clickableId = 1459, settingsId = 6,
           onlySelf = true, text = "MISSING" },
     },
