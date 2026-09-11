@@ -20,6 +20,7 @@ ns.SpellClassificationOverrides = {
     [1943]    = { source = "debuff" }, -- Rupture
     [2094]    = { source = "debuff" }, -- Cecite
     [2484]    = { source = "totem" }, -- Totem de lien terrestre
+    [2645]    = { source = "buff" }, -- Loup fantome
     [2818]    = { source = "debuff" }, -- Poison mortel
     [3355]    = { source = "debuff" }, -- Piege givrant
     [3409]    = { source = "debuff" }, -- Poison affaiblissant
@@ -47,16 +48,20 @@ ns.SpellClassificationOverrides = {
     [48181]   = { source = "debuff" }, -- Hanter
     [49206]   = { source = "totem" }, -- Invocation d'une gargouille
     [51485]   = { source = "totem" }, -- Totem de poigne de terre
+    [51505]   = { deleted = true }, -- Explosion de lave
     [53563]   = { source = "buff" }, -- Guide de lumiere
     [57994]   = { deleted = true }, -- Cisaille de vent
     [61391]   = { source = "debuff" }, -- Typhon
     [73920]   = { source = "totem" }, -- Pluie guerisseuse
+    [77472]   = { deleted = true }, -- Vague de soins
     [77505]   = { source = "debuff" }, -- Seisme
+    [79206]   = { source = "buff" }, -- Grace du marcheur des esprits
     [81281]   = { source = "debuff" }, -- Croissance fongique
     [82691]   = { source = "debuff" }, -- Anneau de givre
     [98008]   = { source = "totem" }, -- Totem de lien d'esprit
     [102359]  = { source = "debuff" }, -- Enchevetrement de masse
     [105174]  = { deleted = true }, -- Main de Gul'dan
+    [108271]  = { source = "buff" }, -- Transfert astral
     [108280]  = { source = "totem" }, -- Totem de maree de soins
     [108287]  = { deleted = true }, -- Projection totemique
     [111685]  = { source = "totem" }, -- Invocation : infernal
@@ -75,10 +80,13 @@ ns.SpellClassificationOverrides = {
     [157299]  = { source = "totem" }, -- Elementaire de tempete
     [157997]  = { source = "debuff" }, -- Nova de glace
     [179057]  = { source = "debuff" }, -- Nova du chaos
+    [188196]  = { deleted = true }, -- Eclair
+    [188443]  = { deleted = true }, -- Chaine d'eclairs
     [188592]  = { source = "totem" }, -- Elementaire de feu
     [188616]  = { source = "totem" }, -- Elementaire de terre
     [190784]  = { source = "buff" }, -- Palefroi divin
     [192058]  = { source = "totem" }, -- Totem condensateur
+    [192063]  = { deleted = true }, -- Bourrasque
     [192077]  = { source = "totem" }, -- Totem de bouffee de vent
     [193332]  = { source = "totem" }, -- Appel des traqueffrois
     [195645]  = { source = "debuff" }, -- Coupure d'ailes
@@ -124,6 +132,7 @@ ns.SpellClassificationOverrides = {
     [372048]  = { source = "debuff" }, -- Rugissement oppressant
     [372245]  = { source = "debuff" }, -- Terreur des cieux
     [378080]  = { source = "debuff" }, -- Affaiblissement
+    [378081]  = { source = "buff" }, -- Rapidite de la nature
     [383013]  = { source = "totem" }, -- Totem de purification du poison
     [383121]  = { source = "debuff" }, -- Metamorphose de masse
     [383414]  = { source = "debuff" }, -- Poison amplifiant
@@ -147,7 +156,7 @@ ns.SpellClassificationOverrides = {
     [426593]  = { source = "debuff" }, -- Morsure de Gueuletripe
     [428737]  = { source = "totem" }, -- Harmonie du Bosquet
     [430589]  = { source = "buff" }, -- Exposition atmospherique
-    [431620]  = { source = "debuff" }, -- Souleevement
+    [431620]  = { source = "debuff" }, -- Soulevement
     [432502]  = { source = "debuff" }, -- Arme sacree
     [434424]  = { source = "buff" }, -- Ame divisee
     [434473]  = { source = "debuff" }, -- Bombardements
@@ -188,6 +197,7 @@ ns.SpellClassificationOverrides = {
     [1259790] = { source = "debuff" }, -- Affliction instable
     [1260251] = { source = "debuff" }, -- Condamnation a mort
     [1262887] = { source = "debuff" }, -- Enflammer
+    [1263768] = { deleted = true }, -- Benediction par la Lumiere
     [1264521] = { source = "debuff" }, -- Decouverte des faiblesses
     [1267016] = { source = "totem" }, -- Totem de flux tempetueux
     [1267089] = { source = "totem" }, -- Totem de flux tempetueux
@@ -203,5 +213,6 @@ ns.SpellClassificationOverrides = {
     [1295942] = { source = "debuff" }, -- Trait prismatique !
     [1301410] = { source = "debuff" }, -- Brulure
     [1302139] = { source = "debuff" }, -- Sceau de represailles
+    [1307531] = { deleted = true }, -- Saignee
     [1307888] = { source = "totem" }, -- Pluie guerisseuse
 }

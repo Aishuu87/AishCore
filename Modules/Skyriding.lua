@@ -89,7 +89,11 @@ local isActive      = false
 local hudVisible    = false  -- vrai quand notre HUD est effectivement affiché (debounce AnimShow/Hide)
 local ascentStart   = 0
 local isLayoutMode  = false
-local previewActive = false  -- vrai quand le panneau de configuration est ouvert
+local previewActive = false  -- vrai quand l'aperçu GUI est réellement affiché
+-- Le panneau a demandé un aperçu (SetPreview(true)) mais le module peut être
+-- coupé : on mémorise la demande pour relancer l'aperçu si on le réactive
+-- pendant que le panneau est encore ouvert (cf. ApplySettings).
+local previewWanted = false
 local smoothSpeed   = 0
 local activateTime  = 0      -- horodatage du dernier tick en vol (pour le délai de grâce hideAtLanding)
 local wasAirborne   = false  -- devient true après le premier vrai décollage (speed>1), reset au démontage
@@ -794,7 +798,21 @@ function Skyriding.ApplySettings()
 
   if cfg.enabled == false then
     previewActive = false   -- ne pas bloquer AnimHide si le panneau était ouvert
-    Deactivate(); return
+    Deactivate()
+    -- Deactivate() sort immédiatement quand isActive est faux -- exactement le
+    -- cas d'un aperçu GUI (SetPreview force l'affichage sans passer par
+    -- Activate) : sans ce HideAll(), couper le module depuis la page
+    -- "Modules" laissait le HUD d'aperçu affiché à l'écran.
+    HideAll()
+    return
+  end
+  -- Module réactivé alors que le panneau est ouvert : relancer l'aperçu coupé
+  -- par la désactivation précédente (différé d'une frame : le reste
+  -- d'ApplySettings redimensionne encore les couches ci-dessous).
+  if previewWanted and not previewActive then
+    C_Timer.After(0, function()
+      if previewWanted and not previewActive then Skyriding.SetPreview(true) end
+    end)
   end
 
   -- Position + échelle (via AnimApply pour respecter l'état d'animation courant)
@@ -967,6 +985,15 @@ end
 -- Preview (affiché lors de l'ouverture du panneau de configuration)
 function Skyriding.SetPreview(on)
   if not container then return end
+  previewWanted = on and true or false
+  -- Module désactivé : jamais d'aperçu (même garde que CastBar.SetPreview).
+  -- previewActive reste faux, sinon AnimHide() serait ignoré et le HUD
+  -- resterait affiché.
+  if on and GetCfg().enabled == false then
+    previewActive = false
+    HideAll()
+    return
+  end
   previewActive = on
   if on then
     -- Figer l'animation en état « visible »

@@ -3782,8 +3782,19 @@ function PriorityBar.SetPreview(on)
   if on then
     -- Ne pas afficher si le GUI cache explicitement la barre
     if pbHiddenForGui then return end
+    -- Module desactive : jamais de preview (meme garde que CastBar.SetPreview).
+    local cfgPrev = ns.GetCfg("priorityBar") or {}
+    if cfgPrev.enabled == false then
+      pbLastVisState = nil   -- forcer la reevaluation (l'etat courant peut venir d'un affichage force)
+      PriorityBar.UpdateVisibility()
+      return
+    end
     -- Forcer l'affichage pour la preview (plus de StateDriver à suspendre)
     SafeShowContainers()
+    -- Enregistrer l'etat force : sans ca, couper la barre ensuite laissait
+    -- UpdateVisibility croire qu'elle etait deja cachee (pbLastVisState=false)
+    -- et les conteneurs restaient a alpha 1 a l'ecran.
+    pbLastVisState = true
   else
     for i = 1, MAX_SLOTS do
       if slotFrames[i] then

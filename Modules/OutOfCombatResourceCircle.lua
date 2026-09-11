@@ -826,8 +826,14 @@ function OutOfCombatResourceCircle.SetPreview(on)
   if on then
     lastVisibilityState = nil
     local cfgPrev = ns.GetCfg("outOfCombatResourceCircle")
-    -- Respecter le toggle : si desactive, ne pas forcer l'affichage en preview
-    if cfgPrev.enabled == false then return end
+    -- Respecter le toggle : si desactive, ne pas forcer l'affichage en preview.
+    -- Masquage explicite (pas un simple return) : previewMode court-circuite
+    -- UpdateVisibility, qui ne cacherait donc jamais le cercle si le module
+    -- vient d'etre coupe depuis la page "Modules" panneau ouvert.
+    if cfgPrev.enabled == false then
+      bar:Hide()
+      return
+    end
     bar:Show()
     bar:SetAlpha(1); bar:SetScale(1)
     if bar.bgGlow then

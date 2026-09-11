@@ -5,6 +5,152 @@ local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _ad
 local tinsert, tsort = table.insert, table.sort
 local pcall = pcall
 
+-- FUSION DES HOMONYMES (style + etat) -----------------------------------------------------------
+-- Un meme buff peut changer de spellID selon le talent heros / le seuil de stacks : le jeu affiche
+-- alors une variante que l'utilisateur n'a jamais configuree. Le regroupement par nom plus bas
+-- (BuildWhitelist) fusionne deja les DESTINATIONS, ce qui suffit a faire APPARAITRE l'icone -- mais
+-- pas son style : la variante affichee gardait sa propre entree vierge, d'ou une barre en couleur de
+-- classe et aucun glow, insensible a tous les reglages (constate en jeu sur Impact foudroyant).
+--
+-- On propage donc le style de l'entree ANCRE vers tous ses homonymes. Meme cle composite que le
+-- regroupement des destinations (nom + source) : elle a deja ete durcie contre le faux positif ou
+-- deux sorts SANS RAPPORT partagent un libelle generique -- ne jamais la reduire au nom seul.
+--
+-- Contrairement au regroupement des destinations (lecture seule), celui-ci ECRIT dans la DB : c'est
+-- voulu, "un buff = une ligne" cote GUI implique un seul etat persiste pour toutes ses variantes.
+-- FAMILLE d'un sort, pour la cle de regroupement des homonymes.
+--
+-- La cle ne peut pas etre le NOM SEUL : regrouper ainsi fusionnait des sorts sans rapport partageant
+-- un libelle generique (un debuff de donjon heritait des destinations d'une capacite joueur du meme
+-- nom) -- bug constate en jeu, la garde reste indispensable.
+--
+-- Mais elle ne peut pas non plus etre le `source` BRUT : le meme buff joueur recoit "buff" ou
+-- "enhancement" selon le viewer CDM qui l'a fait decouvrir (Essential/Utility vs BuffIcon/BuffBar,
+-- cf. CDMHooks.lua) -- deux entrees du meme buff se retrouvaient donc dans deux groupes distincts et
+-- ne fusionnaient jamais (constate sur Impact foudroyant, Main brulante, Tempete dechainee...).
+--
+-- Compromis : on replie les sources en FAMILLES grossieres. Tout ce qui est un buff du joueur tombe
+-- dans la meme famille (meme normalisation que le menu "Auras a tracker", cf. Tactics.lua), tandis
+-- que debuff / totem / equipement restent cloisonnes -- la protection d'origine tient.
+local function HomonymFamily(source)
+    if source == "buff" or source == "enhancement" then return "player" end
+    return tostring(source)
+end
+
+local HOMONYM_KEEP_OWN = {
+    -- Champs propres a chaque spellID : jamais recopies depuis l'ancre.
+    name = true, source = true, linkedSpellIDs = true,
+    _invalid = true, _adminDeleted = true, spellIDs = true, styleAnchorID = true,
+}
+
+-- Score de "personnalisation" : l'ancre est l'entree que l'utilisateur a le plus travaillee, pour ne
+-- jamais ecraser des reglages existants avec une entree vierge auto-decouverte.
+local function HomonymScore(info)
+    local n = 0
+    if info.enabled then n = n + 1000 end
+    if info.destinations then
+        for _, active in pairs(info.destinations) do
+            if active then n = n + 100 end
+        end
+    end
+    if info._glowCustom == true then n = n + 10 end
+    if info._colorDefault == false then n = n + 1 end
+    return n
+end
+
+-- nameGroups : [cle composite] = { spellID, ... } (construit par BuildWhitelist, reutilise ici).
+local function ResolveHomonymStyles(spells, nameGroups)
+    for _, ids in pairs(nameGroups) do
+        if #ids > 1 then
+            tsort(ids)
+            -- ANCRE STABLE. L'election ne doit PAS dependre d'un etat que la propagation ecrit
+            -- elle-meme : elire par score a chaque passage creait une boucle -- decocher la ligne
+            -- faisait chuter le score de l'ancre, une variante soeur encore `enabled` (parce qu'on
+            -- venait de lui propager) devenait ancre a son tour et repropageait `enabled = true` sur
+            -- l'entree tout juste decochee. Resultat : impossible de desactiver ou de recocher un
+            -- buff fusionne, et la ligne affichee sautait d'une variante a l'autre.
+            --
+            -- On elit donc UNE SEULE FOIS par groupe, puis on s'en tient a `styleAnchorID` persiste
+            -- (exclu de la recopie, cf. HOMONYM_KEEP_OWN). Reelection uniquement si l'ancre memorisee
+            -- a disparu du groupe (changement de spe, DB reinitialisee, variante retiree).
+            local inGroup = {}
+            for _, id in ipairs(ids) do inGroup[id] = true end
+
+            local anchorID
+            for _, id in ipairs(ids) do
+                local prev = spells[id] and spells[id].styleAnchorID
+                if prev and inGroup[prev] and spells[prev] then anchorID = prev; break end
+            end
+
+            if not anchorID then
+                -- Premiere fusion de ce groupe : on prend l'entree la plus travaillee, pour ne pas
+                -- ecraser des reglages existants avec une entree vierge auto-decouverte. `>` strict
+                -- => a score egal, le plus petit ID (ids est trie).
+                local bestScore
+                for _, id in ipairs(ids) do
+                    local info = spells[id]
+                    local sc = info and HomonymScore(info) or -1
+                    if not bestScore or sc > bestScore then bestScore, anchorID = sc, id end
+                end
+            end
+
+            local anchor = anchorID and spells[anchorID]
+            if anchor then
+                for _, id in ipairs(ids) do
+                    local info = spells[id]
+                    if info then
+                        if info ~= anchor then
+                            for k, v in pairs(anchor) do
+                                if not HOMONYM_KEEP_OWN[k] then
+                                    -- Copie profonde : deux entrees ne doivent jamais partager une
+                                    -- table (couleur, destinations...) -- les SavedVariables les
+                                    -- dedoublent de toute facon a l'ecriture, et une reference
+                                    -- partagee rendrait les editions imprevisibles en session.
+                                    info[k] = (type(v) == "table") and ns.DeepCopy(v) or v
+                                end
+                            end
+                        end
+                        -- Liste des variantes, pour l'affichage "Nom (id1, id2)" du menu.
+                        info.spellIDs = ids
+                        -- L'entree qui DETIENT le style. Le menu doit afficher exactement cette
+                        -- ligne-la : si l'utilisateur editait une autre variante, sa modification
+                        -- serait ecrasee par la propagation au prochain BuildWhitelist.
+                        info.styleAnchorID = anchorID
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Entree de STYLE a utiliser pour un spellID donne (couleur de barre, glow, anim de proc).
+--
+-- Pourquoi ce n'est pas simplement ns.GetSpecSpells()[spellID] : un ID peut arriver a l'ecran SANS
+-- avoir d'entree propre dans discoveredSpells. C'est le cas du repli linkedSpellIDs plus bas
+-- (linkedFallbackInfo) -- la variante liee entre dans la whitelist, obtient son groupe natif et
+-- s'affiche, mais `spells[id]` reste nil. Tous les chemins de style tombaient alors sur nil et
+-- rendaient la barre en couleur de classe, sans glow, insensible a tout reglage (constate en jeu :
+-- le buff affiche portait un spellID absent de la liste "Auras a tracker").
+--
+-- ns.activeWhitelist contient deja la resolution complete (entrees propres + replis) : on s'en sert
+-- comme second niveau. Repli volontairement silencieux -- si aucune des deux sources ne connait l'ID,
+-- les consommateurs (SpellBarColorRGB/ApplySpellGlow) gerent deja si == nil.
+function ns.GetStyleInfo(spellID)
+    if not spellID then return nil end
+    -- Lecture BRUTE de discoveredSpells, sans passer par ns.GetSpecSpells() : cette derniere
+    -- reapplique ns.ApplyAdminOverrides a chaque appel, or on est ici sur un chemin chaud (appele une
+    -- fois par bouton natif a chaque rafraichissement de style, soit des centaines de fois). Les
+    -- overrides admin ne touchent que `source` et `_adminDeleted`, jamais les champs de style lus par
+    -- les appelants (couleur/glow) -- les ignorer ici est sans effet sur le rendu.
+    local key = ns.GetSpecKey and ns.GetSpecKey()
+    local db = ns.db and ns.db.discoveredSpells
+    local spells = key and db and db[key]
+    local info = spells and spells[spellID]
+    if info then return info end
+    local wl = ns.activeWhitelist
+    return wl and wl[spellID] or nil
+end
+
 function ns.BuildWhitelist()
     -- Auto-configure le sort du cercle central avant chaque rebuild
     if ns.AutoConfigCenterArc then pcall(ns.AutoConfigCenterArc) end
@@ -72,12 +218,17 @@ function ns.BuildWhitelist()
     local nameGroups = {}
     for id, info in pairs(spells) do
         if info.name and not info._invalid then
-            local key = info.name .. "\0" .. tostring(info.source)
+            local key = info.name .. "\0" .. HomonymFamily(info.source)
             local g = nameGroups[key]
             if not g then g = {}; nameGroups[key] = g end
             tinsert(g, id)
         end
     end
+    -- Propage le style de l'ancre vers ses homonymes AVANT la fusion des destinations : la variante
+    -- que le jeu finira par afficher doit porter exactement les memes couleurs/glow que celle que
+    -- l'utilisateur a reglee dans "Auras a tracker".
+    ResolveHomonymStyles(spells, nameGroups)
+
     local linkedDest = {}         -- [spellID] = destinations heritees d'un homonyme/lien coche
     local linkedFallbackInfo = {} -- [spellID] = info de l'ANCRE, pour un ID lie jamais decouvert independamment
     for _, ids in pairs(nameGroups) do

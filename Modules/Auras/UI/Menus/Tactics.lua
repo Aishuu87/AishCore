@@ -321,7 +321,14 @@ local function CreateSpellRow(par,sid,info,y,W,onChg,rebuildFn)
     nm:SetPoint("LEFT",rx,0); nm:SetPoint("RIGHT",row,"RIGHT",adminMode and -345 or -205,0)
     nm:SetJustifyH("LEFT"); nm:SetWordWrap(false)
     nm:SetTextColor(unpack(Theme.textNormal))
-    nm:SetText((info.name or tostring(sid)).." |cff3a3a3a("..sid..")|r")
+    -- Toutes les variantes du buff dans la meme parenthese : l'utilisateur voit d'un coup d'oeil que
+    -- cette ligne pilote plusieurs spellID (et lequel le jeu lui montrera, peu importe).
+    -- spellIDs/styleAnchorID sont poses par ResolveHomonymStyles (Whitelist.lua).
+    local idLabel = tostring(sid)
+    if type(info.spellIDs) == "table" and #info.spellIDs > 1 then
+        idLabel = table.concat(info.spellIDs, ", ")
+    end
+    nm:SetText((info.name or tostring(sid)).." |cff3a3a3a("..idLabel..")|r")
 
     -- Cote droit : zones ancrees depuis la droite vers la gauche. Ordre visuel : [DESTINATIONS] | [STYLE]
     -- (glow + desat + color swatch).
@@ -786,9 +793,26 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
         -- Classement par source : deb = debuffs cible, buf = buffs joueur, tot = totems (pas une
         -- aura reelle, suivi via GetTotemInfo/GetTotemDuration, cf. Core/Totems.lua).
         local deb,buf,tot={},{},{}
+        -- FUSION DES HOMONYMES : un meme buff peut exister sous plusieurs spellID (talent heros,
+        -- seuil de stacks...). Whitelist.lua leur donne deja un style identique (ResolveHomonymStyles)
+        -- ; ici on n'affiche qu'UNE ligne par groupe, sinon l'utilisateur voit deux lignes au nom et
+        -- a l'icone identiques sans savoir laquelle le jeu utilisera.
         for sid,info in pairs(spells) do
+            local skipDuplicate = false
+            if type(info.spellIDs) == "table" and #info.spellIDs > 1 then
+                -- La ligne affichee est celle qui DETIENT le style (styleAnchorID, cf.
+                -- ResolveHomonymStyles) : editer une autre variante verrait la modification ecrasee
+                -- par la propagation au prochain BuildWhitelist. Choix deterministe -- se fier a
+                -- l'ordre de pairs() ferait sauter la ligne d'une variante a l'autre.
+                local primary = info.styleAnchorID or info.spellIDs[1]
+                local pInfo = spells[primary]
+                -- Repli : si l'entree primaire a disparu (ou est masquee hors mode admin), on laisse
+                -- passer la variante courante, sinon le groupe entier deviendrait invisible.
+                local primaryUsable = pInfo and not (pInfo._adminDeleted and not ns._adminMode)
+                if primaryUsable and sid ~= primary then skipDuplicate = true end
+            end
             -- Un sort supprime (mode admin) reste dans la liste (annulable) mais cache hors mode admin.
-            if info.source ~= "equipment" and not (info._adminDeleted and not ns._adminMode) then  -- skip items WG dans ce menu
+            if not skipDuplicate and info.source ~= "equipment" and not (info._adminDeleted and not ns._adminMode) then  -- skip items WG dans ce menu
                 if not info.destinations then info.destinations=ns.DeepCopy and ns.DeepCopy(ns.SpellDefaults.destinations) or {iconlist=false,freebars=false,circlebars=false,icons=false,totems=false} end
                 if info.glow==nil then info.glow=false end
                 if info.desat==nil then info.desat=false end

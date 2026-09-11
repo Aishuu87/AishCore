@@ -210,6 +210,18 @@ local function SetTTBVisibilityDrivers()
         if f_target.nameFrame then f_target.nameFrame:Hide() end
         if f_target.hpFrame   then f_target.hpFrame:Hide()   end
         if f_tt then RegisterStateDriver(f_tt, "visibility", "hide") end
+    elseif ttbPreviewMode then
+        -- Apercu GUI (panneau ouvert) : affichage force, meme sans cible reelle.
+        -- Sans cette branche, re-cocher "Activer" pendant que le panneau est
+        -- ouvert retombait sur le driver [@target,exists] et l'apercu ne
+        -- revenait pas (il n'est arme qu'au OnShow du panneau).
+        RegisterStateDriver(f_target, "visibility", "show")
+        if f_target.nameFrame then f_target.nameFrame:Show() end
+        if f_target.hpFrame   then f_target.hpFrame:Show()   end
+        if f_tt then
+            local showTT = not (db and db.showTargetOfTarget == false)
+            RegisterStateDriver(f_tt, "visibility", showTT and "show" or "hide")
+        end
     else
         RegisterStateDriver(f_target, "visibility", "[@target,exists] show; hide")
         if f_tt then

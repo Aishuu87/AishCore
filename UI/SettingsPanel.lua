@@ -1250,7 +1250,27 @@ function Build.UnitBars(container)
 
   --- En-tete cliquable "+ / - Nom de la barre" -- meme pattern que
   --- AFKCollapsibleHeader (Build.AFKMode), adapte a la structure UBGet/UBSet.
-  local function UBCollapsibleHeader(sectionContainer, sectionW, label, barKey)
+  --- `disabled` (barre decochee dans "Barres affichees" ou dans la page
+  --- "Modules") : l'en-tete reste visible pour garder la liste des 5 barres
+  --- lisible, mais grise, sans +/- et sans clic -- ses reglages n'ont aucun
+  --- effet tant que la barre est coupee. Tooltip explicite au survol.
+  local function UBCollapsibleHeader(sectionContainer, sectionW, label, barKey, disabled)
+    if disabled then
+      local header = SW.CreateSectionHeader(sectionContainer, label, sectionW, Theme.textDisabled)
+      local hitbox = CreateFrame("Frame", nil, header)
+      hitbox:SetAllPoints(header)
+      hitbox:SetFrameLevel(header:GetFrameLevel() + 1)
+      hitbox:EnableMouse(true)
+      hitbox:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(label, 1, 1, 1)
+        GameTooltip:AddLine(L["SETTINGS_UB_BAR_DISABLED_TT"], unpack(Theme.textDim))
+        GameTooltip:Show()
+      end)
+      hitbox:SetScript("OnLeave", function() GameTooltip:Hide() end)
+      return header, true
+    end
+
     local collapsed = UBBarCollapsed(barKey)
     local header = SW.CreateSectionHeader(sectionContainer, (collapsed and "+ " or "- ") .. label, sectionW)
 
@@ -1416,15 +1436,11 @@ function Build.UnitBars(container)
   end
   ctx:AddRow(8, unpack(barCBs))
 
-  -- Sous-section par barre ACTIVEE uniquement, indentee, avec en-tete repliable "+ / -" -- meme principe que les elements de Build.AFKMode.
+  -- Sous-section par barre, indentee, avec en-tete repliable "+ / -" -- meme
+  -- principe que les elements de Build.AFKMode. Une barre decochee garde son
+  -- en-tete mais grise et non cliquable (cf. UBCollapsibleHeader).
   ctx:Spacer(10)
-  local hasAnyBar = false
-  for _, entry in ipairs(BAR_LABELS) do
-    if UBGet(entry.key, "enabled") ~= false then hasAnyBar = true end
-  end
-  if hasAnyBar then
-    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_UB_BAR_DETAILS"], W))
-  end
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_UB_BAR_DETAILS"], W))
 
   -- Reglages communs a TOUTES les barres (inversion de couleurs, hauteur tank, etc.), indentes comme les sous-sections repliables mais sans se replier.
   ctx:Spacer(6)
@@ -1518,49 +1534,48 @@ function Build.UnitBars(container)
 
   for _, entry in ipairs(BAR_LABELS) do
     local bk = entry.key
-    if UBGet(bk, "enabled") ~= false then
-      ctx:Spacer(4)
-      local headerW = W - UB_SECTION_INDENT
-      local header, collapsed = UBCollapsibleHeader(container, headerW, entry.label, bk)
-      header:ClearAllPoints()
-      header:SetPoint("TOPLEFT", container, "TOPLEFT", UB_SECTION_INDENT, -ctx.y)
-      header:Show()
-      ctx.y = ctx.y + header:GetHeight() + 2
-      table.insert(ctx.widgets, header)
+    local barOff = UBGet(bk, "enabled") == false
+    ctx:Spacer(4)
+    local headerW = W - UB_SECTION_INDENT
+    local header, collapsed = UBCollapsibleHeader(container, headerW, entry.label, bk, barOff)
+    header:ClearAllPoints()
+    header:SetPoint("TOPLEFT", container, "TOPLEFT", UB_SECTION_INDENT, -ctx.y)
+    header:Show()
+    ctx.y = ctx.y + header:GetHeight() + 2
+    table.insert(ctx.widgets, header)
 
-      if not collapsed then
-        local detailW = W - UB_SECTION_INDENT
-        local detailSL4 = math.floor((detailW - 3 * 8) / 4)
-        local detail = CreateFrame("Frame", nil, container)
-        detail:SetWidth(detailW)
-        local dctx = NewLayout(detail)
+    if not collapsed then
+      local detailW = W - UB_SECTION_INDENT
+      local detailSL4 = math.floor((detailW - 3 * 8) / 4)
+      local detail = CreateFrame("Frame", nil, container)
+      detail:SetWidth(detailW)
+      local dctx = NewLayout(detail)
 
-        -- "Reglages de la barre" regroupe largeur/hauteur/decalage sur une seule rangee, distingue du decalage du nom juste en dessous.
-        dctx:Add(MakeUBPlainSubtitle(detail, L["SETTINGS_SEC_UB_BAR_POSITION"], detailW))
-        local slW = SW.CreateSlider(detail, L["SETTINGS_WIDTH"], 40, 700, 1, detailSL4)
-        slW:SetValue(UBGet(bk, "width") or 200)
-        slW.onChanged = function(val) UBSet(bk, "width", val) end
-        local slH = SW.CreateSlider(detail, L["SETTINGS_HEIGHT"], 2, 40, 1, detailSL4)
-        slH:SetValue(UBGet(bk, "height") or 4)
-        slH.onChanged = function(val) UBSet(bk, "height", val) end
-        local slBarX = SW.CreateSlider(detail, L["SETTINGS_OFFSET_X"], -200, 200, 1, detailSL4)
-        slBarX:SetValue(UBGet(bk, "x") or 0)
-        slBarX.onChanged = function(val) UBSet(bk, "x", val) end
-        local slBarY = SW.CreateSlider(detail, L["SETTINGS_OFFSET_Y"], -200, 200, 1, detailSL4)
-        slBarY:SetValue(UBGet(bk, "y") or 0)
-        slBarY.onChanged = function(val) UBSet(bk, "y", val) end
-        dctx:AddRow(8, slW, slH, slBarX, slBarY)
+      -- "Reglages de la barre" regroupe largeur/hauteur/decalage sur une seule rangee, distingue du decalage du nom juste en dessous.
+      dctx:Add(MakeUBPlainSubtitle(detail, L["SETTINGS_SEC_UB_BAR_POSITION"], detailW))
+      local slW = SW.CreateSlider(detail, L["SETTINGS_WIDTH"], 40, 700, 1, detailSL4)
+      slW:SetValue(UBGet(bk, "width") or 200)
+      slW.onChanged = function(val) UBSet(bk, "width", val) end
+      local slH = SW.CreateSlider(detail, L["SETTINGS_HEIGHT"], 2, 40, 1, detailSL4)
+      slH:SetValue(UBGet(bk, "height") or 4)
+      slH.onChanged = function(val) UBSet(bk, "height", val) end
+      local slBarX = SW.CreateSlider(detail, L["SETTINGS_OFFSET_X"], -200, 200, 1, detailSL4)
+      slBarX:SetValue(UBGet(bk, "x") or 0)
+      slBarX.onChanged = function(val) UBSet(bk, "x", val) end
+      local slBarY = SW.CreateSlider(detail, L["SETTINGS_OFFSET_Y"], -200, 200, 1, detailSL4)
+      slBarY:SetValue(UBGet(bk, "y") or 0)
+      slBarY.onChanged = function(val) UBSet(bk, "y", val) end
+      dctx:AddRow(8, slW, slH, slBarX, slBarY)
 
-        dctx:Add(MakeUBPlainSubtitle(detail, L["SETTINGS_SEC_UB_NAME_POSITION"], detailW))
-        dctx:Add(MakeXYRow(detail, detailW, bk, "nameOffX", "nameOffY"))
-        dctx:Finalize()
+      dctx:Add(MakeUBPlainSubtitle(detail, L["SETTINGS_SEC_UB_NAME_POSITION"], detailW))
+      dctx:Add(MakeXYRow(detail, detailW, bk, "nameOffX", "nameOffY"))
+      dctx:Finalize()
 
-        detail:ClearAllPoints()
-        detail:SetPoint("TOPLEFT", container, "TOPLEFT", UB_SECTION_INDENT, -ctx.y)
-        detail:Show()
-        ctx.y = ctx.y + detail:GetHeight() + 2
-        table.insert(ctx.widgets, detail)
-      end
+      detail:ClearAllPoints()
+      detail:SetPoint("TOPLEFT", container, "TOPLEFT", UB_SECTION_INDENT, -ctx.y)
+      detail:Show()
+      ctx.y = ctx.y + detail:GetHeight() + 2
+      table.insert(ctx.widgets, detail)
     end
   end
 
@@ -9912,8 +9927,6 @@ local MODULE_CATEGORIES = {
       ModEntry("resourceCircle", L["SETTINGS_SEC_RESOURCE_CIRCLE"],  "resourceCircle", "enabled"),
       ModEntry("orbs",           L["SETTINGS_MOD_ORBS"],             "spellEffects",   "orbsEnabled", L["SETTINGS_MOD_ORBS_TT"]),
       ModEntry("priorityBar",    L["SETTINGS_SEC_PRIORITY_BAR"],     "priorityBar",    "enabled"),
-      ModEntry("castBar",        L["SETTINGS_SEC_CAST_BAR"],         "castBar",        "enabled"),
-      ModEntry("targetCastBar",  L["SETTINGS_CAT_TARGET_CAST"],      "targetCastBar",  "enabled"),
       ModEntry("cdmEssential",   L["SETTINGS_CAT_CDM_ESSENTIAL"],    "cdmEssential",   "enabled"),
       ModEntry("cdmUtility",     L["SETTINGS_CAT_CDM_UTILITY"],      "cdmUtility",     "enabled"),
       ModEntry("bigCursor",      L["SETTINGS_MOD_BIG_CURSOR"],       "bigCursor",      "enabled", L["SETTINGS_MOD_BIG_CURSOR_TT"]),
@@ -9934,6 +9947,10 @@ local MODULE_CATEGORIES = {
         }
         return m
       end)(),
+      -- Barres de cast joueur/cible : rattachees aux cadres d'unites (et non
+      -- plus a "Combat"), comme leurs sections dans la barre laterale.
+      ModEntry("castBar",       L["SETTINGS_SEC_CAST_BAR"],    "castBar",       "enabled"),
+      ModEntry("targetCastBar", L["SETTINGS_CAT_TARGET_CAST"], "targetCastBar", "enabled"),
       (function()
         local m = ModEntry("topTargetBar", L["SETTINGS_CAT_TOP_TARGET"], "topTargetBar", "enabled")
         m.children = {
@@ -11345,8 +11362,8 @@ local CATEGORIES = {
 -- Groupes de la sidebar (style AishUI : headers parchemin + sections cliquables)
 local SIDEBAR_GROUPS = {
   { label = L["SETTINGS_GROUP_GLOBAL"],      ids = { "modulesOverview", "colors", "profiles", "heroicSupport" } },
-  { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "targetCastBar", "topTargetBar", "targetAuras", "groupNumber" } },
-  { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "castBar", "targetCastBar", "cdmEssential", "cdmUtility", "bigCursor", "rotationHelper" } },
+  { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "castBar", "targetCastBar", "topTargetBar", "targetAuras", "groupNumber" } },
+  { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "cdmEssential", "cdmUtility", "bigCursor", "rotationHelper" } },
   { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "xpBar", "skyriding", "afkMode", "visibility", "characterArmory" } },
   { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasTrinkets", "aurasMissingBuffs", "spellEffects" } },
 }

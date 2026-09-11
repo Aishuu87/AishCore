@@ -865,7 +865,16 @@ local function ApplyIconsFlowButtonStyle(auraButton)
     local okCheck, canAccess = pcall(function()
         return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
     end)
-    if not (okCheck and canAccess) then return end
+    -- Renoncement SILENCIEUX quand l'objet est interdit (aura secrete : combat/instance/PvP). C'est
+    -- le point dur de ce fichier : un bouton deja cree ne peut PLUS etre restyle, donc tout edit de
+    -- glow/couleur fait apres sa creation n'atteint jamais le rendu reel (l'apercu Lua, lui, le
+    -- montre tout de suite -- d'ou "correct en apercu, pas en jeu"). On compte les renoncements pour
+    -- pouvoir le diagnostiquer (/aishdebug iconsflow <spellID>) et prevenir l'utilisateur.
+    if not (okCheck and canAccess) then
+        auraButton._aishStyleBlocked = (auraButton._aishStyleBlocked or 0) + 1
+        ns._iconsStyleBlockedCount = (ns._iconsStyleBlockedCount or 0) + 1
+        return
+    end
     local okStyle, errStyle = pcall(function()
         local liveIw, liveIh = liveCfg.iconW or 26, liveCfg.iconH or 26
         auraButton:SetSize(liveIw, liveIh)
@@ -896,7 +905,7 @@ local function ApplyIconsFlowButtonStyle(auraButton)
         -- Config par sort : chaque bouton est dedie a un seul spellID (._aishSpellID, pose a la
         -- creation), ce qui permet une couleur de barre/glow fixes par sort (SpellBarColorRGB/ApplySpellGlow).
         local liveSpells = ns.GetSpecSpells()
-        local liveSi = auraButton._aishSpellID and liveSpells and liveSpells[auraButton._aishSpellID]
+        local liveSi = ns.GetStyleInfo(auraButton._aishSpellID)
 
         if auraButton._aishDurBar then
             local bar = auraButton._aishDurBar
@@ -921,6 +930,8 @@ local function ApplyIconsFlowButtonStyle(auraButton)
     end)
     if not okStyle then
         DBG(string.format("|cffff4444ApplyIconsFlowButtonStyle: bloc principal a echoue -- err=%s|r", tostring(errStyle)))
+    else
+        auraButton._aishStyledOK = true
     end
 end
 
@@ -1007,7 +1018,11 @@ function ns.RepositionIconsNativeGrid()
     local c = EnsureIconsFlowContainer()
     if not c then return end
     local cfg = ns.db and ns.db.icons or ns.Defaults.icons
-    local visible = (cfg.iconsEnabled ~= false) and not (ns.db and ns.db.useNativeCDM)
+    -- iconsEnabled vit a la RACINE de ns.db (cf. Defaults.lua, aux cotes de iconlistEnabled/
+    -- circlebarsEnabled/freebarsEnabled), pas dans ns.db.icons : le lire sur cfg renvoyait
+    -- toujours nil, donc `~= false` toujours vrai -- la destination "Icones" restait visible
+    -- quoi qu'on fasse de son interrupteur. Les 3 autres destinations lisent deja ns.db.
+    local visible = (ns.db == nil or ns.db.iconsEnabled ~= false) and not (ns.db and ns.db.useNativeCDM)
     c:ClearAllPoints()
     -- Ancrage PAR BORD (evite que les icones "bougent des 2 cotes" au changement du nombre d'icones
     -- actives) : le conteneur se redimensionne dynamiquement pour coller au flow, donc le bord cense
@@ -1141,7 +1156,14 @@ function ns.EnsureIconsNativeGrid()
                                 end
                                 durBar:SetStatusBarTexture(ns.ResolveBarTexFromKey(liveCfgAtCreate.texture))
                                 durBar:SetReverseFill(liveCfgAtCreate.barReverseFill == true)
-                                local cR, cG, cB = SpellBarColorRGB(liveCfgAtCreate, spells and spells[spellID])
+                                -- si relu MAINTENANT (et non via le `spells` capture par
+                                -- EnsureIconsNativeGrid) : ce capture peut etre nil si la grille a
+                                -- ete construite avant que la cle de spe soit disponible (login), ce
+                                -- qui figerait la barre sur ns.barColor (couleur de classe) sans
+                                -- aucun moyen de la corriger ensuite. Meme pattern que Circle Bars/
+                                -- Free Bars/Liste d'icones (liveSpells dans leur initializeFrame).
+                                local liveSpellsAtCreate = ns.GetSpecSpells()
+                                local cR, cG, cB = SpellBarColorRGB(liveCfgAtCreate, ns.GetStyleInfo(spellID))
                                 durBar:SetStatusBarColor(cR, cG, cB)
                                 local durBg = durBar:CreateTexture(nil, "BACKGROUND")
                                 durBg:SetAllPoints()
@@ -1158,18 +1180,28 @@ function ns.EnsureIconsNativeGrid()
                                     (liveCfgAtCreate.barReverseFill == true) and "LEFT" or "RIGHT", {cR, cG, cB})
                             end
 
-                            iconsFlowButtons[#iconsFlowButtons + 1] = auraButton
+                            -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                            -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                            -- redondants). No-op dans le cas nominal.
+                            if not auraButton._aishPooled then
+                                auraButton._aishPooled = true
+                                iconsFlowButtons[#iconsFlowButtons + 1] = auraButton
+                            end
                         end)
                         if not okBuild then
                             DBG(string.format("|cffff4444initializeFrame (sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
                         end
                         -- Taille/glow/swipe/texte de duree/stacks : appliques via ApplyIconsFlowButtonStyle.
                         ApplyIconsFlowButtonStyle(auraButton)
+                        -- La creation est la SEULE fenetre ou le style est garanti applicable : on
+                        -- note si elle a reussi, pour distinguer au diagnostic un bouton jamais
+                        -- style d'un bouton style puis devenu intouchable (cf. _aishStyleBlocked).
+                        auraButton._aishStyledAtCreate = auraButton._aishStyledOK == true
                         -- Animation d'entree du glow jouee une seule fois ici (pas dans
                         -- ApplyIconsFlowButtonStyle, qui rejouerait le flourish a chaque refresh GUI).
                         do
                             local spells = ns.GetSpecSpells()
-                            PlayProcStartOnce(auraButton, spells and spells[spellID], spellID)
+                            PlayProcStartOnce(auraButton, ns.GetStyleInfo(spellID), spellID)
                         end
                     end,
                     layout = {
@@ -1211,8 +1243,14 @@ end
 
 -- DUMP complet de l'etat actuel : /aishdebug iconsflow. Rejoue aussi les
 -- appels SetFlowLayout* pour voir immediatement s'ils echouent.
-function ns.DebugDumpIconsFlow()
+-- Recap "qui est reellement a l'ecran" : defini en fin de fichier (il balaye les 8 pools de
+-- boutons, dont les 4 pools "cible" declares bien plus bas) -- avant-declare ici pour rester
+-- appelable depuis ce dump, portee lexicale Lua oblige.
+local DumpShownButtons
+
+function ns.DebugDumpIconsFlow(onlySpellID)
     DBG("=== DUMP etat icons flow ===")
+    if onlySpellID then DBG(string.format("(filtre : sort %d uniquement)", onlySpellID)) end
     DBG(string.format("InCombatLockdown=%s", tostring(InCombatLockdown and InCombatLockdown())))
     DBG(string.format("conteneur existe=%s", tostring(iconsFlowContainer ~= nil)))
     if iconsFlowContainer then
@@ -1238,12 +1276,61 @@ function ns.DebugDumpIconsFlow()
     DBG(string.format("ns.slotOrderByDest.icons: %d sort(s)", order and #order or 0))
     local cfg = ns.db and ns.db.icons or ns.Defaults.icons
     DBG(string.format("useNativeCDM=%s iconsEnabled=%s x=%s y=%s growth=%s",
-        tostring(ns.db and ns.db.useNativeCDM), tostring(cfg.iconsEnabled), tostring(cfg.x), tostring(cfg.y), tostring(cfg.growth)))
+        tostring(ns.db and ns.db.useNativeCDM), tostring(ns.db and ns.db.iconsEnabled), tostring(cfg.x), tostring(cfg.y), tostring(cfg.growth)))
+    -- Source de verite couleur/glow PAR SORT : sans ces champs, SpellBarColorRGB retombe sur
+    -- ns.barColor (couleur de classe) et ApplySpellGlow ne pose aucun glow -- exactement le symptome
+    -- "rendu correct en apercu, mais barre de classe sans glow en conditions reelles".
+    local dumpSpells, dumpSpecKey = ns.GetSpecSpells()
+    DBG(string.format("specKey=%s discoveredSpells=%s useSpellColors=%s barColor(classe)=%.2f,%.2f,%.2f",
+        tostring(dumpSpecKey), dumpSpells and "ok" or "|cffff4444ABSENT|r",
+        tostring(ns.db and ns.db.useSpellColors), ns.barColor[1], ns.barColor[2], ns.barColor[3]))
+    -- VERBOSITE LIEE AU FILTRE : le pool depasse la centaine de boutons (un groupe natif par sort
+    -- traque, et Blizzard en alloue plusieurs par groupe) -- cracher le detail complet de chacun
+    -- noyait le chat. Sans filtre : une ligne par bouton + le recap. Avec un spellID : tout le detail,
+    -- puisqu'on ne regarde alors qu'une poignee de boutons.
+    local verbose = onlySpellID ~= nil
+    if not verbose then
+        DBG("(vue compacte -- '/aishdebug iconsflow <spellID>' pour le detail complet d'un sort)")
+    end
+    local shownCount = 0
     for i, btn in ipairs(iconsFlowButtons) do
+      if not (onlySpellID and btn._aishSpellID ~= onlySpellID) then
+        shownCount = shownCount + 1
         local okCA, canAccess = pcall(function() return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext() end)
         local okShown, shown = pcall(function() return btn:IsShown() end)
+        if not verbose then
+          DBG(string.format("  #%d sort=%s | affiche=%s | accessible=%s | styleOK=%s | glowIdx=%s",
+              i, tostring(btn._aishSpellID),
+              okShown and tostring(shown) or "?", tostring(canAccess),
+              tostring(btn._aishStyledOK), tostring(btn._glowActiveIdx)))
+        else
         DBG(string.format("  bouton #%d (sort %s) : CanBeAccessedInContext ok=%s val=%s | IsShown ok=%s val=%s",
             i, tostring(btn._aishSpellID), tostring(okCA), tostring(canAccess), tostring(okShown), tostring(shown)))
+        -- Style reellement pose sur CE bouton (pas ce que la config dit) : _aishStyledOK est
+        -- marque par ApplyIconsFlowButtonStyle a chaque application reussie, _aishStyleBlocked
+        -- a chaque fois qu'elle a du renoncer (objet interdit). Un bouton cree AVANT un edit de
+        -- glow/couleur ne peut plus etre restyle : c'est la cause du "custom absent en reel".
+        DBG(string.format("      style pose a la creation=%s | dernier restyle reussi=%s | restyle(s) bloque(s)=%s",
+            tostring(btn._aishStyledAtCreate), tostring(btn._aishStyledOK), tostring(btn._aishStyleBlocked or 0)))
+        -- DIAGNOSTIC COULEUR/GLOW PAR SORT : si (l'entree "Auras a tracker" de ce sort) est-elle
+        -- trouvee, et que resout la chaine de priorite au moment du dump ?
+        local si = ns.GetStyleInfo(btn._aishSpellID)
+        if not si then
+            DBG("      |cffff4444si=ABSENT|r (pas d'entree pour ce sort dans discoveredSpells[specKey])"
+                .. " -> barre en couleur de classe + aucun glow, par construction")
+        else
+            local cR, cG, cB = SpellBarColorRGB(cfg, si)
+            DBG(string.format("      si: color=%s glowColor=%s | glow=%s glowIdx=%s glowAlpha=%s glowScale=%s procGlowIdx=%s",
+                si.color and string.format("%.2f,%.2f,%.2f", si.color[1], si.color[2], si.color[3]) or "nil",
+                si.glowColor and string.format("%.2f,%.2f,%.2f", si.glowColor[1], si.glowColor[2], si.glowColor[3]) or "nil",
+                tostring(si.glow), tostring(si.glowIdx), tostring(si.glowAlpha), tostring(si.glowScale),
+                tostring(si.procGlowIdx)))
+            DBG(string.format("      resolu: couleur barre=%.2f,%.2f,%.2f | glow attendu=%s",
+                cR, cG, cB,
+                (cfg.glowEnabled ~= false and si.glow and si.glowIdx and si.glowIdx > 1)
+                    and ("oui (idx " .. tostring(si.glowIdx) .. ")")
+                    or "non"))
+        end
         -- DIAGNOSTIC SPARK : etat complet du spark de ce bouton --
         -- existe-t-il, est-il visible/dimensionne, ou l'ancrage a-t-il echoue
         -- silencieusement a la creation (MakeNativeBarSpark renvoie nil dans
@@ -1254,6 +1341,43 @@ function ns.DebugDumpIconsFlow()
             local okFT, fillTex = pcall(btn._aishDurBar.GetStatusBarTexture, btn._aishDurBar)
             DBG(string.format("      durBar: IsShown=%s GetStatusBarTexture ok=%s val=%s",
                 tostring(select(2, pcall(btn._aishDurBar.IsShown, btn._aishDurBar))), tostring(okFT), tostring(fillTex)))
+            -- Couleur REELLEMENT posee sur la barre (vs "resolu" ci-dessus, qui n'est que ce que la
+            -- config dit). Un ecart entre les deux = le SetStatusBarColor n'a pas pris, ou a ete
+            -- ecrase apres coup. Lisible seulement hors combat (objet interdit en contexte secret).
+            local okBC, bcR, bcG, bcB = pcall(btn._aishDurBar.GetStatusBarColor, btn._aishDurBar)
+            if okBC and type(bcR) == "number" then
+                DBG(string.format("      durBar COULEUR POSEE=%.2f,%.2f,%.2f", bcR, bcG, bcB))
+            else
+                DBG("      durBar COULEUR POSEE=illisible (objet interdit -- relancer hors combat, hors instance)")
+            end
+        end
+        -- Etat REEL du glow sur ce bouton : les widgets sont crees par ns.ShowGlow (EnsureGlow) en
+        -- enfants du bouton. _glowSetup=false => EnsureGlow a echoue (glow impossible a poser) ;
+        -- _glowActiveIdx=nil => ShowGlow n'a jamais abouti ; texture non affichee ou alpha 0 =>
+        -- pose mais invisible. C'est ce triplet qui distingue "jamais applique" de "applique mais
+        -- pas visible".
+        DBG(string.format("      glow: _glowSetup=%s _glowActiveIdx=%s",
+            tostring(btn._glowSetup), tostring(btn._glowActiveIdx)))
+        local function DumpGlowTex(label, tex)
+            if not tex then DBG(string.format("      glow %s=nil", label)); return end
+            local okSh, shownT = pcall(tex.IsShown, tex)
+            local okA, alphaT = pcall(tex.GetAlpha, tex)
+            local okSz, wT, hT = pcall(tex.GetSize, tex)
+            local okVC, vr, vg, vb, va = pcall(tex.GetVertexColor, tex)
+            DBG(string.format("      glow %s: IsShown=%s Alpha=%s Taille=%sx%s VertexColor=%s",
+                label,
+                okSh and tostring(shownT) or "ERR",
+                okA and (type(alphaT) == "number" and string.format("%.2f", alphaT) or tostring(alphaT)) or "ERR",
+                okSz and (type(wT) == "number" and string.format("%.0f", wT) or "?") or "ERR",
+                okSz and (type(hT) == "number" and string.format("%.0f", hT) or "?") or "ERR",
+                (okVC and type(vr) == "number") and string.format("%.2f,%.2f,%.2f,%.2f", vr, vg, vb, va or 1) or "ERR"))
+        end
+        DumpGlowTex("flip (flipbook)", btn._glowFlip)
+        DumpGlowTex("pulse (alpha)", btn._glowPulse)
+        if btn._glowFlipAG then
+            DBG(string.format("      glow flipAG: IsPlaying=%s | pulseAG: IsPlaying=%s",
+                tostring(select(2, pcall(btn._glowFlipAG.IsPlaying, btn._glowFlipAG))),
+                btn._glowPulseAG and tostring(select(2, pcall(btn._glowPulseAG.IsPlaying, btn._glowPulseAG))) or "nil"))
         end
         if not btn._aishSpark then
             DBG("      _aishSpark=nil (MakeNativeBarSpark a echoue OU sparkEnabled=false au moment de la creation)")
@@ -1270,7 +1394,14 @@ function ns.DebugDumpIconsFlow()
                 okVC and tostring(r) or "ERR", okVC and tostring(g) or "?", okVC and tostring(b) or "?", okVC and tostring(a) or "?",
                 okPt and string.format("%s,%s,%s,%s,%s", tostring(p1), tostring(p2), tostring(p3), tostring(p4), tostring(p5)) or "AUCUN (anchor jamais pose)"))
         end
+        end  -- fin du detail (mode verbeux)
+      end
     end
+    if onlySpellID and shownCount == 0 then
+        DBG(string.format("|cffff4444aucun bouton natif pour le sort %d|r -- ce sort n'a pas (encore) de groupe dedie dans 'icons' : son rendu reel ne passe pas par ce conteneur.", onlySpellID))
+    end
+
+    if DumpShownButtons then DumpShownButtons(DBG) end
     DBG("=== fin dump ===")
 end
 
@@ -1339,7 +1470,7 @@ local function ApplyIconsFlowButtonStyleTarget(auraButton)
         end
 
         local liveSpells = ns.GetSpecSpells()
-        local liveSi = auraButton._aishSpellID and liveSpells and liveSpells[auraButton._aishSpellID]
+        local liveSi = ns.GetStyleInfo(auraButton._aishSpellID)
 
         if auraButton._aishDurBar then
             local bar = auraButton._aishDurBar
@@ -1406,7 +1537,11 @@ function ns.RepositionIconsNativeGridTarget()
             ok1 and "ok" or tostring(err1), ok3 and "ok" or tostring(err3), ok4 and "ok" or tostring(err4)))
     end
 
-    local visible = (cfg.iconsEnabled ~= false) and not (ns.db and ns.db.useNativeCDM)
+    -- iconsEnabled vit a la RACINE de ns.db (cf. Defaults.lua, aux cotes de iconlistEnabled/
+    -- circlebarsEnabled/freebarsEnabled), pas dans ns.db.icons : le lire sur cfg renvoyait
+    -- toujours nil, donc `~= false` toujours vrai -- la destination "Icones" restait visible
+    -- quoi qu'on fasse de son interrupteur. Les 3 autres destinations lisent deja ns.db.
+    local visible = (ns.db == nil or ns.db.iconsEnabled ~= false) and not (ns.db and ns.db.useNativeCDM)
     pcall(function()
         if visible and not (ns.IsAuraHidingContext and ns.IsAuraHidingContext()) then
             c:SetAlpha(1)
@@ -1488,7 +1623,7 @@ function ns.EnsureIconsNativeGridTarget()
                                     end
                                     durBar:SetStatusBarTexture(ns.ResolveBarTexFromKey(liveCfgAtCreate.texture))
                                     durBar:SetReverseFill(liveCfgAtCreate.barReverseFill == true)
-                                    local cR, cG, cB = SpellBarColorRGB(liveCfgAtCreate, spells and spells[spellID])
+                                    local cR, cG, cB = SpellBarColorRGB(liveCfgAtCreate, ns.GetStyleInfo(spellID))
                                     durBar:SetStatusBarColor(cR, cG, cB)
                                     local durBg = durBar:CreateTexture(nil, "BACKGROUND")
                                     durBg:SetAllPoints()
@@ -1503,7 +1638,13 @@ function ns.EnsureIconsNativeGridTarget()
                                         (liveCfgAtCreate.barReverseFill == true) and "LEFT" or "RIGHT", {cR, cG, cB})
                                 end
 
-                                iconsFlowButtonsTarget[#iconsFlowButtonsTarget + 1] = auraButton
+                                -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                                -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                                -- redondants). No-op dans le cas nominal.
+                                if not auraButton._aishPooled then
+                                    auraButton._aishPooled = true
+                                    iconsFlowButtonsTarget[#iconsFlowButtonsTarget + 1] = auraButton
+                                end
                             end)
                             if not okBuild then
                                 DBG(string.format("|cffff4444initializeFrame cible (sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
@@ -1511,7 +1652,7 @@ function ns.EnsureIconsNativeGridTarget()
                             ApplyIconsFlowButtonStyleTarget(auraButton)
                             do
                                 local liveSpells2 = ns.GetSpecSpells()
-                                PlayProcStartOnce(auraButton, liveSpells2 and liveSpells2[spellID], spellID)
+                                PlayProcStartOnce(auraButton, ns.GetStyleInfo(spellID), spellID)
                             end
                         end,
                         layout = {
@@ -1763,7 +1904,7 @@ function ns.RefreshCircleBarsNativeGridStyle()
             return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext()
         end)
         if okCheck and canAccess then
-            local si = btn._aishSpellID and spells and spells[btn._aishSpellID]
+            local si = ns.GetStyleInfo(btn._aishSpellID)
             if btn._aishBarL then
                 local okL, rL, gL, bL = pcall(CBApplySpellColor, btn._aishBarL, liveCfg, btn._aishSpellID, si)
                 -- Spark : texture propre a l'addon, jamais secrete, toujours sure a retoucher.
@@ -1884,7 +2025,7 @@ function ns.EnsureCircleBarsNativeGrid()
         currentSet[spellID] = true
         if not circleBarsPerSpellGroups[spellID] then
             local groupKey = "aishCircleBarsFlow_" .. tostring(spellID)
-            local si = spells and spells[spellID]
+            local si = ns.GetStyleInfo(spellID)
             local okAdd, errAdd = pcall(function()
                 c:AddAuraGroup(groupKey, "HELPFUL", {
                     maxFrameCount = 1,
@@ -1909,7 +2050,7 @@ function ns.EnsureCircleBarsNativeGrid()
                             local liveCfg = ns.db and ns.db.freebars or ns.Defaults.freebars
                             local lbw, lbh, lgp = liveCfg.barW or 45, liveCfg.barH or 3, liveCfg.gap or 50
                             local liveSpells = ns.GetSpecSpells()
-                            local liveSi = liveSpells and liveSpells[spellID]
+                            local liveSi = ns.GetStyleInfo(spellID)
                             auraButton._aishSpellID = spellID
                             circleBarsSlotCounter = circleBarsSlotCounter + 1
                             auraButton:SetSize(lbw * 2 + lgp * 2, lbh)
@@ -1971,7 +2112,13 @@ function ns.EnsureCircleBarsNativeGrid()
                                 pcall(ApplyNativeCountdownStyle, timerCD, liveCfg, auraButton)
                             end
 
-                            circleBarsFlowButtons[#circleBarsFlowButtons + 1] = auraButton
+                            -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                            -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                            -- redondants). No-op dans le cas nominal.
+                            if not auraButton._aishPooled then
+                                auraButton._aishPooled = true
+                                circleBarsFlowButtons[#circleBarsFlowButtons + 1] = auraButton
+                            end
                         end)
                         if not okBuild then
                             CBDBG(string.format("|cffff4444initializeFrame (Circle Bars, sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
@@ -2163,7 +2310,7 @@ function ns.RefreshCircleBarsNativeGridStyleTarget()
             return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext()
         end)
         if okCheck and canAccess then
-            local si = btn._aishSpellID and spells and spells[btn._aishSpellID]
+            local si = ns.GetStyleInfo(btn._aishSpellID)
             if btn._aishBarL then
                 local okL, rL, gL, bL = pcall(CBApplySpellColor, btn._aishBarL, liveCfg, btn._aishSpellID, si)
                 if btn._aishSparkL and okL then pcall(ApplyNativeBarSparkColor, btn._aishSparkL, liveCfg, {rL, gL, bL}) end
@@ -2263,7 +2410,7 @@ function ns.EnsureCircleBarsNativeGridTarget()
                                 local liveCfg = ns.db and ns.db.freebars or ns.Defaults.freebars
                                 local lbw, lbh, lgp = liveCfg.barW or 45, liveCfg.barH or 3, liveCfg.gap or 50
                                 local liveSpells = ns.GetSpecSpells()
-                                local liveSi = liveSpells and liveSpells[spellID]
+                                local liveSi = ns.GetStyleInfo(spellID)
                                 auraButton._aishSpellID = spellID
                                 auraButton:SetSize(lbw * 2 + lgp * 2, lbh)
 
@@ -2315,7 +2462,13 @@ function ns.EnsureCircleBarsNativeGridTarget()
                                     pcall(ApplyNativeCountdownStyle, timerCD, liveCfg, auraButton)
                                 end
 
-                                circleBarsFlowButtonsTarget[#circleBarsFlowButtonsTarget + 1] = auraButton
+                                -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                                -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                                -- redondants). No-op dans le cas nominal.
+                                if not auraButton._aishPooled then
+                                    auraButton._aishPooled = true
+                                    circleBarsFlowButtonsTarget[#circleBarsFlowButtonsTarget + 1] = auraButton
+                                end
                             end)
                             if not okBuild then
                                 CBDBG(string.format("|cffff4444initializeFrame cible (Circle Bars, sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
@@ -2523,7 +2676,7 @@ function ns.RefreshFreeBarsNativeGridStyle()
             return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext()
         end)
         if okCheck and canAccess then
-            local si = btn._aishSpellID and spells and spells[btn._aishSpellID]
+            local si = ns.GetStyleInfo(btn._aishSpellID)
             local cR, cG, cB = SpellBarColorRGB(liveCfg, si)
             if btn._aishBarL then pcall(btn._aishBarL.SetStatusBarColor, btn._aishBarL, cR, cG, cB) end
             if btn._aishBarR then pcall(btn._aishBarR.SetStatusBarColor, btn._aishBarR, cR, cG, cB) end
@@ -2582,7 +2735,7 @@ function ns.EnsureFreeBarsNativeGrid()
         currentSet[spellID] = true
         if not freeBarsPerSpellGroups[spellID] then
             local groupKey = "aishFreeBarsFlow_" .. tostring(spellID)
-            local si = spells and spells[spellID]
+            local si = ns.GetStyleInfo(spellID)
             local okAdd, errAdd = pcall(function()
                 c:AddAuraGroup(groupKey, "HELPFUL", {
                     maxFrameCount = 1,
@@ -2596,7 +2749,7 @@ function ns.EnsureFreeBarsNativeGrid()
                         local okBuild, errBuild = pcall(function()
                             local liveCfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
                             local liveSpells = ns.GetSpecSpells()
-                            local liveSi = liveSpells and liveSpells[spellID]
+                            local liveSi = ns.GetStyleInfo(spellID)
                             auraButton._aishSpellID = spellID
                             auraButton:SetSize(rowW, rowH)
 
@@ -2758,7 +2911,13 @@ function ns.EnsureFreeBarsNativeGrid()
                                 PlayProcStartOnce(auraButton._aishGlowAnchor, liveSi, spellID)
                             end
 
-                            freeBarsFlowButtons[#freeBarsFlowButtons + 1] = auraButton
+                            -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                            -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                            -- redondants). No-op dans le cas nominal.
+                            if not auraButton._aishPooled then
+                                auraButton._aishPooled = true
+                                freeBarsFlowButtons[#freeBarsFlowButtons + 1] = auraButton
+                            end
                         end)
                         if not okBuild then
                             FBDBG(string.format("|cffff4444initializeFrame (Free Bars, sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
@@ -2864,7 +3023,7 @@ function ns.RefreshFreeBarsNativeGridStyleTarget()
             return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext()
         end)
         if okCheck and canAccess then
-            local si = btn._aishSpellID and spells and spells[btn._aishSpellID]
+            local si = ns.GetStyleInfo(btn._aishSpellID)
             local cR, cG, cB = SpellBarColorRGB(liveCfg, si)
             if btn._aishBarL then pcall(btn._aishBarL.SetStatusBarColor, btn._aishBarL, cR, cG, cB) end
             if btn._aishBarR then pcall(btn._aishBarR.SetStatusBarColor, btn._aishBarR, cR, cG, cB) end
@@ -2972,7 +3131,7 @@ function ns.EnsureFreeBarsNativeGridTarget()
             currentSet[spellID] = true
             if not freeBarsPerSpellGroupsTarget[spellID] then
                 local groupKey = "aishFreeBarsFlowTarget_" .. tostring(spellID)
-                local si = spells and spells[spellID]
+                local si = ns.GetStyleInfo(spellID)
                 local okAdd, errAdd = pcall(function()
                     c:AddAuraGroup(groupKey, "HARMFUL|PLAYER", {
                         maxFrameCount = 1,
@@ -2986,7 +3145,7 @@ function ns.EnsureFreeBarsNativeGridTarget()
                             local okBuild, errBuild = pcall(function()
                                 local liveCfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
                                 local liveSpells = ns.GetSpecSpells()
-                                local liveSi = liveSpells and liveSpells[spellID]
+                                local liveSi = ns.GetStyleInfo(spellID)
                                 auraButton._aishSpellID = spellID
                                 auraButton:SetSize(rowW, rowH)
 
@@ -3131,7 +3290,13 @@ function ns.EnsureFreeBarsNativeGridTarget()
                                     PlayProcStartOnce(auraButton._aishGlowAnchor, liveSi, spellID)
                                 end
 
-                                freeBarsFlowButtonsTarget[#freeBarsFlowButtonsTarget + 1] = auraButton
+                                -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                                -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                                -- redondants). No-op dans le cas nominal.
+                                if not auraButton._aishPooled then
+                                    auraButton._aishPooled = true
+                                    freeBarsFlowButtonsTarget[#freeBarsFlowButtonsTarget + 1] = auraButton
+                                end
                             end)
                             if not okBuild then
                                 FBDBG(string.format("|cffff4444initializeFrame cible (Free Bars, sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
@@ -3358,7 +3523,7 @@ function ns.RefreshIconListNativeGridStyle()
             return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext()
         end)
         if okCheck and canAccess then
-            local si = btn._aishSpellID and spells and spells[btn._aishSpellID]
+            local si = ns.GetStyleInfo(btn._aishSpellID)
             local cR, cG, cB = SpellBarColorRGB(liveCfg, si)
             if btn._aishBarL then pcall(btn._aishBarL.SetStatusBarColor, btn._aishBarL, cR, cG, cB) end
             if btn._aishBarR then pcall(btn._aishBarR.SetStatusBarColor, btn._aishBarR, cR, cG, cB) end
@@ -3412,7 +3577,7 @@ function ns.EnsureIconListNativeGrid()
         currentSet[spellID] = true
         if not iconListPerSpellGroups[spellID] then
             local groupKey = "aishIconListFlow_" .. tostring(spellID)
-            local si = spells and spells[spellID]
+            local si = ns.GetStyleInfo(spellID)
             local okAdd, errAdd = pcall(function()
                 c:AddAuraGroup(groupKey, "HELPFUL", {
                     maxFrameCount = 1,
@@ -3426,7 +3591,7 @@ function ns.EnsureIconListNativeGrid()
                         local okBuild, errBuild = pcall(function()
                             local liveCfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
                             local liveSpells = ns.GetSpecSpells()
-                            local liveSi = liveSpells and liveSpells[spellID]
+                            local liveSi = ns.GetStyleInfo(spellID)
                             auraButton._aishSpellID = spellID
                             local lbw, lbh, liw, lih, lgp, lpg, lrg, llayout, lisDual = IconListGeom(liveCfg)
                             auraButton:SetSize(elemW, elemH)
@@ -3538,7 +3703,13 @@ function ns.EnsureIconListNativeGrid()
                             -- Animation d'entree, jouee une seule fois.
                             PlayProcStartOnce(auraButton._aishGlowAnchor, liveSi, spellID)
 
-                            iconListFlowButtons[#iconListFlowButtons + 1] = auraButton
+                            -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                            -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                            -- redondants). No-op dans le cas nominal.
+                            if not auraButton._aishPooled then
+                                auraButton._aishPooled = true
+                                iconListFlowButtons[#iconListFlowButtons + 1] = auraButton
+                            end
                         end)
                         if not okBuild then
                             ILDBG(string.format("|cffff4444initializeFrame (Icon List, sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
@@ -3642,7 +3813,7 @@ function ns.RefreshIconListNativeGridStyleTarget()
             return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext()
         end)
         if okCheck and canAccess then
-            local si = btn._aishSpellID and spells and spells[btn._aishSpellID]
+            local si = ns.GetStyleInfo(btn._aishSpellID)
             local cR, cG, cB = SpellBarColorRGB(liveCfg, si)
             if btn._aishBarL then pcall(btn._aishBarL.SetStatusBarColor, btn._aishBarL, cR, cG, cB) end
             if btn._aishBarR then pcall(btn._aishBarR.SetStatusBarColor, btn._aishBarR, cR, cG, cB) end
@@ -3753,7 +3924,7 @@ function ns.EnsureIconListNativeGridTarget()
             currentSet[spellID] = true
             if not iconListPerSpellGroupsTarget[spellID] then
                 local groupKey = "aishIconListFlowTarget_" .. tostring(spellID)
-                local si = spells and spells[spellID]
+                local si = ns.GetStyleInfo(spellID)
                 local okAdd, errAdd = pcall(function()
                     -- "HARMFUL|PLAYER" (pas juste "HARMFUL") : filtre standard Blizzard restreignant
                     -- aux auras dont le joueur est la source (cf. TargetAuras.lua "onlyPlayer"). Sans
@@ -3771,7 +3942,7 @@ function ns.EnsureIconListNativeGridTarget()
                             local okBuild, errBuild = pcall(function()
                                 local liveCfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
                                 local liveSpells = ns.GetSpecSpells()
-                                local liveSi = liveSpells and liveSpells[spellID]
+                                local liveSi = ns.GetStyleInfo(spellID)
                                 auraButton._aishSpellID = spellID
                                 local lbw, lbh, liw, lih, lgp, lpg, lrg, llayout, lisDual = IconListGeom(liveCfg)
                                 auraButton:SetSize(elemW, elemH)
@@ -3870,7 +4041,13 @@ function ns.EnsureIconListNativeGridTarget()
                                 ApplySpellGlow(auraButton._aishGlowAnchor, liveCfg, liveSi, liw, lih)
                                 PlayProcStartOnce(auraButton._aishGlowAnchor, liveSi, spellID)
 
-                                iconListFlowButtonsTarget[#iconListFlowButtonsTarget + 1] = auraButton
+                                -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                                -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                                -- redondants). No-op dans le cas nominal.
+                                if not auraButton._aishPooled then
+                                    auraButton._aishPooled = true
+                                    iconListFlowButtonsTarget[#iconListFlowButtonsTarget + 1] = auraButton
+                                end
                             end)
                             if not okBuild then
                                 ILDBG(string.format("|cffff4444initializeFrame cible (Icon List, sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
@@ -3915,6 +4092,41 @@ end)
 -- Chaque spellID traque au moins une fois laisse donc des widgets alloues en permanence jusqu'au
 -- prochain /reload, meme decoche ensuite. Dump ce compteur pour distinguer une accumulation normale
 -- (tests repetes sur beaucoup de sorts) d'une vraie fuite.
+-- Balaye TOUS les pools (4 destinations x joueur/cible) et ne liste que les boutons affiches.
+-- Un AddAuraGroup dedie ne pouvant JAMAIS etre supprime, un sort jadis traque ailleurs peut
+-- continuer d'afficher son icone avec son style d'origine : ce recap dit quel spellID, dans quel
+-- pool, occupe l'ecran a cet instant -- seule facon de verifier que l'icone qu'on regarde est bien
+-- celle qu'on croit configurer.
+DumpShownButtons = function(DBG)
+    DBG("--- boutons actuellement AFFICHES (tous pools, tous spellID) ---")
+    local anyShown = false
+    local function ScanShown(label, pool)
+        if not pool then return end
+        for i, btn in ipairs(pool) do
+            local okShown, shown = pcall(function() return btn:IsShown() end)
+            if okShown and shown then
+                anyShown = true
+                local sid = btn._aishSpellID
+                local name = (sid and GetSpellName and GetSpellName(sid)) or "?"
+                DBG(string.format("   |cff00ff88%s[%d]|r sort=%s (%s) | styleOK=%s | glowIdx=%s",
+                    label, i, tostring(sid), tostring(name),
+                    tostring(btn._aishStyledOK), tostring(btn._glowActiveIdx)))
+            end
+        end
+    end
+    ScanShown("icones/joueur ", iconsFlowButtons)
+    ScanShown("icones/cible  ", iconsFlowButtonsTarget)
+    ScanShown("circlebars/j  ", circleBarsFlowButtons)
+    ScanShown("circlebars/c  ", circleBarsFlowButtonsTarget)
+    ScanShown("freebars/j    ", freeBarsFlowButtons)
+    ScanShown("freebars/c    ", freeBarsFlowButtonsTarget)
+    ScanShown("iconlist/j    ", iconListFlowButtons)
+    ScanShown("iconlist/c    ", iconListFlowButtonsTarget)
+    if not anyShown then
+        DBG("   (aucun bouton affiche a cet instant -- relancer PENDANT que le proc est visible)")
+    end
+end
+
 function ns.DebugDumpGroupCounts()
     local function CountKeys(t) local n = 0; for _ in pairs(t) do n = n + 1 end; return n end
     print("|cff00ccffAishCore Debug|r === Groupes AddAuraGroup dedies (jamais supprimables) ===")
@@ -3924,6 +4136,42 @@ function ns.DebugDumpGroupCounts()
     print(string.format("  Liste icones : %d groupe(s) crees | %d bouton(s) dans le pool", CountKeys(iconListPerSpellGroups), #iconListFlowButtons))
     local total = CountKeys(iconsPerSpellGroups) + CountKeys(circleBarsPerSpellGroups) + CountKeys(freeBarsPerSpellGroups) + CountKeys(iconListPerSpellGroups)
     print(string.format("  |cffffcc00TOTAL : %d groupes dedies alloues cette session (jamais liberes avant /reload)|r", total))
+
+    -- BOUTONS PAR SORT : chaque groupe est declare maxFrameCount=1, donc on attend 1 bouton par
+    -- sort. En pratique le conteneur natif en alloue plusieurs (constate : 10 par sort, soit 100
+    -- boutons pour 10 sorts traques). Ce ratio est le seul moyen de suivre le phenomene -- s'il
+    -- derive au fil d'une session, c'est une vraie fuite ; s'il reste constant, c'est le
+    -- pre-dimensionnement du pool par Blizzard, hors de notre controle.
+    local function PerSpell(label, pool)
+        local perSpell, distinct, orphans = {}, 0, 0
+        for _, btn in ipairs(pool) do
+            local sid = btn._aishSpellID
+            if sid then
+                if not perSpell[sid] then perSpell[sid] = 0; distinct = distinct + 1 end
+                perSpell[sid] = perSpell[sid] + 1
+            else
+                orphans = orphans + 1
+            end
+        end
+        if distinct == 0 and orphans == 0 then return end
+        local worstID, worstN = nil, 0
+        for sid, n in pairs(perSpell) do
+            if n > worstN then worstID, worstN = sid, n end
+        end
+        print(string.format("  %-13s %d bouton(s) / %d sort(s) = %.1f par sort%s%s",
+            label, #pool, distinct, (distinct > 0) and (#pool / distinct) or 0,
+            worstID and string.format(" | pire : %d x%d", worstID, worstN) or "",
+            (orphans > 0) and string.format(" |cffff4444| %d sans spellID|r", orphans) or ""))
+    end
+    print("|cff00ccffAishCore Debug|r === Boutons par sort (attendu : 1, maxFrameCount=1) ===")
+    PerSpell("Icones",       iconsFlowButtons)
+    PerSpell("Icones/cible", iconsFlowButtonsTarget)
+    PerSpell("CircleBars",   circleBarsFlowButtons)
+    PerSpell("CircleB/cible", circleBarsFlowButtonsTarget)
+    PerSpell("FreeBars",     freeBarsFlowButtons)
+    PerSpell("FreeB/cible",  freeBarsFlowButtonsTarget)
+    PerSpell("ListeIcones",  iconListFlowButtons)
+    PerSpell("ListeI/cible", iconListFlowButtonsTarget)
 end
 
 -- /aishdebug iconlistrows -- dump direct du pool de boutons Liste d'icones (joueur ET cible), spellID

@@ -1131,6 +1131,14 @@ function ResourceCircle.SetPreview(on)
 
   if on then
     lastVisibilityState = nil
+    -- Respecter le toggle : pas d'apercu pour un module desactive (meme garde
+    -- que HealthCircle/OutOfCombatResourceCircle). Masquage explicite : avec
+    -- previewMode a true, UpdateVisibility est court-circuite et ne le ferait
+    -- jamais de lui-meme.
+    if ns.GetCfg("resourceCircle").enabled == false then
+      bar:Hide()
+      return
+    end
     -- Forcer l'affichage de tous les elements
     bar:Show()
     bar:SetAlpha(1)

@@ -179,10 +179,14 @@ end
 -- Calcule si une barre doit être visible selon l'état du jeu (pure Lua, pas de StateDriver)
 local function ShouldShowBar(frame)
     if ubHiddenForGui  then return false end  -- onglet Animations 3D : masqué
-    if ubPreviewMode   then return true  end
+    -- Le toggle (global ou par barre) passe AVANT le mode preview : une barre
+    -- coupée depuis la page "Modules" ou "Barres de vie" doit disparaître aussi
+    -- de l'aperçu du panneau, pas seulement en jeu (ubPreviewMode retournait
+    -- true sans jamais regarder enabled).
     local db  = ns.GetCfg("unitBars")
     local cfg = Cfg(frame._def.key)
     if (db and db.enabled == false) or cfg.enabled == false then return false end
+    if ubPreviewMode   then return true  end
     if ns.IsInBlockedState()    then return false end
     if ubHiddenForSkyriding     then return false end
     if inVehicle                then return false end

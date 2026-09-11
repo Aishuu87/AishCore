@@ -839,7 +839,14 @@ end
 -- Visibilité
 function TargetAuras.UpdateVisibility()
   if not frame then return end
-  if previewMode then frame:Show(); return end
+  -- previewMode force l'affichage sans cible reelle, mais jamais au-dela du
+  -- toggle : une coupure depuis la page "Modules" doit aussi vider l'apercu.
+  -- (Seul cfg.enabled est relu ici, pas ShouldShow, qui exige une cible.)
+  if previewMode then
+    local cfgV = Cfg()
+    if cfgV and cfgV.enabled == false then frame:Hide() else frame:Show() end
+    return
+  end
   if TargetAuras.ShouldShow() then
     frame:Show()
   else
@@ -852,6 +859,11 @@ function TargetAuras.SetPreview(on)
   previewMode = on
   if not frame then return end
   if on then
+    if Cfg() and Cfg().enabled == false then
+      -- Module desactive : pas d'apercu force
+      frame:Hide()
+      return
+    end
     frame:Show()
     RefreshAuras()
   else

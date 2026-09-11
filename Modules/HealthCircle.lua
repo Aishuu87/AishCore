@@ -373,9 +373,16 @@ function HealthCircle.SetPreview(on)
 
   if on then
     lastHealthVisState = nil
-    -- Respecter le toggle : ne pas forcer l'affichage si desactive
+    -- Respecter le toggle : ne pas forcer l'affichage si desactive. Masquage
+    -- explicite (pas un simple return) : previewMode court-circuite
+    -- UpdateVisibility, donc rien d'autre ne cacherait le cercle si le module
+    -- vient d'etre coupe depuis la page "Modules" panneau ouvert.
     local cfgPrev = ns.GetCfg("healthCircle")
-    if cfgPrev.enabled == false then return end
+    if cfgPrev.enabled == false then
+      bar:Hide()
+      bar._healthShown = false
+      return
+    end
     -- Forcer l'affichage de tous les elements
     bar:Show()
     bar:SetAlpha(1)
