@@ -121,6 +121,10 @@ ef:SetScript("OnEvent", function(_, event, arg1)
 
     elseif event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "ZONE_CHANGED_NEW_AREA" then
         ns._inCombat = InCombatLockdown(); ns._whitelistBuilt = false
+        -- Rouvre la resynchro des noms de sorts (cf. ns.RefreshSpellNames) : le prochain GetSpecSpells
+        -- les relira via GetSpellName. Necessaire ici parce que le cache de sorts du client est froid au
+        -- tout premier appel, et parce qu'un changement de spe amene une autre table discoveredSpells.
+        if ns.InvalidateSpellNameCache then ns.InvalidateSpellNameCache() end
         wipe(ns.cdmData.target); wipe(ns.cdmData.player)
         -- Changement de zone/spec = changement de contexte complet : les auras
         -- de l'ancien contexte n'existent plus (pas de continuité). On wipe aussi

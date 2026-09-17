@@ -98,28 +98,48 @@ local function HideInactiveChildren(layoutChildren, keepEmpty)
         frame:Hide()
       end
     else
+      -- __isActive == nil : mode "ne jamais masquer" (hideWhenInactive = 1).
       if (frame:IsVisible() or frame.__shouldBeVisible) or frame.__isEditing or EditModeManagerFrame:IsEditModeActive() or CooldownViewerSettings:IsVisible() then
         if not frame:IsVisible() then frame:Show() end
         table.insert(visible, frame)
       else
-        if keepEmpty then
-          frame:Hide()
-          table.insert(visible, frame)
-        else
-          frame:Hide()
-        end
+        -- NE PAS appeler Hide() ici. Dans ce mode la seule source de verite est frame:IsVisible(),
+        -- puisque __shouldBeVisible n'est ecrit nulle part. Masquer nous-memes une frame que Blizzard
+        -- n'a pas encore montree (reacquisition du pool, changement de spec/talents) la verrouillait :
+        -- au passage suivant IsVisible() etait toujours false, donc on la re-masquait, indefiniment.
+        -- L'icone ne revenait plus jamais et son sort disparaissait de la barre. On se contente de ne
+        -- pas l'inclure dans le layout ; Blizzard garde la main pour la reafficher.
+        if keepEmpty then table.insert(visible, frame) end
       end
     end
   end
   return visible
 end
 
+-- Memo de layout. Comparer le seul NOMBRE de visibles ne suffisait pas : l'ensemble peut changer a
+-- effectif constant (une icone s'eteint pendant qu'une autre s'allume). Le layout etait alors saute et
+-- la frame nouvellement visible restait sur l'ancre de son passage precedent -- deux icones superposees,
+-- et un trou la ou l'une des deux aurait du etre. On memorise donc l'ensemble, pas son cardinal.
+local function SameVisibleSet(self, visibleChildren)
+  local prev = self.__wasVisibleChildren
+  if type(prev) == "table" and #prev == #visibleChildren then
+    local same = true
+    for i = 1, #visibleChildren do
+      if prev[i] ~= visibleChildren[i] then same = false; break end
+    end
+    if same then return true end
+  end
+  local snapshot = {}
+  for i = 1, #visibleChildren do snapshot[i] = visibleChildren[i] end
+  self.__wasVisibleChildren = snapshot
+  return false
+end
+
 local function ApplyStandardGridLayout(self, layoutChildren, stride, padding)
   if not self or not layoutChildren or #layoutChildren == 0 then return end
 
   local visibleChildren = HideInactiveChildren(layoutChildren, self.keepEmpty)
-  if self.__wasVisibleChildren == #visibleChildren then return end
-  self.__wasVisibleChildren = #visibleChildren
+  if SameVisibleSet(self, visibleChildren) then return end
 
   local goingRight = self.__layoutFramesGoingRight
   local goingUp    = self.__layoutFramesGoingUp
@@ -146,8 +166,7 @@ local function ApplyCenteredGridLayout(self, layoutChildren, stride, padding)
   if not self or not layoutChildren or #layoutChildren == 0 then return end
 
   local visibleChildren = HideInactiveChildren(layoutChildren, false)
-  if self.__wasVisibleChildren == #visibleChildren then return end
-  self.__wasVisibleChildren = #visibleChildren
+  if SameVisibleSet(self, visibleChildren) then return end
   if #visibleChildren == 0 then return end
 
   stride = math.min(stride, #visibleChildren)
@@ -312,6 +331,23 @@ local function OnButtonRefreshIconColor(self)
   RefreshDesaturation(self)
 end
 
+-- Forward : CheckItemVisibility est defini plus bas (avec le layout), mais les callbacks de fin de
+-- cooldown ci-dessous doivent pouvoir le rappeler.
+local CheckItemVisibility
+
+-- Recalcule __isActive puis redemande un layout. Indispensable a la FIN d'un cooldown : les drapeaux
+-- (__isOnActualCooldown / __isOnAura / __cooldownSet) etaient bien remis a false, mais __isActive, lui,
+-- n'etait recalcule que depuis le hook RefreshData -- c'est-a-dire au prochain rafraichissement spontane
+-- de Blizzard. D'ou l'icone qui restait affichee 10 a 20 s apres que le sort soit redisponible, alors que
+-- l'animation "pret" avait deja joue. RefreshLayoutGrid est memoise (SameVisibleSet) : no-op si rien n'a
+-- bouge, donc l'appeler ici ne coute rien quand l'icone etait deja dans le bon etat.
+local function RefreshItemVisibility(button)
+  if not CheckItemVisibility or not button then return end
+  CheckItemVisibility(button)
+  local bar = button:GetParent()
+  if bar and bar.RefreshLayoutGrid then bar:RefreshLayoutGrid() end
+end
+
 -- Etat de cooldown (CD / GCD / aura / pandemie)
 local function CheckCooldownState(button)
   if not button.cooldownUseAuraDisplayTime or button.__removeAura then
@@ -337,6 +373,7 @@ local function Hook_OnCooldownDone(self)
 
   RefreshDesaturationOnCooldownOnly(button, cfg)
   if cfg.useBackdrop then SetBorderColor(button, cfg.backdropColor) end
+  RefreshItemVisibility(button)
 end
 
 local function OnCooldownClear(cooldownFrame, button)
@@ -351,6 +388,7 @@ local function OnCooldownClear(cooldownFrame, button)
   button.__isOnAura = false
 
   if cfg.useBackdrop then SetBorderColor(button, cfg.backdropColor) end
+  RefreshItemVisibility(button)
 end
 
 local function OnCooldownSet(cooldownFrame, button)
@@ -407,6 +445,10 @@ local function OnCooldownSet(cooldownFrame, button)
   -- Reassert position du decompte : Blizzard peut re-ancrer sa fontstring a
   -- chaque redemarrage de cooldown (cf. commentaire sur RefreshCooldownFont)
   if button.Cooldown then CDME.RefreshCooldownFont(button, cfg) end
+  -- Pendant du couple Hook_OnCooldownDone / OnCooldownClear : le cooldown vient de demarrer, donc
+  -- l'icone doit apparaitre tout de suite en mode "masquer sauf si actif", sans attendre le prochain
+  -- RefreshData de Blizzard.
+  RefreshItemVisibility(button)
 end
 
 local function OnRefreshCooldownInfo(button)
@@ -682,7 +724,7 @@ fadeEventFrame:SetScript("OnEvent", RefreshFadeAll)
 -- Layout principal (hook sur Layout du viewer)
 local _forced = nil
 
-local function CheckItemVisibility(child)
+function CheckItemVisibility(child)
   if child.__hideType == 3 then
     child.__isActive = (child.__isOnActualCooldown or child.__isOnAura or child.wasSetFromCharges) and true or false
   elseif child.__hideType == 2 then
@@ -712,10 +754,25 @@ local function Hook_Layout(self)
   local layoutChildren = self:GetLayoutChildren()
   if not self:ShouldUpdateLayout(layoutChildren) then self.__locked = false; return end
 
+  -- PRE-PASSE de visibilite, separee de la customisation ci-dessous, et volontairement AVANT elle.
+  -- Deux raisons :
+  --  1. Evaluer __isActive tout de suite, sans attendre le hook RefreshData de chaque enfant. Sur une
+  --     frame fraichement acquise (typiquement apres un /reload) il valait encore nil, et
+  --     HideInactiveChildren retombe alors sur le mode "ne jamais masquer" : la regle hideWhenInactive
+  --     ne s'appliquait pas et tout ce que Blizzard affichait a cet instant restait visible.
+  --  2. La boucle de customisation s'interrompt (`return`) au premier enfant en donnees Edit Mode.
+  --     Tous les enfants SUIVANTS restaient alors sans __hideType ni __isActive, donc en "ne jamais
+  --     masquer" a vie -- l'icone fantome qui ne disparaissait que le jour ou Blizzard recyclait sa
+  --     frame pour un vrai cooldown. La pre-passe, elle, ne saute jamais personne.
+  -- Les drapeaux de cooldown sont nil a ce stade, donc on part masque et on se devoile des qu'un
+  -- cooldown demarre (cf. RefreshItemVisibility dans OnCooldownSet).
+  for _, child in ipairs(layoutChildren) do
+    child.__hideType = cfg.hideWhenInactive
+    CheckItemVisibility(child)
+  end
+
   for _, child in ipairs(layoutChildren) do
     if child:HasEditModeData() then self.__locked = false; return end
-
-    child.__hideType = cfg.hideWhenInactive
 
     if not child.__hooked then
       if child.RefreshData then hooksecurefunc(child, "RefreshData", function(c)
@@ -731,6 +788,23 @@ local function Hook_Layout(self)
       end
       if child.RefreshCooldownInfo then hooksecurefunc(child, "RefreshCooldownInfo", OnRefreshCooldownInfo) end
       if child.RefreshSpellCooldownInfo then hooksecurefunc(child, "RefreshSpellCooldownInfo", OnRefreshCooldownInfo) end
+      -- Re-affirmation de la decision au moment meme du Show. Nos Hide() ne se produisent que pendant
+      -- une passe de layout ; Blizzard, lui, peut rappeler Show() sur l'item APRES cette passe (le hook
+      -- RefreshData tourne quand RefreshData rend la main, mais le viewer reaffiche parfois l'item
+      -- ensuite). Le Hide() etait alors ecrase, sans qu'aucune nouvelle passe ne vienne le retablir :
+      -- l'icone restait affichee jusqu'a ce qu'un vrai cooldown declenche un layout. C'est exactement
+      -- l'etat observe au diagnostic -- IsShown=true avec __isActive=false.
+      -- Strictement borne a __isActive == false (donc hideWhenInactive 2 ou 3, sort inactif) : en mode
+      -- "ne jamais masquer" __isActive vaut nil et ce hook ne fait rien. Memes echappatoires Edit Mode
+      -- que HideInactiveChildren. Hide() ne declenche pas OnShow, donc pas de boucle.
+      child:HookScript("OnShow", function(c)
+        if c.__isActive == false
+           and not c.__isEditing
+           and not EditModeManagerFrame:IsEditModeActive()
+           and not CooldownViewerSettings:IsVisible() then
+          c:Hide()
+        end
+      end)
       child.__hooked = true
     end
 
@@ -906,9 +980,16 @@ SlashCmdList["CDMDBG"] = function()
         print(P .. "  " .. #layoutChildren .. " icone(s) trackee(s) par Blizzard :")
         for i, child in ipairs(layoutChildren) do
           local okS, spellID = pcall(child.GetSpellID, child)
-          print(string.format("%s   [%d] spell=%s  IsShown=%s  IsVisible=%s  __isActive=%s  __hideType=%s",
+          -- Drapeaux sources en plus de __isActive : ils disent POURQUOI une icone reste affichee.
+          -- __hideType=nil = enfant jamais vu par la pre-passe de Hook_Layout (bug de fantome) ;
+          -- __isActive=true avec les 3 drapeaux a false/nil = incoherence de CheckItemVisibility ;
+          -- editData=true hors Edit Mode = frame de previsualisation restee dans le pool.
+          local okE, hasEdit = pcall(child.HasEditModeData, child)
+          print(string.format("%s   [%d] spell=%s  IsShown=%s  IsVisible=%s  __isActive=%s  __hideType=%s  cd=%s  aura=%s  charges=%s  editData=%s",
             P, i, tostring(okS and spellID), tostring(child:IsShown()), tostring(child:IsVisible()),
-            tostring(child.__isActive), tostring(child.__hideType)))
+            tostring(child.__isActive), tostring(child.__hideType),
+            tostring(child.__isOnActualCooldown), tostring(child.__isOnAura),
+            tostring(child.wasSetFromCharges), tostring(okE and hasEdit)))
         end
       end
     end

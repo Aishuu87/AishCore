@@ -688,14 +688,19 @@ function TopTargetBar.Create()
         local panel = _G["AishCoreSettingsPanel"]
         if panel then
             panel:HookScript("OnShow", function()
+                -- Module desactive : aucune preview. Le garde ne couvrait auparavant que les
+                -- RegisterStateDriver ci-dessous, et tout le reste du bloc s'executait quand meme --
+                -- ttbPreviewMode passait a true, _UpdateTargetName reecrivait un nom de test et
+                -- hpFrame:Show() + hpTxt "75K" reaffichaient la vie. Comme nameFrame/hpFrame sont
+                -- parentes a UIParent (cf. SetTTBVisibilityDrivers), le masquage fait a la
+                -- desactivation etait purement et simplement annule a l'ouverture du panneau.
+                local cfg = ns.GetCfg("topTargetBar")
+                if cfg and cfg.enabled == false then return end
+
                 -- Preview : forcer l'affichage + noms de test
                 if not InCombatLockdown() then
-                    local cfg = ns.GetCfg("topTargetBar")
-                    local en  = not (cfg and cfg.enabled == false)
-                    if en then
-                        RegisterStateDriver(f_target, "visibility", "show")
-                        if f_tt then RegisterStateDriver(f_tt, "visibility", "show") end
-                    end
+                    RegisterStateDriver(f_target, "visibility", "show")
+                    if f_tt then RegisterStateDriver(f_tt, "visibility", "show") end
                 end
                 ttbPreviewMode = true
                 pcall(_UpdateTargetName)

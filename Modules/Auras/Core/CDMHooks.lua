@@ -449,7 +449,10 @@ end
 
 -- Décide s'il faut masquer : si l'utilisateur préfère le CDM natif, ne rien masquer.
 -- Sinon, force le masking pour BuffIcon/BuffBar quand l'option globale est activée,
--- ou retombe sur le masking basé sur la whitelist (comportement Utility).
+-- ou retombe sur le masking basé sur la whitelist.
+-- Ce repli whitelist ne concerne QUE les viewers d'auras (BuffIcon/BuffBar) : ns.activeWhitelist ne
+-- contient que des auras traquees, et Essentiel/Utilitaire affichent des cooldowns de sorts. Les deux
+-- viewers de sorts sont donc declares mask=false (cf. InitCDMHooks) et n'entrent jamais ici.
 local function ShouldMaskFrame(frame, spellID)
     if ns.db and ns.db.useNativeCDM then return false end
     if buffFrameAlwaysMask[frame] and ns.db and ns.db.hideCDMBuffFrames then
@@ -471,6 +474,20 @@ local function MaskCDMFrame(frame, shouldMask)
     end)
 end
 
+-- Re-evaluation differee et coalescee du masking (cf. ns.RefreshCDMMask, plus bas).
+-- Pourquoi differee : OnAcquireItemFrame se declenche AVANT que Blizzard pose cooldownInfo/cooldownID
+-- sur la frame, donc GetCDMFrameSpellID y renverrait encore nil. Pourquoi coalescee : un relayout du
+-- viewer reacquiert toutes ses itemFrames d'un coup, et un seul balayage (~40 frames) suffit.
+local maskRefreshPending = false
+local function ScheduleMaskRefresh()
+    if maskRefreshPending then return end
+    maskRefreshPending = true
+    C_Timer.After(0, function()
+        maskRefreshPending = false
+        pcall(ns.RefreshCDMMask)
+    end)
+end
+
 -- Scratch table pour le check War Gear dans AutoDiscoverSpell.
 -- Réutilisée entre appels : évite d'allouer une table à chaque SetAuraInstanceInfo.
 local _wgNamesScratch = {}
@@ -479,15 +496,19 @@ local _wgNamesScratch = {}
 -- courante (Colors.ELEMENT_KEYS). Chaque nouvelle aura découverte reçoit ainsi
 -- une couleur distincte plutôt que la même couleur de classe pour toutes.
 -- Fallback sur ns.barColor si le module Colors n'est pas disponible.
+--- Retourne la couleur ET la cle d'element de theme tiree au sort (2e retour, nil si repli).
+--- Le RGB seul ne suffit pas : fige en base, il ne suivrait plus jamais les Themed colors. La cle,
+--- elle, se reresout a chaque rendu (cf. SpellBarColorRGB), donc un profil sans couleurs thematiques
+--- retombe naturellement sur la couleur de classe via Colors.Get/useClassDefaults.
 local function GetRandomSpecColor()
     local Colors = _addon and _addon.Modules and _addon.Modules.Colors
     if Colors and Colors.ELEMENT_KEYS and #Colors.ELEMENT_KEYS > 0 and Colors.Get then
         local key = Colors.ELEMENT_KEYS[math.random(#Colors.ELEMENT_KEYS)]
         local c = Colors.Get(key)
-        if c and c[1] then return { c[1], c[2], c[3] } end
+        if c and c[1] then return { c[1], c[2], c[3] }, key end
     end
     local bc = ns.barColor
-    return { bc[1], bc[2], bc[3] }
+    return { bc[1], bc[2], bc[3] }, nil
 end
 
 -- Auto-decouverte hoistee : appelee par chaque SetAuraInstanceInfo pour un sort inconnu (skip si deja
@@ -528,7 +549,11 @@ local function AutoDiscoverSpell(spellID, name, unit, frame, linkedSpellIDs)
                or ((unit == "target") and "debuff" or "buff")
     local defaults = ns.DeepCopy(ns.SpellDefaults)
     defaults.name = name
-    defaults.color = GetRandomSpecColor()
+    -- colorKey : source de verite vivante. color reste ecrit pour les lecteurs qui ne connaissent
+    -- pas encore colorKey, et sert de repli si le module Couleurs est indisponible.
+    local autoColor, autoKey = GetRandomSpecColor()
+    defaults.color = autoColor
+    defaults.colorKey = autoKey
     defaults._colorDefault = false  -- couleur thématique appliquée, ne plus retoucher
     defaults.priority = spellID
     defaults.source = src
@@ -566,7 +591,9 @@ function ns.RollDefaultSpecColors()
         -- cd == false → jamais retoucher (roulé ou défini manuellement)
 
         if isDefault then
-            info.color = GetRandomSpecColor()
+            local rolledColor, rolledKey = GetRandomSpecColor()
+            info.color = rolledColor
+            info.colorKey = rolledKey
             info._colorDefault = false  -- verrouillé : plus jamais retoucher
         end
     end
@@ -738,7 +765,13 @@ function ns.InitCDMHooks()
     local viewers = {}
     pcall(function()
         if EssentialCooldownViewer  then tinsert(viewers, {v=EssentialCooldownViewer,  mask=false, src="debuff",      alwaysMask=false}) end
-        if UtilityCooldownViewer    then tinsert(viewers, {v=UtilityCooldownViewer,    mask=true,  src="debuff",      alwaysMask=false}) end
+        -- mask=false comme Essentiel : Utilitaire est un viewer de SORTS (cooldowns), pas d'auras.
+        -- Il etait masquable, donc soumis au repli whitelist de ShouldMaskFrame -- or cette whitelist
+        -- ne contient que des AURAS traquees. Tout sort utilitaire partageant son spellID avec une
+        -- aura traquee (Determination sans faille, Pacte sombre...) voyait donc son icone native mise
+        -- a alpha 0 en permanence : trou definitif dans la barre, slot toujours reserve. Le tracking
+        -- d'auras ne doit jamais toucher Essentiel/Utilitaire.
+        if UtilityCooldownViewer    then tinsert(viewers, {v=UtilityCooldownViewer,    mask=false, src="debuff",      alwaysMask=false}) end
         if BuffIconCooldownViewer   then tinsert(viewers, {v=BuffIconCooldownViewer,   mask=true,  src="enhancement", alwaysMask=true})  end
         if BuffBarCooldownViewer    then tinsert(viewers, {v=BuffBarCooldownViewer,    mask=true,  src="enhancement", alwaysMask=true})  end
     end)
@@ -747,6 +780,12 @@ function ns.InitCDMHooks()
         pcall(function()
             hooksecurefunc(info.v, "OnAcquireItemFrame", function(_, frame)
                 HookCDMFrame(frame, info.mask, info.src, info.alwaysMask)
+                -- Frame DEJA hookee : HookCDMFrame ressort immediatement, mais Blizzard vient de relier
+                -- cette frame du pool a un AUTRE cooldown. Sans re-evaluation elle garde l'alpha du sort
+                -- precedent : un CD utilitaire non-whitelist herite d'un alpha 0 et n'en sort jamais, car
+                -- SetAuraInstanceInfo (l'autre point de re-masking) ne se declenche pas pour un cooldown
+                -- sans aura. Son slot reste alors reserve mais vide -- les "trous" dans le viewer.
+                if info.mask then ScheduleMaskRefresh() end
             end)
             for _, f in pairs({ info.v:GetChildren() }) do
                 HookCDMFrame(f, info.mask, info.src, info.alwaysMask)
@@ -1035,13 +1074,14 @@ end
 -- d'option ou reconstruction de whitelist)
 function ns.RefreshCDMMask()
     pcall(function()
-        local forceOn = ns.db and ns.db.hideCDMBuffFrames
         for frame in pairs(maskableFrames) do
             pcall(function()
-                local sid = GetCDMFrameSpellID(frame)
-                -- Skip les frames vides sauf si force-masked (BuffIcon/BuffBar avec option activée)
-                if not sid and not (buffFrameAlwaysMask[frame] and forceOn) then return end
-                MaskCDMFrame(frame, ShouldMaskFrame(frame, sid))
+                -- sid peut etre nil (frame relachee par le viewer, ou pas encore reliee). On ne sort
+                -- PAS : ShouldMaskFrame gere deja ce cas (useNativeCDM -> false ; force-masked BuffIcon/
+                -- BuffBar -> true ; sinon IsInWhitelist(wl, nil) -> false), donc une frame vide se
+                -- retrouve demasquee. L'ancien early-return la laissait a l'alpha du sort precedent, et
+                -- elle restait invisible en revenant sur un autre sort -- les "trous" dans le viewer.
+                MaskCDMFrame(frame, ShouldMaskFrame(frame, GetCDMFrameSpellID(frame)))
             end)
         end
     end)

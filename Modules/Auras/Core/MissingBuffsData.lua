@@ -2,35 +2,47 @@
 -- Donnees "Buffs manquants" : table de reference des buffs de classe/groupe a detecter, variantes et conditions.
 -- Table de donnees pure, aucune dependance Ace3/LibEditMode/LibDualSpec.
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
+local L = _addon.L
 
--- Libelles affiches sous l'icone d'alerte (cf. MissingBuffs.lua)
-ns.MISSING_TEXT = {
-    MISSING          = "MANQUANT",
-    WRONG            = "INCORRECT",
-    USE_STANCE       = "CHANGER DE POSTURE",
-    USE_AURA         = "CHANGER D'AURA",
-    USE_ATTUNEMENT   = "CHANGER D'HARMONISATION",
-    SUMMON_PET       = "INVOQUER FAMILIER",
-    REVIVE_PET       = "RESSUSCITER FAMILIER",
-    APPLY_LETHAL     = "APPLIQUER POISON",
-    APPLY_NONLETHAL  = "APPLIQUER POISON",
-    REAPPLY          = "RÉAPPLIQUER",
+-- Libelles affiches sous l'icone d'alerte (cf. MissingBuffs.lua).
+-- Lecture PARESSEUSE dans ns.L : cette table de donnees est construite au chargement, mais
+-- /aish locale reconstruit ns.L en place plus tard -- un copier-coller des libelles ici figerait
+-- l'alerte dans la langue de depart (bug : texte francais sur un client anglais).
+local ALERT_TEXT_KEYS = {
+    MISSING          = "MISSINGBUFFS_ALERT_MISSING",
+    WRONG            = "MISSINGBUFFS_ALERT_WRONG",
+    USE_STANCE       = "MISSINGBUFFS_ALERT_USE_STANCE",
+    USE_AURA         = "MISSINGBUFFS_ALERT_USE_AURA",
+    USE_ATTUNEMENT   = "MISSINGBUFFS_ALERT_USE_ATTUNEMENT",
+    SUMMON_PET       = "MISSINGBUFFS_ALERT_SUMMON_PET",
+    REVIVE_PET       = "MISSINGBUFFS_ALERT_REVIVE_PET",
+    APPLY_LETHAL     = "MISSINGBUFFS_ALERT_APPLY_LETHAL",
+    APPLY_NONLETHAL  = "MISSINGBUFFS_ALERT_APPLY_NONLETHAL",
+    REAPPLY          = "MISSINGBUFFS_ALERT_REAPPLY",
     -- Affiche quand un buff suivi est encore actif mais approche de sa fin (cf. GetSelfBuffExpiringSoon).
-    EXPIRING_SOON    = "RAFRAICHIR",
-    BUFF_ALLY        = "BUFFER UN ALLIÉ",
-    USE_FLASK        = "BOIRE UN FLACON",
-    EAT_FOOD         = "MANGER",
-    USE_WEAPON_BUFF  = "ENCHANTER L'ARME",
+    EXPIRING_SOON    = "MISSINGBUFFS_ALERT_EXPIRING_SOON",
+    BUFF_ALLY        = "MISSINGBUFFS_ALERT_BUFF_ALLY",
+    USE_FLASK        = "MISSINGBUFFS_ALERT_USE_FLASK",
+    EAT_FOOD         = "MISSINGBUFFS_ALERT_EAT_FOOD",
+    USE_WEAPON_BUFF  = "MISSINGBUFFS_ALERT_USE_WEAPON_BUFF",
 }
+ns.MISSING_TEXT = setmetatable({}, {
+    __index = function(_, key)
+        local locKey = ALERT_TEXT_KEYS[key]
+        return locKey and L[locKey] or nil
+    end,
+})
 
 -- Masques de forme pour l'icone d'alerte (cf. UI/Menus/MissingBuffs.lua, MissingBuffs.lua:RefreshAppearance).
 -- value=1 "Defaut" = pas de masque ; les autres utilisent un atlas Blizzard ou notre texture degrade "feather".
+-- Libelles lus au chargement (les locales sont chargees avant ce fichier, cf. AishCore.toc) :
+-- ce menu deroulant n'est construit qu'une fois, il ne se retraduirait pas a chaud de toute facon.
 ns.MISSING_BUFF_ICON_MASKS = {
-    { value = 1, text = "Par defaut (carre)" },
-    { value = 2, text = "Cercle", atlas = "CircleMaskScalable" },
-    { value = 3, text = "Hexagone", atlas = "CovenantSanctum-Renown-Hexagon-Mask" },
-    { value = 4, text = "Adouci (feather)", texture = "Interface\\AddOns\\AishCore\\Media\\UI\\IconFeatherMask.png" },
-    { value = 5, text = "Feather grunge", texture = "Interface\\AddOns\\AishCore\\Media\\UI\\IconGrungeMask.png" },
+    { value = 1, text = L["MISSINGBUFFS_MASK_DEFAULT"] or "Par defaut (carre)" },
+    { value = 2, text = L["MISSINGBUFFS_MASK_CIRCLE"] or "Cercle", atlas = "CircleMaskScalable" },
+    { value = 3, text = L["MISSINGBUFFS_MASK_HEXAGON"] or "Hexagone", atlas = "CovenantSanctum-Renown-Hexagon-Mask" },
+    { value = 4, text = L["MISSINGBUFFS_MASK_FEATHER"] or "Adouci (feather)", texture = "Interface\\AddOns\\AishCore\\Media\\UI\\IconFeatherMask.png" },
+    { value = 5, text = L["MISSINGBUFFS_MASK_GRUNGE"] or "Feather grunge", texture = "Interface\\AddOns\\AishCore\\Media\\UI\\IconGrungeMask.png" },
 }
 
 -- Buffs de classe : le sort que le joueur peut fournir au groupe/raid.

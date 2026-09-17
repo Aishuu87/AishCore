@@ -199,6 +199,40 @@ function ns.SetAdminDeletedOverride(spellID, deleted)
     o.deleted = deleted and true or false
 end
 
+-- info.name est un CACHE, pose une seule fois a la decouverte (CDMHooks.lua::AutoDiscoverSpell) dans la
+-- langue du client de ce moment-la, et plus jamais rafraichi : une DB peuplee sous client francais
+-- affichait donc des libelles francais sur un client anglais, definitivement, et sur tous les persos du
+-- compte (les cles de spe sont CLASSE_SPE depuis MigrateSpecKeys). On resynchronise sur GetSpellName().
+-- On conserve le nom stocke quand le client ne connait pas (encore) le sort : GetSpellName renvoie nil
+-- tant que le cache client n'est pas chaud, et un libelle perime vaut mieux qu'un trou.
+-- ATTENTION : info.name n'est pas qu'un libelle. Whitelist.lua s'en sert pour la cle de fusion des
+-- homonymes (info.name + separateur + HomonymFamily), et ns.ApplyPreset pour apparier ses regles par nom.
+-- ns.Presets est vide a ce jour, mais tout preset ajoute plus tard devra lister ses alias par langue.
+local _LiveSpellName = (C_Spell and C_Spell.GetSpellName) or GetSpellInfo
+function ns.RefreshSpellNames(spells)
+    if not spells then return 0 end
+    local changed = 0
+    for spellID, info in pairs(spells) do
+        if type(info) == "table" then
+            local ok, live = pcall(_LiveSpellName, spellID)
+            if ok and type(live) == "string" and live ~= "" and live ~= info.name then
+                info.name = live
+                changed = changed + 1
+            end
+        end
+    end
+    return changed
+end
+
+-- Une seule resynchro par cle de spe et par passage : GetSpecSpells est un chemin chaud (appele a chaque
+-- scan), balayer 40 a 100 sorts a chaque appel serait du gaspillage. ns.InvalidateSpellNameCache() remet
+-- le compteur a zero sur PLAYER_ENTERING_WORLD / changement de spe, moments ou le cache de sorts du
+-- client est chaud -- c'est ce qui rattrape un premier passage trop precoce ou GetSpellName renvoyait nil.
+local _namesSyncedForKey = {}
+function ns.InvalidateSpellNameCache()
+    wipe(_namesSyncedForKey)
+end
+
 function ns.GetSpecSpells()
     local key = ns.GetSpecKey()
     if not key or not ns.db then return nil end
@@ -206,6 +240,10 @@ function ns.GetSpecSpells()
     if not ns.db.discoveredSpells[key] then ns.db.discoveredSpells[key] = {} end
     local spells = ns.db.discoveredSpells[key]
     ns.ApplyAdminOverrides(spells)
+    if not _namesSyncedForKey[key] then
+        _namesSyncedForKey[key] = true
+        ns.RefreshSpellNames(spells)
+    end
     return spells, key
 end
 

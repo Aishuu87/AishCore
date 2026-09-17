@@ -249,6 +249,10 @@ local function GetClassFillColor(unit, fallback)
 end
 
 -- Création d'une barre (appelée une seule fois par key)
+-- Forward : PositionBarFrame est defini plus bas (avec les fonctions de refresh), mais OnDragStop
+-- doit pouvoir le rappeler pour re-ancrer immediatement dans la convention canonique.
+local PositionBarFrame
+
 local function CreateUnitBar(def)
     local cfg      = Cfg(def.key)
     local w        = cfg.width or def.defaults.width
@@ -290,21 +294,42 @@ local function CreateUnitBar(def)
         if not self._dragging then return end
         self._dragging = false
         self:StopMovingOrSizing()
-        -- Sauvegarde de la position
+        -- Sauvegarde de la position.
+        -- On NE LIT PLUS frame:GetPoint(1) : StartMoving/StopMovingOrSizing re-ancre la frame dans la
+        -- convention que WoW juge bonne (souvent un coin, relatif a un bord d'ecran), et l'ancien code
+        -- jetait les 3 premiers retours -- donc le point ET le point relatif. Les offsets etaient donc
+        -- enregistres dans un repere inconnu, alors que PositionBarFrame les reapplique toujours en
+        -- BOTTOM de la frame vers CENTER de UIParent. Tant que rien ne repositionnait, l'ancre de WoW
+        -- tenait et tout semblait correct ; au premier ApplyBarSettings (changer la police du nom, par
+        -- exemple) la barre se teleportait. Le verrou n'y changeait rien : il bloque le drag, pas la
+        -- relecture d'une valeur deja corrompue.
+        -- On recalcule donc dans le repere exact de PositionBarFrame, comme le fait deja
+        -- ResourceCircle.SetDraggable : centre horizontal, bord bas, relatifs au centre de UIParent.
         local db = ns.DB and ns.DB.unitBars
         if db and db.bars and db.bars[def.key] then
-            local _, _, _, ox, oy = frame:GetPoint(1)
-            -- Pour le pet (ancré sur le joueur) : reconvertir en absolu
-            if def.key == "pet" and bars.player then
-                local pDef = BAR_DEFS[1].defaults
-                local pCfg = Cfg("player")
-                local px   = pCfg.x or pDef.x
-                local py   = pCfg.y or pDef.y
-                ox = ox + px
-                oy = oy + py
+            local cx        = frame:GetCenter()
+            local bottom    = frame:GetBottom()
+            local ucx, ucy  = UIParent:GetCenter()
+            if cx and bottom and ucx and ucy then
+                -- Valeurs absolues (repere UIParent CENTER) : c'est deja la convention de stockage,
+                -- y compris pour le pet, dont PositionBarFrame soustrait lui-meme la position du joueur.
+                db.bars[def.key].x = math.floor(cx - ucx + 0.5)
+                db.bars[def.key].y = math.floor(bottom - ucy + 0.5)
             end
-            db.bars[def.key].x = ox
-            db.bars[def.key].y = oy
+        end
+        -- Re-ancrage immediat dans la convention canonique : sans ca la frame resterait sur l'ancre
+        -- posee par WoW jusqu'au prochain refresh, et on ne verrait le desaccord que plus tard.
+        if PositionBarFrame then PositionBarFrame(frame) end
+
+        -- Report dans les champs X/Y du panneau (registre rempli par UI/SettingsPanel.lua). Sans ca
+        -- les sliders gardaient l'ancienne valeur apres un deplacement a la souris : impossible
+        -- d'affiner au clavier ensuite, le premier ajustement renvoyait la barre a son ancien point.
+        -- pcall : les widgets sont detruits/recrees a chaque reconstruction de la page.
+        local sl = ns._ubPosSliders and ns._ubPosSliders[def.key]
+        local saved = db and db.bars and db.bars[def.key]
+        if sl and saved then
+            if sl.x and saved.x then pcall(sl.x.SetValue, sl.x, saved.x) end
+            if sl.y and saved.y then pcall(sl.y.SetValue, sl.y, saved.y) end
         end
     end)
 
@@ -667,7 +692,7 @@ local function UpdateBarName(frame)
 end
 
 -- Repositionne frame selon cfg.x/y, avec decalage horizontal optionnel (extraX, pour l'anim slide-in/out)
-local function PositionBarFrame(frame, extraX)
+function PositionBarFrame(frame, extraX)
     local def = frame._def
     local cfg = Cfg(def.key)
     local x   = (cfg.x or def.defaults.x) + (extraX or 0)

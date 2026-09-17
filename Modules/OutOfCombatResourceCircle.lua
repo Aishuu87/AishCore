@@ -884,7 +884,13 @@ function OutOfCombatResourceCircle.SetDraggable(on)
     bar:SetMovable(true)
     bar:EnableMouse(true)
     bar:RegisterForDrag("LeftButton")
-    bar:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    bar:SetScript("OnDragStart", function(self)
+      -- Verrou relu A CHAUD : le drag est arme des l'ouverture du panneau (plus de bouton dedie),
+      -- donc la case "Verrouiller la position" est le seul frein -- meme modele que unitBars.
+      local c = ns.GetCfg("outOfCombatResourceCircle")
+      if c and c.locked then return end
+      self:StartMoving()
+    end)
     bar:SetScript("OnDragStop", function(self)
       self:StopMovingOrSizing()
       local cx, cy = self:GetCenter()
@@ -907,7 +913,10 @@ function OutOfCombatResourceCircle.SetDraggable(on)
       border:SetColorTexture(1, 1, 1, 0.15)
       bar._dragBorder = border
     end
-    bar._dragBorder:Show()
+    -- Bordure affichee seulement si le deplacement est reellement possible : la montrer sur un
+    -- element verrouille laisserait croire qu'il est saisissable.
+    local _c = ns.GetCfg("outOfCombatResourceCircle")
+    if _c and _c.locked then bar._dragBorder:Hide() else bar._dragBorder:Show() end
     bar:SetScript("OnEnter", function(self)
       GameTooltip:SetOwner(self, "ANCHOR_TOP")
       GameTooltip:SetText(L["RESOURCE_DRAG_TOOLTIP"])

@@ -339,8 +339,8 @@ local function CreateSpellRow(par,sid,info,y,W,onChg,rebuildFn)
     local sw1B = sw1:CreateTexture(nil,"BORDER"); sw1B:SetPoint("TOPLEFT",-1,1); sw1B:SetPoint("BOTTOMRIGHT",1,-1)
     sw1B:SetColorTexture(0.18,0.16,0.14,0.7)
     sw1:SetScript("OnClick",function() ColorPickerFrame:SetupColorPickerAndShow({r=sc[1],g=sc[2],b=sc[3],
-        swatchFunc=function() local r,g,b=ColorPickerFrame:GetColorRGB(); info.color={r,g,b}; info._colorDefault=false; sw1T:SetColorTexture(r,g,b); onChg() end,
-        cancelFunc=function(pp) info.color={pp.r,pp.g,pp.b}; info._colorDefault=false; sw1T:SetColorTexture(pp.r,pp.g,pp.b); onChg() end}) end)
+        swatchFunc=function() local r,g,b=ColorPickerFrame:GetColorRGB(); info.color={r,g,b}; info.colorKey=nil; info._colorDefault=false; sw1T:SetColorTexture(r,g,b); onChg() end,
+        cancelFunc=function(pp) info.color={pp.r,pp.g,pp.b}; info.colorKey=nil; info._colorDefault=false; sw1T:SetColorTexture(pp.r,pp.g,pp.b); onChg() end}) end)
     sw1:SetScript("OnEnter",function() GameTooltip:SetOwner(sw1,"ANCHOR_TOP"); GameTooltip:SetText(L["AURASMENU_TACTICS_BAR_COLOR_TOOLTIP"],1,1,1); GameTooltip:Show() end)
     sw1:SetScript("OnLeave",function() GameTooltip:Hide() end)
 

@@ -201,6 +201,19 @@ local function HideHighlight()
   if highlight then highlight:Hide() end
 end
 
+-- IsVisible() ne regarde QUE la chaine Show/Hide -- il reste vrai a alpha 0. Or la plupart des modules
+-- de cet addon se masquent par SetAlpha(0) et jamais par Hide() (seul moyen sur pour une frame securisee
+-- en combat, cf. PriorityBar.SafeHideContainers). Un module desactive gardait donc sa hitbox de survol :
+-- highlight et roue crantee apparaissaient sur du vide. On exige donc aussi une opacite effective.
+-- Seuil bas (pas > 0) : plusieurs modules ont un fondu hors combat legitime a 0.3/0.4, il ne faut pas
+-- les rendre insurvolables. A l'inverse un module desactive est exactement a 0.
+local MIN_HOVER_ALPHA = 0.05
+local function IsEffectivelyVisible(frame)
+  local okA, alpha = pcall(frame.GetEffectiveAlpha, frame)
+  if not okA or type(alpha) ~= "number" then return true end -- doute : on garde l'ancien comportement
+  return alpha > MIN_HOVER_ALPHA
+end
+
 -- DRIVER : ticker leger, actif uniquement pendant que le panneau est ouvert.
 local TICK_INTERVAL = 0.05
 local ticker
@@ -228,7 +241,7 @@ local function Tick()
   local best, bestArea, bestE
   for _, e in ipairs(BuildEntries()) do
     local ok, frame = pcall(e.getFrame)
-    if ok and frame and frame:IsVisible() and ns.IsFrameMouseOver(frame) then
+    if ok and frame and frame:IsVisible() and IsEffectivelyVisible(frame) and ns.IsFrameMouseOver(frame) then
       local w, h = frame:GetSize()
       local area = (w or 0) * (h or 0)
       if not best or area < bestArea then

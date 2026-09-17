@@ -17,13 +17,15 @@ local C_Timer, CreateFrame = C_Timer, CreateFrame
 -- Textures : blasons classe / faction / race / extension (Media/AFK/)
 local AFK_TEX_BASE = "Interface\\AddOns\\AishCore\\Media\\AFK\\"
 
--- Extension par categorie/style : race/factioncrest "blizzard" en .blp, le reste en .tga
+-- Extension par categorie : race/factioncrest en .blp, le reste en .tga.
+-- Un seul style depuis la standardisation sur les assets Blizzard ; les jeux "sltheme" et
+-- "releaf-flat" ont ete retires (fichiers supprimes, et la categorie "classes" avec eux -- elle
+-- n'avait aucune variante Blizzard, cf. le blason de classe supprime du panneau).
 local AFK_TEX_EXT = {
-  classes      = { ["releaf-flat"] = "tga", sltheme = "tga" },
-  race         = { blizzard = "blp", ["releaf-flat"] = "tga", sltheme = "tga" },
-  factioncrest = { blizzard = "blp", ["releaf-flat"] = "tga", sltheme = "tga" },
-  factionlogo  = { blizzard = "tga", ["releaf-flat"] = "tga", sltheme = "tga" },
-  expansion    = { blizzard = "tga", ["releaf-flat"] = "tga", sltheme = "tga" },
+  race         = { blizzard = "blp" },
+  factioncrest = { blizzard = "blp" },
+  factionlogo  = { blizzard = "tga" },
+  expansion    = { blizzard = "tga" },
 }
 
 -- Mechagnome -> fichier MechaGnome.blp (seule divergence connue du set)
@@ -43,9 +45,7 @@ local EXPANSION_TOKENS = {
   [LE_EXPANSION_DRAGONFLIGHT]            = "df",
 }
 local EXPANSION_STYLE_TOKENS = {
-  blizzard        = { classic=true, tbc=true, wotlk=true, cata=true, mop=true, wod=true, legion=true, bfa=true, sl=true, df=true },
-  ["releaf-flat"] = { sl = true },
-  sltheme         = { sl = true },
+  blizzard = { classic=true, tbc=true, wotlk=true, cata=true, mop=true, wod=true, legion=true, bfa=true, sl=true, df=true },
 }
 
 local function ResolveTexturePath(category, style, token, override)
@@ -108,7 +108,6 @@ local TEXT_ELEMENTS = {
   { key = "time",        panel = "top",    anchor = "TOPRIGHT" },
 }
 local GRAPHIC_ELEMENTS = {
-  { key = "crestClass",    panel = "bottom", anchor = "BOTTOMRIGHT", category = "classes" },
   { key = "crestFaction",  panel = "bottom", anchor = "BOTTOMRIGHT", category = "factioncrest" },
   { key = "logoFaction",   panel = "bottom", anchor = "BOTTOMLEFT",  category = "factionlogo" },
   { key = "crestRace",     panel = "bottom", anchor = "BOTTOMRIGHT", category = "race" },
@@ -384,7 +383,6 @@ local function RefreshGraphics()
   local faction        = UnitFactionGroup("player") or "Neutral"
 
   local TOKEN_BY_KEY = {
-    crestClass   = classToken,
     crestFaction = faction,
     logoFaction  = faction,
     crestRace    = raceToken,

@@ -132,9 +132,13 @@ function P.InitDB()
     root._version       = 1
   end
 
-  -- Garantir l'existence du profil "Default"
+  -- Garantir l'existence du profil "Default".
+  -- Tout premier lancement : on part du template de reference, comme P.Create()/P.Reset(). Une table
+  -- vide ne tombait que sur ns.Defaults (via le MergeDefaults plus bas), donc l'installation neuve
+  -- n'heritait d'aucun des reglages du profil de reference -- exactement ce que le template existe
+  -- pour eviter. MergeDefaults comble ensuite les cles absentes.
   if not root._profiles["Default"] then
-    root._profiles["Default"] = {}
+    root._profiles["Default"] = ns.ProfileTemplate and ns.DeepCopy(ns.ProfileTemplate) or {}
   end
 
   -- Déterminer le profil actif
@@ -187,6 +191,20 @@ function P.InitDB()
     if se and type(se.spells) == "table" then
       se.spells[8004]  = nil
       se.spells[17364] = nil
+    end
+    -- AFK : l'ecran AFK n'utilise plus que les textures Blizzard. Le choix de style a disparu du
+    -- panneau, donc un profil reste sur "sltheme"/"releaf-flat" n'aurait plus aucun moyen d'en
+    -- sortir. On force "blizzard", en laissant "auto" tranquille pour le logo d'extension (ce
+    -- n'est pas un jeu de textures tiers mais la resolution automatique par extension).
+    -- crestClass est supprime : cette categorie n'a jamais eu de variante Blizzard.
+    local afk = prof.afkMode
+    if afk and type(afk.elements) == "table" then
+      afk.elements.crestClass = nil
+      for _, elem in pairs(afk.elements) do
+        if type(elem) == "table" and (elem.style == "sltheme" or elem.style == "releaf-flat") then
+          elem.style = "blizzard"
+        end
+      end
     end
   end
   root._migratedV2 = true

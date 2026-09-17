@@ -4,6 +4,7 @@ local addonName, ns = ...
 ns.Defaults = {
   -- Cercle de ressource (mana)
   resourceCircle = {
+    locked = false,   -- verrou du glisser-deposer (cf. SetDraggable)
     enabled = true,
     size = 80,
     bgSize = 88,
@@ -86,6 +87,7 @@ ns.Defaults = {
 
   -- Cercle de vie
   healthCircle = {
+    locked = false,   -- verrou du glisser-deposer (cf. SetDraggable)
     enabled = true,
     size = 40,
     bgSize = 44,
@@ -124,6 +126,7 @@ ns.Defaults = {
 
   -- Cercle de ressource hors combat (meme logique que resourceCircle, visible seulement hors combat)
   outOfCombatResourceCircle = {
+    locked = false,   -- verrou du glisser-deposer (cf. SetDraggable)
     enabled = true,
     size = 40,
     fontSize = 9,
@@ -777,7 +780,6 @@ ns.Defaults = {
       time        = { enable = true, font = nil, size = 12, color = {1,1,1,1},       anchor = "TOPRIGHT",    x = -12, y = -24, outlineStyle = "OUTLINE", useSpecColor = false, specColorKey = "powercircle" },
       tips        = { enable = true, font = nil, size = 11, color = {1,1,1,1},       anchor = "BOTTOM",      x = 0,   y = 8,   lineWidth = 500, useSpecColor = false, specColorKey = "powercircle" }, -- largeur de retour a la ligne (ScrollingMessageFrame)
 
-      crestClass    = { enable = true,  style = "sltheme",  anchor = "BOTTOMRIGHT", x = -220, y = 8, width = 40, height = 40 },
       crestFaction  = { enable = true,  style = "blizzard", anchor = "BOTTOMRIGHT", x = -176, y = 8, width = 40, height = 40 },
       logoFaction   = { enable = false, style = "blizzard", anchor = "BOTTOMLEFT",  x = 12,   y = 8, width = 64, height = 64 },
       crestRace     = { enable = true,  style = "blizzard", anchor = "BOTTOMRIGHT", x = -132, y = 8, width = 40, height = 40 },

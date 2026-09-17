@@ -614,8 +614,21 @@ local function SpellBarColorRGB(cfg, si)
     if cfg.barColorR ~= nil then
         return cfg.barColorR, cfg.barColorG or ns.barColor[2], cfg.barColorB or ns.barColor[3]
     end
-    if ns.db and ns.db.useSpellColors and si and si.color then
-        return si.color[1], si.color[2], si.color[3]
+    if ns.db and ns.db.useSpellColors and si then
+        -- si.colorKey : couleur AUTOMATIQUE, resolue en direct sur le module Couleurs pour qu'elle
+        -- suive les Themed colors (et retombe sur la couleur de classe quand le profil n'en a pas).
+        -- si.color seul = couleur figee : soit choisie a la main dans "Auras a tracker" (le picker
+        -- efface colorKey), soit heritee d'une entree d'avant cette resolution vivante.
+        if si.colorKey then
+            local Colors = _addon and _addon.Modules and _addon.Modules.Colors
+            if Colors and Colors.Get then
+                local c = Colors.Get(si.colorKey)
+                if c and c[1] then return c[1], c[2], c[3] end
+            end
+        end
+        if si.color then
+            return si.color[1], si.color[2], si.color[3]
+        end
     end
     return ns.barColor[1], ns.barColor[2], ns.barColor[3]
 end

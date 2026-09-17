@@ -3707,6 +3707,13 @@ end
 -- Drag
 function PriorityBar.EnableDrag(enable)
   if InCombatLockdown() then return end
+  -- Module desactive : jamais de drag, ni de rectangle bleu. SetPreview a deja ce garde, mais pas
+  -- EnableDrag -- or le panneau appelle les DEUX a l'ouverture, et SetDraggable passe en dernier.
+  -- SetupDrag remettait alors container:SetAlpha(1) + dragBg:Show() sur une barre coupee : la hitbox
+  -- reapparaissait a chaque ouverture du panneau et ne partait qu'en rebasculant le module.
+  -- On retombe sur la branche "disable", qui termine par UpdateVisibility() et remet le bon alpha.
+  local cfgDrag = ns.GetCfg("priorityBar") or {}
+  if enable and cfgDrag.enabled == false then enable = false end
   dragEnabled = enable
 
   local function OnDragStop(container, sideName)

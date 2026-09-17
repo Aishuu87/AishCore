@@ -296,9 +296,24 @@ end
 -- Reconstruit une catégorie GUI en live ; forward-déclarée pour que LiveApply puisse aussi invalider la page "Modules" (mêmes flags que les pages individuelles).
 local _invalidateCategory
 
+-- Les 3 cercles n'ont plus de bouton de drag dedie : leur bordure "deplacable" doit suivre en direct
+-- la case "Verrouiller la position". SetDraggable(true) relit le verrou et ajuste la bordure, donc on
+-- le re-arme apres chaque changement de reglage tant que le panneau est ouvert.
+local CIRCLE_DRAG_MODULES = {
+  resourceCircle            = "ResourceCircle",
+  healthCircle              = "HealthCircle",
+  outOfCombatResourceCircle = "OutOfCombatResourceCircle",
+}
+
 local function LiveApply(dbKey)
   local mod = ns.Modules and ns.Modules[GetModKey(dbKey)]
   if mod and mod.ApplySettings then mod.ApplySettings() end
+  local dragModName = CIRCLE_DRAG_MODULES[dbKey]
+  if dragModName then
+    local dm = ns.Modules and ns.Modules[dragModName]
+    local panel = ns.SettingsPanel or _G["AishCoreSettingsPanel"]
+    if dm and dm.SetDraggable and panel and panel:IsShown() then dm.SetDraggable(true) end
+  end
   if _invalidateCategory then _invalidateCategory("modulesOverview") end
 end
 
@@ -459,6 +474,14 @@ function Build.ResourceCircle(container)
     L["SETTINGS_RC_ENABLE"],
     L["SETTINGS_RC_ENABLE_TT"], W))
   BindCheckbox(cb, "resourceCircle", "enabled")
+
+  -- Verrouiller la position : le glisser-deposer est actif des l'ouverture du panneau (cf. OnShow),
+  -- cette case est le seul frein -- meme modele que "unitBars"/locked. Lue a chaud par
+  -- SetDraggable/OnDragStart, donc pas besoin de re-appliquer quoi que ce soit au clic.
+  local cbRCLock = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_LOCK_POSITION"],
+    L["SETTINGS_LOCK_POSITION_TT"], W))
+  BindCheckbox(cbRCLock, "resourceCircle", "locked")
 
   ctx:Spacer(4)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_VISIBILITY"], W))
@@ -782,46 +805,6 @@ function Build.ResourceCircle(container)
   _G["AishCoreRCPosYSlider"] = slRCPosY
   ctx:Spacer(6)
 
-  -- Drag toggle for ResourceCircle
-  local rcDragActive = false
-  local rcDragBtn = CreateFrame("Button", nil, container)
-  rcDragBtn:SetSize(W, 26)
-  local _rcBg = rcDragBtn:CreateTexture(nil, "BACKGROUND")
-  _rcBg:SetAllPoints(); _rcBg:SetColorTexture(0.10, 0.10, 0.13, 1)
-  local _rcLabel = rcDragBtn:CreateFontString(nil, "OVERLAY")
-  _rcLabel:SetFont(ns.Media.fontGui, 11); _rcLabel:SetPoint("CENTER")
-  _rcLabel:SetTextColor(unpack(Theme.textNormal))
-  _rcLabel:SetText(L["UI_MOVE_DRAG_DROP"])
-
-  local function SetRCDragBtnState(active)
-    if active then
-      _rcBg:SetColorTexture(0.05, 0.18, 0.08, 1)
-      _rcLabel:SetTextColor(0.3, 1.0, 0.3, 1)
-      _rcLabel:SetText(L["SETTINGS_RC_DRAG_HINT"])
-    else
-      _rcBg:SetColorTexture(0.10, 0.10, 0.13, 1)
-      _rcLabel:SetTextColor(unpack(Theme.textNormal))
-      _rcLabel:SetText(L["UI_MOVE_DRAG_DROP"])
-    end
-  end
-
-  rcDragBtn:SetScript("OnEnter", function()
-    if not rcDragActive then
-      _rcBg:SetColorTexture(0.16, 0.15, 0.20, 1)
-      _rcLabel:SetTextColor(unpack(Theme.textHighlight))
-    end
-  end)
-  rcDragBtn:SetScript("OnLeave", function()
-    SetRCDragBtnState(rcDragActive)
-  end)
-  rcDragBtn:SetScript("OnClick", function()
-    rcDragActive = not rcDragActive
-    SetRCDragBtnState(rcDragActive)
-    local RC = ns.Modules.ResourceCircle
-    if RC and RC.SetDraggable then RC.SetDraggable(rcDragActive) end
-    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-  end)
-  ctx:Add(rcDragBtn)
 
   ctx:Finalize()
   return ctx.widgets
@@ -841,6 +824,14 @@ function Build.OutOfCombat(container)
     L["SETTINGS_HC_ENABLE"],
     L["SETTINGS_HC_ENABLE_TT"], W))
   BindCheckbox(cbHC, "healthCircle", "enabled")
+
+  -- Verrouiller la position : le glisser-deposer est actif des l'ouverture du panneau (cf. OnShow),
+  -- cette case est le seul frein -- meme modele que "unitBars"/locked. Lue a chaud par
+  -- SetDraggable/OnDragStart, donc pas besoin de re-appliquer quoi que ce soit au clic.
+  local cbHCLock = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_LOCK_POSITION"],
+    L["SETTINGS_LOCK_POSITION_TT"], W))
+  BindCheckbox(cbHCLock, "healthCircle", "locked")
 
   local slHCSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, SL_W3)
   BindSlider(slHCSize, "healthCircle", "size")
@@ -873,48 +864,6 @@ function Build.OutOfCombat(container)
     L["SETTINGS_HC_HEARTBEAT_PULSE_TT"], W))
   BindCheckbox(cbHCPulse, "healthCircle", "heartbeatPulse")
 
-  -- Drag toggle for HealthCircle
-  ctx:Spacer(2)
-  local hcDragActive = false
-  local hcDragBtn = CreateFrame("Button", nil, container)
-  hcDragBtn:SetSize(W, 26)
-  local _hcBg = hcDragBtn:CreateTexture(nil, "BACKGROUND")
-  _hcBg:SetAllPoints(); _hcBg:SetColorTexture(0.10, 0.10, 0.13, 1)
-  local _hcLabel = hcDragBtn:CreateFontString(nil, "OVERLAY")
-  _hcLabel:SetFont(ns.Media.fontGui, 11); _hcLabel:SetPoint("CENTER")
-  _hcLabel:SetTextColor(unpack(Theme.textNormal))
-  _hcLabel:SetText(L["SETTINGS_HC_MOVE"])
-
-  local function SetHCDragBtnState(active)
-    if active then
-      _hcBg:SetColorTexture(0.05, 0.18, 0.08, 1)
-      _hcLabel:SetTextColor(0.3, 1.0, 0.3, 1)
-      _hcLabel:SetText(L["SETTINGS_DRAG_CIRCLE_HINT"])
-    else
-      _hcBg:SetColorTexture(0.10, 0.10, 0.13, 1)
-      _hcLabel:SetTextColor(unpack(Theme.textNormal))
-      _hcLabel:SetText(L["SETTINGS_HC_MOVE"])
-    end
-  end
-
-  hcDragBtn:SetScript("OnEnter", function()
-    if not hcDragActive then
-      _hcBg:SetColorTexture(0.16, 0.15, 0.20, 1)
-      _hcLabel:SetTextColor(unpack(Theme.textHighlight))
-    end
-  end)
-  hcDragBtn:SetScript("OnLeave", function()
-    SetHCDragBtnState(hcDragActive)
-  end)
-  hcDragBtn:SetScript("OnClick", function()
-    hcDragActive = not hcDragActive
-    SetHCDragBtnState(hcDragActive)
-    local HC = ns.Modules.HealthCircle
-    if HC and HC.SetDraggable then HC.SetDraggable(hcDragActive) end
-    if HC and HC.SetPreview   then HC.SetPreview(hcDragActive) end
-    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-  end)
-  ctx:Add(hcDragBtn)
 
   ctx:Spacer(10)
 
@@ -925,6 +874,14 @@ function Build.OutOfCombat(container)
     L["SETTINGS_OCRC_ENABLE"],
     L["SETTINGS_OCRC_ENABLE_TT"], W))
   BindCheckbox(cbOCRC, "outOfCombatResourceCircle", "enabled")
+
+  -- Verrouiller la position : le glisser-deposer est actif des l'ouverture du panneau (cf. OnShow),
+  -- cette case est le seul frein -- meme modele que "unitBars"/locked. Lue a chaud par
+  -- SetDraggable/OnDragStart, donc pas besoin de re-appliquer quoi que ce soit au clic.
+  local cbOCRCLock = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_LOCK_POSITION"],
+    L["SETTINGS_LOCK_POSITION_TT"], W))
+  BindCheckbox(cbOCRCLock, "outOfCombatResourceCircle", "locked")
 
   local slOCRCSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, SL_W3)
   BindSlider(slOCRCSize, "outOfCombatResourceCircle", "size")
@@ -1024,47 +981,6 @@ function Build.OutOfCombat(container)
 
   ctx:Spacer(4)
 
-  -- Drag toggle for OutOfCombatResourceCircle
-  local ocrcDragActive = false
-  local ocrcDragBtn = CreateFrame("Button", nil, container)
-  ocrcDragBtn:SetSize(W, 26)
-  local _ocrcBg = ocrcDragBtn:CreateTexture(nil, "BACKGROUND")
-  _ocrcBg:SetAllPoints(); _ocrcBg:SetColorTexture(0.10, 0.10, 0.13, 1)
-  local _ocrcLabel = ocrcDragBtn:CreateFontString(nil, "OVERLAY")
-  _ocrcLabel:SetFont(ns.Media.fontGui, 11); _ocrcLabel:SetPoint("CENTER")
-  _ocrcLabel:SetTextColor(unpack(Theme.textNormal))
-  _ocrcLabel:SetText(L["SETTINGS_OCRC_MOVE"])
-
-  local function SetOCRCDragBtnState(active)
-    if active then
-      _ocrcBg:SetColorTexture(0.05, 0.18, 0.08, 1)
-      _ocrcLabel:SetTextColor(0.3, 1.0, 0.3, 1)
-      _ocrcLabel:SetText(L["SETTINGS_DRAG_CIRCLE_HINT"])
-    else
-      _ocrcBg:SetColorTexture(0.10, 0.10, 0.13, 1)
-      _ocrcLabel:SetTextColor(unpack(Theme.textNormal))
-      _ocrcLabel:SetText(L["SETTINGS_OCRC_MOVE"])
-    end
-  end
-
-  ocrcDragBtn:SetScript("OnEnter", function()
-    if not ocrcDragActive then
-      _ocrcBg:SetColorTexture(0.16, 0.15, 0.20, 1)
-      _ocrcLabel:SetTextColor(unpack(Theme.textHighlight))
-    end
-  end)
-  ocrcDragBtn:SetScript("OnLeave", function()
-    SetOCRCDragBtnState(ocrcDragActive)
-  end)
-  ocrcDragBtn:SetScript("OnClick", function()
-    ocrcDragActive = not ocrcDragActive
-    SetOCRCDragBtnState(ocrcDragActive)
-    local OCRC = ns.Modules.OutOfCombatResourceCircle
-    if OCRC and OCRC.SetDraggable then OCRC.SetDraggable(ocrcDragActive) end
-    if OCRC and OCRC.SetPreview   then OCRC.SetPreview(ocrcDragActive) end
-    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-  end)
-  ctx:Add(ocrcDragBtn)
 
   ctx:Spacer(4)
 
@@ -1565,6 +1481,14 @@ function Build.UnitBars(container)
       local slBarY = SW.CreateSlider(detail, L["SETTINGS_OFFSET_Y"], -200, 200, 1, detailSL4)
       slBarY:SetValue(UBGet(bk, "y") or 0)
       slBarY.onChanged = function(val) UBSet(bk, "y", val) end
+      -- Registre consulte par UnitBars.lua a la fin d'un glisser-deposer, pour que les champs X/Y
+      -- suivent la barre deplacee (meme intention que _G["AishCoreRCPosXSlider"] cote cercles, mais
+      -- une paire par barre donc pas de nom global). Les entrees pointent des widgets detruits quand
+      -- la page est reconstruite : cote lecteur, toujours passer par pcall.
+      -- container:SetValue est protege par _programmaticSet, donc n'appelle pas onChanged -- pas de
+      -- reecriture en base ni de boucle.
+      ns._ubPosSliders = ns._ubPosSliders or {}
+      ns._ubPosSliders[bk] = { x = slBarX, y = slBarY }
       dctx:AddRow(8, slW, slH, slBarX, slBarY)
 
       dctx:Add(MakeUBPlainSubtitle(detail, L["SETTINGS_SEC_UB_NAME_POSITION"], detailW))
@@ -8039,21 +7963,11 @@ end
 -- local ici -- c'est un champ de table, pas une locale.
 do
 
-local AFK_STYLE_OPTIONS_STD = {
-  { value = "blizzard",     text = L["SETTINGS_AFK_STYLE_BLIZZARD"] },
-  { value = "sltheme",      text = L["SETTINGS_AFK_STYLE_SLTHEME"] },
-  { value = "releaf-flat",  text = L["SETTINGS_AFK_STYLE_RELEAFFLAT"] },
-}
-local AFK_STYLE_OPTIONS_CLASS = {
-  { value = "sltheme",      text = L["SETTINGS_AFK_STYLE_SLTHEME"] },
-  { value = "releaf-flat",  text = L["SETTINGS_AFK_STYLE_RELEAFFLAT"] },
-}
-local AFK_STYLE_OPTIONS_EXPANSION = {
-  { value = "auto",         text = L["SETTINGS_AFK_STYLE_AUTO"] },
-  { value = "blizzard",     text = L["SETTINGS_AFK_STYLE_BLIZZARD"] },
-  { value = "sltheme",      text = L["SETTINGS_AFK_STYLE_SLTHEME"] },
-  { value = "releaf-flat",  text = L["SETTINGS_AFK_STYLE_RELEAFFLAT"] },
-}
+-- Styles de textures AFK : plus aucun choix expose. Toutes les images de l'ecran AFK viennent
+-- desormais des assets Blizzard, seul jeu complet et coherent. Les anciennes listes (sltheme,
+-- releaf-flat) sont supprimees, et "crestClass" avec elles : cette categorie n'a jamais eu de
+-- variante Blizzard (cf. AFKMode.lua, table EXT : classes = { releaf-flat, sltheme }), donc elle
+-- ne pouvait pas survivre a la standardisation.
 local AFK_ANIM_TYPE_OPTIONS = {
   { value = "slideIn",   text = L["SETTINGS_AFK_ANIM_SLIDEIN"] },
   { value = "slideSide", text = L["SETTINGS_AFK_ANIM_SLIDESIDE"] },
@@ -8089,12 +8003,11 @@ local AFK_TEXT_LABELS = {
   { key = "tips",        label = L["SETTINGS_AFK_SHOW_TIPS"] },
 }
 local AFK_GRAPHIC_LABELS = {
-  { key = "crestClass",    label = L["SETTINGS_AFK_CREST_CLASS"],    styleOptions = AFK_STYLE_OPTIONS_CLASS },
-  { key = "crestFaction",  label = L["SETTINGS_AFK_CREST_FACTION"],  styleOptions = AFK_STYLE_OPTIONS_STD },
-  { key = "logoFaction",   label = L["SETTINGS_AFK_LOGO_FACTION"],   styleOptions = AFK_STYLE_OPTIONS_STD },
-  { key = "crestRace",     label = L["SETTINGS_AFK_CREST_RACE"],     styleOptions = AFK_STYLE_OPTIONS_STD },
-  { key = "logoExpansion", label = L["SETTINGS_AFK_LOGO_EXPANSION"], styleOptions = AFK_STYLE_OPTIONS_EXPANSION },
-  { key = "aishLogo",      label = L["SETTINGS_AFK_LOGO_AISHUI"] }, -- pas de styleOptions : texture fixe, pas de dropdown de style
+  { key = "crestFaction",  label = L["SETTINGS_AFK_CREST_FACTION"] },
+  { key = "logoFaction",   label = L["SETTINGS_AFK_LOGO_FACTION"] },
+  { key = "crestRace",     label = L["SETTINGS_AFK_CREST_RACE"] },
+  { key = "logoExpansion", label = L["SETTINGS_AFK_LOGO_EXPANSION"] },
+  { key = "aishLogo",      label = L["SETTINGS_AFK_LOGO_AISHUI"] },
 }
 
 -- Lecture/ecriture d'un champ d'element (ns.DB.afkMode.elements[cle][champ])
@@ -8448,18 +8361,10 @@ Build.AFKMode = function(container)
   ctx:Spacer(6)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_AFK_GRAPHICS"], W))
 
+  -- Un simple on/off par graphique : le style de texture n'est plus configurable (tout est Blizzard).
   for _, g in ipairs(AFK_GRAPHIC_LABELS) do
-    if g.styleOptions then
-      local cb = SW.CreateCheckbox(container, g.label, nil, W2)
-      AFKBindElemEnable(cb, g.key)
-      local dd = SW.CreateDropdown(container, nil, g.styleOptions, W2)
-      AFKBindElemDropdown(dd, g.key, "style")
-      ctx:AddRow(8, cb, dd)
-    else
-      -- Pas de styleOptions : texture fixe (ex. logo AishUI), pas de dropdown de style
-      local cb = ctx:Add(SW.CreateCheckbox(container, g.label, nil, W))
-      AFKBindElemEnable(cb, g.key)
-    end
+    local cb = ctx:Add(SW.CreateCheckbox(container, g.label, nil, W))
+    AFKBindElemEnable(cb, g.key)
   end
 
   ctx:Spacer(6)
@@ -10921,7 +10826,7 @@ end
 local HEROIC_SUPPORT_LINKS = {
   { icon = "Interface\\AddOns\\AishCore\\Media\\Logo\\kofi",      imgW = 128, imgH = 35,  label = "Ko-fi",      url = "https://ko-fi.com/aishuutv" },
   { icon = "Interface\\AddOns\\AishCore\\Media\\Logo\\discord",   imgW = 128, imgH = 19,  label = "Discord",    url = "https://discord.gg/xamhJnSsbp" },
-  { icon = "Interface\\AddOns\\AishCore\\Media\\Logo\\CurseForge", imgW = 776, imgH = 150, label = "CurseForge", url = "https://www.curseforge.com/wow/addons/REMPLACER" },
+  { icon = "Interface\\AddOns\\AishCore\\Media\\Logo\\CurseForge", imgW = 776, imgH = 150, label = "CurseForge", url = "https://www.curseforge.com/wow/addons/aishcore" },
 }
 
 -- Toutes les images font 1374x552 (ratio verifie via les fichiers, cf.
@@ -12204,6 +12109,11 @@ MainFrame:SetScript("OnShow", function(self)
     if OCRC and OCRC.SetGuiHidden then OCRC.SetGuiHidden(true) end
     if PB   and PB.SetPreview   then PB.SetPreview(true)    end
     if PB   and PB.SetDraggable then PB.SetDraggable(true)  end
+    -- Cercles deplacables des l'ouverture du panneau, comme les barres d'unite et la Priority Bar.
+    -- Le frein est la case "Verrouiller la position" de chaque section, relue a chaud dans OnDragStart.
+    if RC   and RC.SetDraggable then RC.SetDraggable(true) end
+    if HC   and HC.SetDraggable then HC.SetDraggable(true) end
+    if OCRC and OCRC.SetDraggable then OCRC.SetDraggable(true) end
     if CB   and CB.SetPreview   then CB.SetPreview(true)    end
     if SR   and SR.SetPreview   then SR.SetPreview(false)   end
     if RH   and RH.SetPreview   then RH.SetPreview(true)    end
@@ -12218,6 +12128,11 @@ MainFrame:SetScript("OnShow", function(self)
   if OCRC and OCRC.SetPreview   then OCRC.SetPreview(true)   end
   if PB   and PB.SetPreview     then PB.SetPreview(true)     end
   if PB   and PB.SetDraggable   then PB.SetDraggable(true)   end
+  -- Cercles deplacables des l'ouverture du panneau, comme les barres d'unite et la Priority Bar.
+  -- Le frein est la case "Verrouiller la position" de chaque section, relue a chaud dans OnDragStart.
+  if RC   and RC.SetDraggable then RC.SetDraggable(true) end
+  if HC   and HC.SetDraggable then HC.SetDraggable(true) end
+  if OCRC and OCRC.SetDraggable then OCRC.SetDraggable(true) end
   if CB   and CB.SetPreview     then CB.SetPreview(true)     end
   if SR   and SR.SetPreview     then SR.SetPreview(true)     end
   if RH   and RH.SetPreview     then RH.SetPreview(true)     end
