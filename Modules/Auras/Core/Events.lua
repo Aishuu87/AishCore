@@ -137,7 +137,7 @@ ef:SetScript("OnEvent", function(_, event, arg1)
         if ns.RefreshEffectsSuspension then pcall(ns.RefreshEffectsSuspension) end
         -- Cleanup des sorts découverts : retire uniquement les items War Gear
         pcall(function()
-            local spells = ns.GetSpecSpells()
+            local spells, specKey = ns.GetSpecSpells()
             if spells then
                 local toRemove = {}
                 local wgIDs, wgNames = {}, {}
@@ -157,6 +157,7 @@ ef:SetScript("OnEvent", function(_, event, arg1)
                     if remove then toRemove[#toRemove + 1] = sid end
                 end
                 for _, sid in ipairs(toRemove) do spells[sid] = nil end
+                if ns.Profiles and ns.Profiles.ForgetDiscovered then ns.Profiles:ForgetDiscovered(specKey, toRemove) end
             end
         end)
         -- Pré-sync de tous les effets 3D (garantit que les champs flat sont prêts avant combat)
@@ -185,7 +186,7 @@ ef:SetScript("OnEvent", function(_, event, arg1)
         -- Ré-exécute le cleanup WG après init de Providers (délai 3s)
         C_Timer.After(3.5, function()
             pcall(function()
-                local spells = ns.GetSpecSpells()
+                local spells, specKey = ns.GetSpecSpells()
                 if spells and ns.Providers and ns.Providers.GetAllSlots then
                     local wgIDs, wgNames = {}, {}
                     for _,slot in ipairs(ns.Providers:GetAllSlots()) do
@@ -201,6 +202,7 @@ ef:SetScript("OnEvent", function(_, event, arg1)
                         end
                     end
                     for _, sid in ipairs(toRemove) do spells[sid] = nil end
+                    if ns.Profiles and ns.Profiles.ForgetDiscovered then ns.Profiles:ForgetDiscovered(specKey, toRemove) end
                     if #toRemove > 0 then ns.BuildWhitelist(); ns.ScanAuras() end
                 end
             end)

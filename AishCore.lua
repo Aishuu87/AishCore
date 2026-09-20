@@ -424,8 +424,9 @@ end
 
 -- Chargement de la SavedVariable
 local function LoadDatabase()
-  -- Delègue au moteur de profils : migration legacy, merge defaults, pointage ns.DB
-  ns.Profiles.InitDB()
+  -- Delègue au moteur de profils : migration legacy, merge defaults, pointage ns.DB.
+  -- Déjà fait si le module Auras (ADDON_LOADED traité avant) en a eu besoin pour lier son profil.
+  if not ns._activeProfileName then ns.Profiles.InitDB() end
 end
 
 -- Cache classe/spec joueur (ne jamais écraser par nil, API parfois indispo)
@@ -625,7 +626,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
 
     -- Force la font des timers Platynator, avec hook pour résister à un changement de design
     if PlatynatorNameplateCooldownFont then
-      local PLAT_FONT_PATH  = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat-Bold.ttf"
+      local PLAT_FONT_PATH  = ns.FONT_FALLBACK  -- police du jeu (2002), aucune media pack requise
       local PLAT_FONT_SIZE  = 11
       local PLAT_FONT_FLAGS = "OUTLINE"
       PlatynatorNameplateCooldownFont:SetFont(PLAT_FONT_PATH, PLAT_FONT_SIZE, PLAT_FONT_FLAGS)

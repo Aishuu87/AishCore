@@ -154,6 +154,7 @@ end
 function ns.BuildWhitelist()
     -- Auto-configure le sort du cercle central avant chaque rebuild
     if ns.AutoConfigCenterArc then pcall(ns.AutoConfigCenterArc) end
+    if ns.AutoConfigSecResDurBar then pcall(ns.AutoConfigSecResDurBar) end
     local spells = ns.GetSpecSpells()
     if not spells then
         ns.activeWhitelist = nil; ns.whitelistByDest = nil; ns.slotOrderByDest = nil
@@ -287,8 +288,11 @@ function ns.BuildWhitelist()
     ns.activeWhitelist = next(wl) and wl or nil
 
     -- Whitelists par destination
-    local byDest = {iconlist={}, freebars={}, circlebars={}, icons={}, centerArc={}, totems={}}
-    local orderByDest = {iconlist={}, freebars={}, circlebars={}, icons={}, centerArc={}, totems={}}
+    -- secResDurBar : destination INVISIBLE, comme centerArc. Elle ne rend rien ; elle
+    -- sert uniquement a faire entrer le sort dans le scan pour que son durObj soit
+    -- resolu par Scan (contexte propre) et lisible par la barre de duree.
+    local byDest = {iconlist={}, freebars={}, circlebars={}, icons={}, centerArc={}, totems={}, secResDurBar={}}
+    local orderByDest = {iconlist={}, freebars={}, circlebars={}, icons={}, centerArc={}, totems={}, secResDurBar={}}
     -- Union plate de TOUTES les destinations : utilisée comme early-filter dans
     -- CollectAuras. Si un spellID n'est dans aucune destination, on skip
     -- l'allocation de MakeEntry + ses pcalls coûteux. Gain proportionnel au

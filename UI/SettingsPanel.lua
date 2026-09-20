@@ -492,15 +492,20 @@ function Build.ResourceCircle(container)
   }, "combat")
   MakeAlwaysInInstanceToggle(container, ctx, W, "resourceCircle")
 
-  local slSize = ctx:Add(SW.CreateSlider(container, L["SETTINGS_SIZE"], 20, 200, 1, W))
-  BindSlider(slSize, "resourceCircle", "size")
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_CENTER_CIRCLE_SETTINGS"], W))
 
-  local slRCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE_RATIO"], 0.5, 1.0, 0.05, SL_W2)
+  -- Taille / taille d'arc / epaisseur d'arc sur une seule ligne : les trois se reglent
+  -- ensemble en pratique, les separer obligeait a faire l'aller-retour en scrollant.
+  local _rcSL3 = math.floor((W - 16) / 3)
+  local slSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 20, 200, 1, _rcSL3)
+  BindSlider(slSize, "resourceCircle", "size")
+  local slRCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE_RATIO"], 0.5, 1.0, 0.05, _rcSL3)
   BindSlider(slRCArcSize, "resourceCircle", "arcSizeRatio")
   -- Max étendu à 1.2 (au lieu de 0.99) : les quartiers radiaux sont surdimensionnés de 20%, leur bord déborde donc un peu au-delà du rayon nominal.
-  local slRCThick = SW.CreateSlider(container, L["SETTINGS_ARC_THICKNESS"], 0.0, 1.2, 0.01, SL_W2)
+  local slRCThick = SW.CreateSlider(container, L["SETTINGS_ARC_THICKNESS"], 0.0, 1.2, 0.01, _rcSL3)
   BindSlider(slRCThick, "resourceCircle", "overlayRatio")
-  ctx:AddRow(8, slRCArcSize, slRCThick)
+  ctx:AddRow(8, slSize, slRCArcSize, slRCThick)
 
   -- Bascule remplissage vertical / radial
   local cbRCRadial = ctx:Add(SW.CreateCheckbox(container,
@@ -509,10 +514,27 @@ function Build.ResourceCircle(container)
     W))
   BindCheckbox(cbRCRadial, "resourceCircle", "radialFillTest")
 
-  local slFont = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 30, 1, W))
-  BindSlider(slFont, "resourceCircle", "fontSize")
-  local ddFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
+  -- Police du texte central : choix + taille sur la meme ligne.
+  local ddFont = SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), SL_W2)
   BindDropdown(ddFont, "resourceCircle", "font")
+  local slFont = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 30, 1, SL_W2)
+  BindSlider(slFont, "resourceCircle", "fontSize")
+  ctx:AddRow(8, ddFont, slFont)
+
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_BG_GLOW"], W))
+
+  local cbGlow = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_GLOW_ENABLE"],
+    L["SETTINGS_RC_GLOW_ENABLE_TT"], W))
+  BindCheckbox(cbGlow, "resourceCircle", "glowEnabled")
+
+  local slGlowSize = SW.CreateSlider(container, L["SETTINGS_GLOW_SIZE"], 0.5, 8.0, 0.1, SL_W2)
+  BindSlider(slGlowSize, "resourceCircle", "glowSize")
+  local slGlowOpacity = SW.CreateSlider(container, L["SETTINGS_GLOW_OPACITY"], 0, 1, 0.05, SL_W2)
+  BindSlider(slGlowOpacity, "resourceCircle", "glowOpacity")
+  ctx:AddRow(8, slGlowSize, slGlowOpacity)
+
 
   ctx:Spacer(6)
   -- Option Paladin : Puissance Sacrée en spé Protection / Vindicte
@@ -585,6 +607,7 @@ function Build.ResourceCircle(container)
   local _arcSpec
   if     ns._specID == 66  then _arcSpec = { cfgKey = "consecrationArcEnabled", label = L["SETTINGS_ARC_LABEL_CONSECRATION"], color = {1.00, 0.88, 0.10} }
   elseif ns._specID == 73  then _arcSpec = { cfgKey = "ignorePainArcEnabled",   label = L["SETTINGS_ARC_LABEL_IGNORE_PAIN"],  color = {0.78, 0.25, 0.25} }
+  elseif ns._specID == 104 then _arcSpec = { cfgKey = "ironfurArcEnabled",  label = L["SETTINGS_ARC_LABEL_IRONFUR"],      color = {0.85, 0.65, 0.30} }
   elseif ns._specID == 250 then _arcSpec = { cfgKey = "dndArcEnabled",          label = L["SETTINGS_ARC_LABEL_DND"], color = {0.20, 0.78, 0.35} }
   elseif ns._specID == 270 then _arcSpec = { cfgKey = "manaTeaArcEnabled",      label = L["SETTINGS_SEC_RES_LABEL_MANA_TEA"], color = {0.25, 0.85, 0.55} }
   elseif ns._specID == 1480 then _arcSpec = { cfgKey = "devourerArcEnabled",    label = L["SETTINGS_SEC_RES_LABEL_DEVOURER"], color = {0.70, 0.30, 1.00} }
@@ -596,15 +619,22 @@ function Build.ResourceCircle(container)
     -- 4e arg = tooltip, PAS le 3e : le 3e-comme-tooltip manquant faisait
     -- s'afficher W (une largeur en pixels, ex. "870") comme texte de tooltip --
     -- aucun intérêt pour l'utilisateur. nil = pas de tooltip.
-    local cbDur = ctx:Add(SW.CreateCheckbox(container, string.format(L["SETTINGS_ARC_DURATION_SHOW"], _arcSpec.label), nil, W))
-    BindCheckbox(cbDur, "resourceCircle", _arcSpec.cfgKey)
-    cbDur.onChanged = function(v)
-      DBSet("resourceCircle", _arcSpec.cfgKey, v)
-      -- AutoConfigCenterArc/ResyncCenterArc vivent sur ns.Auras, pas sur ce ns principal.
+    -- AutoConfigCenterArc/ResyncCenterArc vivent sur ns.Auras, pas sur ce ns principal.
+    -- Tout reglage qui change le MODE de l'arc doit passer par la : ResolveActiveArc()
+    -- est le seul endroit qui (des)abonne le canal clone-bar CDM et (re)demarre les
+    -- tickers. Un simple DBSet laisse l'ancien mode brancher sur bar.durationArc.
+    local function ResyncCenterArc()
       local AurasNS = ns.Auras
       if AurasNS and AurasNS.AutoConfigCenterArc then AurasNS.AutoConfigCenterArc() end
       -- Resync complet (pas juste AutoConfigCenterArc) : relance le ticker meme si activeInfo ne s'etait jamais resolu pour cette spe.
       if AurasNS and AurasNS.ResyncCenterArc then AurasNS.ResyncCenterArc() end
+    end
+
+    local cbDur = ctx:Add(SW.CreateCheckbox(container, string.format(L["SETTINGS_ARC_DURATION_SHOW"], _arcSpec.label), nil, W))
+    BindCheckbox(cbDur, "resourceCircle", _arcSpec.cfgKey)
+    cbDur.onChanged = function(v)
+      DBSet("resourceCircle", _arcSpec.cfgKey, v)
+      ResyncCenterArc()
     end
     cbDur:SetChecked(DBGet("resourceCircle", _arcSpec.cfgKey) ~= false)
 
@@ -614,6 +644,27 @@ function Build.ResourceCircle(container)
         L["SETTINGS_ARC_MODE_ABSORB_TOGGLE"],
         L["SETTINGS_ARC_MODE_ABSORB_TOGGLE_TT"], W))
       BindCheckbox(cbArcAbsorb, "resourceCircle", "ignorePainArcAbsorb")
+      -- Bascule duree <-> absorption : c'est un changement de MODE, donc resync
+      -- obligatoire. Sans lui le canal clone-bar CDM restait abonne et continuait a
+      -- piloter l'arc en duree, en ecrasant les SetCenterArcFill d'AbsorbTick --
+      -- le toggle semblait sans effet jusqu'au prochain /reload ou changement de spe.
+      cbArcAbsorb.onChanged = function(v)
+        DBSet("resourceCircle", "ignorePainArcAbsorb", v)
+        ResyncCenterArc()
+      end
+    end
+
+    -- Druide Gardien uniquement : contenu de l'arc (duree vs stacks de Fer-poil, 5 = plein).
+    -- Meme nature que la bascule de Dur au mal ci-dessus, donc meme resync obligatoire.
+    if ns._specID == 104 then
+      local cbArcStacks = ctx:Add(SW.CreateCheckbox(container,
+        L["SETTINGS_ARC_MODE_STACKS_TOGGLE"],
+        L["SETTINGS_ARC_MODE_STACKS_TOGGLE_TT"], W))
+      BindCheckbox(cbArcStacks, "resourceCircle", "ironfurArcStacks")
+      cbArcStacks.onChanged = function(v)
+        DBSet("resourceCircle", "ironfurArcStacks", v)
+        ResyncCenterArc()
+      end
     end
 
     -- Taille/epaisseur specifiques a la spec active (cf. ns.SecResSpecKey),
@@ -690,25 +741,12 @@ function Build.ResourceCircle(container)
   end)
 
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_BG_GLOW"], W))
-
-  local cbGlow = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_GLOW_ENABLE"],
-    L["SETTINGS_RC_GLOW_ENABLE_TT"], W))
-  BindCheckbox(cbGlow, "resourceCircle", "glowEnabled")
-
-  local slGlowSize = SW.CreateSlider(container, L["SETTINGS_GLOW_SIZE"], 0.5, 8.0, 0.1, SL_W2)
-  BindSlider(slGlowSize, "resourceCircle", "glowSize")
-  local slGlowOpacity = SW.CreateSlider(container, L["SETTINGS_GLOW_OPACITY"], 0, 1, 0.05, SL_W2)
-  BindSlider(slGlowOpacity, "resourceCircle", "glowOpacity")
-  ctx:AddRow(8, slGlowSize, slGlowOpacity)
-
-  ctx:Spacer(6)
   -- En-tête nommé selon la spec active (cf. ResourceMap.lua) plutôt qu'un texte générique.
   local SEC_RES_LABELS = {
     [250]  = L["SETTINGS_SEC_RES_LABEL_BONE_SHIELD"],
     [581]  = L["SETTINGS_SEC_RES_LABEL_SOUL_FRAGMENTS"],
     [73]   = L["SETTINGS_ARC_LABEL_IGNORE_PAIN"],
+    [104]  = L["SETTINGS_ARC_LABEL_IRONFUR"],
     [270]  = L["SETTINGS_SEC_RES_LABEL_MANA_TEA"],
   }
   local secResLabel = SEC_RES_LABELS[ns._specID]
@@ -769,7 +807,7 @@ function Build.ResourceCircle(container)
   -- Guerrier Prot uniquement : le texte affiche un montant (absorb Dur au Mal),
   -- les autres ressources secondaires (Bone Shield, Soul Fragments…) sont des
   -- petits nombres de stacks (0-10) où l'abréviation n'a pas de sens.
-  if ns._specID == 73 then
+  if ns._specID == 73 or ns._specID == 104 then
     local cbSecResAbbr = ctx:Add(SW.CreateCheckbox(container,
       L["SETTINGS_SEC_RES_ABBREVIATE"],
       L["SETTINGS_SEC_RES_ABBREVIATE_TT"], W))
@@ -790,6 +828,82 @@ function Build.ResourceCircle(container)
   local slSecResDecoSpacing = SW.CreateSlider(container, L["SETTINGS_DECO_SPACING"], 0, 20, 1, decoSpacingW)
   BindSlider(slSecResDecoSpacing, "resourceCircle", ns.SecResSpecKey("secResDecoSpacing"), "secResDecoSpacing")
   ctx:AddRow(8, ddSecResDeco, ddSecResDecoFont, slSecResDecoSpacing)
+
+
+  -- Barre de duree : reservee aux specs dont CenterArc.lua suit une duree de buff
+  -- attachee a la ressource secondaire (cf. SEC_RES_DUR_BAR_SPECS dans ResourceCircle.lua).
+  do
+    local _durBarSpec
+    if     ns._specID == 73  then _durBarSpec = { label = L["SETTINGS_ARC_LABEL_IGNORE_PAIN"], color = {0.78, 0.25, 0.25} }
+    elseif ns._specID == 104 then _durBarSpec = { label = L["SETTINGS_ARC_LABEL_IRONFUR"],     color = {0.85, 0.65, 0.30} }
+    -- Bouclier d'os et non Mort & Decomposition : c'est ce que la barre suit (cf.
+    -- SEC_RES_DUR_BAR_SPELLS). L'arc central, lui, reste sur D&D.
+    elseif ns._specID == 250 then _durBarSpec = { label = L["SETTINGS_SEC_RES_LABEL_BONE_SHIELD"], color = {0.75, 0.88, 1.00} }
+    end
+    if _durBarSpec then
+      ctx:Spacer(6)
+      ctx:Add(SW.CreateSectionHeader(container,
+        string.format(L["SETTINGS_SEC_RES_DUR_BAR_HEADER"], _durBarSpec.label), W))
+
+      local cbDurBar = ctx:Add(SW.CreateCheckbox(container,
+        L["SETTINGS_SEC_RES_DUR_BAR_SHOW"], L["SETTINGS_SEC_RES_DUR_BAR_SHOW_TT"], W))
+      BindCheckbox(cbDurBar, "resourceCircle", ns.SecResSpecKey("secResDurBarEnabled"), "secResDurBarEnabled")
+
+      -- Largeur TOTALE : chaque moitie en prend la moitie, elles se touchent au centre.
+      local slDurBarW = SW.CreateSlider(container, L["SETTINGS_WIDTH"], 10, 200, 1, SL_W2)
+      BindSlider(slDurBarW, "resourceCircle", ns.SecResSpecKey("secResDurBarWidth"), "secResDurBarWidth")
+      local slDurBarH = SW.CreateSlider(container, L["SETTINGS_THICKNESS"], 1, 20, 1, SL_W2)
+      BindSlider(slDurBarH, "resourceCircle", ns.SecResSpecKey("secResDurBarHeight"), "secResDurBarHeight")
+      ctx:AddRow(8, slDurBarW, slDurBarH)
+
+      -- Position relative au texte de ressource secondaire : bord d'ancrage + decalage.
+      local ddDurBarAnchor = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_SEC_RES_DUR_BAR_ANCHOR"], {
+        { value = "BOTTOM", text = L["SETTINGS_ANCHOR_BOTTOM"] },
+        { value = "TOP",    text = L["SETTINGS_ANCHOR_TOP"]    },
+      }, 220))
+      BindDropdown(ddDurBarAnchor, "resourceCircle", ns.SecResSpecKey("secResDurBarAnchor"), "secResDurBarAnchor")
+
+      local slDurBarX = SW.CreateSlider(container, L["SETTINGS_OFFSET_X"], -200, 200, 1, SL_W2)
+      BindSlider(slDurBarX, "resourceCircle", ns.SecResSpecKey("secResDurBarOffX"), "secResDurBarOffX")
+      local slDurBarY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -200, 200, 1, SL_W2)
+      BindSlider(slDurBarY, "resourceCircle", ns.SecResSpecKey("secResDurBarOffY"), "secResDurBarOffY")
+      ctx:AddRow(8, slDurBarX, slDurBarY)
+
+      -- Couleur : non definie = couleur du sort envoyee par CenterArc (defaut affiche ici).
+      local dbR = ns.SecResSpecKey("secResDurBarColorR")
+      local dbG = ns.SecResSpecKey("secResDurBarColorG")
+      local dbB = ns.SecResSpecKey("secResDurBarColorB")
+      local dr = ns.GetSecResCfg("secResDurBarColorR") or _durBarSpec.color[1]
+      local dg = ns.GetSecResCfg("secResDurBarColorG") or _durBarSpec.color[2]
+      local db_ = ns.GetSecResCfg("secResDurBarColorB") or _durBarSpec.color[3]
+      local durColorRow = CreateFrame("Frame", nil, container); durColorRow:SetSize(W, 26)
+      local durColorLbl = durColorRow:CreateFontString(nil, "OVERLAY")
+      durColorLbl:SetFont(ns.Media.fontGui, 11); durColorLbl:SetPoint("LEFT", 0, 0)
+      durColorLbl:SetTextColor(0.8, 0.8, 0.8, 1); durColorLbl:SetText(L["SETTINGS_SEC_RES_DUR_BAR_COLOR"])
+      local dsw = CreateFrame("Button", nil, durColorRow); dsw:SetSize(22, 22)
+      dsw:SetPoint("LEFT", durColorLbl, "RIGHT", 8, 0)
+      local dswT = dsw:CreateTexture(nil, "ARTWORK"); dswT:SetAllPoints(); dswT:SetColorTexture(dr, dg, db_)
+      local dswB = dsw:CreateTexture(nil, "BORDER"); dswB:SetPoint("TOPLEFT",-1,1); dswB:SetPoint("BOTTOMRIGHT",1,-1)
+      dswB:SetColorTexture(0.2, 0.2, 0.2, 0.8)
+      local function ApplyDurBarColor()
+        dswT:SetColorTexture(dr, dg, db_)
+        DBSet("resourceCircle", dbR, dr)
+        DBSet("resourceCircle", dbG, dg)
+        DBSet("resourceCircle", dbB, db_)
+        LiveApply("resourceCircle")
+      end
+      dsw:SetScript("OnClick", function()
+        ColorPickerFrame:SetupColorPickerAndShow({
+          r = dr, g = dg, b = db_,
+          swatchFunc = function() dr, dg, db_ = ColorPickerFrame:GetColorRGB(); ApplyDurBarColor() end,
+          cancelFunc = function(pp) dr, dg, db_ = pp.r, pp.g, pp.b; ApplyDurBarColor() end,
+        })
+      end)
+      dsw:SetScript("OnEnter", function() GameTooltip:SetOwner(dsw,"ANCHOR_TOP"); GameTooltip:SetText(L["SETTINGS_SEC_RES_DUR_BAR_COLOR"],1,1,1); GameTooltip:Show() end)
+      dsw:SetScript("OnLeave", function() GameTooltip:Hide() end)
+      ctx:Add(durColorRow)
+    end
+  end
 
   ctx:Spacer(4)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_POSITION"], W))
@@ -1367,6 +1481,10 @@ function Build.UnitBars(container)
     preBars:SetWidth(preBarsW)
     local pctx = NewLayout(preBars)
 
+    local ddUBTex = pctx:Add(SW.CreateDropdown(preBars, L["SETTINGS_BAR_TEXTURE"], ns.GetBarTextureList(), preBarsW))
+    ddUBTex:SetValue(UBGlobal("barTexture") or ns.BAR_TEXTURE_DEFAULT)
+    ddUBTex.onChanged = function(val) UBGlobalSet("barTexture", val) end
+
     local cbColorInvert = pctx:Add(SW.CreateCheckbox(preBars,
       L["SETTINGS_UB_COLOR_INVERTED"],
       L["SETTINGS_UB_COLOR_INVERTED_TT"], preBarsW))
@@ -1510,19 +1628,158 @@ end
 -- BUILD : Numero de Groupe (raid uniquement) : vignette + texte, page separee dans "Cadres d'unites" (pas une sous-section de Barres de Vie).
 function Build.GroupNumber(container)
   local ctx = NewLayout(container)
-  local W = CONTENT_W
-  local W2 = math.floor((W - 8) / 2)
+
+  -- Capture de reference (Media/UI/RaidFramesPreview.tga) : deux conteneurs de
+  -- groupe ElvUI cote a cote. La TGA fait 256x256 (puissance de 2 obligatoire),
+  -- l'image utile n'en occupe que la partie gauche -> TEXCOORD_R.
+  local IMG_W, IMG_H = 265, 272
+  local TEXCOORD_R   = 249 / 256
+  -- Rectangles des deux conteneurs dans l'image, en pixels image (origine haut-gauche).
+  local GROUP_RECTS = {
+    { l = 38,  r = 139, t = 17, b = 233 },
+    { l = 147, r = 264, t = 17, b = 233 },
+  }
+  local PREVIEW_W, PREVIEW_H = 220, 244
+
+  -- L'apercu est epingle en haut a droite de la page : les sections qui vivent
+  -- a cote de lui travaillent sur une largeur reduite. Sous une fenetre etroite
+  -- il est abandonne plutot que d'ecraser les widgets.
+  local preview
+  local reserve = 0
+  if CONTENT_W >= 560 then reserve = PREVIEW_W + 14 end
+  local W    = CONTENT_W - reserve   -- colonne de gauche (a cote de l'apercu)
+  local WALL = CONTENT_W             -- pleine largeur (sous l'apercu)
+  local W2   = math.floor((W - 8) / 2)
+
+  if reserve > 0 then
+    preview = CreateFrame("Frame", nil, container, "BackdropTemplate")
+    preview:SetSize(PREVIEW_W, PREVIEW_H)
+    preview:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 0)
+    preview:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8",
+                          edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    preview:SetBackdropColor(0.055, 0.055, 0.065, 0.95)
+    preview:SetBackdropBorderColor(Theme.border[1], Theme.border[2], Theme.border[3], 0.9)
+
+    local pvTitle = preview:CreateFontString(nil, "OVERLAY")
+    pvTitle:SetFont(ns.Media.fontGui, 10)
+    pvTitle:SetPoint("TOPLEFT", preview, "TOPLEFT", 7, -6)
+    pvTitle:SetTextColor(Theme.accentText[1], Theme.accentText[2], Theme.accentText[3], 1)
+    pvTitle:SetText((L["SETTINGS_GN_PREVIEW"]):upper())
+
+    -- Canevas : l'image des cadres de raid + les vignettes, mises a l'echelle
+    -- ensemble pour rester visibles quel que soit le decalage configure.
+    local canvas = CreateFrame("Frame", nil, preview)
+    canvas:SetPoint("TOPLEFT",     preview, "TOPLEFT",      6, -21)
+    canvas:SetPoint("BOTTOMRIGHT", preview, "BOTTOMRIGHT", -6,   6)
+    canvas:SetClipsChildren(true)
+
+    local img = canvas:CreateTexture(nil, "BACKGROUND")
+    img:SetTexture("Interface\\AddOns\\AishCore\\Media\\UI\\RaidFramesPreview")
+    img:SetTexCoord(0, TEXCOORD_R, 0, 1)
+
+    -- Une vignette par conteneur, construite comme celles du module
+    -- (texture grunge teintee + numero avec le meme style de contour).
+    local badges = {}
+    for i = 1, #GROUP_RECTS do
+      local bf = CreateFrame("Frame", nil, canvas)
+      bf:SetFrameLevel(canvas:GetFrameLevel() + 2)
+      local tex = bf:CreateTexture(nil, "ARTWORK")
+      tex:SetAllPoints()
+      tex:SetTexture("Interface\\AddOns\\AishCore\\Media\\XPBar\\grunge_spot1.png")
+      tex:SetRotation(i == 1 and 0.35 or 2.20)
+      local txt = bf:CreateFontString(nil, "OVERLAY")
+      txt:SetJustifyH("CENTER")
+      badges[i] = { frame = bf, tex = tex, text = txt, ring = ns.CreateSlugRing(bf, txt) }  -- anneau en ARTWORK : sous le numero, comme dans le module
+    end
+
+    function preview:Update()
+      local cfg  = ns.GetCfg("groupNumber") or {}
+      local size = cfg.badgeSize or 28
+      local pos  = cfg.badgePosition or "TOP"
+      local dx   = cfg.badgeX or 0
+      local dy   = cfg.badgeY or 0
+
+      -- Position de chaque vignette en pixels image. WoW compte dy vers le HAUT,
+      -- l'image vers le BAS : d'ou le "- dy".
+      local minL, minT = 0, 0
+      local maxR, maxB = IMG_W, IMG_H
+      local rects = {}
+      for i, g in ipairs(GROUP_RECTS) do
+        local ax = (pos:find("LEFT") and g.l) or (pos:find("RIGHT") and g.r) or (g.l + g.r) / 2
+        local ay = (pos:find("TOP")  and g.t) or (pos:find("BOTTOM") and g.b) or (g.t + g.b) / 2
+        -- La vignette s'ancre par le MEME point que celui choisi sur le conteneur.
+        local l = (ax + dx) - ((pos:find("LEFT") and 0) or (pos:find("RIGHT")  and size) or size / 2)
+        local t = (ay - dy) - ((pos:find("TOP")  and 0) or (pos:find("BOTTOM") and size) or size / 2)
+        rects[i] = { l = l, t = t }
+        if l < minL then minL = l end
+        if t < minT then minT = t end
+        if l + size > maxR then maxR = l + size end
+        if t + size > maxB then maxB = t + size end
+      end
+
+      local cw = math.max(1, canvas:GetWidth()  or 1)
+      local ch = math.max(1, canvas:GetHeight() or 1)
+      -- Zoom arriere automatique : l'image ET les vignettes tiennent toujours
+      -- dans le canevas, meme avec un gros decalage.
+      local scale = math.min(cw / (maxR - minL), ch / (maxB - minT))
+      local ox = (cw - (maxR - minL) * scale) / 2 - minL * scale
+      local oy = (ch - (maxB - minT) * scale) / 2 - minT * scale
+
+      img:ClearAllPoints()
+      img:SetPoint("TOPLEFT", canvas, "TOPLEFT", ox, -oy)
+      img:SetSize(IMG_W * scale, IMG_H * scale)
+
+      local alpha = (cfg.enabled == false) and 0.25 or 1
+      for i, r in ipairs(rects) do
+        local b = badges[i]
+        b.frame:SetSize(math.max(1, size * scale), math.max(1, size * scale))
+        b.frame:ClearAllPoints()
+        b.frame:SetPoint("TOPLEFT", canvas, "TOPLEFT", ox + r.l * scale, -(oy + r.t * scale))
+        b.frame:SetAlpha(alpha)
+        b.tex:SetVertexColor(unpack(cfg.badgeColor or { 0, 0, 0, 0.85 }))
+        ns.ApplyTextOutlineStyle(b.text, b.ring, cfg.font or ns.Media.font,
+          math.max(5, math.floor((cfg.textSize or 16) * scale + 0.5)), cfg.textOutlineStyle, true)
+        b.text:SetTextColor(unpack(cfg.textColor or { 1, 1, 1, 1 }))
+        b.text:ClearAllPoints()
+        b.text:SetPoint("CENTER", b.frame, "CENTER",
+          (cfg.textOffsetX or 0) * scale, (cfg.textOffsetY or 0) * scale)
+        b.text:SetText(tostring(i))
+      end
+    end
+
+    -- Re-synchronise a chaque reaffichage de la page : les valeurs peuvent avoir
+    -- change sans passer par onChanged (changement de profil, import...).
+    preview:SetScript("OnShow", function(self) self:Update() end)
+    table.insert(ctx.widgets, preview)
+  end
+
+  -- Rafraichit l'apercu apres l'action normale du widget.
+  local function Live(w)
+    if preview then
+      local orig = w.onChanged
+      w.onChanged = function(val)
+        if orig then orig(val) end
+        preview:Update()
+      end
+    end
+    return w
+  end
 
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_GROUP_NUMBER"], W))
 
   local cbGN = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_GN_ENABLE"], L["SETTINGS_GN_ENABLE_TT"], W))
   BindCheckbox(cbGN, "groupNumber", "enabled")
+  Live(cbGN)
 
-  local slGNSize = ctx:Add(SW.CreateSlider(container, L["SETTINGS_GN_BADGE_SIZE"], 16, 48, 1, W))
+  -- Vignette
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_GN_BADGE"], W))
+
+  local slGNSize = SW.CreateSlider(container, L["SETTINGS_GN_BADGE_SIZE"], 16, 48, 1, W2)
   BindSlider(slGNSize, "groupNumber", "badgeSize")
-
-  local colGNBadge = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_GN_BADGE_COLOR"], W))
+  local colGNBadge = SW.CreateColorButton(container, L["SETTINGS_GN_BADGE_COLOR"], W2)
   BindColorButton(colGNBadge, "groupNumber", "badgeColor")
+  ctx:AddRow(8, Live(slGNSize), Live(colGNBadge))
 
   -- Point d'ancrage sur le conteneur de groupe ElvUI (mode multi-vignettes,
   -- cf. Modules/GroupNumber.lua) : les 8 coins/cotes possibles.
@@ -1536,17 +1793,23 @@ function Build.GroupNumber(container)
     { value = "BOTTOMLEFT",  text = L["SETTINGS_POS_BOTTOMLEFT"] },
     { value = "BOTTOMRIGHT", text = L["SETTINGS_POS_BOTTOMRIGHT"] },
   }
-  local ddGNPos = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_GN_POSITION"], GN_POSITION_OPTIONS, 220))
+  local ddGNPos = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_GN_POSITION"], GN_POSITION_OPTIONS, math.min(220, W)))
   BindDropdown(ddGNPos, "groupNumber", "badgePosition")
+  Live(ddGNPos)
 
   local slGNBadgeX = SW.CreateSlider(container, L["SETTINGS_OFFSET_X"], -400, 400, 1, W2)
   BindSlider(slGNBadgeX, "groupNumber", "badgeX")
   local slGNBadgeY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -300, 300, 1, W2)
   BindSlider(slGNBadgeY, "groupNumber", "badgeY")
-  ctx:AddRow(8, slGNBadgeX, slGNBadgeY)
+  ctx:AddRow(8, Live(slGNBadgeX), Live(slGNBadgeY))
+
+  -- Numero : la section passe sous l'apercu, donc de nouveau en pleine largeur.
+  if preview and ctx.y < PREVIEW_H + 6 then ctx.y = PREVIEW_H + 6 end
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_GN_NUMBER"], WALL))
 
   -- Police / contour / taille / couleur du texte sur une seule rangee.
-  local gnSL4 = math.floor((W - 3 * 8) / 4)
+  local gnSL4 = math.floor((WALL - 3 * 8) / 4)
   local ddGNFont = SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), gnSL4)
   BindDropdown(ddGNFont, "groupNumber", "font")
 
@@ -1558,13 +1821,16 @@ function Build.GroupNumber(container)
 
   local colGNText = SW.CreateColorButton(container, L["SETTINGS_TEXT_COLOR"], gnSL4)
   BindColorButton(colGNText, "groupNumber", "textColor")
-  ctx:AddRow(8, ddGNFont, ddGNOutline, slGNTextSize, colGNText)
+  ctx:AddRow(8, Live(ddGNFont), Live(ddGNOutline), Live(slGNTextSize), Live(colGNText))
 
-  local slGNTextX = SW.CreateSlider(container, L["SETTINGS_OFFSET_X"], -20, 20, 1, W2)
+  local _gnW2 = math.floor((WALL - 8) / 2)
+  local slGNTextX = SW.CreateSlider(container, L["SETTINGS_OFFSET_X"], -20, 20, 1, _gnW2)
   BindSlider(slGNTextX, "groupNumber", "textOffsetX")
-  local slGNTextY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -20, 20, 1, W2)
+  local slGNTextY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -20, 20, 1, _gnW2)
   BindSlider(slGNTextY, "groupNumber", "textOffsetY")
-  ctx:AddRow(8, slGNTextX, slGNTextY)
+  ctx:AddRow(8, Live(slGNTextX), Live(slGNTextY))
+
+  if preview then preview:Update() end
 
   ctx:Finalize()
   return ctx.widgets
@@ -1618,6 +1884,10 @@ function Build.CastBar(container)
   slH:SetValue(CBGet("height") or 3)
   slH.onChanged = function(val) CBSet("height", val) end
   ctx:AddRow(8, slW, slH)
+
+  local ddCBTex = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_BAR_TEXTURE"], ns.GetBarTextureList(), W))
+  ddCBTex:SetValue(CBGet("barTexture") or ns.BAR_TEXTURE_DEFAULT)
+  ddCBTex.onChanged = function(val) CBSet("barTexture", val) end
 
   -- Position
   ctx:Spacer(6)
@@ -1842,6 +2112,10 @@ function Build.TargetCastBar(container)
   slTCBH:SetValue(TCBGet("height") or 3)
   slTCBH.onChanged = function(val) TCBSet("height", val) end
   ctx:AddRow(8, slTCBW, slTCBH)
+
+  local ddTCBTex = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_BAR_TEXTURE"], ns.GetBarTextureList(), W))
+  ddTCBTex:SetValue(TCBGet("barTexture") or ns.BAR_TEXTURE_DEFAULT)
+  ddTCBTex.onChanged = function(val) TCBSet("barTexture", val) end
 
   -- Position
   ctx:Spacer(6)
@@ -6165,6 +6439,10 @@ function Build.XPBar(container)
   local ddXPOutline = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_TEXT_OUTLINE"], ns.GetTextOutlineStyles(), 220))
   BindDropdown(ddXPOutline, "xpBar", "levelOutlineStyle")
 
+  -- Textes d'info : infobulle (XP restante / repos) + XP centrale
+  local ddXPInfoFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_XP_INFO_FONT"], ns.GetFontList(), 220))
+  BindDropdown(ddXPInfoFont, "xpBar", "fontInfo")
+
   ctx:Finalize()
   return ctx.widgets
 end
@@ -6182,6 +6460,7 @@ function Build.PriorityBar(container)
   local cbPB = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_ENABLE"],
     L["SETTINGS_PB_ENABLE_TT"], W))
   BindCheckbox(cbPB, "priorityBar", "enabled")
+
   ctx:Spacer(8)
 
   -- Disposition (5 choix visuels, spec-specific)
@@ -6319,7 +6598,12 @@ function Build.PriorityBar(container)
   BindSlider(slPBSpacing, "priorityBar", "iconSpacing")
   ctx:AddRow(8, slPBSize, slPBSpacing)
 
-  local slPBOffset = SW.CreateSlider(container, L["SETTINGS_PB_HORIZ_DISTANCE"], 50, 400, 1, _pbSL2)
+  -- Decalage vertical dedie a la spe tank : LayoutSlots l'applique des que la spe active
+  -- est tank, quelle que soit la config des barres de vie -- le slider est donc toujours
+  -- visible (sinon il serait inatteignable depuis une spe non-tank).
+  local _pbSLVert = _pbSL3
+
+  local slPBOffset = SW.CreateSlider(container, L["SETTINGS_PB_HORIZ_DISTANCE"], 50, 400, 1, _pbSLVert)
   BindSlider(slPBOffset, "priorityBar", "sideOffset")
   local origOff = slPBOffset.onChanged
   slPBOffset.onChanged = function(val)
@@ -6327,7 +6611,7 @@ function Build.PriorityBar(container)
     if PB and PB.ClearDragPositions then PB.ClearDragPositions() end
     origOff(val)
   end
-  local slPBVert = SW.CreateSlider(container, L["SETTINGS_VERTICAL_OFFSET"], -500, 500, 1, _pbSL2)
+  local slPBVert = SW.CreateSlider(container, L["SETTINGS_VERTICAL_OFFSET"], -500, 500, 1, _pbSLVert)
   BindSlider(slPBVert, "priorityBar", "verticalOffset")
   local origVert = slPBVert.onChanged
   slPBVert.onChanged = function(val)
@@ -6335,7 +6619,19 @@ function Build.PriorityBar(container)
     if PB and PB.ClearDragPositions then PB.ClearDragPositions() end
     origVert(val)
   end
-  ctx:AddRow(8, slPBOffset, slPBVert)
+  local slPBTankY = SW.CreateSlider(container,
+    L["SETTINGS_PB_VERTICAL_OFFSET_TANK"], -300, 300, 1, _pbSLVert)
+  BindSlider(slPBTankY, "priorityBar", "verticalOffsetTank")
+  -- Valeur absente par defaut (nil = aucune surcharge tank) : sans ca le slider
+  -- afficherait son minimum. SetValue est programmatique, il n'ecrit rien en DB.
+  if DBGet("priorityBar", "verticalOffsetTank") == nil then slPBTankY:SetValue(0) end
+  local origTankY = slPBTankY.onChanged
+  slPBTankY.onChanged = function(val)
+    local PB = ns.Modules.PriorityBar
+    if PB and PB.ClearDragPositions then PB.ClearDragPositions() end
+    origTankY(val)
+  end
+  ctx:AddRow(8, slPBOffset, slPBVert, slPBTankY)
 
   ctx:Spacer(4)
 
@@ -6386,6 +6682,8 @@ function Build.PriorityBar(container)
 
   local slCDFont = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 8, 24, 1, W))
   BindSlider(slCDFont, "priorityBar", "cooldownFontSize")
+  local ddPBCDFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), W))
+  BindDropdown(ddPBCDFont, "priorityBar", "cooldownFont")
 
   local colCDText = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TEXT_COLOR"], W))
   BindColorButton(colCDText, "priorityBar", "cooldownTextColor")
@@ -6417,6 +6715,8 @@ function Build.PriorityBar(container)
   BindSlider(slChargeOffY, "priorityBar", "chargeOffsetY")
   local slChargeFont = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 8, 24, 1, _pbSL3)
   BindSlider(slChargeFont, "priorityBar", "chargeFontSize")
+  local ddPBChFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), W))
+  BindDropdown(ddPBChFont, "priorityBar", "chargeFont")
   ctx:AddRow(8, slChargeOffX, slChargeOffY, slChargeFont)
 
   local colCharges = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_PB_CHARGES_COLOR"], W))
@@ -7133,6 +7433,9 @@ function Build.TopTargetBar(container)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_COLORED_BAR"], W))
   MakeTTBSliderRow("barW",  "barH",  L["SETTINGS_WIDTH"],    L["SETTINGS_HEIGHT"],    60, 700, 1, 1, 20, 0.1)
   MakeTTBSliderRow("barOX", "barOY", L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"], -50, 50, 1, -50, 50, 1)
+  -- Texture partagee par la barre de vie, la barre de ressource et la barre de la cible de la cible.
+  local ddTTBTex = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_BAR_TEXTURE"], ns.GetBarTextureList(), 220))
+  BindDropdown(ddTTBTex, "topTargetBar", "barTexture")
 
   ctx:Spacer(8)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_NAME_TEXT"], W))
@@ -8377,6 +8680,14 @@ Build.AFKMode = function(container)
   BindCheckbox(cbChat, "afkMode", "chatShow")
   BindCheckbox(cbExit, "afkMode", "exitOnKeypress")
   ctx:AddRow(8, cbCam, cbChat, cbExit)
+
+  -- Fenetre de chat : police + taille (son placement reste fixe, contrairement aux
+  -- elements de texte qui ont leur propre sous-section)
+  local ddAFKChatFont = SW.CreateDropdown(container, L["SETTINGS_AFK_CHAT_FONT"], ns.GetFontList(), W2)
+  BindDropdown(ddAFKChatFont, "afkMode", "chatFont")
+  local slAFKChatSize = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 8, 24, 1, W2)
+  BindSlider(slAFKChatSize, "afkMode", "chatSize")
+  ctx:AddRow(8, ddAFKChatFont, slAFKChatSize)
 
   local colAccent = SW.CreateColorButton(container, L["SETTINGS_AFK_ACCENT_COLOR"], W2)
   BindColorButton(colAccent, "afkMode", "accentColor")
@@ -10242,6 +10553,30 @@ function Build.CDM(container, dbKey)
   local slItemSize = SW.CreateSlider(container, L["SETTINGS_CDM_ITEM_SIZE"], 16, 80, 1, SL_W2)
   BindSlider(slItemSize, dbKey, "itemSize")
   ctx:AddRowCentered(8, cbItemSize, slItemSize)
+
+  -- Position liee a la barre de vie du joueur (Essentiels uniquement)
+  if dbKey == "cdmEssential" then
+    ctx:Spacer(6)
+    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_CDM_POSITION"], W))
+    local cbLink = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_CDM_LINK_PLAYER_BAR"], L["SETTINGS_CDM_LINK_PLAYER_BAR_TT"], W))
+    BindCheckbox(cbLink, dbKey, "linkToPlayerBar")
+    local ddSide = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_CDM_LINK_SIDE"], {
+      { value = "RIGHT",       text = L["SETTINGS_ANCHOR_RIGHT"]       },
+      { value = "LEFT",        text = L["SETTINGS_ANCHOR_LEFT"]        },
+      { value = "TOP",         text = L["SETTINGS_ANCHOR_TOP"]         },
+      { value = "BOTTOM",      text = L["SETTINGS_ANCHOR_BOTTOM"]      },
+      { value = "TOPLEFT",     text = L["SETTINGS_ANCHOR_TOPLEFT"]     },
+      { value = "TOPRIGHT",    text = L["SETTINGS_ANCHOR_TOPRIGHT"]    },
+      { value = "BOTTOMLEFT",  text = L["SETTINGS_ANCHOR_BOTTOMLEFT"]  },
+      { value = "BOTTOMRIGHT", text = L["SETTINGS_ANCHOR_BOTTOMRIGHT"] },
+    }, 220))
+    BindDropdown(ddSide, dbKey, "linkSide")
+    local slGap = SW.CreateSlider(container, L["SETTINGS_CDM_LINK_GAP"], -50, 100, 1, SL_W2)
+    BindSlider(slGap, dbKey, "linkGap")
+    local slOff = SW.CreateSlider(container, L["SETTINGS_CDM_LINK_OFFSET"], -200, 200, 1, SL_W2)
+    BindSlider(slOff, dbKey, "linkOffset")
+    ctx:AddRow(8, slGap, slOff)
+  end
 
   -- Couleurs par etat : grille compacte 3 colonnes, pas de separateur entre lignes
   ctx:Spacer(6)

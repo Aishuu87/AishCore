@@ -1208,9 +1208,9 @@ local CAROUSEL_GOLD = { 0.78, 0.62, 0.30 }
 -- Expose pour les usages hors de ce fichier (ex: Build.HeroicSupport) qui doivent
 -- eux aussi rester dores en permanence, independamment du theme d'accent.
 SharedWidgets.HEROIC_GOLD = CAROUSEL_GOLD
--- Police italique pour la legende ; degrade silencieusement vers la police
--- normale si SharedMedia_MyMedia n'est pas installe.
-local CAROUSEL_ITALIC_FONT = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Fontin-Italic.ttf"
+-- Police de la legende : police du jeu (2002), disponible dans toutes les locales.
+-- Aucune dependance a une media pack externe.
+local CAROUSEL_CAPTION_FONT = ns.FONT_FALLBACK
 
 function SharedWidgets.CreateCarousel(parent, width, height, images, autoInterval)
   autoInterval = autoInterval or 6
@@ -1256,7 +1256,7 @@ function SharedWidgets.CreateCarousel(parent, width, height, images, autoInterva
   -- Legende (nom de l'image courante), bas-gauche, italique -- meme niveau
   -- que les miniatures cote droit.
   local caption = container:CreateFontString(nil, "OVERLAY")
-  caption:SetFont(CAROUSEL_ITALIC_FONT, 10, "")
+  caption:SetFont(CAROUSEL_CAPTION_FONT, 10, "")
   caption:SetTextColor(unpack(CAROUSEL_GOLD))
   caption:SetJustifyH("LEFT")
   caption:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", 0, 0)

@@ -1265,6 +1265,17 @@ function MissingBuffs.Init()
     end)
 end
 
+-- Changement de profil (cf. Core/Profiles.lua Prof:SetActive) : Cfg() pointe deja sur le nouveau
+-- profil, on reapplique position, apparence et etat de l'alerte.
+function MissingBuffs.OnProfileChanged()
+    if frame and not InCombatLockdown() then
+        frame._positioned = false
+        PositionFrameIfNeeded()
+    end
+    MissingBuffs.RefreshAppearance()
+    MissingBuffs.RequestCheck()
+end
+
 -- Helper reglages : (des)ignorer une entree par settingsId
 function MissingBuffs.SetIgnored(settingsId, ignored)
     local cfg = Cfg()

@@ -12,10 +12,11 @@ local TEX_GRUNGE    = "Interface\\AddOns\\AishCore\\Media\\XPBar\\grunge_spot1.p
 local TEX_SPARK     = "Interface\\CastingBar\\UI-CastingBar-Spark"
 local TEX_SOLID     = "Interface\\BUTTONS\\WHITE8X8"
 
-local FONT_LEVEL    = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat-BoldItalic.ttf"
-local FONT_INFO     = "Fonts\\2002.ttf"
+local FONT_LEVEL    = ns.FONT_FALLBACK  -- police du jeu (2002)
+local FONT_INFO     = ns.FONT_FALLBACK  -- meme casse que ns.FONT_LIST (sinon doublon dans le dropdown)
 -- Font du badge de niveau (mise a jour via ApplySettings si l'utilisateur change la police)
 local xpFontLevel   = FONT_LEVEL
+local xpFontInfo    = FONT_INFO  -- textes d'info (tooltip, XP centrale), cf. cfg.fontInfo
 
 local BAR_H         = 9
 local SPARK_W       = 107
@@ -947,7 +948,7 @@ end
 
 local function MakeCoordText(parent)
   local f = parent:CreateFontString(nil, "OVERLAY")
-  f:SetFont(FONT_INFO, 10, "OUTLINE")
+  f:SetFont(xpFontInfo, 10, "OUTLINE")
   f:SetPoint("TOPLEFT", parent, "TOPLEFT", 2, -2)
   f:SetTextColor(1, 1, 0, 1)
   f:SetShadowOffset(1, -1)
@@ -1418,7 +1419,7 @@ local function CreateXPBar_Tooltip(tf)
   tooltipFrame:RegisterForDrag("LeftButton")
 
   tooltipXP = tooltipFrame:CreateFontString(nil, "OVERLAY")
-  tooltipXP:SetFont(FONT_INFO, 12, "OUTLINE")
+  tooltipXP:SetFont(xpFontInfo, 12, "OUTLINE")
   tooltipXP:SetPoint("TOPLEFT", tooltipFrame, "TOPLEFT", 32, -12)
   tooltipXP:SetJustifyH("LEFT")
   tooltipXP:SetTextColor(0.780, 0.667, 0.400, 1)
@@ -1431,7 +1432,7 @@ local function CreateXPBar_Tooltip(tf)
   ttTex:SetRotation(math.rad(tf.bgRot))
 
   tooltipRested = tooltipFrame:CreateFontString(nil, "OVERLAY")
-  tooltipRested:SetFont(FONT_INFO, 12, "OUTLINE")
+  tooltipRested:SetFont(xpFontInfo, 12, "OUTLINE")
   tooltipRested:SetPoint("TOPLEFT", tooltipFrame, "TOPLEFT", 10, -26)
   tooltipRested:SetJustifyH("LEFT")
   tooltipRested:SetTextColor(0.40, 0.80, 1.00, 1)
@@ -1443,7 +1444,7 @@ local function CreateXPBar_Tooltip(tf)
   centerXPHolder:SetFrameStrata("DIALOG")
 
   centerXPText = centerXPHolder:CreateFontString(nil, "OVERLAY")
-  centerXPText:SetFont(FONT_INFO, 13, "OUTLINE")
+  centerXPText:SetFont(xpFontInfo, 13, "OUTLINE")
   centerXPText:SetPoint("CENTER", centerXPHolder, "CENTER", 0, 0)
   centerXPText:SetJustifyH("CENTER")
   centerXPText:SetTextColor(0.780, 0.667, 0.400, 1)
@@ -1802,6 +1803,7 @@ function XPBar.ApplySettings()
 
   -- Police du badge de niveau (mis a jour avant les fonctions dynamiques)
   xpFontLevel = cfg.fontLevel or FONT_LEVEL
+  xpFontInfo  = cfg.fontInfo  or FONT_INFO
   if levelText then
     local _, sz = levelText:GetFont()
     SetLevelTextFont(sz or 19)

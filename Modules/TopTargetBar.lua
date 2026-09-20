@@ -8,9 +8,13 @@ local TopTargetBar = {}
 ns.Modules.TopTargetBar = TopTargetBar
 
 -- Constantes
-local BAR_TEXTURE   = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga"
-local BEBAS_FONT    = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\BebasNeue-Regular.ttf"
-local MONTSERRAT_BI = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat-BoldItalic.ttf"
+-- Texture de la barre : cle de config resolue a chaque appel (ns.BAR_TEXTURES),
+-- pour que le choix du dropdown s'applique sans /reload.
+local function BarTex()
+    return ns.ResolveBarTexFromKey((ns.GetCfg("topTargetBar") or {}).barTexture)
+end
+local DEFAULT_FONT    = ns.FONT_FALLBACK  -- police du jeu (2002), aucune media pack requise
+local DEFAULT_HP_FONT = ns.FONT_FALLBACK
 local DARK          = 14 / 255   -- #0e0e0e
 
 -- Couleurs (identiques aux conditions WA)
@@ -296,7 +300,7 @@ local function CreateTargetBar()
     local bar = CreateFrame("StatusBar", nil, f)
     bar:SetSize(bw, bh)
     bar:SetPoint("TOP", f, "TOP", box, boy)
-    bar:SetStatusBarTexture(BAR_TEXTURE)
+    bar:SetStatusBarTexture(BarTex())
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0)
     bar:SetStatusBarColor(DARK, DARK, DARK, 1)
@@ -314,7 +318,7 @@ local function CreateTargetBar()
     local powerBar = CreateFrame("StatusBar", nil, f)
     powerBar:SetSize(bw, bh)
     powerBar:SetPoint("TOP", f, "TOP", box, boy)
-    powerBar:SetStatusBarTexture(BAR_TEXTURE)
+    powerBar:SetStatusBarTexture(BarTex())
     powerBar:SetMinMaxValues(0, 1)
     powerBar:SetValue(0)
     powerBar:SetStatusBarColor(1, 0.82, 0, 1)
@@ -341,7 +345,7 @@ local function CreateTargetBar()
     nameFrame:Hide()
 
     local nameTxt = nameFrame:CreateFontString(nil, "OVERLAY")
-    nameTxt:SetFont(BEBAS_FONT, 15, "")
+    nameTxt:SetFont(DEFAULT_FONT, 15, "")
     nameTxt:SetJustifyH("CENTER")
     nameTxt:SetAlpha(1)
     nameTxt:SetShadowColor(0, 0, 0, 1)
@@ -364,7 +368,7 @@ local function CreateTargetBar()
     hpFrame:SetPoint(hanchor, bgFull, hanchor, hox, hoy)
 
     local hpTxt = hpFrame:CreateFontString(nil, "OVERLAY")
-    if not hpTxt:SetFont(MONTSERRAT_BI, hpts, "") then
+    if not hpTxt:SetFont(DEFAULT_HP_FONT, hpts, "") then
         hpTxt:SetFont("Fonts\\FRIZQT__.TTF", hpts, "")
     end
     hpTxt:SetJustifyH(hanchor)
@@ -444,7 +448,7 @@ local function CreateTargetTargetBar()
     local bar = CreateFrame("StatusBar", nil, f)
     bar:SetSize(tbw, tbh)
     bar:SetPoint("CENTER", f, "CENTER", tbox, tboy)
-    bar:SetStatusBarTexture(BAR_TEXTURE)
+    bar:SetStatusBarTexture(BarTex())
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0)
     bar:SetStatusBarColor(DARK, DARK, DARK, 1)
@@ -454,7 +458,7 @@ local function CreateTargetTargetBar()
     local tnoy  = (db2 and db2.ttNameOY) or 0.860
 
     local nameTxt = f:CreateFontString(nil, "OVERLAY")
-    nameTxt:SetFont(BEBAS_FONT, 12, "")
+    nameTxt:SetFont(DEFAULT_FONT, 12, "")
     nameTxt:SetJustifyH("CENTER")
     nameTxt:SetAlpha(1)
     nameTxt:SetShadowColor(0, 0, 0, 1)
@@ -855,6 +859,7 @@ function TopTargetBar.ApplySettings()
         -- Quand la barre de ressource est active, la barre de vie remonte de (bh+1) px
         local healthBarOY = showPower and (boy + bh + 1) or boy
         f_target.bar:SetSize(bw, bh)
+        f_target.bar:SetStatusBarTexture(BarTex())
         f_target.bar:ClearAllPoints()
         f_target.bar:SetPoint("TOP", f_target, "TOP", box, healthBarOY)
         f_target.barBg:ClearAllPoints()
@@ -865,6 +870,7 @@ function TopTargetBar.ApplySettings()
         if f_target.powerBar then
             if showPower then
                 f_target.powerBar:SetSize(bw, bh)
+                f_target.powerBar:SetStatusBarTexture(BarTex())
                 f_target.powerBar:ClearAllPoints()
                 f_target.powerBar:SetPoint("TOP", f_target, "TOP", box, boy)
                 f_target.powerBarBg:ClearAllPoints()
@@ -885,7 +891,7 @@ function TopTargetBar.ApplySettings()
         -- Texte nom/niveau — repositionner nameFrame (le FontString est centré dedans)
         local nox = (db and db.nameOX) or 0
         local noy = (db and db.nameOY) or -5
-        f_target.nameTxt:SetFont((db and db.nameFont) or BEBAS_FONT, 15, "")
+        f_target.nameTxt:SetFont((db and db.nameFont) or DEFAULT_FONT, 15, "")
         if f_target.nameFrame then
             f_target.nameFrame:ClearAllPoints()
             f_target.nameFrame:SetPoint("TOP", f_target, "TOP", nox, noy)
@@ -903,7 +909,7 @@ function TopTargetBar.ApplySettings()
             f_target.hpFrame:SetPoint(hanchor, f_target.bgFull, hanchor, hox, hoy)
         end
         if f_target.hpTxt then
-            local _hpFont = (db and db.hpFont) or MONTSERRAT_BI
+            local _hpFont = (db and db.hpFont) or DEFAULT_HP_FONT
             if not f_target.hpTxt:SetFont(_hpFont, hpts, "") then
                 f_target.hpTxt:SetFont("Fonts\\FRIZQT__.TTF", hpts, "")
             end
@@ -935,13 +941,14 @@ function TopTargetBar.ApplySettings()
         local tbox = (db and db.ttBarOX) or 0
         local tboy = (db and db.ttBarOY) or -10.161
         f_tt.bar:SetSize(tbw, tbh)
+        f_tt.bar:SetStatusBarTexture(BarTex())
         f_tt.bar:ClearAllPoints()
         f_tt.bar:SetPoint("CENTER", f_tt, "CENTER", tbox, tboy)
 
         -- Texte nom TT
         local tnox = (db and db.ttNameOX) or 0
         local tnoy = (db and db.ttNameOY) or 0.860
-        f_tt.nameTxt:SetFont((db and db.nameFont) or BEBAS_FONT, 12, "")
+        f_tt.nameTxt:SetFont((db and db.nameFont) or DEFAULT_FONT, 12, "")
         f_tt.nameTxt:ClearAllPoints()
         f_tt.nameTxt:SetPoint("CENTER", f_tt, "CENTER", tnox, tnoy)
     end

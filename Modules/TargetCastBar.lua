@@ -16,8 +16,12 @@ local function IsSafeValue(value)
 end
 
 -- Constantes visuelles
-local BAR_TEXTURE   = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga"
-local BEBAS_FONT    = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\BebasNeue-Regular.ttf"
+-- Texture de la barre : cle de config resolue a chaque appel (ns.BAR_TEXTURES),
+-- pour que le choix du dropdown s'applique sans /reload.
+local function BarTex()
+    return ns.ResolveBarTexFromKey((ns.GetCfg("targetCastBar") or {}).barTexture)
+end
+local DEFAULT_FONT    = ns.FONT_FALLBACK  -- police du jeu (2002), aucune media pack requise
 local DARK          = 14/255
 
 -- Couleurs par type de cast cible
@@ -500,7 +504,7 @@ function TargetCastBar.Create(parent)
     local sb = CreateFrame("StatusBar", nil, frame)
     sb:SetSize(w, h)
     sb:SetPoint("TOPLEFT", bgTex)
-    sb:SetStatusBarTexture(BAR_TEXTURE)
+    sb:SetStatusBarTexture(BarTex())
     sb:SetMinMaxValues(0, 1)
     sb:SetValue(0)
     sb:SetStatusBarColor(unpack(COLOR_INTERRUPTIBLE))
@@ -510,7 +514,7 @@ function TargetCastBar.Create(parent)
     local niBar = CreateFrame("StatusBar", nil, frame)
     niBar:SetSize(w, h)
     niBar:SetPoint("TOPLEFT", bgTex)
-    niBar:SetStatusBarTexture(BAR_TEXTURE)
+    niBar:SetStatusBarTexture(BarTex())
     niBar:SetMinMaxValues(0, 1)
     niBar:SetValue(0)
     niBar:SetStatusBarColor(unpack(COLOR_NOT_INTERRUPTIBLE))
@@ -522,7 +526,7 @@ function TargetCastBar.Create(parent)
     local impBar = CreateFrame("StatusBar", nil, frame)
     impBar:SetSize(w, h)
     impBar:SetPoint("TOPLEFT", bgTex)
-    impBar:SetStatusBarTexture(BAR_TEXTURE)
+    impBar:SetStatusBarTexture(BarTex())
     impBar:SetMinMaxValues(0, 1)
     impBar:SetValue(0)
     impBar:SetStatusBarColor(unpack(COLOR_IMPORTANT))
@@ -546,7 +550,7 @@ function TargetCastBar.Create(parent)
     local nSelf, nRel = TextAnchor(nJustify)
     local nameTxt = frame:CreateFontString(nil, "OVERLAY")
     frame.nameTxtSlug = ns.CreateSlugRing(frame, nameTxt)
-    ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
+    ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, cfg.font or DEFAULT_FONT, nSize, cfg.nameOutlineStyle, true)
     nameTxt:SetJustifyH(nJustify)
     nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
     nameTxt:SetWidth(w)
@@ -562,7 +566,7 @@ function TargetCastBar.Create(parent)
     local niNameTxt = niNameFrame:CreateFontString(nil, "OVERLAY")
     -- Meme anneau SLUG que nameTxt (evite l'ombre directionnelle asymetrique), parente a niNameFrame pour suivre son fondu d'alpha.
     frame.notIntNameTxtSlug = ns.CreateSlugRing(niNameFrame, niNameTxt)
-    ns.ApplyTextOutlineStyle(niNameTxt, frame.notIntNameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
+    ns.ApplyTextOutlineStyle(niNameTxt, frame.notIntNameTxtSlug, cfg.font or DEFAULT_FONT, nSize, cfg.nameOutlineStyle, true)
     niNameTxt:SetJustifyH(nJustify)
     niNameTxt:SetTextColor(COLOR_NOT_INTERRUPTIBLE[1], COLOR_NOT_INTERRUPTIBLE[2], COLOR_NOT_INTERRUPTIBLE[3], 1)
     niNameTxt:SetWidth(w)
@@ -579,7 +583,7 @@ function TargetCastBar.Create(parent)
     local impNameTxt = impNameFrame:CreateFontString(nil, "OVERLAY")
     -- Meme anneau SLUG que nameTxt, meme raison que notIntNameTxtSlug (evite l'ombre directionnelle fixe)
     frame.impNameTxtSlug = ns.CreateSlugRing(impNameFrame, impNameTxt)
-    ns.ApplyTextOutlineStyle(impNameTxt, frame.impNameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
+    ns.ApplyTextOutlineStyle(impNameTxt, frame.impNameTxtSlug, cfg.font or DEFAULT_FONT, nSize, cfg.nameOutlineStyle, true)
     impNameTxt:SetJustifyH(nJustify)
     impNameTxt:SetTextColor(COLOR_IMPORTANT[1], COLOR_IMPORTANT[2], COLOR_IMPORTANT[3], 1)
     impNameTxt:SetWidth(w)
@@ -712,19 +716,23 @@ function TargetCastBar.ApplySettings()
     frame.bgTex:ClearAllPoints()
     frame.bgTex:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
 
+    local barTex = BarTex()
     frame.bar:SetSize(w, h)
     frame.bar:ClearAllPoints()
     frame.bar:SetPoint("TOPLEFT", frame.bgTex)
+    frame.bar:SetStatusBarTexture(barTex)
 
     if frame.notIntBar then
         frame.notIntBar:SetSize(w, h)
         frame.notIntBar:ClearAllPoints()
         frame.notIntBar:SetPoint("TOPLEFT", frame.bgTex)
+        frame.notIntBar:SetStatusBarTexture(barTex)
     end
     if frame.impBar then
         frame.impBar:SetSize(w, h)
         frame.impBar:ClearAllPoints()
         frame.impBar:SetPoint("TOPLEFT", frame.bgTex)
+        frame.impBar:SetStatusBarTexture(barTex)
     end
     ApplyBarColor()
 
@@ -744,14 +752,14 @@ function TargetCastBar.ApplySettings()
     local nOffY    = cfg.nameOffY    or 9
     local nJustify = cfg.nameJustify or "CENTER"
     local nSelf, nRel = TextAnchor(nJustify)
-    ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
+    ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, cfg.font or DEFAULT_FONT, nSize, cfg.nameOutlineStyle, true)
     frame.nameTxt:SetJustifyH(nJustify)
     frame.nameTxt:SetWidth(w)
     frame.nameTxt:ClearAllPoints()
     frame.nameTxt:SetPoint(nSelf, frame.bgTex, nRel, nOffX, nOffY)
 
     if frame.notIntNameTxt then
-        ns.ApplyTextOutlineStyle(frame.notIntNameTxt, frame.notIntNameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
+        ns.ApplyTextOutlineStyle(frame.notIntNameTxt, frame.notIntNameTxtSlug, cfg.font or DEFAULT_FONT, nSize, cfg.nameOutlineStyle, true)
         frame.notIntNameTxt:SetJustifyH(nJustify)
         frame.notIntNameTxt:SetWidth(w)
         frame.notIntNameTxt:ClearAllPoints()
@@ -759,7 +767,7 @@ function TargetCastBar.ApplySettings()
     end
 
     if frame.impNameTxt then
-        ns.ApplyTextOutlineStyle(frame.impNameTxt, frame.impNameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
+        ns.ApplyTextOutlineStyle(frame.impNameTxt, frame.impNameTxtSlug, cfg.font or DEFAULT_FONT, nSize, cfg.nameOutlineStyle, true)
         frame.impNameTxt:SetJustifyH(nJustify)
         frame.impNameTxt:SetWidth(w)
         frame.impNameTxt:ClearAllPoints()

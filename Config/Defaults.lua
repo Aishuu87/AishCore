@@ -12,7 +12,7 @@ ns.Defaults = {
     arcOffsetX = 27,
     arcOffsetY = 5,
     fontSize = 14,
-    font = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    font = "Fonts\\2002.TTF",
     x = 0,
     y = 0,
     anchor = "CENTER",
@@ -66,11 +66,25 @@ ns.Defaults = {
     -- décompte le temps restant ; true = rempli selon le nombre de stacks de
     -- Dur au Mal (approximation de l'absorption restante, cf. CenterArc.lua)
     ignorePainArcAbsorb = false,
+    ironfurArcEnabled   = true,   -- Druide Gardien (specID 104) : Fer-poil (192081)
+    -- Remplit l'arc selon les stacks de Fer-poil (5 = plein) au lieu de la duree.
+    ironfurArcStacks    = false,
+
+    -- Barre de duree de la ressource secondaire (Guerrier Prot 73 -> Dur au mal,
+    -- DK Sang 250 -> Mort et decrepitude) : deux moities miroir qui se contractent vers
+    -- le centre. Cles lisibles par spec via ns.GetSecResCfg (secRes_<specID>_<cle>).
+    -- Couleur non definie ici : nil = reprend la couleur du sort envoyee par CenterArc.
+    secResDurBarEnabled = false,
+    secResDurBarWidth   = 60,     -- largeur TOTALE (les deux moities reunies)
+    secResDurBarHeight  = 3,
+    secResDurBarAnchor  = "BOTTOM",  -- "BOTTOM" = sous le texte, "TOP" = au-dessus
+    secResDurBarOffX    = 0,
+    secResDurBarOffY    = -2,
     -- Texte de ressource secondaire (Bone Shield, Soul Fragments, Dévoreur…)
     secResTextSize    = 11,  -- taille police
     secResTextOffsetX =  0,  -- décalage horizontal par rapport au texte de ressource
     secResTextOffsetY = -2,  -- décalage vertical (négatif = vers le bas)
-    secResFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    secResFont = "Fonts\\2002.TTF",
     secResDecoStyle   = "dash", -- cf. ns.SEC_RES_DECO_STYLES dans ResourceCircle.lua
     secResDecoSpacing = 4,      -- espace (px) entre le texte et chaque déco
     secResDecoFont    = nil,    -- nil = reprend secResFont
@@ -95,7 +109,7 @@ ns.Defaults = {
     arcOffsetX = 13,
     arcOffsetY = 2,
     fontSize = 9,
-    font = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    font = "Fonts\\2002.TTF",
     x = 200,
     y = 100,
     anchor = "BOTTOMLEFT_OFFSET",  -- spécial : calculé depuis BOTTOMLEFT + offset %
@@ -130,7 +144,7 @@ ns.Defaults = {
     enabled = true,
     size = 40,
     fontSize = 9,
-    font = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    font = "Fonts\\2002.TTF",
     -- Position : meme systeme que healthCircle (pct depuis BOTTOMLEFT + offset pixel)
     -- Par defaut : directement au-dessus du cercle de vie (meme ancre %, decalage Y = rayon HC + rayon OCRC + gap)
     anchorPctX = 0.22,
@@ -177,8 +191,10 @@ ns.Defaults = {
       x = 46, y = 1.5, w = 175, h = 48,
       bgRot = 14, bgW = 244, bgH = 97, bgOffX = -100, bgOffY = 37,
     },
-    fontLevel = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    fontLevel = "Fonts\\2002.TTF",
     levelOutlineStyle = "OUTLINE",
+    -- Textes d'info de la barre d'XP : tooltip (XP restante / repos) + XP centrale
+    fontInfo  = "Fonts\\2002.TTF",
   },
 
   -- Fiche de personnage enrichie : agrandissement + fond derriere le modele,
@@ -322,10 +338,12 @@ ns.Defaults = {
     chargePosition = "BOTTOMRIGHT",
     chargeOffsetX  = 0,
     chargeOffsetY  = 0,
+    chargeFont     = "Fonts\\2002.TTF",
     chargeFontSize = 12,
     chargeColor = { 1, 1, 1, 1 },
     -- Texte de cooldown
     showCooldownText = false,
+    cooldownFont     = "Fonts\\2002.TTF",
     cooldownFontSize = 14,
     cooldownTextColor = { 1, 1, 1, 1 },
     -- Desaturation
@@ -352,6 +370,9 @@ ns.Defaults = {
     -- qu'ALT est maintenu (evite de saturer l'ecran de tooltips en plein
     -- combat) ; hors combat, il reste toujours visible au survol.
     tooltipAltCombatOnly = false,
+    -- Surcharge de verticalOffset en spe tank (la barre de vie y est souvent plus
+    -- haute, cf. unitBars.useTankHeight). nil = pas de surcharge.
+    verticalOffsetTank = nil,
   },
 
   -- Cooldown Manager Essentiels / Utilitaires : personnalisation des viewers natifs Blizzard
@@ -364,6 +385,9 @@ ns.Defaults = {
     hideWhenInactive = 1,    -- 1=jamais masquer / 2=sauf aura / 3=sauf CD/aura/charges
     strideOverride = 0,      -- 0=stride natif Blizzard / N=force N icones par ligne (evite le retour a la ligne)
     useItemSize = false, itemSize = 40,
+    -- Position liee a la barre de vie du joueur (UnitBars) : suit sa largeur/position au lieu de la position Edit Mode.
+    -- linkSide = cote de la barre ("RIGHT"/"LEFT"/"TOP"/"BOTTOM"), linkGap = ecart depuis ce bord, linkOffset = decalage perpendiculaire
+    linkToPlayerBar = false, linkSide = "RIGHT", linkGap = 4, linkOffset = 0,
     -- Couleurs par etat (icone)
     useNormalColor = false, normalColor = { 1, 1, 1, 1 },             normalDesaturate = false,
     useCdColor     = false, cdColor     = { 0.6, 0.6, 0.6, 1 },       cdDesaturate     = true,
@@ -385,17 +409,17 @@ ns.Defaults = {
     removePandemic = false,
     -- Decompte (Cooldown:GetCountdownFontString())
     useCooldownFontColor = false, cooldownFontColor = { 1, 1, 1, 1 },
-    cooldownFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    cooldownFont = "Fonts\\2002.TTF",
     useCooldownFontSize = false, cooldownFontSize = 17,
     cooldownPoint = "CENTER", cooldownOffsetX = 0, cooldownOffsetY = 0,
     -- Stacks (child.Applications -- compteur de stacks d'aura)
     useStacksColor = false, stacksColor = { 1, 1, 1, 1 },
-    stacksFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    stacksFont = "Fonts\\2002.TTF",
     useStacksFontSize = false, stacksFontSize = 16,
     stacksPoint = "BOTTOMRIGHT", stacksOffsetX = 0, stacksOffsetY = 0,
     -- Charges (child.ChargeCount -- compteur de charges de sort)
     useChargesColor = false, chargesColor = { 1, 1, 1, 1 },
-    chargesFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    chargesFont = "Fonts\\2002.TTF",
     useChargesFontSize = false, chargesFontSize = 16,
     chargesPoint = "BOTTOMRIGHT", chargesOffsetX = 0, chargesOffsetY = 0,
     showCountdownNumbersForCharges = true,
@@ -428,15 +452,15 @@ ns.Defaults = {
     removeGCDSwipe = false, auraRemoveSwipe = false,
     removePandemic = false,
     useCooldownFontColor = false, cooldownFontColor = { 1, 1, 1, 1 },
-    cooldownFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    cooldownFont = "Fonts\\2002.TTF",
     useCooldownFontSize = false, cooldownFontSize = 17,
     cooldownPoint = "CENTER", cooldownOffsetX = 0, cooldownOffsetY = 0,
     useStacksColor = false, stacksColor = { 1, 1, 1, 1 },
-    stacksFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    stacksFont = "Fonts\\2002.TTF",
     useStacksFontSize = false, stacksFontSize = 16,
     stacksPoint = "BOTTOMRIGHT", stacksOffsetX = 0, stacksOffsetY = 0,
     useChargesColor = false, chargesColor = { 1, 1, 1, 1 },
-    chargesFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    chargesFont = "Fonts\\2002.TTF",
     useChargesFontSize = false, chargesFontSize = 16,
     chargesPoint = "BOTTOMRIGHT", chargesOffsetX = 0, chargesOffsetY = 0,
     showCountdownNumbersForCharges = true,
@@ -472,9 +496,13 @@ ns.Defaults = {
     timerJustify  = "RIGHT",
     colorBySchool = false,
     barColor      = { 0.471, 0.392, 0.271, 1 },
-    font          = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    -- Texture de remplissage : cle de ns.BAR_TEXTURES. Par defaut "Flat (WoW)", native au
+    -- client ; les entrees LibSharedMedia s'ajoutent au dropdown quand une media pack
+    -- est installee.
+    barTexture    = "flat",
+    font          = "Fonts\\2002.TTF",
     nameOutlineStyle = "OUTLINE",
-    timerFont     = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    timerFont     = "Fonts\\2002.TTF",
     timerOutlineStyle = "OUTLINE",
   },
 
@@ -495,9 +523,13 @@ ns.Defaults = {
     timerOffX     = 1,
     timerOffY     = 2,
     timerJustify  = "RIGHT",
-    font          = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    -- Texture de remplissage : cle de ns.BAR_TEXTURES. Par defaut "Flat (WoW)", native au
+    -- client ; les entrees LibSharedMedia s'ajoutent au dropdown quand une media pack
+    -- est installee.
+    barTexture    = "flat",
+    font          = "Fonts\\2002.TTF",
     nameOutlineStyle = "OUTLINE",
-    timerFont     = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    timerFont     = "Fonts\\2002.TTF",
     timerOutlineStyle = "OUTLINE",
     colorInterruptible    = { 0, 0.78, 0.78, 1 },        -- turquoise
     colorImportant        = { 0.855, 0.239, 1, 1 },       -- #DA3DFF
@@ -521,11 +553,15 @@ ns.Defaults = {
     dotRatio         = 0,      -- 0=proportionnel, 100=tous identiques
     dotGap           = 3,
     textSize         = 8,
-    font             = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    -- Texture de remplissage : cle de ns.BAR_TEXTURES. Par defaut "Flat (WoW)", native au
+    -- client ; les entrees LibSharedMedia s'ajoutent au dropdown quand une media pack
+    -- est installee.
+    barTexture       = "flat",
+    font             = "Fonts\\2002.TTF",
     hpOutlineStyle   = "OUTLINE",
     hpDisplayMode    = "pct",  -- "pct" = pourcentage 0-100, "value" = valeur abreviee
     nameSize         = 14,
-    nameFont         = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    nameFont         = "Fonts\\2002.TTF",
     nameOutlineStyle = "OUTLINE",
     useTankHeight    = false,
     tankHeight       = 8,
@@ -595,12 +631,16 @@ ns.Defaults = {
     bgW  = 530,  bgH  = 35,   bgOX  = 0,    bgOY  = 0,
     -- Barre de vie target (offset relatif au conteneur)
     barW  = 525,  barH  = 2,    barOX  = 0,    barOY  = -22,
+    -- Texture de remplissage : cle de ns.BAR_TEXTURES. Par defaut "Flat (WoW)", native au
+    -- client ; les entrees LibSharedMedia s'ajoutent au dropdown quand une media pack
+    -- est installee.
+    barTexture = "flat",
     -- Texte nom/niveau (offset relatif au conteneur)
     nameOX = 0,   nameOY = -5,
     -- Texte HP (ancre + offset relatifs à la barre de vie)
     hpAnchor = "LEFT",  hpOX = 5,  hpOY = -19,  hpFontSize = 10,
-    nameFont = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
-    hpFont   = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    nameFont = "Fonts\\2002.TTF",
+    hpFont   = "Fonts\\2002.TTF",
     -- Position du conteneur targettarget
     ttx = 0,    tty = -75,
     -- Fond noir targettarget
@@ -641,14 +681,14 @@ ns.Defaults = {
       showSwipe      = true,
       reverseSwipe   = false,
       -- Police durée (position du countdown natif C++)
-      durationFont     = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+      durationFont     = "Fonts\\2002.TTF",
       durationFontSize = 9,
       durationColor    = { 1, 1, 1, 1 },
       durationAnchor   = "CENTER",   -- CENTER, TOP, BOTTOM, TOPLEFT, BOTTOMRIGHT…
       durationOffX     = 0,
       durationOffY     = 0,
       -- Police stacks
-      countFont        = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Bold.ttf",
+      countFont        = "Fonts\\2002.TTF",
       countFontSize    = 10,
       countOutlineStyle = "OUTLINE",
       countColor       = { 1, 1, 1, 1 },
@@ -680,14 +720,14 @@ ns.Defaults = {
       showSwipe      = true,
       reverseSwipe   = false,
       -- Police durée (position du countdown natif C++)
-      durationFont     = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+      durationFont     = "Fonts\\2002.TTF",
       durationFontSize = 9,
       durationColor    = { 1, 1, 1, 1 },
       durationAnchor   = "CENTER",   -- CENTER, TOP, BOTTOM, TOPLEFT, BOTTOMRIGHT…
       durationOffX     = 0,
       durationOffY     = 0,
       -- Police stacks
-      countFont        = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Bold.ttf",
+      countFont        = "Fonts\\2002.TTF",
       countFontSize    = 10,
       countOutlineStyle = "OUTLINE",
       countColor       = { 1, 1, 1, 1 },
@@ -728,7 +768,7 @@ ns.Defaults = {
     ascentSize    = 98,   -- cercle d'ascension (pie-chart)
     mask2Size     = 85,   -- masque 2 (couvre le centre de l'ascension)
     textSize      = 14,   -- taille police vitesse
-    font          = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf",
+    font          = "Fonts\\2002.TTF",
   },
 
   -- Mode AFK : ecran plein ecran affiche quand le joueur passe AFK, remplace l'ecran natif.
@@ -766,6 +806,8 @@ ns.Defaults = {
     -- Divers
     cameraSpin     = true,
     chatShow       = true,
+    chatFont       = "Fonts\\2002.TTF",
+    chatSize       = 12,
     exitOnKeypress = true,
 
     -- Elements individuels (textes + blasons/logos). useSpecColor/specColorKey : pioche la

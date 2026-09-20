@@ -635,7 +635,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                 local texLbl=layerChild:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(texLbl,FONT,9)
                 texLbl:SetPoint("TOPLEFT",8,-cy); texLbl:SetTextColor(unpack(Theme.textDim)); texLbl:SetText(L["AURASMENU_EFFECTS_TEXTURE_LABEL"])
                 local texNames = {L["AURASMENU_EFFECTS_NONE_MASC"]}; local texPaths = {""}
-                for _,bt in ipairs(ns.BAR_TEXTURES) do texNames[#texNames+1]=bt.text; texPaths[#texPaths+1]=ns.ResolveLSMTexture and ns.ResolveLSMTexture(bt) or bt.path or "" end
+                for _,e in ipairs(ns.GetBarTextureList and ns.GetBarTextureList() or {}) do texNames[#texNames+1]=e.text; texPaths[#texPaths+1]=ns.ResolveBarTexFromKey(e.value) end
                 local curTex = si and si.overlayTex or ""
                 local curIdx = 1
                 for i,p in ipairs(texPaths) do if p == curTex then curIdx = i; break end end

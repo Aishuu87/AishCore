@@ -113,13 +113,203 @@ function ns.EnableMouseOnlyOnAlt(frame)
   end)
 end
 
--- Chemins media
+-- Police de repli universelle : 2002.TTF est livree par le client dans TOUTES les
+-- locales, donc aucune dependance externe a installer.
+ns.FONT_FALLBACK = "Fonts\\2002.TTF"
+
+-- Chemins media (jamais de police SharedMedia en dur : la media pack peut etre absente)
 ns.Media = {
-  circle    = "Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2.tga",
-  font      = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat.ttf",
-  fontGui   = "Fonts\\FRIZQT__.TTF",
-  fontTitle = "Fonts\\FRIZQT__.TTF",
+  circle      = "Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2.tga",
+  font        = ns.FONT_FALLBACK,
+  fontGui     = "Fonts\\FRIZQT__.TTF",
+  fontTitle   = "Fonts\\FRIZQT__.TTF",
+  -- Texture de repli des StatusBar : native au client, jamais manquante.
+  fallbackBar = "Interface\\TargetingFrame\\UI-StatusBar",
 }
+
+-- Texture de barre par defaut : "Flat (WoW)" (Interface\\Buttons\\WHITE8X8),
+-- native au client donc jamais manquante. Cle de ns.BAR_TEXTURES (cf. plus bas), pas un chemin.
+ns.BAR_TEXTURE_DEFAULT = "flat"
+
+-- Validation des chemins de police. FontString:SetFont() leve une erreur Lua quand le
+-- fichier est absent (media pack desinstallee, profil importe d'un autre setup...) : la
+-- creation du frame appelant est alors interrompue en plein milieu, d'ou les cascades
+-- "attempt to index field 'text' (a nil value)". On teste chaque chemin une seule fois
+-- sur un FontString jetable, resultat memorise.
+local _fontProbe
+local _fontValidCache = {}
+function ns.IsFontValid(path)
+  if type(path) ~= "string" or path == "" then return false end
+  local cached = _fontValidCache[path]
+  if cached ~= nil then return cached end
+  if not _fontProbe then
+    _fontProbe = UIParent:CreateFontString(nil, "BACKGROUND")
+    _fontProbe:Hide()
+  end
+  -- Selon les builds, un asset invalide leve une erreur OU renvoie false : on couvre les deux.
+  local ok, ret = pcall(_fontProbe.SetFont, _fontProbe, path, 12, "")
+  ok = ok and (ret ~= false)
+  _fontValidCache[path] = ok
+  return ok
+end
+
+--- Retourne `path` s'il est reellement chargeable, sinon la police du jeu (2002).
+function ns.SafeFontPath(path)
+  if ns.IsFontValid(path) then return path end
+  return ns.FONT_FALLBACK
+end
+
+--- Normalise la casse des chemins de police dans `tbl` (recursif).
+---
+--- Cette fonction REMPLACAIT auparavant toute police jugee non chargeable par la police
+--- du jeu. C'etait une mauvaise idee : la sonde ns.IsFontValid produit des faux negatifs,
+--- et le verdict etait ecrit dans le profil SAUVEGARDE -- une police parfaitement valide
+--- pouvait donc etre effacee definitivement du choix de l'utilisateur. On ne touche plus
+--- qu'a la casse, ce qui est sans risque et evite un doublon dans les menus. La protection
+--- contre un chemin mort reste entiere a l'application (SetFont est enveloppe dans un
+--- pcall avec repli, cf. ns.ApplyTextOutlineStyle / ns.ApplyFont).
+function ns.SanitizeFontPaths(tbl, _seen)
+  if type(tbl) ~= "table" then return end
+  _seen = _seen or {}
+  if _seen[tbl] then return end
+  _seen[tbl] = true
+  local fallbackLower = string.lower(ns.FONT_FALLBACK)
+  for k, v in pairs(tbl) do
+    local tv = type(v)
+    if tv == "table" then
+      ns.SanitizeFontPaths(v, _seen)
+    elseif tv == "string" and v ~= ns.FONT_FALLBACK and string.lower(v) == fallbackLower then
+      -- Meme police, autre casse (vieux profils ecrits avec "Fonts\\2002.ttf") : on
+      -- normalise, sinon le dropdown ne retrouve pas la valeur et affiche du vide.
+      tbl[k] = ns.FONT_FALLBACK
+    end
+  end
+end
+
+-- Bar textures (~45)
+ns.BAR_TEXTURES = {
+    { value = "aish_grad",   text = "Aish Gradient",     path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient" },
+    { value = "aish_grad2",  text = "Aish Gradient 2",   path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient2" },
+    { value = "aish_grad3",  text = "Aish Gradient 3",   path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient3" },
+    { value = "aish_fx",     text = "Aish Effect",       path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_effect" },
+    { value = "aish_fx2",    text = "Aish Effect 2",     path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_effect2" },
+    { value = "toxiui",     text = "ToxiUI Clean",     path = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga", lsm = "ToxiUI-clean", addon = "SharedMedia_MyMedia" },
+    { value = "charcoal",   text = "Charcoal",          lsm = "Charcoal" },
+    { value = "elvui",      text = "ElvUI Norm1",       lsm = "ElvUI Norm1" },
+    { value = "samw00",     text = "Samw00",            lsm = "Samw00" },
+    { value = "flat",       text = "Flat (WoW)",        path = "Interface\\Buttons\\WHITE8X8" },
+    { value = "statusbar",  text = "StatusBar (WoW)",   path = "Interface\\TargetingFrame\\UI-StatusBar" },
+    { value = "aluminium",  text = "Aluminium",         lsm = "Aluminium" },
+    { value = "armory",     text = "Armory",            lsm = "Armory" },
+    { value = "blizzard",   text = "Blizzard",          path = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill" },
+    { value = "cloud",      text = "Cloud",             lsm = "Cloud" },
+    { value = "comet",      text = "Comet",             lsm = "Comet" },
+    { value = "dabs",       text = "Dabs",              lsm = "Dabs" },
+    { value = "darkbottom", text = "DarkBottom",        lsm = "DarkBottom" },
+    { value = "diagonal",   text = "Diagonal",          lsm = "Diagonal" },
+    { value = "elv_gloss",  text = "ElvUI Gloss",       lsm = "ElvUI Gloss" },
+    { value = "elv_melli",  text = "ElvUI Melli",       lsm = "ElvUI Melli" },
+    { value = "falcon",     text = "Falcon",            lsm = "Falcon" },
+    { value = "glaze",      text = "Glaze",             lsm = "Glaze" },
+    { value = "gloss",      text = "Gloss",             lsm = "Gloss" },
+    { value = "gradient",   text = "Gradient",          lsm = "Gradient" },
+    { value = "litestep",   text = "LiteStep",          lsm = "LiteStep" },
+    { value = "lyfe",       text = "Lyfe",              lsm = "Lyfe" },
+    { value = "melli",      text = "Melli",             lsm = "Melli" },
+    { value = "minimalist", text = "Minimalist",        lsm = "Minimalist" },
+    { value = "normtex",    text = "NormTex",           lsm = "normTex" },
+    { value = "otravi",     text = "Otravi",            lsm = "Otravi" },
+    { value = "outline",    text = "Outline",           lsm = "Outline" },
+    { value = "perl",       text = "Perl",              lsm = "Perl" },
+    { value = "rain",       text = "Rain",              lsm = "Rain" },
+    { value = "round",      text = "Round",             lsm = "Round" },
+    { value = "ruben",      text = "Ruben",             lsm = "Ruben" },
+    { value = "skullflower",text = "Skullflower",       lsm = "Skullflower" },
+    { value = "smooth",     text = "Smooth",            lsm = "Smooth" },
+    { value = "smooth_v2",  text = "Smooth v2",         lsm = "Smooth v2" },
+    { value = "steel",      text = "Steel",             lsm = "Steel" },
+    { value = "striped",    text = "Striped",           lsm = "Striped" },
+    { value = "tube",       text = "Tube",              lsm = "Tube" },
+    { value = "water",      text = "Water",             lsm = "Water" },
+    { value = "wglass",     text = "WGlass",            lsm = "WGlass" },
+    { value = "wisps",      text = "Wisps",             lsm = "Wisps" },
+}
+
+local function GetLSM()
+    local ok, LSM = pcall(function()
+        return LibStub and LibStub("LibSharedMedia-3.0", true)
+    end)
+    return ok and LSM or nil
+end
+
+--- Une entree de ns.BAR_TEXTURES est utilisable si LSM sait la resoudre, ou si son
+--- `path` est reellement present (bundlee dans AishCore, native au client, ou fournie
+--- par un addon declare via `addon` ET charge).
+local function BarTexEntryPath(entry, LSM)
+    if entry.lsm then
+        local p = LSM and LSM:Fetch("statusbar", entry.lsm, true)
+        if p then return p end
+    end
+    if entry.path then
+        -- `addon` = media pack tierce : sans elle le fichier n'existe pas, la barre
+        -- s'afficherait vide (SetStatusBarTexture echoue en silence).
+        if entry.addon and not (C_AddOns and C_AddOns.IsAddOnLoaded
+                                and C_AddOns.IsAddOnLoaded(entry.addon)) then
+            return nil
+        end
+        return entry.path
+    end
+    return nil
+end
+
+-- Resout une texture via LSM, avec repli sur la texture native du client.
+function ns.ResolveLSMTexture(entry)
+    return BarTexEntryPath(entry, GetLSM()) or ns.Media.fallbackBar
+end
+
+local function FindBarTexEntry(texKey)
+    if not texKey then return nil end
+    for _, e in ipairs(ns.BAR_TEXTURES) do
+        if e.value == texKey then return e end
+    end
+    return nil
+end
+
+--- Chemin de texture pour une cle de ns.BAR_TEXTURES. Une cle inconnue, ou connue mais
+--- devenue introuvable (media pack desinstallee), retombe sur la texture par defaut.
+function ns.ResolveBarTexFromKey(texKey)
+    local LSM = GetLSM()
+    local entry = FindBarTexEntry(texKey)
+    local path = entry and BarTexEntryPath(entry, LSM)
+    if path then return path end
+    local def = FindBarTexEntry(ns.BAR_TEXTURE_DEFAULT)
+    return (def and BarTexEntryPath(def, LSM)) or ns.Media.fallbackBar
+end
+
+-- Liste utilisable par les dropdowns : on ecarte les entrees qu'on ne sait pas resoudre.
+-- Les textures bundlees dans AishCore sont toujours la ; celles marquees `lsm`
+-- n'apparaissent que si LibSharedMedia les fournit -- c'est le bonus pour qui installe
+-- une media pack (SharedMedia, SharedMedia_MyMedia, ElvUI...).
+local _barTexListCache
+function ns.GetBarTextureList()
+    if _barTexListCache then return _barTexListCache end
+    local LSM = GetLSM()
+    local out, complete = {}, true
+    for _, e in ipairs(ns.BAR_TEXTURES) do
+        if BarTexEntryPath(e, LSM) then
+            out[#out + 1] = { value = e.value, text = e.text }
+        else
+            complete = false
+        end
+    end
+    if #out == 0 then
+        out[1] = { value = ns.BAR_TEXTURE_DEFAULT, text = "Flat (WoW)" }
+    end
+    -- LSM peut encore se charger apres nous : on ne met en cache que si la liste est
+    -- complete, sinon on reconstruit au prochain appel.
+    if complete then _barTexListCache = out end
+    return out
+end
 
 -- Filtrage trilineaire (mipmaps) : réduit l'aliasing sur les cercles minifiés
 function ns.SetSmoothTexture(texture, path)
@@ -139,7 +329,7 @@ end
 -- Triée par ordre alphabétique (text)
 local _SM = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\"
 ns.FONT_LIST = {
-  { value = "Fonts\\2002.ttf",                       text = "2002 (WoW)"                    },
+  { value = ns.FONT_FALLBACK,                        text = "2002 (WoW)"                    },
   { value = _SM.."AccidentalPresidency.ttf",         text = "Accidental Presidency"         },
   { value = "Fonts\\ARIALN.TTF",                     text = "Arial Narrow (WoW)"            },
   { value = _SM.."BebasNeue-Regular.ttf",            text = "Bebas Neue"                    },
@@ -184,8 +374,30 @@ ns.FONT_LIST = {
 }
 
 -- Retourne la liste des polices depuis LibSharedMedia-3.0 si disponible,
--- sinon fallback sur la liste hardcodée ci-dessus.
+-- sinon fallback sur la liste hardcodee ci-dessus.
+--
+-- ATTENTION : ne JAMAIS filtrer cette liste avec ns.IsFontValid(). La sonde produit des
+-- faux negatifs (fichier pas encore accessible selon le moment de l'appel, media pack
+-- enregistree dans LSM apres nous, SetFont qui renvoie false a chaud) et son resultat est
+-- memorise pour toute la session. Une entree ecartee a tort disparaissait donc
+-- definitivement du menu : des polices parfaitement installees (Bebas, Montserrat)
+-- devenaient introuvables alors que les autres addons les utilisaient sans souci.
+-- Appliquer une police cassee est deja sans danger (ApplyTextOutlineStyle et ns.ApplyFont
+-- enveloppent SetFont dans un pcall avec repli), donc rien ne justifie de priver
+-- l'utilisateur du choix.
 local _fontListCache
+
+--- Garantit la presence de la police du jeu dans la liste, meme si LSM ne la declare pas
+--- (clients zhCN/zhTW). Purement additif : ne retire jamais aucune entree.
+local function WithFallbackFont(list)
+    local fallbackLower = string.lower(ns.FONT_FALLBACK)
+    for _, entry in ipairs(list) do
+        if string.lower(entry.value or "") == fallbackLower then return list end
+    end
+    table.insert(list, 1, { value = ns.FONT_FALLBACK, text = "2002 (WoW)" })
+    return list
+end
+
 function ns.GetFontList()
     if _fontListCache then return _fontListCache end
     local ok, LSM = pcall(function()
@@ -199,11 +411,13 @@ function ns.GetFontList()
             for _, name in ipairs(names) do
                 list[#list + 1] = { value = LSM:Fetch("font", name), text = name }
             end
-            _fontListCache = list
+            _fontListCache = WithFallbackFont(list)
             return _fontListCache
         end
     end
-    return ns.FONT_LIST  -- LSM absent ou vide, non mis en cache (retry au prochain appel)
+    -- LSM absent ou vide : liste hardcodee, non mise en cache (retry au prochain appel,
+    -- LSM peut encore se charger).
+    return WithFallbackFont(ns.FONT_LIST)
 end
 
 -- Style de contour de texte partagé : Fin/Epais (natifs) ou SLUG (anneau de 8 copies noires,

@@ -286,7 +286,7 @@ end
 -- Construction d'une output entry : extrait les metadonnees du sort (couleurs, modeles 3D...) et construit
 -- la table finale envoyee aux renders. Pool d'entries reutilisables sans risque (contrairement a MakeEntry) :
 -- ns.auraData[dest] est integralement remplace a chaque scan, personne n'en garde de reference entre 2 ticks.
-local _entryPools = { iconlist = {}, circlebars = {}, icons = {}, freebars = {}, centerArc = {} }
+local _entryPools = { iconlist = {}, circlebars = {}, icons = {}, freebars = {}, centerArc = {}, secResDurBar = {} }
 
 local function _BuildOutputEntry(e, sid, si, dest, poolIdx)
     -- Champs FX3D : utilise GetFlatFieldsByDest pour supporter le per-render override.

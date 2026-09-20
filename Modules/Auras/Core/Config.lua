@@ -12,6 +12,10 @@ ns.GetTextOutlineStyles = ns.GetTextOutlineStyles or _addon.GetTextOutlineStyles
 ns.CreateSlugRing       = ns.CreateSlugRing       or _addon.CreateSlugRing
 ns.ApplyTextOutlineStyle = ns.ApplyTextOutlineStyle or _addon.ApplyTextOutlineStyle
 ns.SetSlugRingText      = ns.SetSlugRingText      or _addon.SetSlugRingText
+ns.FONT_FALLBACK        = ns.FONT_FALLBACK        or _addon.FONT_FALLBACK
+ns.IsFontValid          = ns.IsFontValid          or _addon.IsFontValid
+ns.SafeFontPath         = ns.SafeFontPath         or _addon.SafeFontPath
+ns.SanitizeFontPaths    = ns.SanitizeFontPaths    or _addon.SanitizeFontPaths
 
 local SAFE_FONT = "Fonts\\FRIZQT__.TTF"
 
@@ -29,7 +33,7 @@ end
 
 -- Media paths (WoW natif uniquement, jamais SharedMedia en dur)
 ns.Media = {
-    font      = SAFE_FONT,  -- Friz Quadrata
+    font      = ns.FONT_FALLBACK or SAFE_FONT,  -- police du jeu (2002), livree dans toutes les locales
     sparkTex  = "Interface\\CastingBar\\UI-CastingBar-Spark",
     fallbackBar = "Interface\\TargetingFrame\\UI-StatusBar",
 }
@@ -323,82 +327,15 @@ ns.GLOW_DEFS = {
       texCoord={0.00781250,0.50781250,0.27734375,0.52734375}, blendMode="ADD", fromAlpha=0.0, toAlpha=0.85, duration=0.28 },
 }
 
--- Bar textures (~45)
-ns.BAR_TEXTURES = {
-    { value = "aish_grad",   text = "Aish Gradient",     path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient" },
-    { value = "aish_grad2",  text = "Aish Gradient 2",   path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient2" },
-    { value = "aish_grad3",  text = "Aish Gradient 3",   path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_gradient3" },
-    { value = "aish_fx",     text = "Aish Effect",       path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_effect" },
-    { value = "aish_fx2",    text = "Aish Effect 2",     path = "Interface\\AddOns\\AishCore\\Media\\Statusbars\\aish_effect2" },
-    { value = "toxiui",     text = "ToxiUI Clean",     path = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga", lsm = "ToxiUI-clean" },
-    { value = "birg00",     text = "Birg00",            lsm = "Birg00" },
-    { value = "charcoal",   text = "Charcoal",          lsm = "Charcoal" },
-    { value = "elvui",      text = "ElvUI Norm1",       lsm = "ElvUI Norm1" },
-    { value = "samw00",     text = "Samw00",            lsm = "Samw00" },
-    { value = "flat",       text = "Flat (WoW)",        path = "Interface\\Buttons\\WHITE8X8" },
-    { value = "statusbar",  text = "StatusBar (WoW)",   path = "Interface\\TargetingFrame\\UI-StatusBar" },
-    { value = "aluminium",  text = "Aluminium",         lsm = "Aluminium" },
-    { value = "armory",     text = "Armory",            lsm = "Armory" },
-    { value = "blizzard",   text = "Blizzard",          path = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill" },
-    { value = "cloud",      text = "Cloud",             lsm = "Cloud" },
-    { value = "comet",      text = "Comet",             lsm = "Comet" },
-    { value = "dabs",       text = "Dabs",              lsm = "Dabs" },
-    { value = "darkbottom", text = "DarkBottom",        lsm = "DarkBottom" },
-    { value = "diagonal",   text = "Diagonal",          lsm = "Diagonal" },
-    { value = "elv_gloss",  text = "ElvUI Gloss",       lsm = "ElvUI Gloss" },
-    { value = "elv_melli",  text = "ElvUI Melli",       lsm = "ElvUI Melli" },
-    { value = "falcon",     text = "Falcon",            lsm = "Falcon" },
-    { value = "glaze",      text = "Glaze",             lsm = "Glaze" },
-    { value = "gloss",      text = "Gloss",             lsm = "Gloss" },
-    { value = "gradient",   text = "Gradient",          lsm = "Gradient" },
-    { value = "litestep",   text = "LiteStep",          lsm = "LiteStep" },
-    { value = "lyfe",       text = "Lyfe",              lsm = "Lyfe" },
-    { value = "melli",      text = "Melli",             lsm = "Melli" },
-    { value = "minimalist", text = "Minimalist",        lsm = "Minimalist" },
-    { value = "normtex",    text = "NormTex",           lsm = "normTex" },
-    { value = "otravi",     text = "Otravi",            lsm = "Otravi" },
-    { value = "outline",    text = "Outline",           lsm = "Outline" },
-    { value = "perl",       text = "Perl",              lsm = "Perl" },
-    { value = "rain",       text = "Rain",              lsm = "Rain" },
-    { value = "round",      text = "Round",             lsm = "Round" },
-    { value = "ruben",      text = "Ruben",             lsm = "Ruben" },
-    { value = "skullflower",text = "Skullflower",       lsm = "Skullflower" },
-    { value = "smooth",     text = "Smooth",            lsm = "Smooth" },
-    { value = "smooth_v2",  text = "Smooth v2",         lsm = "Smooth v2" },
-    { value = "steel",      text = "Steel",             lsm = "Steel" },
-    { value = "striped",    text = "Striped",           lsm = "Striped" },
-    { value = "tube",       text = "Tube",              lsm = "Tube" },
-    { value = "water",      text = "Water",             lsm = "Water" },
-    { value = "wglass",     text = "WGlass",            lsm = "WGlass" },
-    { value = "wisps",      text = "Wisps",             lsm = "Wisps" },
-}
+-- Textures de barre : definies dans Core.lua (namespace parent) pour etre partagees
+-- avec les modules hors Auras (CastBar, UnitBars, TopTargetBar...).
+ns.BAR_TEXTURES         = ns.BAR_TEXTURES         or _addon.BAR_TEXTURES
+ns.GetBarTextureList    = ns.GetBarTextureList    or _addon.GetBarTextureList
+ns.ResolveLSMTexture    = ns.ResolveLSMTexture    or _addon.ResolveLSMTexture
+ns.ResolveBarTexFromKey = ns.ResolveBarTexFromKey or _addon.ResolveBarTexFromKey
 
 -- Cascade urgency (2 niveaux en secondes)
 ns.URGENCY = { MEDIUM = 5, CRITICAL = 2 }
-
--- Resout une texture via LSM
-function ns.ResolveLSMTexture(entry)
-    if entry.lsm then
-        local ok, LSM = pcall(function()
-            return LibStub and LibStub("LibSharedMedia-3.0", true)
-        end)
-        if ok and LSM then
-            local p = LSM:Fetch("statusbar", entry.lsm)
-            if p then return p end
-        end
-    end
-    return entry.path or ns.Media.fallbackBar
-end
-
-function ns.ResolveBarTexFromKey(texKey)
-    if texKey then
-        for _, e in ipairs(ns.BAR_TEXTURES) do
-            if e.value == texKey then return ns.ResolveLSMTexture(e) end
-        end
-    end
-    local def = ns.BAR_TEXTURES[1]
-    return def and ns.ResolveLSMTexture(def) or ns.Media.fallbackBar
-end
 
 function ns.DeepCopy(src)
     if type(src) ~= "table" then return src end

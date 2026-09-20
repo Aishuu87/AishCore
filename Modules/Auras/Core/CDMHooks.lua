@@ -261,6 +261,15 @@ function ns.SubscribeCDMAuraStack(spellID, key, fontString)
     end
 end
 
+--- Derniere valeur `applications` vue par le canal clone-stack pour ce spellID.
+--- Seule source de stacks encore lisible en combat : GetAuraApplicationDisplayCount
+--- est refuse des que l'appelant est taint. Valeur potentiellement secrete : a
+--- relayer telle quelle (SetText / SetValue), jamais a comparer ni calculer.
+function ns.GetCDMLastApplications(spellID)
+    if not spellID then return nil end
+    return cdmAuraLastApplications[spellID]
+end
+
 function ns.UnsubscribeCDMAuraStack(spellID, key)
     if not spellID or not key then return end
     local subs = cdmAuraStackSubscribers[spellID]

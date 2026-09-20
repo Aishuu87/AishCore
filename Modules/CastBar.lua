@@ -7,8 +7,12 @@ local CastBar = {}
 ns.Modules.CastBar = CastBar
 
 -- Constantes visuelles
-local BAR_TEXTURE   = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga"
-local BEBAS_FONT    = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\BebasNeue-Regular.ttf"
+-- Texture de la barre : cle de config resolue a chaque appel (ns.BAR_TEXTURES),
+-- pour que le choix du dropdown s'applique sans /reload.
+local function BarTex()
+    return ns.ResolveBarTexFromKey((ns.GetCfg("castBar") or {}).barTexture)
+end
+local DEFAULT_FONT    = ns.FONT_FALLBACK  -- police du jeu (2002), aucune media pack requise
 local DARK          = 14/255
 
 local DEFAULTS = {
@@ -30,7 +34,7 @@ local DEFAULTS = {
     timerOffY     = 2,
     timerJustify  = "RIGHT",
     colorBySchool = false,
-    font      = nil,   -- nil = utilise BEBAS_FONT (BebasNeue)
+    font      = nil,   -- nil = utilise DEFAULT_FONT (police du jeu)
     timerFont = nil,   -- nil = utilise ns.Media.font (Montserrat)
     timerOutlineStyle = "OUTLINE",
 }
@@ -488,7 +492,7 @@ function CastBar.Create(parent)
     local sb = CreateFrame("StatusBar", nil, frame)
     sb:SetSize(w, h)
     sb:SetPoint("TOPLEFT", bgTex)
-    sb:SetStatusBarTexture(BAR_TEXTURE)
+    sb:SetStatusBarTexture(BarTex())
     sb:SetMinMaxValues(0, 1)
     sb:SetValue(0)
     sb:SetStatusBarColor(bc[1], bc[2], bc[3], bc[4] or 1)
@@ -515,7 +519,7 @@ function CastBar.Create(parent)
     local nSelf, nRel = TextAnchor(nJustify)
     local nameTxt = frame:CreateFontString(nil, "OVERLAY")
     frame.nameTxtSlug = ns.CreateSlugRing(frame, nameTxt)
-    ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
+    ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, DEFAULT_FONT, nSize, cfg.nameOutlineStyle, true)
     nameTxt:SetJustifyH(nJustify)
     nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
     nameTxt:SetWidth(w)
@@ -684,6 +688,7 @@ function CastBar.ApplySettings()
     frame.bar:SetSize(w, h)
     frame.bar:ClearAllPoints()
     frame.bar:SetPoint("TOPLEFT", frame.bgTex)
+    frame.bar:SetStatusBarTexture(BarTex())
     ApplyBarColor(state.spellId, state.name, state.spellIcon)
 
     -- Textes : l'ancre de la boîte de texte suit le justify pour que
@@ -693,7 +698,7 @@ function CastBar.ApplySettings()
     local nOffY    = cfg.nameOffY    or DEFAULTS.nameOffY
     local nJustify = cfg.nameJustify or DEFAULTS.nameJustify
     local nSelf, nRel = TextAnchor(nJustify)
-    ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, cfg.font or BEBAS_FONT, nSize, cfg.nameOutlineStyle, true)
+    ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, cfg.font or DEFAULT_FONT, nSize, cfg.nameOutlineStyle, true)
     frame.nameTxt:SetJustifyH(nJustify)
     frame.nameTxt:SetWidth(w)
     frame.nameTxt:ClearAllPoints()

@@ -7,6 +7,12 @@ local P = ns.Profiles
 
 -- Helpers internes
 
+-- Profils du module Auras (AishUIAuraDB, cf. Modules/Auras/Core/Profiles.lua) : liés par NOM au profil
+-- AishCore, chaque opération ci-dessous est répercutée dessus. nil tant que le module n'est pas chargé.
+local function AurasProfiles()
+  return ns.Auras and ns.Auras.Profiles
+end
+
 local function CharKey()
   local name  = UnitName("player")  or "Unknown"
   local realm = GetRealmName()       or "Unknown"
@@ -126,7 +132,11 @@ function P.InitDB()
     -- Efface les clés de config du niveau racine
     for k in pairs(legacy) do root[k] = nil end
 
-    root._profiles      = { ["Default"] = legacy }
+    root._profiles      = {}
+    -- Installation neuve : `legacy` est vide (aucune SavedVariable a migrer). On ne cree PAS
+    -- "Default" ici, sinon le bloc suivant trouverait une table -- vide, mais truthy -- et
+    -- n'appliquerait jamais le template de reference.
+    if next(legacy) then root._profiles["Default"] = legacy end
     root._globalProfile = "Default"
     root._charProfiles  = {}
     root._version       = 1
@@ -136,8 +146,10 @@ function P.InitDB()
   -- Tout premier lancement : on part du template de reference, comme P.Create()/P.Reset(). Une table
   -- vide ne tombait que sur ns.Defaults (via le MergeDefaults plus bas), donc l'installation neuve
   -- n'heritait d'aucun des reglages du profil de reference -- exactement ce que le template existe
-  -- pour eviter. MergeDefaults comble ensuite les cles absentes.
-  if not root._profiles["Default"] then
+  -- pour eviter. MergeDefaults comble ensuite les cles absentes. Le test porte sur le CONTENU :
+  -- un "Default" vide laisse par l'ancien chemin de migration est rattrape au prochain login.
+  local defaultProfile = root._profiles["Default"]
+  if type(defaultProfile) ~= "table" or next(defaultProfile) == nil then
     root._profiles["Default"] = ns.ProfileTemplate and ns.DeepCopy(ns.ProfileTemplate) or {}
   end
 
@@ -213,6 +225,18 @@ function P.InitDB()
   -- Pointer ns.DB sur le profil actif (merge defaults)
   root._profiles[activeName] = ns.MergeDefaults(root._profiles[activeName], ns.Defaults)
 
+  -- Polices introuvables : un profil cree quand une media pack (SharedMedia_MyMedia...)
+  -- etait installee garde son chemin en dur. Si l'utilisateur desinstalle la media pack,
+  -- SetFont() leve une erreur et interrompt la creation du frame en plein milieu
+  -- (d'ou les "attempt to index field 'text' (a nil value)" en cascade). On rabat toute
+  -- police non chargeable sur la police du jeu, dans TOUS les profils : le switch de profil
+  -- ne doit pas ressusciter le probleme.
+  if ns.SanitizeFontPaths then
+    for _, prof in pairs(root._profiles) do
+      ns.SanitizeFontPaths(prof)
+    end
+  end
+
   -- Purge retroactive des entrees VIDES de spellEffects.auraCombos (ancien bug de creation
   -- au simple clic dans SettingsPanel, deja corrige). One-shot PAR PROFIL.
   do
@@ -272,6 +296,9 @@ function P.SetActive(name)
     root._charProfiles[ns._charKey] = name
   end
 
+  local AP = AurasProfiles()
+  if AP then AP:SetActive(name) end
+
   ApplyAllSettings()
   ns.CallbackRegistry:Trigger("PROFILE_CHANGED", name)
   -- Broadcast différé : garantit que les couleurs sont bien appliquées APRES
@@ -314,10 +341,14 @@ function P.Create(name, copyFrom)
 
   if copyFrom and root._profiles[copyFrom] then
     root._profiles[name] = ns.DeepCopy(root._profiles[copyFrom])
+    local AP = AurasProfiles()
+    if AP then AP:Copy(copyFrom, name) end
   else
     -- Partir du template de référence, combler les clés absentes avec ns.Defaults
     local base = ns.ProfileTemplate and ns.DeepCopy(ns.ProfileTemplate) or {}
     root._profiles[name] = ns.MergeDefaults(base, ns.Defaults)
+    local AP = AurasProfiles()
+    if AP then AP:Reset(name) end
   end
 
   ns.CallbackRegistry:Trigger("PROFILE_LIST_CHANGED")
@@ -338,6 +369,8 @@ function P.Delete(name)
   end
 
   root._profiles[name] = nil
+  local AP = AurasProfiles()
+  if AP then AP:Delete(name) end
   -- Nettoyer les liaisons per-char qui pointaient dessus
   if root._charProfiles then
     for charK, pName in pairs(root._charProfiles) do
@@ -362,6 +395,8 @@ function P.Rename(oldName, newName)
 
   root._profiles[newName] = root._profiles[oldName]
   root._profiles[oldName] = nil
+  local AP = AurasProfiles()
+  if AP then AP:Rename(oldName, newName) end
 
   if root._globalProfile == oldName then root._globalProfile = newName end
   if root._charProfiles then
@@ -385,8 +420,11 @@ function P.Reset(name)
 
   local base = ns.ProfileTemplate and ns.DeepCopy(ns.ProfileTemplate) or {}
   root._profiles[name] = ns.MergeDefaults(base, ns.Defaults)
+  local AP = AurasProfiles()
+  if AP then AP:Reset(name) end
   if name == (ns._activeProfileName or "Default") then
     ns.DB = root._profiles[name]
+    if AP then AP:SetActive(name) end
     ApplyAllSettings()
   end
 
@@ -399,6 +437,15 @@ function P.Export(name)
   local root = AishaddonDB
   local data = root._profiles[name]
   if not data then return nil, L["PROFILE_NOT_FOUND"] end
+  -- Réglages Auras du profil (liste d'auras, Missing Buffs...) embarqués sous _auras
+  local AP = AurasProfiles()
+  local auras = AP and AP:GetProfileData(name)
+  if auras then
+    local out = {}
+    for k, v in pairs(data) do out[k] = v end
+    out._auras = auras
+    data = out
+  end
   return EXPORT_PREFIX .. Serialize(data)
 end
 
@@ -429,8 +476,19 @@ function P.Import(str, newName)
   local data, err = Deserialize(payload)
   if not data then return false, string.format(L["PROFILE_IMPORT_READ_ERROR"], tostring(err)) end
 
+  -- Réglages Auras embarqués (absents des exports antérieurs : le profil Auras sera créé par défaut)
+  local auras = data._auras
+  data._auras = nil
+  local AP = AurasProfiles()
+  if AP then
+    if type(auras) == "table" then AP:SetProfileData(newName, auras) else AP:Reset(newName) end
+  end
+
   -- Merge defaults pour combler les clés manquantes
   root._profiles[newName] = ns.MergeDefaults(data, ns.Defaults)
+  -- Un profil importé vient d'un autre setup : ses polices peuvent pointer vers une
+  -- media pack qu'on n'a pas. Cf. InitDB.
+  if ns.SanitizeFontPaths then ns.SanitizeFontPaths(root._profiles[newName]) end
 
   ns.CallbackRegistry:Trigger("PROFILE_LIST_CHANGED")
   return true
@@ -445,6 +503,8 @@ function P.CopyFrom(sourceName)
 
   root._profiles[active] = ns.MergeDefaults(ns.DeepCopy(root._profiles[sourceName]), ns.Defaults)
   ns.DB = root._profiles[active]
+  local AP = AurasProfiles()
+  if AP and AP:Copy(sourceName, active) then AP:SetActive(active) end
   ApplyAllSettings()
   ns.CallbackRegistry:Trigger("PROFILE_CHANGED", active)
   return true

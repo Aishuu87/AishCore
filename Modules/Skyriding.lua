@@ -44,7 +44,7 @@ local MODEL_CRAWTH     = 4520560    -- galeforce precast (orbes + souffle)
 local TEX_CIRCLEFLAT   = "Interface\\AddOns\\AishCore\\Media\\Skyriding\\circleflat"
 local TEX_CIRCLE_SMOOTH = "Interface\\AddOns\\AishCore\\Media\\Skyriding\\Circle_Smooth"
 local TEX_SQUARE_WHITE = "Interface\\AddOns\\AishCore\\Media\\Skyriding\\Square_FullWhite"
-local FONT_MONTSERRAT_B = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat-Bold.ttf"
+local FONT_SPEED_DEFAULT = ns.FONT_FALLBACK  -- police du jeu (2002)
 
 -- Couleurs
 local COL_BG            = { 0.0549, 0.0549, 0.0549, 1 }
@@ -555,7 +555,7 @@ function Skyriding.Create()
   textFrame:SetAllPoints()
   textFrame:SetFrameLevel(base + 7)
   speedText = textFrame:CreateFontString(nil, "OVERLAY")
-  speedText:SetFont(FONT_MONTSERRAT_B, txtSize, "")
+  speedText:SetFont(FONT_SPEED_DEFAULT, txtSize, "")
   speedText:SetJustifyH("CENTER")
   speedText:SetShadowColor(unpack(COL_TXT_SHADOW))
   speedText:SetShadowOffset(1, -1)
@@ -851,7 +851,7 @@ function Skyriding.ApplySettings()
 
   -- Texte
   if speedText then
-    speedText:SetFont(cfg.font or FONT_MONTSERRAT_B, txtSize, "")
+    speedText:SetFont(cfg.font or FONT_SPEED_DEFAULT, txtSize, "")
   end
 
   -- Speed cap marker repositionné en fonction du bgSize

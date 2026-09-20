@@ -451,17 +451,22 @@ function HealthCircle.SetDraggable(on)
       border:SetColorTexture(1, 1, 1, 0.15)
       bar._dragBorder = border
     end
-    -- Bordure affichee seulement si le deplacement est reellement possible : la montrer sur un
+    -- Bordure affichee seulement au survol (un cadre permanent autour du cercle, panneau ouvert, etait
+    -- tres visible), et seulement si le deplacement est reellement possible : la montrer sur un
     -- element verrouille laisserait croire qu'il est saisissable.
-    local _c = ns.GetCfg("healthCircle")
-    if _c and _c.locked then bar._dragBorder:Hide() else bar._dragBorder:Show() end
+    bar._dragBorder:Hide()
     -- Tooltip au survol
     bar:SetScript("OnEnter", function(self)
+      local c = ns.GetCfg("healthCircle")
+      if not (c and c.locked) then self._dragBorder:Show() end
       GameTooltip:SetOwner(self, "ANCHOR_TOP")
       GameTooltip:SetText(L["RESOURCE_DRAG_TOOLTIP"])
       GameTooltip:Show()
     end)
-    bar:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    bar:SetScript("OnLeave", function(self)
+      self._dragBorder:Hide()
+      GameTooltip:Hide()
+    end)
   else
     bar:SetMovable(false)
     bar:EnableMouse(false)

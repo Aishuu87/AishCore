@@ -57,12 +57,314 @@ local SEC_SLIDE_SCALE = 1.55   -- facteur de départ (× plus loin du centre)
 local secDotAnims     = {}     -- [i] = { progress, target }
 local secAnimFrame    = nil    -- frame dédié à l'animation slide des sec dots
 
+-- Barre de duree de la ressource secondaire : deux StatusBars miroir qui se contractent
+-- vers le centre (illusion d'une barre qui se reduit par les deux bouts).
+--
+-- Elle a son PROPRE sort par spec, volontairement decorrele de CENTER_ARC_SPELLS
+-- (CenterArc.lua) : l'arc central du DK Sang suit Mort et decrepitude, alors que la
+-- barre doit suivre Bouclier d'os -- le buff que le texte de ressource secondaire
+-- juste au-dessus d'elle affiche deja en stacks.
+--
+-- Deux sources, dans cet ordre :
+--   1. canal clone-bar CDM (ns.SubscribeCDMAuraBar) : combat-safe, valeurs jamais lues
+--   2. repli GetPlayerAuraBySpellID hors combat, quand le sort n'est pas epingle sur le
+--      viewer "Barres" de la CDM (le canal 1 n'existe alors pas)
+local SEC_RES_DUR_BAR_SPELLS = {
+  [73]  = { spellID = 190456, color = { 0.78, 0.25, 0.25 } },  -- Guerrier Prot : Dur au mal
+  [104] = { spellID = 192081, color = { 0.85, 0.65, 0.30 } },  -- Druide Gardien : Fer-poil
+  [250] = { spellID = 195181, color = { 0.75, 0.88, 1.00 } },  -- DK Sang : Bouclier d'os
+}
+
+local _secResDurInfo   = nil  -- entree SEC_RES_DUR_BAR_SPELLS active (ou nil)
+local _secResDurSpecID = nil  -- spec pour laquelle le pilote a ete arme
+local _secResDurTicker = nil  -- ticker du repli hors combat
+local _secResDurLastFeed = nil  -- GetTime() du dernier SetValue recu du canal CDM
+
+--- Expose le sort suivi par la barre de duree, pour que le module Auras puisse lui
+--- activer sa destination de scan (cf. ns.AutoConfigSecResDurBar dans CenterArc.lua).
+function ns.GetSecResDurBarSpellID(specID)
+  local e = SEC_RES_DUR_BAR_SPELLS[specID or _secResDurSpecID or ns._specID or 0]
+  return e and e.spellID or nil
+end
+
+local function SecResDurInfoFor(specID)
+  return SEC_RES_DUR_BAR_SPELLS[specID or 0]
+end
+
+--- Avec un specID : question theorique ("cette spec aurait-elle une barre ?"), utilisee
+--- par RefreshSecResDurBar pour armer ou couper le pilote.
+--- Sans specID : etat REEL du pilote. On ne retombe surtout pas sur ns._specID, qui reste
+--- nil un moment apres un /reload (meme defaut que les detecteurs, cf. ResolveSpecID) --
+--- les barres etaient alors masquees a chaque tick malgre un pilote correctement arme.
+local function SecResDurBarsActive(specID)
+  if specID then
+    if not SecResDurInfoFor(specID) then return false end
+    return ns.GetSecResCfg("secResDurBarEnabled", specID) and true or false
+  end
+  if not _secResDurInfo then return false end
+  return ns.GetSecResCfg("secResDurBarEnabled", _secResDurSpecID) and true or false
+end
+
+--- Applique `fn` aux deux moities (gauche puis droite), si elles existent.
+local function SecResDurEach(fn)
+  if not (bar and bar.secResDurL and bar.secResDurR) then return end
+  fn(bar.secResDurL)
+  fn(bar.secResDurR)
+end
+
+--- Show/Hide des deux moities. Un show ne passe que si la spec + l'option l'autorisent.
+local function SecResDurShow(shown)
+  if shown and not SecResDurBarsActive() then shown = false end
+  SecResDurEach(function(b) b:SetShown(shown) end)
+end
+
+--- Couleur : celle choisie par l'utilisateur si definie, sinon celle du sort suivi.
+local function SecResDurColor(specID)
+  specID = specID or _secResDurSpecID
+  local r = ns.GetSecResCfg("secResDurBarColorR", specID)
+  if r then
+    return { r, ns.GetSecResCfg("secResDurBarColorG", specID) or 1,
+                ns.GetSecResCfg("secResDurBarColorB", specID) or 1 }
+  end
+  local info = SecResDurInfoFor(specID)
+  return info and info.color or nil
+end
+
+local function SecResDurApplyColor(specID)
+  local c = SecResDurColor(specID)
+  if c then SecResDurEach(function(db) db:SetStatusBarColor(c[1], c[2], c[3], 1) end) end
+end
+
+-- Proxy "clone-bar" : meme contrat que ResourceCircle.centerArcBarProxy (SetMinMaxValues /
+-- SetValue / Show), sans etre une vraie StatusBar. lo/hi/value peuvent etre secrets en
+-- combat : relayes bruts, jamais compares -- sauf hi == 0, envoye en clair a l'expiration.
+ResourceCircle.secResDurBarProxy = {
+  SetMinMaxValues = function(_, lo, hi)
+    if not SecResDurBarsActive() then SecResDurShow(false); return end
+    local okZero, isZero = pcall(function() return hi == 0 end)
+    if okZero and isZero then
+      SecResDurEach(function(db) db:SetValue(0) end)
+      SecResDurShow(false)
+      return
+    end
+    SecResDurApplyColor()
+    SecResDurEach(function(db)
+      db:SetAlpha(1)
+      pcall(db.SetMinMaxValues, db, lo, hi)
+    end)
+    SecResDurShow(true)
+  end,
+  SetValue = function(_, value)
+    _secResDurLastFeed = GetTime()
+    SecResDurEach(function(db) pcall(db.SetValue, db, value) end)
+  end,
+  Show = function() end,
+}
+
+-- Animation combat-safe : SetTimerDuration(durObj) laisse Blizzard vider la barre a
+-- 60fps sans qu'on lise jamais la valeur. C'est la seule source utilisable en combat,
+-- ou duration/expirationTime sont des valeurs secretes.
+local SRD_INTERP = Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.Immediate
+local SRD_DRAIN  = Enum and Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime
+local SRD_GetAuraDuration = C_UnitAuras and C_UnitAuras.GetAuraDuration
+local _secResDurLastRef = nil  -- tostring(durObj) arme sur les deux moities
+
+--- auraInstanceID du sort suivi. cdmData d'abord : GetPlayerAuraBySpellID echoue pour
+--- beaucoup d'auras en combat, alors que le registre CDM reste fiable.
+local function SecResDurAuraInstID(spellID)
+  local A = ns.Auras
+  local cdmPlayer = A and A.cdmData and A.cdmData.player
+  local e = cdmPlayer and cdmPlayer[spellID]
+  if e and e.instID then return e.instID end
+  local ok, data = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
+  if ok and data then return data.auraInstanceID end
+  return nil
+end
+
+--- Duration object du sort, pris dans ns.Auras.auraData : ce sont les entrees que les
+--- renders qui FONCTIONNENT en combat (barres de cercle, barres libres...) consomment
+--- deja. Les resoudre nous-memes via GetAuraDuration echoue en combat, le ticker etant
+--- un contexte taint AishCore ("Auras cannot be accessed when secret while tainted") --
+--- alors que Scan.lua, lui, les resout depuis un contexte propre.
+local function SecResDurFindDurObj(spellID)
+  local A = ns.Auras
+  local data = A and A.auraData
+  if not data then return nil end
+  for _, list in pairs(data) do
+    if type(list) == "table" then
+      for i = 1, #list do
+        local e = list[i]
+        if e and e.spellID == spellID and e.durObj then return e.durObj end
+      end
+    end
+  end
+  return nil
+end
+
+--- Coupe le timer arme sur les deux moities (uniquement s'il y en avait un : passer nil
+--- a SetTimerDuration sans timer actif peut corrompre l'etat de la StatusBar).
+local function SecResDurClearTimer()
+  if not _secResDurLastRef then return end
+  _secResDurLastRef = nil
+  SecResDurEach(function(db)
+    if db.SetTimerDuration then pcall(db.SetTimerDuration, db, nil) end
+    db:SetValue(0)
+  end)
+end
+
+--- Trois sources, par ordre de fiabilite :
+---   1. canal clone-bar CDM, s'il nous alimente reellement (sort epingle sur "Barres")
+---   2. duration object via C_UnitAuras.GetAuraDuration -- marche EN COMBAT
+---   3. lecture numerique duration/expirationTime, hors combat uniquement
+local function SecResDurTick()
+  if previewMode then return end  -- SetPreview pilote les barres dans ce mode
+  if not SecResDurBarsActive() then SecResDurShow(false); return end
+  local info = _secResDurInfo
+  if not info then return end
+
+  -- 1) Le canal CDM a la priorite, mais seulement s'il nous a REELLEMENT alimente
+  -- recemment. Tester IsCDMAuraBarPresent ne suffit pas : un sort peut etre suivi par la
+  -- CDM sans etre epingle sur le viewer "Barres", auquel cas le proxy ne recoit jamais
+  -- de SetValue -- la barre restait a 0, donc affichee mais invisible.
+  if _secResDurLastFeed and (GetTime() - _secResDurLastFeed) < 0.5 then return end
+
+  local instID = SecResDurAuraInstID(info.spellID)
+  if not instID then
+    -- Aura absente : couper proprement, sinon le timer continuerait a animer dans le vide.
+    SecResDurClearTimer()
+    SecResDurShow(false)
+    return
+  end
+
+  -- 2) Duration object. On lit d'abord le cache rempli par Scan.lua : ce ticker est un
+  -- contexte taint AishCore, ou GetAuraDuration se fait refuser l'acces aux auras
+  -- secretes en combat ("Auras cannot be accessed when secret while tainted"). Scan,
+  -- lui, resout le durObj depuis un contexte propre. L'appel direct ne reste qu'en
+  -- second recours (hors combat, ou si le sort n'est pas suivi par le pipeline).
+  do
+    local durObj = SecResDurFindDurObj(info.spellID)
+    if not durObj and SRD_GetAuraDuration then
+      local okD, d = pcall(SRD_GetAuraDuration, "player", instID)
+      durObj = okD and d or nil
+    end
+    if durObj then
+      local ref = tostring(durObj)
+      if ref ~= _secResDurLastRef then
+        _secResDurLastRef = ref
+        SecResDurApplyColor()
+        SecResDurEach(function(db)
+          db:SetAlpha(1)
+          db:SetMinMaxValues(0, 1)
+          if db.SetTimerDuration and SRD_INTERP and SRD_DRAIN then
+            pcall(db.SetTimerDuration, db, durObj, SRD_INTERP, SRD_DRAIN)
+          end
+        end)
+      end
+      SecResDurShow(true)
+      return
+    end
+  end
+
+  -- 3) Repli numerique : GetAuraDuration echoue silencieusement pour certaines auras
+  -- pourtant lisibles autrement. En combat le calcul leve (valeurs secretes), le pcall
+  -- echoue proprement et on laisse la barre en l'etat plutot que de la vider a tort.
+  local okA, data = pcall(C_UnitAuras.GetPlayerAuraBySpellID, info.spellID)
+  if not okA or not data then return end
+  local okF, frac = pcall(function()
+    local dur = data.duration
+    if not dur or dur <= 0 then return nil end
+    return (data.expirationTime - GetTime()) / dur
+  end)
+  if not okF or not frac then return end
+  SecResDurClearTimer()
+  SecResDurApplyColor()
+  SecResDurEach(function(db)
+    db:SetAlpha(1)
+    db:SetMinMaxValues(0, 1)
+    ns.SmoothSetValue(db, math.max(0, math.min(1, frac)))
+  end)
+  SecResDurShow(true)
+end
+
+--- Coupe tout : desabonnement du canal CDM, arret du ticker de repli, barres masquees.
+local function SecResDurStop()
+  if _secResDurInfo and ns.Auras and ns.Auras.UnsubscribeCDMAuraBar then
+    ns.Auras.UnsubscribeCDMAuraBar(_secResDurInfo.spellID, "secResDurBar")
+  end
+  SecResDurClearTimer()
+  _secResDurInfo = nil
+  _secResDurSpecID = nil
+  _secResDurLastFeed = nil
+  if _secResDurTicker then _secResDurTicker:Cancel(); _secResDurTicker = nil end
+  SecResDurShow(false)
+end
+
+--- (Re)branche la barre sur le sort de `specID`. Appele a chaque changement de spec et
+--- a chaque changement de reglage (l'option peut etre (de)cochee a chaud).
+local function SecResDurStart(specID)
+  SecResDurStop()
+  if not SecResDurBarsActive(specID) then return end
+  local info = SecResDurInfoFor(specID)
+  if not info then return end
+  _secResDurInfo = info
+  _secResDurSpecID = specID or ns._specID
+  if ns.Auras and ns.Auras.SubscribeCDMAuraBar then
+    ns.Auras.SubscribeCDMAuraBar(info.spellID, "secResDurBar", ResourceCircle.secResDurBarProxy)
+  end
+  _secResDurTicker = C_Timer.NewTicker(0.05, SecResDurTick)
+end
+
 -- Affiche/masque texte + tirets décoratifs ensemble ; tirets séparés de N car concat/format interdits sur une valeur secrète.
 local function SetSecResShown(shown)
   if not bar then return end
   if bar.secResText  then bar.secResText:SetShown(shown)  end
   if bar.secResDashL then bar.secResDashL:SetShown(shown) end
   if bar.secResDashR then bar.secResDashR:SetShown(shown) end
+  -- Le texte cache : la barre de duree n'a plus de sens (elle lui est ancree).
+  -- L'inverse n'est pas vrai : un texte visible n'implique pas un buff actif, donc
+  -- c'est le pilote (canal CDM / repli) qui decide du show.
+  if not shown then SecResDurShow(false) end
+end
+
+--- Geometrie + couleur de la barre de duree (par spec). `secResDurBarWidth` est la
+--- largeur TOTALE : chaque moitie en prend la moitie, et elles se touchent au point
+--- d'ancrage, qui est le bord (haut ou bas) du texte de ressource secondaire decale
+--- de (offX, offY).
+local function RefreshSecResDurBar(specID)
+  if not (bar and bar.secResDurL and bar.secResDurR and bar.secResText) then return end
+  -- Appelee aussi depuis ApplySettings, qui resout la spec en ligne et peut passer nil
+  -- (juste apres un /reload). Sans ce repli, la comparaison de reference plus bas
+  -- desarmerait un pilote pourtant correct.
+  specID = specID or _secResDurSpecID or ns._specID
+  local totalW = ns.GetSecResCfg("secResDurBarWidth",  specID) or 60
+  local h      = ns.GetSecResCfg("secResDurBarHeight", specID) or 3
+  local anchor = ns.GetSecResCfg("secResDurBarAnchor", specID) or "BOTTOM"
+  local offX   = ns.GetSecResCfg("secResDurBarOffX",   specID) or 0
+  local offY   = ns.GetSecResCfg("secResDurBarOffY",   specID) or -2
+  local halfW  = math.max(1, totalW / 2)
+  if h < 1 then h = 1 end
+  -- "TOP" = au-dessus du texte, tout le reste (defaut) = en dessous.
+  local relPoint = (anchor == "TOP") and "TOP" or "BOTTOM"
+
+  bar.secResDurL:SetSize(halfW, h)
+  bar.secResDurL:ClearAllPoints()
+  bar.secResDurL:SetPoint("RIGHT", bar.secResText, relPoint, offX, offY)
+
+  bar.secResDurR:SetSize(halfW, h)
+  bar.secResDurR:ClearAllPoints()
+  bar.secResDurR:SetPoint("LEFT", bar.secResText, relPoint, offX, offY)
+
+  local c = SecResDurColor(specID)
+  if c then SecResDurEach(function(db) db:SetStatusBarColor(c[1], c[2], c[3], 1) end) end
+  -- L'option est modifiable a chaud : on rebranche (ou on coupe) le pilote ici plutot
+  -- que d'attendre un changement de spec.
+  if SecResDurBarsActive(specID) then
+    -- Comparaison de REFERENCE de table : detecte aussi un changement de spec
+    -- (73 -> 250), qui doit rebrancher la barre sur l'autre sort.
+    if _secResDurInfo ~= SecResDurInfoFor(specID) then SecResDurStart(specID) end
+  else
+    SecResDurStop()
+  end
 end
 
 -- Applique style/espacement déco (par spec, ns.GetSecResCfg) ; specID optionnel pour éviter de dépendre de ns._specID pas encore à jour.
@@ -147,7 +449,7 @@ local secResDef        = nil   -- définition active (ou nil)
 local secResUpdateTicker = nil -- ticker de mise à jour
 -- spellID(s) abonnés au canal clone-stack (CDMHooks) pour bar.secResText, mémorisés pour désabonnement propre au changement de spec.
 local _secResStackSubIDs = nil
-local FONT_BOLD_ITALIC = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat-BoldItalic.ttf"
+local FONT_SECRES_DEFAULT = ns.FONT_FALLBACK  -- police du jeu (2002)
 
 -- Essence Burst (Evoker Preservation) : proc détecté via spell overlay
 -- Sorts qui s'allument quand Essence Burst est actif
@@ -640,7 +942,7 @@ function ResourceCircle.Create(parent)
   bar.secResFrame = secResFrame
 
   local secResText = secResFrame:CreateFontString(nil, "OVERLAY")
-  secResText:SetFont(FONT_BOLD_ITALIC, 11, "")
+  secResText:SetFont(FONT_SECRES_DEFAULT, 11, "")
   secResText:SetPoint("CENTER", secResFrame, "CENTER", 0, 0)
   secResText:SetTextColor(1, 1, 1, 1)
   secResText:SetText("")
@@ -649,16 +951,34 @@ function ResourceCircle.Create(parent)
 
   -- Déco "- N -" (style/espacement configurables, cf. RefreshSecResDeco) : FontStrings séparées ancrées aux bords de secResText.
   local secResDashL = secResFrame:CreateFontString(nil, "OVERLAY")
-  secResDashL:SetFont(FONT_BOLD_ITALIC, 11, "")
+  secResDashL:SetFont(FONT_SECRES_DEFAULT, 11, "")
   secResDashL:SetTextColor(1, 1, 1, 1)
   secResDashL:Hide()
   bar.secResDashL = secResDashL
 
   local secResDashR = secResFrame:CreateFontString(nil, "OVERLAY")
-  secResDashR:SetFont(FONT_BOLD_ITALIC, 11, "")
+  secResDashR:SetFont(FONT_SECRES_DEFAULT, 11, "")
   secResDashR:SetTextColor(1, 1, 1, 1)
   secResDashR:Hide()
   bar.secResDashR = secResDashR
+
+  -- Barre de duree : moitie gauche remplie depuis sa DROITE (SetReverseFill), moitie
+  -- droite depuis sa GAUCHE. Les deux se rejoignent au centre, donc a valeur egale on
+  -- voit une seule barre qui se vide symetriquement par les deux extremites.
+  -- Geometrie/couleur posees par RefreshSecResDurBar (par spec).
+  for _, side in ipairs({ "L", "R" }) do
+    local db = CreateFrame("StatusBar", nil, secResFrame)
+    db:SetFrameLevel(secResFrame:GetFrameLevel())
+    db:SetStatusBarTexture(ns.ResolveBarTexFromKey(nil))
+    db:SetOrientation("HORIZONTAL")
+    db:SetReverseFill(side == "L")
+    db:SetMinMaxValues(0, 1)
+    db:SetValue(0)
+    db:Hide()
+    bar["secResDur" .. side] = db
+  end
+  RefreshSecResDurBar()
+
   RefreshSecResDeco()
 
   -- Fond sombre sous le power text pour lisibilité (masqué pour Brasseur qui a son propre overlay)
@@ -679,6 +999,9 @@ function ResourceCircle.Create(parent)
   ResourceCircle.DetectSecondaryResource()
   -- Detecter l'arc de stagger (Moine Brasseur)
   ResourceCircle.DetectStagger()
+  -- Create() tourne a l'init de l'addon, bien avant que la spec soit lisible apres un
+  -- /reload : sans ce retry les trois detecteurs ci-dessus restent sur "aucune spec".
+  ResourceCircle.RetrySpecDetectionIfNeeded()
   -- Démarrer le frame d'animation slide des secondary dots
   ResourceCircle.CreateSecAnimFrame()
 
@@ -1182,19 +1505,72 @@ function ResourceCircle.SetPreview(on)
     -- Texte de ressource secondaire visible en preview seulement si la spé a une définition.
     -- Reset explicite d'alpha/position : un pop-out interrompu peut laisser secResFrame à alpha 0.
     if bar.secResFrame and bar.secResText then
-      if secResDef then
-        bar.secResText:SetText("8")
-        SetSecResShown(true)
-        bar.secResFrame:SetAlpha(1)
-        local home = _elemHome[bar.secResFrame]
-        if home then
-          bar.secResFrame:ClearAllPoints()
-          bar.secResFrame:SetPoint(home.point, home.relTo, home.relPoint, home.x, home.y)
+      -- Moine Brasseur : pas de secResDef, c'est le pourcentage de Report qui occupe ce
+      -- meme slot de texte (cf. UpdateStagger). Sans ce cas l'apercu restait vide et les
+      -- reglages de police/couleur/position du pourcentage n'etaient pas previsualisables.
+      local _prevCfg = ns.GetCfg("resourceCircle")
+      local _staggerPreview = (not secResDef) and ns._specID == 268
+        and _prevCfg and _prevCfg.staggerShowPercent
+      if secResDef or _staggerPreview then
+        local function PlaceSecResFrame()
+          bar.secResFrame:SetAlpha(1)
+          local home = _elemHome[bar.secResFrame]
+          if home then
+            bar.secResFrame:ClearAllPoints()
+            bar.secResFrame:SetPoint(home.point, home.relTo, home.relPoint, home.x, home.y)
+          end
+          bar.secResFrame:Show()
         end
-        bar.secResFrame:Show()
+        if secResDef then
+          bar.secResText:SetText("8")
+          SetSecResShown(true)
+        else
+          -- Valeur factice dans la bande "moderee" (30-60%), d'ou la couleur orange :
+          -- meme rendu que ce que produira UpdateStagger en jeu.
+          bar.secResText:SetText("42.5%")
+          bar.secResText:SetTextColor(STAGGER_MODERATE[1], STAGGER_MODERATE[2], STAGGER_MODERATE[3], 1)
+          bar.secResText:Show()
+          -- Un pourcentage n'est pas un nombre de stacks : pas de tirets decoratifs,
+          -- exactement comme le chemin reel dans UpdateStagger.
+          if bar.secResDashL then bar.secResDashL:Hide() end
+          if bar.secResDashR then bar.secResDashR:Hide() end
+        end
+        PlaceSecResFrame()
       else
         SetSecResShown(false)
         bar.secResFrame:Hide()
+      end
+    end
+    -- Barre de duree : sans valeur fictive elle restait a 0 en apercu, donc invisible,
+    -- et largeur/epaisseur/couleur/position n'etaient pas reglables a vue.
+    if bar.secResDurL and bar.secResDurR then
+      if SecResDurBarsActive(ns._specID) then
+        RefreshSecResDurBar(ns._specID)
+        SecResDurApplyColor(ns._specID)
+        SecResDurEach(function(db)
+          db:SetAlpha(1)
+          db:SetMinMaxValues(0, 1)
+          db:SetValue(0.6)
+          db:Show()
+        end)
+      else
+        SecResDurEach(function(db) db:Hide() end)
+      end
+    end
+
+    -- Arc de Report (Brasseur) : comme le pourcentage ci-dessus, il n'apparaissait pas
+    -- en apercu, donc taille/epaisseur/couleur n'etaient pas reglables a vue. Valeur
+    -- fictive coherente avec le texte (42.5 sur une echelle 0-100, bande "moderee").
+    if bar.staggerArc and bar.staggerOverlayFrame then
+      if staggerActive or ns._specID == 268 then
+        bar.staggerArc:SetStatusBarColor(STAGGER_MODERATE[1], STAGGER_MODERATE[2], STAGGER_MODERATE[3], 1)
+        bar.staggerArc:SetMinMaxValues(0, 100)
+        bar.staggerArc:SetValue(42.5)
+        bar.staggerArc:SetAlpha(1); bar.staggerArc:Show()
+        bar.staggerOverlayFrame:SetAlpha(1); bar.staggerOverlayFrame:Show()
+      else
+        bar.staggerArc:Hide()
+        bar.staggerOverlayFrame:Hide()
       end
     end
     -- Respecter le mode radial en preview aussi, sinon l'arc vertical réapparaîtrait par-dessus le disque radial
@@ -1257,17 +1633,22 @@ function ResourceCircle.SetDraggable(on)
       border:SetColorTexture(1, 1, 1, 0.15)
       bar._dragBorder = border
     end
-    -- Bordure affichee seulement si le deplacement est reellement possible : la montrer sur un
+    -- Bordure affichee seulement au survol (un cadre permanent autour du cercle, panneau ouvert, etait
+    -- tres visible), et seulement si le deplacement est reellement possible : la montrer sur un
     -- element verrouille laisserait croire qu'il est saisissable.
-    local _c = ns.GetCfg("resourceCircle")
-    if _c and _c.locked then bar._dragBorder:Hide() else bar._dragBorder:Show() end
+    bar._dragBorder:Hide()
     -- Tooltip au survol
     bar:SetScript("OnEnter", function(self)
+      local c = ns.GetCfg("resourceCircle")
+      if not (c and c.locked) then self._dragBorder:Show() end
       GameTooltip:SetOwner(self, "ANCHOR_TOP")
       GameTooltip:SetText(L["RESOURCE_DRAG_TOOLTIP"])
       GameTooltip:Show()
     end)
-    bar:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    bar:SetScript("OnLeave", function(self)
+      self._dragBorder:Hide()
+      GameTooltip:Hide()
+    end)
   else
     bar:SetMovable(false)
     bar:EnableMouse(false)
@@ -1980,11 +2361,13 @@ function ResourceCircle.RefreshSecResSpecGeometry(specID)
     end
   end
 
+  RefreshSecResDurBar(specID)
+
   local secResTextSize = ns.GetSecResCfg("secResTextSize", specID) or 11
   if bar.secResText then
-    bar.secResText:SetFont(ns.GetSecResCfg("secResFont", specID) or FONT_BOLD_ITALIC, secResTextSize, "")
+    bar.secResText:SetFont(ns.GetSecResCfg("secResFont", specID) or FONT_SECRES_DEFAULT, secResTextSize, "")
     -- Police de la déco : indépendante (secResDecoFont), reprend secResFont si non définie.
-    local decoFont = ns.GetSecResCfg("secResDecoFont", specID) or ns.GetSecResCfg("secResFont", specID) or FONT_BOLD_ITALIC
+    local decoFont = ns.GetSecResCfg("secResDecoFont", specID) or ns.GetSecResCfg("secResFont", specID) or FONT_SECRES_DEFAULT
     if bar.secResDashL then bar.secResDashL:SetFont(decoFont, secResTextSize, "") end
     if bar.secResDashR then bar.secResDashR:SetFont(decoFont, secResTextSize, "") end
 
@@ -2009,6 +2392,46 @@ function ResourceCircle.RefreshSecResSpecGeometry(specID)
   RefreshSecResDeco(specID)
 end
 
+--- Resolution de spec exploitable, ou nil. Ne renvoie JAMAIS de valeur par defaut :
+--- juste apres un /reload, GetSpecialization() repond nil pendant un court instant, et
+--- un detecteur qui interprete ce nil comme "pas ma spe" se desactive jusqu'au prochain
+--- changement de spe (symptome : ressource secondaire, arc de Report et barre de duree
+--- absents apres un reload, revenant seulement en rechangeant de spe).
+local function ResolveSpecID()
+  if not (GetSpecialization and GetSpecializationInfo) then return nil end
+  local idx = GetSpecialization()
+  if not idx or idx == 0 then return nil end
+  local ok, specID = pcall(GetSpecializationInfo, idx)
+  if not ok or not specID or specID == 0 then return nil end
+  return specID
+end
+
+--- Relance les detecteurs dependants de la spec des qu'elle devient lisible. Sans effet
+--- si elle l'est deja. Retry borne, meme motif que RetryHealth dans UnitBars.lua.
+local _specRetryRunning = false
+function ResourceCircle.RetrySpecDetectionIfNeeded()
+  if ResolveSpecID() then return end
+  if _specRetryRunning then return end
+  _specRetryRunning = true
+  local tries = 0
+  local function Retry()
+    tries = tries + 1
+    if ResolveSpecID() then
+      _specRetryRunning = false
+      ResourceCircle.DetectSecondaryDots()
+      ResourceCircle.DetectSecondaryResource()
+      ResourceCircle.DetectStagger()
+      return
+    end
+    if tries < 10 then
+      C_Timer.After(0.5, Retry)
+    else
+      _specRetryRunning = false
+    end
+  end
+  C_Timer.After(0.3, Retry)
+end
+
 -- Détecte la ressource secondaire selon la spec active et démarre le ticker
 function ResourceCircle.DetectSecondaryResource()
   if not bar then return end
@@ -2030,15 +2453,8 @@ function ResourceCircle.DetectSecondaryResource()
 
   if not ns.SecondaryResourceDefs then return end
 
-  -- Résoudre le specID courant
-  local specID = nil
-  if GetSpecialization and GetSpecializationInfo then
-    local idx = GetSpecialization()
-    if idx and idx > 0 then
-      local ok, sid = pcall(GetSpecializationInfo, idx)
-      if ok and sid and sid > 0 then specID = sid end
-    end
-  end
+  -- Résoudre le specID courant (nil = pas encore lisible, cf. ResolveSpecID)
+  local specID = ResolveSpecID()
   if not specID then return end
 
   local def = ns.SecondaryResourceDefs[specID]
@@ -2047,7 +2463,9 @@ function ResourceCircle.DetectSecondaryResource()
   secResDef = def
 
   -- Abonner bar.secResText au canal clone-stack (CDMHooks) : ApplyStacksToText échoue en combat pour certains sorts, ce canal reste fiable.
-  if def.useStacks and def.spellID and ns.Auras and ns.Auras.SubscribeCDMAuraStack then
+  -- useArmor y est inclus : le montant d'armure n'est pas lisible en combat, mais le
+  -- nombre de stacks l'est via ce canal -- mieux vaut un compteur qu'un texte vide.
+  if (def.useStacks or def.useArmor) and def.spellID and ns.Auras and ns.Auras.SubscribeCDMAuraStack then
     _secResStackSubIDs = { def.spellID }
     ns.Auras.SubscribeCDMAuraStack(def.spellID, "resourceCircleSecRes", bar.secResText)
     if def.altSpellID then
@@ -2306,6 +2724,64 @@ local function ApplyAbsorbToText(fontString, spellID)
   return pcall(fontString.SetText, fontString, absorb)
 end
 
+-- Montant d'armure accorde par un buff (Fer-poil / Ironfur 192081).
+-- Pourquoi l'infobulle et pas AuraData.points : points est secret en combat, et surtout
+-- il ne porte que la valeur d'UNE application -- l'infobulle, elle, affiche le total
+-- courant, stacks compris, qui est ce qu'on veut montrer.
+-- Le parsing prend le PLUS GRAND nombre de l'infobulle : les autres nombres qu'on peut y
+-- croiser (stacks, secondes restantes) sont d'un ordre de grandeur bien inferieur a un
+-- montant d'armure. Tolerant aux separateurs de milliers selon la locale
+-- (espace, espace insecable, virgule, point).
+local function ApplyArmorToText(fontString, spellID)
+  -- instID par la CDM d'abord : GetPlayerAuraBySpellID echoue pour beaucoup d'auras en
+  -- combat, et un echec ici ne doit PAS court-circuiter le repli sur les stacks.
+  local A = ns.Auras
+  local cdmPlayer = A and A.cdmData and A.cdmData.player
+  local cdmEntry  = cdmPlayer and cdmPlayer[spellID]
+  local instID    = cdmEntry and cdmEntry.instID
+  if not instID then
+    local okA, data = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
+    if okA and data then instID = data.auraInstanceID end
+  end
+
+  if instID and C_TooltipInfo and C_TooltipInfo.GetUnitBuffByAuraInstanceID then
+    local okT, tip = pcall(C_TooltipInfo.GetUnitBuffByAuraInstanceID, "player", instID)
+    if okT and tip and tip.lines then
+      local best
+      for _, line in ipairs(tip.lines) do
+        local txt = line and line.leftText
+        if type(txt) == "string" then
+          for raw in string.gmatch(txt, "%d[%d%s\194\160%.,]*") do
+            local n = tonumber((string.gsub(raw, "[%s\194\160%.,]", "")))
+            if n and (not best or n > best) then best = n end
+          end
+        end
+      end
+      if best then
+        -- Meme option "grand nombre" (10000 -> "10k") que le montant d'absorption.
+        if ns.GetSecResCfg("secResAbsorbAbbreviate") and AbbreviateNumbers then
+          local okAb, str = pcall(AbbreviateNumbers, best)
+          if okAb and str then return pcall(fontString.SetText, fontString, str) end
+        end
+        return pcall(fontString.SetText, fontString, best)
+      end
+    end
+  end
+
+  -- Repli 1 : chaine de stacks normale (fiable hors combat).
+  if ApplyStacksToText and ApplyStacksToText(fontString, spellID) then return true end
+
+  -- Repli 2 : derniere valeur du canal clone-stack. En combat c'est la seule qui passe,
+  -- GetAuraApplicationDisplayCount etant refuse a un appelant taint. Valeur possiblement
+  -- secrete : relayee brute a SetText, jamais comparee.
+  local A2 = ns.Auras
+  if A2 and A2.GetCDMLastApplications then
+    local appl = A2.GetCDMLastApplications(spellID)
+    if appl ~= nil then return pcall(fontString.SetText, fontString, appl) end
+  end
+  return false
+end
+
 function ResourceCircle.UpdateSecondaryResource()
   if not bar or not bar.secResText then return end
   if previewMode then return end  -- ne pas écraser la valeur factice affichée par SetPreview
@@ -2374,9 +2850,27 @@ function ResourceCircle.UpdateSecondaryResource()
       SetSecResShown(false)
     end
     return
-  elseif secResDef.useAbsorb and secResDef.spellID then
-    -- Montant d'absorption restant (ex: Dur Au Mal / Ignore Pain)
-    local applied = ApplyAbsorbToText(bar.secResText, secResDef.spellID)
+  elseif (secResDef.useAbsorb or secResDef.useArmor) and secResDef.spellID then
+    -- Montant d'absorption restant (Dur Au Mal) ou d'armure accordee (Fer-poil) :
+    -- meme traitement ensuite (couleur suivie sur l'arc, pop, show/hide).
+    -- if/else explicite et pas `a and f() or g()` : f() renvoie false en cas d'echec,
+    -- ce qui ferait retomber sur g() -- donc afficher une absorption pour le Fer-poil.
+    local applied
+    if secResDef.useArmor then
+      applied = ApplyArmorToText(bar.secResText, secResDef.spellID)
+      -- Le canal clone-stack pousse le compteur directement dans le FontString : si
+      -- l'aura est la, le texte est a jour meme quand nos lectures echouent (combat).
+      -- Sans ce repli de PRESENCE, `applied` restait faux et on masquait un texte
+      -- pourtant correctement rempli.
+      if not applied then
+        local A3 = ns.Auras
+        if A3 and A3.IsCDMAuraSwipePresent and A3.IsCDMAuraSwipePresent(secResDef.spellID) then
+          applied = true
+        end
+      end
+    else
+      applied = ApplyAbsorbToText(bar.secResText, secResDef.spellID)
+    end
     -- Recale la couleur à chaque tick sur celle de l'arc de durée (reflète en
     -- direct un changement de couleur via le color picker du panneau options).
     local c = GetDurationArcColor(ns._specID) or secResDef.color
@@ -2424,17 +2918,11 @@ function ResourceCircle.DetectStagger()
     SetSecResShown(false)
     if bar.secResFrame then bar.secResFrame:Hide() end
   end
-  if GetSpecialization and GetSpecializationInfo then
-    local idx = GetSpecialization()
-    if idx and idx > 0 then
-      local ok, specID = pcall(GetSpecializationInfo, idx)
-      if ok and specID == 268 then  -- Brewmaster Monk
-        staggerActive = true
-        staggerUpdateTicker = C_Timer.NewTicker(0.1, function()
-          ResourceCircle.UpdateStagger()
-        end)
-      end
-    end
+  if ResolveSpecID() == 268 then  -- Brewmaster Monk
+    staggerActive = true
+    staggerUpdateTicker = C_Timer.NewTicker(0.1, function()
+      ResourceCircle.UpdateStagger()
+    end)
   end
 end
 
@@ -2575,10 +3063,28 @@ ResourceCircle.centerArcBarProxy = {
 function ResourceCircle.ApplyStacksToCenterArc(spellID, maxValue, color, dbg)
   if not bar or not bar.durationArc then return false end
   if not maxValue or maxValue <= 0 then return false end
+  -- SetMinMaxValues doit preceder SetValue, mais rien ne garantit que les stacks
+  -- s'appliqueront : on memorise la plage courante pour la restaurer en cas d'echec.
+  -- Sans ca, un simple appel exploratoire (ex. la sonde de /rcarc) reglait l'arc sur
+  -- la plage demandee et le laissait fausse -- il sautait a 100% en mode absorb.
+  local okPrev, prevMin, prevMax = pcall(bar.durationArc.GetMinMaxValues, bar.durationArc)
   bar.durationArc:SetMinMaxValues(0, maxValue)
   local applied = ApplyStacksTo(function(v)
     return pcall(ns.SmoothSetValue, bar.durationArc, v)
   end, spellID, dbg)
+  -- Repli combat : le canal clone-stack garde la derniere valeur vue, la ou
+  -- GetAuraApplicationDisplayCount (utilise par ApplyStacksTo) est refuse a un appelant
+  -- taint. Valeur possiblement secrete : passee brute a SetValue, jamais comparee.
+  if not applied then
+    local A2 = ns.Auras
+    local appl = A2 and A2.GetCDMLastApplications and A2.GetCDMLastApplications(spellID)
+    if appl ~= nil then
+      applied = pcall(ns.SmoothSetValue, bar.durationArc, appl)
+    end
+  end
+  if not applied and okPrev then
+    pcall(bar.durationArc.SetMinMaxValues, bar.durationArc, prevMin, prevMax)
+  end
   if applied then
     if color then bar.durationArc:SetStatusBarColor(color[1], color[2], color[3], 1) end
     bar.durationArc:SetAlpha(1); bar.durationArc:Show()
@@ -2748,6 +3254,65 @@ SlashCmdList["RCSECRES"] = function()
   local specID = idx and GetSpecializationInfo and select(1, pcall(GetSpecializationInfo, idx))
   local okSpec, sid = pcall(GetSpecializationInfo, idx or 0)
   p(string.format("GetSpecialization idx=%s specID(ok=%s)=%s", tostring(idx), tostring(okSpec), tostring(sid)))
+  p(string.format("ns._specID=%s  ResolveSpecID()=%s", tostring(ns._specID), tostring(ResolveSpecID and ResolveSpecID())))
+
+  -- --- Barre de duree (deux moities miroir) ---------------------------------
+  do
+    local liveSpec = (ResolveSpecID and ResolveSpecID()) or ns._specID
+    local entry = SEC_RES_DUR_BAR_SPELLS[liveSpec or 0]
+    p(string.format("durBar: spe=%s  sort attendu=%s  option=%s",
+      tostring(liveSpec), tostring(entry and entry.spellID),
+      tostring(ns.GetSecResCfg("secResDurBarEnabled", liveSpec))))
+    p(string.format("durBar: pilote arme=%s (spellID=%s, spec=%s)  ticker=%s",
+      tostring(_secResDurInfo ~= nil), tostring(_secResDurInfo and _secResDurInfo.spellID),
+      tostring(_secResDurSpecID), tostring(_secResDurTicker ~= nil)))
+    if _secResDurInfo then
+      local A = ns.Auras
+      local cdmOk = A and A.IsCDMAuraBarPresent and A.IsCDMAuraBarPresent(_secResDurInfo.spellID)
+      p(string.format("durBar: canal CDM present=%s (sinon repli GetPlayerAuraBySpellID)", tostring(cdmOk)))
+      local okA, data = pcall(C_UnitAuras.GetPlayerAuraBySpellID, _secResDurInfo.spellID)
+      p(string.format("durBar: aura lisible=%s  duration=%s", tostring(okA and data ~= nil),
+        tostring(okA and data and data.duration)))
+      -- Source principale en combat. On distingue les DEUX origines : le pipeline
+      -- (ns.Auras.auraData, celui qui fait marcher les barres de cercle) et l'API
+      -- directe (qui echoue en combat depuis ce contexte taint).
+      local instID   = SecResDurAuraInstID(_secResDurInfo.spellID)
+      local fromData = SecResDurFindDurObj(_secResDurInfo.spellID)
+      local fromAPI
+      if instID and SRD_GetAuraDuration then
+        local okD, d = pcall(SRD_GetAuraDuration, "player", instID)
+        fromAPI = okD and d or nil
+      end
+      p(string.format("durBar: instID=%s  durObj pipeline=%s  durObj API=%s  timer arme=%s  SetTimerDuration dispo=%s",
+        tostring(instID), tostring(fromData ~= nil), tostring(fromAPI ~= nil),
+        tostring(_secResDurLastRef ~= nil),
+        tostring(bar.secResDurL and bar.secResDurL.SetTimerDuration ~= nil)))
+      -- Ou le sort apparait-il dans le pipeline, et avec ou sans durObj ?
+      local A2 = ns.Auras
+      if A2 and A2.auraData then
+        for dest, list in pairs(A2.auraData) do
+          if type(list) == "table" then
+            for i = 1, #list do
+              local e = list[i]
+              if e and e.spellID == _secResDurInfo.spellID then
+                p(string.format("   auraData[%s][%d] : durObj=%s directDuration=%s",
+                  tostring(dest), i, tostring(e.durObj ~= nil), tostring(e.directDuration)))
+              end
+            end
+          end
+        end
+      else
+        p("   ns.Auras.auraData absent")
+      end
+    end
+    if bar.secResDurL then
+      p(string.format("durBar L: IsShown=%s Alpha=%.2f Taille=%.0fx%.0f",
+        tostring(bar.secResDurL:IsShown()), bar.secResDurL:GetAlpha(),
+        bar.secResDurL:GetWidth(), bar.secResDurL:GetHeight()))
+    else
+      p("durBar: les moities n'existent pas (bar.secResDurL nil)")
+    end
+  end
   if secResDef then
     p(string.format("secResDef: spellID=%s useStacks=%s useAbsorb=%s useCharges=%s useTargetDebuff=%s altSpellID=%s",
       tostring(secResDef.spellID), tostring(secResDef.useStacks), tostring(secResDef.useAbsorb), tostring(secResDef.useCharges), tostring(secResDef.useTargetDebuff), tostring(secResDef.altSpellID)))

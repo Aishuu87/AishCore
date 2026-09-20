@@ -1401,7 +1401,7 @@ local function CreateSlotFrame(index, parent)
   local cx = cfg.chargeOffsetX or 0
   local cy = cfg.chargeOffsetY or 0
   frame.chargeText:SetPoint(chargePos, inner, chargePos, cx, cy)
-  frame.chargeText:SetFont(ns.Media.font, cfg.chargeFontSize or 12, "OUTLINE")
+  frame.chargeText:SetFont(cfg.chargeFont or ns.Media.font, cfg.chargeFontSize or 12, "OUTLINE")
   local cc = cfg.chargeColor or { 1, 1, 1, 1 }
   frame.chargeText:SetTextColor(cc[1], cc[2], cc[3], cc[4] or 1)
   frame.chargeText:Hide()
@@ -1498,7 +1498,14 @@ local function LayoutSlots()
   local size = cfg.iconSize or 34
   local spacing = cfg.iconSpacing or 6
   local sideOffset = cfg.sideOffset or 150
+  -- En spe tank, la barre de vie du joueur peut etre plus haute (unitBars.useTankHeight) :
+  -- verticalOffsetTank surcharge alors le decalage normal, pour ne pas avoir a rejouer le
+  -- reglage a chaque changement de spe.
   local verticalOffset = cfg.verticalOffset or 0
+  local UB = ns.Modules and ns.Modules.UnitBars
+  if cfg.verticalOffsetTank and UB and UB.IsTankSpec and UB.IsTankSpec() then
+    verticalOffset = cfg.verticalOffsetTank
+  end
 
   local layoutDef = GetCurrentLayoutDef()
   local cols = layoutDef.cols
@@ -1514,6 +1521,7 @@ local function LayoutSlots()
 
   -- Position custom du profil actif si disponible, sinon sideOffset par défaut
   local pbCfg = ns.GetCfg("priorityBar") or {}
+
   if leftContainer then
     leftContainer:ClearAllPoints()
     if pbCfg.leftAnchor then
@@ -3558,7 +3566,7 @@ function PriorityBar.ApplySettings()
           local cdColor = cfg.cooldownTextColor or { 1, 1, 1, 1 }
           for _, region in pairs({slot.cooldown:GetRegions()}) do
             if region:IsObjectType("FontString") then
-              region:SetFont(ns.Media.font, cdFontSize, "OUTLINE")
+              region:SetFont(cfg.cooldownFont or ns.Media.font, cdFontSize, "OUTLINE")
               region:SetTextColor(cdColor[1], cdColor[2], cdColor[3], cdColor[4] or 1)
             end
           end
@@ -3572,7 +3580,7 @@ function PriorityBar.ApplySettings()
         local cy  = cfg.chargeOffsetY or 0
         slot.chargeText:ClearAllPoints()
         slot.chargeText:SetPoint(pos, slot.innerFrame or slot, pos, cx, cy)
-        slot.chargeText:SetFont(ns.Media.font, cfg.chargeFontSize or 12, "OUTLINE")
+        slot.chargeText:SetFont(cfg.chargeFont or ns.Media.font, cfg.chargeFontSize or 12, "OUTLINE")
         local cc = cfg.chargeColor or { 1, 1, 1, 1 }
         slot.chargeText:SetTextColor(cc[1], cc[2], cc[3], cc[4] or 1)
         if not cfg.showCharges then slot.chargeText:Hide() end
@@ -3814,12 +3822,11 @@ function PriorityBar.SetPreview(on)
   end
 end
 
+-- Repasse les conteneurs en positionnement "par reglages". LayoutSlots ne consulte QUE les
+-- ancres de la DB (leftAnchor/rightAnchor) -- _userPlaced n'est jamais relu -- donc les effacer
+-- est la seule facon de rendre la main aux sliders de decalage apres un drag ou un profil
+-- importe avec une position figee.
 function PriorityBar.ClearDragPositions()
-  if leftContainer then leftContainer._userPlaced = false end
-  if rightContainer then rightContainer._userPlaced = false end
-end
-
-function PriorityBar.ResetPositions()
   if leftContainer then leftContainer._userPlaced = false end
   if rightContainer then rightContainer._userPlaced = false end
   if ns.DB and ns.DB.priorityBar then
@@ -3830,6 +3837,10 @@ function PriorityBar.ResetPositions()
     ns.DB.priorityBar.rightX = nil
     ns.DB.priorityBar.rightY = nil
   end
+end
+
+function PriorityBar.ResetPositions()
+  PriorityBar.ClearDragPositions()
   LayoutSlots()
 end
 

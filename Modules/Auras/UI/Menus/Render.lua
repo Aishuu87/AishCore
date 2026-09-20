@@ -513,9 +513,9 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
             ccBg.onChanged=function(col) if ns.db and ns.db[rk] then ns.db[rk].barBgR=col[1]; ns.db[rk].barBgG=col[2]; ns.db[rk].barBgB=col[3] end; pcall(ns.RebuildDisplay); CircleBarsRefresh(); FreeBarsRefresh(); IconListRefresh() end
             local sBgA=SW.CreateSlider(c,L["AURASMENU_RENDER_BG_OPACITY"],0,1,0.05,slW); sBgA:SetPoint("TOPLEFT",ox+slW+gap,-cy); sBgA:SetValue(cf.barBgAlpha or 0)
             sBgA.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].barBgAlpha=v end; pcall(ns.RebuildDisplay); CircleBarsRefresh(); FreeBarsRefresh(); IconListRefresh() end; cy=cy+60
-            local texOpts={}; for _,t in ipairs(ns.BAR_TEXTURES) do texOpts[#texOpts+1]={value=t.value,text=t.text} end
+            local texOpts=ns.GetBarTextureList and ns.GetBarTextureList() or {}
             local tdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_BAR_TEXTURE"],texOpts,w-30); tdd:SetPoint("TOPLEFT",15,-cy)
-            tdd:SetValue(cf.texture or ns.BAR_TEXTURES[1].value)
+            tdd:SetValue(cf.texture or _addon.BAR_TEXTURE_DEFAULT or ns.BAR_TEXTURES[1].value)
             tdd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].texture=v end; pcall(ns.RebuildDisplay); CircleBarsRefresh(); FreeBarsRefresh(); IconListRefresh() end
             cy=cy+50; c:SetHeight(cy) end}
 

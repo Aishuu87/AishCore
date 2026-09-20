@@ -201,7 +201,7 @@ end
 -- EXPORT DES CORRECTIONS ADMIN (/aishadmin) : popup avec EditBox en Lua lisible, a copier
 -- manuellement dans le code source (un addon ne peut pas reecrire ses propres fichiers .lua).
 function ns.ExportAdminOverrides()
-    local ov = ns.db and ns.db.adminOverrides
+    local ov = ns.GetAdminOverrides and ns.GetAdminOverrides()
     if not (ov and next(ov)) then
         print("|cff00ffff[AishCore]|r Aucune correction admin a exporter.")
         return
@@ -937,7 +937,13 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
             {0.55, 0.22, 0.15, 0.75},
             {0.75, 0.35, 0.25})
         b4:SetPoint("TOP", cont, "TOP", 0, -y)
-        b4:SetScript("OnClick", function() wipe(spells); onChg(); Build() end)
+        b4:SetScript("OnClick", function()
+            -- Liste d'auras partagee par tous les profils (cf. Core/Profiles.lua) : vider aussi le registre compte
+            local ids = {}
+            for sid in pairs(spells) do ids[#ids + 1] = sid end
+            if ns.Profiles and ns.Profiles.ForgetDiscovered then ns.Profiles:ForgetDiscovered(ns.GetSpecKey(), ids) end
+            wipe(spells); onChg(); Build()
+        end)
         y = y + 28
 
         -- Mode admin uniquement : export des corrections vers une popup copiable a integrer en dur.

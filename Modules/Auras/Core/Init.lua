@@ -129,9 +129,9 @@ function ns.ReleaseModelPaths()
     return true
 end
 
--- Helpers de spécialisation. Clé = "CLASSE_SPE" uniquement (pas de nom/royaume) : la DB est
--- partagée tout le compte, donc une liste "Auras à tracker" configurée sur un personnage doit
--- être retrouvée par tout autre personnage de la même classe/spé. Ancien format (nom-realm
+-- Helpers de spécialisation. Clé = "CLASSE_SPE" uniquement (pas de nom/royaume) : la liste vit dans
+-- le profil, partagé entre personnages, donc une liste "Auras à tracker" configurée sur un personnage
+-- doit être retrouvée par tout autre personnage de la même classe/spé utilisant ce profil. Ancien format (nom-realm
 -- inclus) migré une fois vers ce format par MigrateSpecKeys (cf. ns.InitDB).
 function ns.GetSpecKey()
     local key
@@ -149,15 +149,22 @@ function ns.GetSpecKey()
     return key
 end
 
--- Mode admin ("Auras à tracker") : ns.db.adminOverrides[spellID] = { source="debuff"|"buff"|"totem"
+-- Mode admin ("Auras à tracker") : adminOverrides[spellID] = { source="debuff"|"buff"|"totem"
 -- (reclassification manuelle, prioritaire sur l'auto-découverte), deleted=true (masque le sort, cf.
--- Tactics.lua) }. Stockage GLOBAL (pas par spec) car un spellID désigne le même sort partout.
+-- Tactics.lua) }. Stockage GLOBAL (pas par spec) car un spellID désigne le même sort partout, et
+-- COMPTE (pas par profil) comme le classement des auras découvertes (cf. Core/Profiles.lua).
 -- Objectif final : brouillon à exporter (ns.ExportAdminOverrides) puis intégrer en dur -- un addon
 -- ne peut pas réécrire ses .lua, donc ce SavedVariables reste une étape intermédiaire.
+function ns.GetAdminOverrides(create)
+    local raw = AishUIAuraDB; if not raw then return nil end
+    if create and type(raw.adminOverrides) ~= "table" then raw.adminOverrides = {} end
+    return raw.adminOverrides
+end
+
 function ns.ApplyAdminOverrides(spells)
     if not spells then return end
     -- Baseline codée en dur (SpellClassificationOverrides.lua) pour tous, puis override
-    -- personnel du joueur (ns.db.adminOverrides, /aishadmin) par-dessus qui garde le dernier mot.
+    -- personnel du joueur (ns.GetAdminOverrides, /aishadmin) par-dessus qui garde le dernier mot.
     local hardcoded = ns.SpellClassificationOverrides
     if hardcoded then
         for spellID, o in pairs(hardcoded) do
@@ -168,7 +175,7 @@ function ns.ApplyAdminOverrides(spells)
             end
         end
     end
-    local ov = ns.db and ns.db.adminOverrides
+    local ov = ns.GetAdminOverrides()
     if not ov then return end
     for spellID, o in pairs(ov) do
         local info = spells[spellID]
@@ -182,18 +189,16 @@ function ns.ApplyAdminOverrides(spells)
 end
 
 function ns.SetAdminSourceOverride(spellID, source)
-    if not ns.db then return end
-    ns.db.adminOverrides = ns.db.adminOverrides or {}
-    local o = ns.db.adminOverrides[spellID]
-    if not o then o = {}; ns.db.adminOverrides[spellID] = o end
+    local ov = ns.GetAdminOverrides(true); if not ov then return end
+    local o = ov[spellID]
+    if not o then o = {}; ov[spellID] = o end
     o.source = source
 end
 
 function ns.SetAdminDeletedOverride(spellID, deleted)
-    if not ns.db then return end
-    ns.db.adminOverrides = ns.db.adminOverrides or {}
-    local o = ns.db.adminOverrides[spellID]
-    if not o then o = {}; ns.db.adminOverrides[spellID] = o end
+    local ov = ns.GetAdminOverrides(true); if not ov then return end
+    local o = ov[spellID]
+    if not o then o = {}; ov[spellID] = o end
     -- Booléen explicite (jamais nil) : distingue "jamais touché" (clé absente) de "explicitement
     -- décoché" (false), pour qu'annuler une suppression hardcodée (SpellClassificationOverrides) tienne.
     o.deleted = deleted and true or false
@@ -440,6 +445,11 @@ local function BulkSetDefaultProcGlow(raw)
 end
 
 function ns.InitDB()
+    -- Le profil Auras actif suit le profil AishCore (cf. Core/Profiles.lua) : ce handler ADDON_LOADED
+    -- passe AVANT celui d'AishCore.lua (ordre du .toc), on resout donc le profil AishCore ici.
+    if not _addon._activeProfileName and _addon.Profiles and _addon.Profiles.InitDB then
+        pcall(_addon.Profiles.InitDB)
+    end
     if not AishUIAuraDB then AishUIAuraDB = {} end
     local raw = AishUIAuraDB
     -- Migration des anciennes clés avant tout MergeDefaults

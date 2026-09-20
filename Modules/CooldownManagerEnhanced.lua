@@ -25,6 +25,9 @@ local ICON_MASK_OPTIONS = {
   { value = 3, text = L["SETTINGS_CDM_MASK_CIRCLE"],   atlas = "CircleMaskScalable" },
   { value = 4, text = L["SETTINGS_CDM_MASK_HEXAGON"],  atlas = "CovenantSanctum-Renown-Hexagon-Mask" },
   { value = 5, text = L["SETTINGS_CDM_MASK_TALENT"],   atlas = "talents-node-choiceflyout-mask" },
+  -- Carre plein : pas un atlas mais une texture unie, donc aucun arrondi ni fondu de
+  -- bord. Utile pour verifier si un halo vient du masque ou d'une region native.
+  { value = 6, text = L["SETTINGS_CDM_MASK_SQUARE"],   atlas = "Interface\\Buttons\\WHITE8X8" },
 }
 ns.CDM_ICON_MASK_OPTIONS = ICON_MASK_OPTIONS
 
@@ -51,11 +54,15 @@ local function SetTextureOrAtlas(region, texture, useAtlasSize)
 end
 
 -- Bordure (icone/backdrop)
-local function SetBackdropBorderSize(frame, borderSize)
-  local parent = frame:GetParent()
+-- `anchorTo` : region que la bordure doit epouser. On memorise le choix sur la frame
+-- pour que les rafraichissements ulterieurs (qui ne le repassent pas) gardent la meme
+-- cible. Par defaut le parent, comme avant.
+local function SetBackdropBorderSize(frame, borderSize, anchorTo)
+  anchorTo = anchorTo or frame.__borderAnchor or frame:GetParent()
+  frame.__borderAnchor = anchorTo
   frame:ClearAllPoints()
-  frame:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
-  frame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
+  frame:SetPoint("TOPLEFT", anchorTo, "TOPLEFT", 0, 0)
+  frame:SetPoint("BOTTOMRIGHT", anchorTo, "BOTTOMRIGHT", 0, 0)
   frame:SetBackdrop({
     edgeFile = "Interface\\Buttons\\WHITE8x8",
     edgeSize = borderSize,
@@ -63,12 +70,17 @@ local function SetBackdropBorderSize(frame, borderSize)
 end
 
 local function CreateBorder(frame, frameName, cfg)
+  -- La bordure doit epouser l'ICONE. Avant, on remontait au bouton parent et on ancrait
+  -- dessus : le bouton etant plus grand que son icone, le backdrop dessinait un cadre
+  -- noir nettement plus large que l'icone -- tres visible a petite taille, et pris pour
+  -- une "texture fantome" en plus de la bordure.
+  local anchorTo = frame
   if frame:GetObjectType() == "Texture" then
     frame = frame:GetParent()
   end
   local edgeSize = (cfg.backdropSize and cfg.backdropSize > 0) and cfg.backdropSize or 1
   local border = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-  SetBackdropBorderSize(border, edgeSize)
+  SetBackdropBorderSize(border, edgeSize, anchorTo)
   local c = cfg.backdropColor or { 0, 0, 0, 1 }
   border:SetBackdropBorderColor(c[1], c[2], c[3], c[4] or 1)
   frame:SetClampedToScreen(false)
@@ -524,6 +536,27 @@ function CDME.RefreshItemSize(child, cfg)
   end
 end
 
+-- Contour natif du bouton CDM. /cdmregions le revele : sur un bouton de 28x28, cette
+-- texture OVERLAY mesure 46x44 -- elle deborde donc largement de l'icone et se lit comme
+-- un halo noir, d'autant plus visible que les icones sont petites. Elle n'a rien a voir
+-- avec le masque (la forme) ni avec notre bordure, d'ou l'impression de "texture fantome".
+-- Toujours masquee : ce halo n'a aucun cas d'usage, il n'y a donc plus de reglage.
+local NATIVE_ICON_OVERLAY_ATLAS = "UI-HUD-CoolDownManager-IconOverlay"
+
+function CDME.RefreshIconOverlay(child)
+  for _, r in ipairs({ child:GetRegions() }) do
+    local ok, typ = pcall(r.GetObjectType, r)
+    if ok and typ == "Texture" then
+      local okA, atlas = pcall(r.GetAtlas, r)
+      if okA and atlas == NATIVE_ICON_OVERLAY_ATLAS then
+        -- SetAlpha plutot que Hide : Blizzard reaffiche la region a ses propres refresh,
+        -- et un Hide perdu laisserait le halo revenir jusqu'au prochain Layout.
+        r:SetAlpha(0)
+      end
+    end
+  end
+end
+
 function CDME.RefreshIconMask(child, cfg)
   local opt = ICON_MASK_OPTIONS[cfg.iconMaskIndex] or ICON_MASK_OPTIONS[1]
   local icon = child.Icon
@@ -670,8 +703,18 @@ local function FrameFadeOut(frame, duration, fromAlpha, toAlpha)
 end
 
 local function SetFrameAlpha(frame, toAlpha)
+  -- Un fondu deja en route vers CETTE cible ne doit pas etre relance : FrameFade remet
+  -- l'alpha a fromAlpha et repart de zero. Rappele plus vite que FADE_DURATION (ce qui
+  -- arrive des que Blizzard relayoute souvent), le fondu ne se terminait jamais et
+  -- l'alpha restait bloque pres de sa valeur de depart -- le viewer paraissait donc
+  -- rester allume, comme si les bascules de fondu etaient ignorees.
+  local inFlight = Fader.Frames[frame]
+  if inFlight and inFlight.toAlpha == toAlpha then return end
   local currentAlpha = frame:GetAlpha()
-  if toAlpha == currentAlpha then return end
+  if toAlpha == currentAlpha then
+    Fader.Frames[frame] = nil   -- deja a la bonne opacite : purge un fondu obsolete
+    return
+  end
   if toAlpha > currentAlpha then
     FrameFadeIn(frame, FADE_DURATION, currentAlpha, toAlpha)
   else
@@ -709,6 +752,17 @@ end
 local function RefreshFadeAll()
   for _, frameName in ipairs(VIEWER_NAMES) do RefreshFade(frameName) end
 end
+
+-- Veille legere : Blizzard repositionne/reaffiche ses viewers et remet leur opacite a 1
+-- en dehors de tout evenement que l'on ecoute. On reaffirme donc la cible periodiquement.
+-- Sans risque de relancer un fondu en boucle : SetFrameAlpha ignore une cible deja en
+-- cours et purge un fondu obsolete quand l'opacite est deja bonne.
+C_Timer.NewTicker(0.2, function()
+  for _, frameName in ipairs(VIEWER_NAMES) do
+    local cfg = GetCfgFor(frameName)
+    if cfg and cfg.enabled and cfg.useFading then RefreshFade(frameName) end
+  end
+end)
 
 local fadeEventFrame = CreateFrame("Frame")
 fadeEventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -750,6 +804,11 @@ local function Hook_Layout(self)
   self.__layoutFramesGoingRight = cfg.growRight
   self.__padding = self.childXPadding or self.childYPadding
   self.gridLayoutType = cfg.gridLayoutType
+
+  -- Blizzard remet l'alpha du viewer a 1 lors de ses propres mises a jour (relayout,
+  -- changement de sort/aura...). Sans cette reapplication, le fondu etait perdu et la
+  -- barre restait visible jusqu'a ce qu'un survol rappelle RefreshFade.
+  RefreshFade(frameName)
 
   local layoutChildren = self:GetLayoutChildren()
   if not self:ShouldUpdateLayout(layoutChildren) then self.__locked = false; return end
@@ -862,6 +921,10 @@ local function Hook_Layout(self)
       child.__sizeHooked = true
     end
 
+    -- Reapplique a CHAQUE passage (pas de cache) : Blizzard remet l'alpha de sa texture
+    -- a 1 lors de ses propres rafraichissements.
+    CDME.RefreshIconOverlay(child)
+
     if cfg.iconMaskIndex and cfg.iconMaskIndex > 1 and (not child.__iconMaskSet or forceUpdate) then
       CDME.RefreshIconMask(child, cfg)
       child.__iconMaskSet = true
@@ -896,6 +959,72 @@ local function Hook_Layout(self)
   _forced = nil
 end
 
+-- Liaison a la barre de vie du joueur (cfg.linkToPlayerBar) : le viewer est repositionne contre un bord
+-- de la barre, en coordonnees UIParent calculees par UnitBars.GetPlayerBarRect, et re-cale a chaque
+-- changement de la barre (UnitBars.NotifyPlayerBarMoved). Jamais ANCRE sur la barre : c'est un
+-- SecureUnitButton, et un frame ancre sur un frame protege devient protege a son tour (le layout
+-- Blizzard du viewer serait alors bloque en combat).
+-- Cote de la barre joueur -> point du viewer qui vient s'y coller (donc le point OPPOSE).
+local LINK_VIEWER_POINT = {
+  RIGHT = "LEFT", LEFT = "RIGHT", TOP = "BOTTOM", BOTTOM = "TOP",
+  -- Coins : le viewer se pose en diagonale a l'exterieur du coin vise.
+  TOPLEFT     = "BOTTOMRIGHT", TOPRIGHT    = "BOTTOMLEFT",
+  BOTTOMLEFT  = "TOPRIGHT",    BOTTOMRIGHT = "TOPLEFT",
+}
+local _linkApplying = false
+local _linkActive = {}   -- [frameName] = true tant que la position est pilotee par la liaison
+local _linkPending = false
+
+local function ApplyPlayerBarLink(frameName)
+  local viewer = _G[frameName]
+  if not viewer then return end
+  local cfg = GetCfgFor(frameName)
+  if not (cfg and cfg.enabled and cfg.linkToPlayerBar) then
+    -- Liaison retiree : rend la main a la position Edit Mode
+    if _linkActive[frameName] and not InCombatLockdown() then
+      _linkActive[frameName] = nil
+      if viewer.ApplySystemAnchor then pcall(viewer.ApplySystemAnchor, viewer) end
+    end
+    return
+  end
+  -- En Edit Mode, on laisse Blizzard deplacer le viewer ; recale a la sortie (hook OnHide plus bas)
+  if EditModeManagerFrame and EditModeManagerFrame:IsEditModeActive() then return end
+  if InCombatLockdown() then _linkPending = true; return end
+
+  local UB = ns.Modules and ns.Modules.UnitBars
+  if not (UB and UB.GetPlayerBarRect) then return end
+  local l, r, b, t = UB.GetPlayerBarRect()
+  if not l then return end
+
+  local side = LINK_VIEWER_POINT[cfg.linkSide] and cfg.linkSide or "RIGHT"
+  local gap, off = cfg.linkGap or 4, cfg.linkOffset or 0
+  local x, y
+  if side == "RIGHT" then        x, y = r + gap, (b + t) / 2 + off
+  elseif side == "LEFT" then     x, y = l - gap, (b + t) / 2 + off
+  elseif side == "TOP" then      x, y = (l + r) / 2 + off, t + gap
+  elseif side == "BOTTOM" then   x, y = (l + r) / 2 + off, b - gap
+  -- Coins : pas de perpendiculaire unique en diagonale, `off` decale horizontalement.
+  elseif side == "TOPLEFT" then     x, y = l - gap + off, t + gap
+  elseif side == "TOPRIGHT" then    x, y = r + gap + off, t + gap
+  elseif side == "BOTTOMLEFT" then  x, y = l - gap + off, b - gap
+  else                              x, y = r + gap + off, b - gap end
+
+  -- Offsets de SetPoint exprimes dans l'echelle du viewer
+  local scale = viewer:GetScale()
+  if not scale or scale == 0 then scale = 1 end
+  _linkApplying = true
+  pcall(function()
+    viewer:ClearAllPoints()
+    viewer:SetPoint(LINK_VIEWER_POINT[side], UIParent, "CENTER", x / scale, y / scale)
+  end)
+  _linkApplying = false
+  _linkActive[frameName] = true
+end
+
+function CDME.RefreshPlayerBarLink()
+  for _, frameName in ipairs(VIEWER_NAMES) do ApplyPlayerBarLink(frameName) end
+end
+
 -- Setup (hooks une seule fois, hors combat)
 local _hooksSet = {}
 
@@ -914,6 +1043,14 @@ local function SetHooksFor(frameName)
   if frame.HidePandemicStateFrame then
     hooksecurefunc(frame, "HidePandemicStateFrame", Hook_HidePandemic)
   end
+  -- Edit Mode reapplique sa propre ancre (chargement/changement de layout) : on recale derriere lui
+  hooksecurefunc(frame, "SetPoint", function()
+    if _linkApplying then return end
+    local cfg = GetCfgFor(frameName)
+    if cfg and cfg.enabled and cfg.linkToPlayerBar then
+      C_Timer.After(0, function() ApplyPlayerBarLink(frameName) end)
+    end
+  end)
   _hooksSet[frameName] = true
   RefreshFade(frameName)
 end
@@ -935,15 +1072,73 @@ function CDME.ApplySettings()
     end
     RefreshFade(frameName)
   end
+  CDME.RefreshPlayerBarLink()
+end
+
+-- Debug : /cdmregions, liste TOUTES les regions du 1er bouton d'un viewer avec leur
+-- texture/atlas, taille et calque. Sert a identifier une texture native non geree par
+-- l'addon (halo, ombre, cadre) que ni la bordure ni le masque n'expliquent.
+SLASH_CDMREGIONS1 = "/cdmregions"
+SlashCmdList["CDMREGIONS"] = function()
+  local function p(m) DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[CDMRegions]|r " .. tostring(m)) end
+  for _, frameName in ipairs(VIEWER_NAMES) do
+    local frame = _G[frameName]
+    local kids = frame and frame.GetLayoutChildren and frame:GetLayoutChildren()
+    local child = kids and kids[1]
+    if child then
+      p(frameName .. " -> 1er bouton : " .. tostring(child:GetName() or "(sans nom)")
+        .. string.format("  taille=%.0fx%.0f", child:GetWidth(), child:GetHeight()))
+      for _, r in ipairs({ child:GetRegions() }) do
+        local ok, typ = pcall(r.GetObjectType, r)
+        if ok and typ == "Texture" then
+          local atlas = r.GetAtlas and r:GetAtlas() or nil
+          local tex   = r.GetTexture and r:GetTexture() or nil
+          p(string.format("   [%s] shown=%s alpha=%.2f taille=%.0fx%.0f atlas=%s tex=%s",
+            tostring(r:GetDrawLayer()), tostring(r:IsShown()), r:GetAlpha(),
+            r:GetWidth(), r:GetHeight(), tostring(atlas), tostring(tex)))
+        end
+      end
+      -- Sous-frames (Cooldown, Border, FX...) : leurs textures aussi
+      for _, sub in ipairs({ child:GetChildren() }) do
+        p(string.format("   sous-frame %s shown=%s alpha=%.2f taille=%.0fx%.0f",
+          tostring(sub:GetName() or "(sans nom)"), tostring(sub:IsShown()), sub:GetAlpha(),
+          sub:GetWidth(), sub:GetHeight()))
+        for _, r in ipairs({ sub:GetRegions() }) do
+          local ok, typ = pcall(r.GetObjectType, r)
+          if ok and typ == "Texture" and r:IsShown() then
+            local atlas = r.GetAtlas and r:GetAtlas() or nil
+            p(string.format("      [%s] alpha=%.2f atlas=%s tex=%s",
+              tostring(r:GetDrawLayer()), r:GetAlpha(), tostring(atlas),
+              tostring(r.GetTexture and r:GetTexture())))
+          end
+        end
+      end
+      return
+    end
+  end
+  p("aucun bouton trouve (viewers vides ou CDM non charge)")
 end
 
 -- Init
+local _editModeHooked = false
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-initFrame:SetScript("OnEvent", function()
+initFrame:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
+initFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+initFrame:SetScript("OnEvent", function(_, event)
+  if event == "PLAYER_REGEN_ENABLED" then
+    if _linkPending then _linkPending = false; CDME.RefreshPlayerBarLink() end
+    return
+  end
   for _, frameName in ipairs(VIEWER_NAMES) do
     SetHooksFor(frameName)
   end
+  if not _editModeHooked and EditModeManagerFrame then
+    EditModeManagerFrame:HookScript("OnHide", function() CDME.RefreshPlayerBarLink() end)
+    _editModeHooked = true
+  end
+  -- Differe : laisse Edit Mode et UnitBars poser leurs positions avant de recaler
+  C_Timer.After(0.5, CDME.RefreshPlayerBarLink)
 end)
 
 -- /cdmdbg : diagnostic -- etat du viewer (visibilite, alpha, fading, enfants)

@@ -28,8 +28,8 @@ end
 
 -- Constantes / Textures
 local DARK        = 14 / 255
-local FONT_BOLD   = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Bold.ttf"
-local FONT_FILE   = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\PTSansNarrow-Regular.ttf"
+local FONT_COUNT_DEFAULT   = ns.FONT_FALLBACK  -- police du jeu (2002)
+local FONT_DURATION_DEFAULT   = ns.FONT_FALLBACK
 local DEBUFF_TYPE_COLORS = {
   Magic   = { 0.20, 0.60, 1.00 },
   Curse   = { 0.60, 0.00, 1.00 },
@@ -129,7 +129,7 @@ local function CreateAuraIcon(parent, index, namePrefix)
 
   f.count = raised:CreateFontString(nil, "OVERLAY")
   f.countSlug = ns.CreateSlugRing(raised, f.count)
-  ns.ApplyTextOutlineStyle(f.count, f.countSlug, FONT_BOLD, 10, nil)
+  ns.ApplyTextOutlineStyle(f.count, f.countSlug, FONT_COUNT_DEFAULT, 10, nil)
   f.count:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -1, 1)
   f.count:SetJustifyH("RIGHT")
 
@@ -273,13 +273,13 @@ end
 
 local function StyleIcons(pool, grp)
   local size = grp.iconSize or 26
-  local dFont = grp.durationFont or FONT_FILE
+  local dFont = grp.durationFont or FONT_DURATION_DEFAULT
   local dSize = grp.durationFontSize or 9
   local dCol  = grp.durationColor or { 1, 1, 1, 1 }
   local dAnc  = grp.durationAnchor or "CENTER"
   local dOX   = grp.durationOffX or 0
   local dOY   = grp.durationOffY or 0
-  local cFont = grp.countFont or FONT_BOLD
+  local cFont = grp.countFont or FONT_COUNT_DEFAULT
   local cSize = grp.countFontSize or 10
   local cCol  = grp.countColor or { 1, 1, 1, 1 }
 
@@ -514,7 +514,7 @@ local function CreateNativeButtonWidgets(auraButton, isDebuff)
   -- Le FONT doit être posé AVANT SetApplicationCount, sinon erreur "Font not set".
   local countFS = auraButton:CreateFontString(nil, "OVERLAY", nil, 7)
   auraButton._aishCountSlug = ns.CreateSlugRing(auraButton, countFS)
-  ns.ApplyTextOutlineStyle(countFS, auraButton._aishCountSlug, FONT_BOLD, 10, nil)
+  ns.ApplyTextOutlineStyle(countFS, auraButton._aishCountSlug, FONT_COUNT_DEFAULT, 10, nil)
   countFS:SetJustifyH("RIGHT")
   auraButton:SetApplicationCount(countFS, {})
   auraButton._aishCount = countFS
@@ -566,14 +566,14 @@ local function ApplyNativeButtonStyle(auraButton, grp, isDebuff)
       end
       local dAnc = grp.durationAnchor or "CENTER"
       StyleCooldownText(cd, auraButton,
-        grp.durationFont or FONT_FILE, grp.durationFontSize or 9,
+        grp.durationFont or FONT_DURATION_DEFAULT, grp.durationFontSize or 9,
         grp.durationColor or { 1, 1, 1, 1 },
         dAnc, dAnc, grp.durationOffX or 0, grp.durationOffY or 0)
     end
 
     if auraButton._aishCount then
       local cnt = auraButton._aishCount
-      ns.ApplyTextOutlineStyle(cnt, auraButton._aishCountSlug, grp.countFont or FONT_BOLD, grp.countFontSize or 10, grp.countOutlineStyle)
+      ns.ApplyTextOutlineStyle(cnt, auraButton._aishCountSlug, grp.countFont or FONT_COUNT_DEFAULT, grp.countFontSize or 10, grp.countOutlineStyle)
       local cc = grp.countColor or { 1, 1, 1, 1 }
       cnt:SetTextColor(cc[1], cc[2], cc[3], cc[4] or 1)
       cnt:ClearAllPoints()

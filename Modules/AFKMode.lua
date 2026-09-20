@@ -702,10 +702,11 @@ local function CreatePanels()
 end
 
 local function CreateChatAndTips()
+  local cfgAtCreate = Cfg()
   chatFrame = CreateFrame("ScrollingMessageFrame", "AishCoreAFKChat", frame)
   chatFrame:SetSize(480, 160)
   chatFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -80)
-  chatFrame:SetFont(ns.Media.fontGui, 12, "")
+  chatFrame:SetFont(cfgAtCreate.chatFont or ns.Media.font, cfgAtCreate.chatSize or 12, "")
   chatFrame:SetJustifyH("LEFT")
   chatFrame:SetMaxLines(200)
   chatFrame:SetFading(false)
@@ -771,6 +772,11 @@ function AFKMode.ApplySettings()
   local bg = cfg.panelBgColor or { 0, 0, 0, 0.85 }
   for _, panel in ipairs({ topPanel, bottomPanel }) do
     panel:SetBackdropColor(bg[1], bg[2], bg[3], bg[4])
+  end
+
+  -- Fenetre de chat : police/taille configurables (son placement, lui, reste fixe)
+  if chatFrame then
+    chatFrame:SetFont(cfg.chatFont or ns.Media.font, cfg.chatSize or 12, "")
   end
 
   model:SetCamDistanceScale(cfg.modelDistance or 4.5)

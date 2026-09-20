@@ -376,6 +376,8 @@ ns.SecondaryResourceDefs = {
   [1480] = { spellID = 1225789, useStacks = true, altSpellID = 1227702, maxStacks = 50 },
   -- Warrior Protection (73) : Dur Au Mal (190456), montant d'absorption restant
   [73] = { spellID = 190456, useAbsorb = true, color = { 0.78, 0.25, 0.25, 1 } },
+  -- Druid Guardian (104) : Fer-poil (192081), montant d'armure accorde par le buff
+  [104] = { spellID = 192081, useArmor = true, color = { 0.85, 0.65, 0.30, 1 } },
   -- Monk Mistweaver (270) : Thé de Mana (115867) introuvable en combat -- castCountSpellID
   -- (115294, sort activable) sert de repli via ApplyCastCountToText
   [270] = { spellID = 115867, useStacks = true, castCountSpellID = 115294,

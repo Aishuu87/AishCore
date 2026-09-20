@@ -6,8 +6,12 @@ local UnitBars = {}
 ns.Modules.UnitBars = UnitBars
 
 -- Constantes visuelles
-local BAR_TEXTURE  = "Interface\\AddOns\\SharedMedia_MyMedia\\statusbar\\ToxiUI-clean.tga"
-local BEBAS_FONT   = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\BebasNeue-Regular.ttf"
+-- Texture de la barre : cle de config resolue a chaque appel (ns.BAR_TEXTURES),
+-- pour que le choix du dropdown s'applique sans /reload.
+local function BarTex()
+    return ns.ResolveBarTexFromKey((ns.GetCfg("unitBars") or {}).barTexture)
+end
+local DEFAULT_FONT   = ns.FONT_FALLBACK  -- police du jeu (2002), aucune media pack requise
 -- Couleur "noire" commune (#0e0e0e)
 local DARK         = 14/255
 -- Couleur de fond commune (presque noir)
@@ -16,7 +20,9 @@ local DEFAULT_BG   = { DARK, DARK, DARK, 1 }
 local DOT_BASE    = { 3, 5, 9 }
 local DOT_SPACING = 3   -- gap interne (fixe) entre chaque dot
 
--- Spécialisations tank : recevront une largeur de barre spécifique si activé
+-- Spécialisations tank : reçoivent une HAUTEUR de barre spécifique si l'option est
+-- activée (cfg.useTankHeight / cfg.tankHeight, cf. GetEffectiveHeight). La largeur,
+-- elle, ne dépend pas de la spé.
 local TANK_SPECS = {
     [250] = true,  -- DK Sang
     [581] = true,  -- DH Vengeance
@@ -28,9 +34,19 @@ local TANK_SPECS = {
 local inTankSpec = false
 local inCombat   = false
 
+--- Met a jour `inTankSpec`. Renvoie false si la spe n'a PAS pu etre resolue.
+--- Distinction importante : juste apres un /reload, GetSpecialization() repond nil
+--- pendant quelques instants. L'ancienne version passait alors 0 a
+--- GetSpecializationInfo, recevait nil, et en concluait "pas tank" -- les barres
+--- gardaient donc leur geometrie non-tank jusqu'au prochain changement de spe.
+--- On ne touche plus a inTankSpec tant que la reponse n'est pas fiable.
 local function UpdateTankSpec()
-    local specID = GetSpecializationInfo(GetSpecialization() or 0)
+    local idx = GetSpecialization and GetSpecialization()
+    if not idx or idx == 0 then return false end
+    local ok, specID = pcall(GetSpecializationInfo, idx)
+    if not ok or not specID or specID == 0 then return false end
     inTankSpec = TANK_SPECS[specID] or false
+    return true
 end
 
 -- Retourne les 3 tailles de dots depuis la config globale
@@ -320,6 +336,7 @@ local function CreateUnitBar(def)
         -- Re-ancrage immediat dans la convention canonique : sans ca la frame resterait sur l'ancre
         -- posee par WoW jusqu'au prochain refresh, et on ne verrait le desaccord que plus tard.
         if PositionBarFrame then PositionBarFrame(frame) end
+        if def.key == "player" then UnitBars.NotifyPlayerBarMoved() end
 
         -- Report dans les champs X/Y du panneau (registre rempli par UI/SettingsPanel.lua). Sans ca
         -- les sliders gardaient l'ancienne valeur apres un deplacement a la souris : impossible
@@ -365,7 +382,7 @@ local function CreateUnitBar(def)
     sb:SetFrameLevel(parentLevel + 1)
     sb:SetSize(w, barH)
     sb:SetPoint("TOPLEFT", bgTex)
-    sb:SetStatusBarTexture(BAR_TEXTURE)
+    sb:SetStatusBarTexture(BarTex())
     sb:SetMinMaxValues(0, 1)
     sb:SetValue(0)
     frame.bar = sb
@@ -513,7 +530,7 @@ local function CreateUnitBar(def)
 
         local nameTxt = frame:CreateFontString(nil, "OVERLAY")
         frame.nameTxtSlug = ns.CreateSlugRing(frame, nameTxt)
-        ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, BEBAS_FONT, nSize, db and db.nameOutlineStyle)
+        ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, DEFAULT_FONT, nSize, db and db.nameOutlineStyle)
         nameTxt:SetJustifyH(justify)
         nameTxt:SetShadowColor(0, 0, 0, 0.7)
         nameTxt:SetTextColor(1, 1, 1, 1)
@@ -748,6 +765,7 @@ local function ApplyBarSettings(frame)
     frame._barOffX = barOffX
     frame._barOffY = (frameH - h) / 2
     frame.bar:SetSize(w, h)
+    frame.bar:SetStatusBarTexture(BarTex())
     frame.bar:ClearAllPoints()
     frame.bar:SetPoint("TOPLEFT", frame.bgTex)
     frame._barW = w
@@ -834,7 +852,7 @@ local function ApplyBarSettings(frame)
         local justify_n = def.nameJustify or "LEFT"
         local anchorS = (justify_n == "LEFT") and "BOTTOMLEFT"  or "BOTTOMRIGHT"
         local anchorA = (justify_n == "LEFT") and "TOPLEFT"     or "TOPRIGHT"
-        ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, (ubCfg and ubCfg.nameFont) or BEBAS_FONT, nSize, ubCfg and ubCfg.nameOutlineStyle)
+        ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, (ubCfg and ubCfg.nameFont) or DEFAULT_FONT, nSize, ubCfg and ubCfg.nameOutlineStyle)
         frame.nameTxt:SetJustifyH(justify_n)
         frame.nameTxt:ClearAllPoints()
         frame.nameTxt:SetPoint(anchorS, frame.bgTex, anchorA, nOffX, nOffY)
@@ -1099,6 +1117,29 @@ function UnitBars.ApplySettings()
     for _, frame in pairs(bars) do
         ApplyBarSettings(frame)
     end
+    UnitBars.NotifyPlayerBarMoved()
+end
+
+-- Rectangle de la barre de vie du joueur (fond de barre, hors dots), en coordonnees relatives au CENTRE
+-- de UIParent : left, right, bottom, top. Calcule depuis la config et non lu sur la frame, pour ignorer
+-- les animations d'apparition (glissement/scale). nil si la barre n'existe pas encore.
+function UnitBars.GetPlayerBarRect()
+    local f = bars.player
+    if not (f and f.bgTex) then return nil end
+    local def = f._def
+    local cfg = Cfg("player")
+    local x = cfg.x or def.defaults.x
+    local y = cfg.y or def.defaults.y
+    local w = f._barW or cfg.width or def.defaults.width
+    local left   = x - f:GetWidth() / 2 + (f._barOffX or 0)
+    local bottom = y + (f._barOffY or 0)
+    return left, left + w, bottom, bottom + f.bgTex:GetHeight()
+end
+
+-- Previent les elements lies a la barre du joueur (CDs essentiels, cf. CooldownManagerEnhanced.lua)
+function UnitBars.NotifyPlayerBarMoved()
+    local cdme = ns.Modules and ns.Modules.CooldownManagerEnhanced
+    if cdme and cdme.RefreshPlayerBarLink then pcall(cdme.RefreshPlayerBarLink) end
 end
 
 -- Appelé par Skyriding.lua quand le skyriding commence/se termine.
@@ -1124,7 +1165,40 @@ function UnitBars.IsPlayerBarShown()
     return ubLastVisState["player"] == true
 end
 
+--- Spe tank active ? Lu par PriorityBar pour son decalage vertical dedie.
+function UnitBars.IsTankSpec()
+    return inTankSpec and true or false
+end
+
+--- Resout la spe et applique la geometrie tank, en surveillant quelques secondes.
+--- DOIT etre arme depuis Create() et pas depuis l'event handler : celui-ci commence par
+--- `if not next(bars) then return end`, or `bars` est encore vide a PLAYER_ENTERING_WORLD
+--- (UnitBars.Create est appele par AishCore.lua depuis SON propre handler du meme
+--- evenement, et notre eventFrame est enregistre avant). Toute la branche
+--- PLAYER_ENTERING_WORLD etait donc avalee par ce garde : seul un changement de spe
+--- manuel, qui arrive une fois les barres creees, mettait `inTankSpec` a jour.
+--- On surveille au lieu de s'arreter au premier succes : juste apres un /reload,
+--- GetSpecialization() peut rendre un index perime avant de se stabiliser.
+local function WatchTankSpec()
+    local tries, appliedTank = 0, nil
+    local function Tick()
+        tries = tries + 1
+        if UpdateTankSpec() and inTankSpec ~= appliedTank then
+            appliedTank = inTankSpec
+            for _, f in pairs(bars) do ApplyBarSettings(f) end
+            -- ApplyBarSettings ne previent pas de lui-meme : la hauteur de la barre
+            -- joueur change, les CDs qui s'y ancrent doivent se repositionner.
+            UnitBars.NotifyPlayerBarMoved()
+        end
+        if tries < 12 then C_Timer.After(0.5, Tick) end
+    end
+    Tick()
+end
+
 function UnitBars.Create(parent)
+    -- Avant la boucle : CreateUnitBar lit deja GetEffectiveHeight, autant partir avec la
+    -- bonne valeur quand la spe est lisible des maintenant.
+    UpdateTankSpec()
     for _, def in ipairs(BAR_DEFS) do
         if not bars[def.key] then
             local f = CreateUnitBar(def)
@@ -1133,6 +1207,7 @@ function UnitBars.Create(parent)
             ApplyBarSettings(f)
         end
     end
+    WatchTankSpec()
     -- Forcer la visibilité quand le panneau config s'ouvre/se ferme
     C_Timer.After(0, function()
         local panel = _G["AishCoreSettingsPanel"]
@@ -1186,11 +1261,45 @@ eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+-- ACTIVE_TALENT_GROUP_CHANGED se declenche aussi au login, quand le serveur confirme
+-- la spe active : c'est le signal fiable que GetSpecialization() devient exploitable,
+-- la ou PLAYER_ENTERING_WORLD arrive trop tot.
+eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
 eventFrame:RegisterEvent("UNIT_ENTERED_VEHICLE")
 eventFrame:RegisterEvent("UNIT_EXITED_VEHICLE")
 eventFrame:RegisterEvent("PET_BATTLE_OPENING_START")
 eventFrame:RegisterEvent("PET_BATTLE_CLOSE")
+
+-- Debug : /ubtank, etat de la hauteur tank (pourquoi une barre ne prend pas sa taille)
+SLASH_UBTANK1 = "/ubtank"
+SlashCmdList["UBTANK"] = function()
+    local function p(msg) DEFAULT_CHAT_FRAME:AddMessage("|cff88ccff[UBTank]|r " .. tostring(msg)) end
+    local idx = GetSpecialization and GetSpecialization()
+    local okS, sid = pcall(GetSpecializationInfo, idx or 0)
+    p(string.format("GetSpecialization()=%s  specID(ok=%s)=%s  TANK_SPECS[specID]=%s",
+        tostring(idx), tostring(okS), tostring(sid), tostring(sid and TANK_SPECS[sid])))
+    p(string.format("inTankSpec=%s  (UpdateTankSpec() vient de renvoyer %s)",
+        tostring(inTankSpec), tostring(UpdateTankSpec())))
+    local db = ns.GetCfg("unitBars")
+    p(string.format("useTankHeight=%s  tankHeight=%s",
+        tostring(db and db.useTankHeight), tostring(db and db.tankHeight)))
+    local nb = 0
+    for _ in pairs(bars) do nb = nb + 1 end
+    p(string.format("barres creees=%d", nb))
+    local f = bars.player
+    if f then
+        local cfg = Cfg("player")
+        p(string.format("player: hauteur attendue=%s  bgTex=%.1f  bar=%.1f  cfg.height=%s",
+            tostring(GetEffectiveHeight(f._def, cfg)),
+            f.bgTex and f.bgTex:GetHeight() or -1,
+            f.bar and f.bar:GetHeight() or -1,
+            tostring(cfg.height)))
+    else
+        p("bars.player est nil")
+    end
+end
 
 -- Map unité → key de barre
 local UNIT_KEY = {
@@ -1225,6 +1334,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
                 if pendingSettingsApply then
                     pendingSettingsApply = false
                     for _, f in pairs(bars) do ApplyBarSettings(f) end
+                    UnitBars.NotifyPlayerBarMoved()
                 end
             end)
         end
@@ -1255,12 +1365,15 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
 
-    if event == "PLAYER_SPECIALIZATION_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM" then
+    if event == "PLAYER_SPECIALIZATION_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM"
+       or event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_LOGIN" then
         local wasTank = inTankSpec
         UpdateTankSpec()
-        if event == "PLAYER_SPECIALIZATION_CHANGED" then
-            -- Changement de spé complet : réappliquer systématiquement
+        if event ~= "UPDATE_SHAPESHIFT_FORM" then
+            -- Changement de spé complet (ou confirmation au login) : réappliquer
+            -- systématiquement, et prévenir les CDs ancrés à la barre joueur.
             for _, f in pairs(bars) do ApplyBarSettings(f) end
+            UnitBars.NotifyPlayerBarMoved()
         elseif inTankSpec ~= wasTank then
             -- Transformation : réappliquer seulement si le statut tank a changé
             -- (évite le saut visuel à chaque shapeshif druide/shaman sans impact réel)
@@ -1275,6 +1388,28 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         for _, f in pairs(bars) do
             ApplyBarSettings(f)
         end
+        -- Reapplication differee INCONDITIONNELLE. Deux raisons cumulees, qui rendent le
+        -- passage synchrone ci-dessus inoperant au login :
+        --   1. `bars` est encore VIDE ici. UnitBars.Create() est appele par AishCore.lua
+        --      depuis SON propre handler PLAYER_ENTERING_WORLD ; or l'eventFrame de ce
+        --      fichier est enregistre en premier (UnitBars.lua est charge avant
+        --      AishCore.lua dans le .toc), donc on passe ici AVANT que les barres
+        --      existent -- la boucle ci-dessus ne s'applique a rien.
+        --   2. juste apres un /reload, GetSpecialization() repond nil un court instant,
+        --      donc inTankSpec vaut encore false quand AishCore cree puis configure les
+        --      barres dans la foulee.
+        -- On repasse donc apres coup des que la spe est lisible, sans condition sur un
+        -- changement d'etat : c'est le seul passage qui voit a la fois les barres creees
+        -- et la spe resolue.
+        -- On SURVEILLE pendant quelques secondes au lieu de s'arreter a la premiere
+        -- resolution : juste apres un /reload, GetSpecialization() peut d'abord rendre
+        -- un index perime (resolu, mais pas la bonne spe) avant de se stabiliser. Un
+        -- retry qui s'arrete au premier succes fige alors la mauvaise hauteur -- d'ou un
+        -- comportement intermittent d'un reload a l'autre.
+        -- Rechargement de zone : les barres existent deja ici. Le cas du login, lui, est
+        -- couvert par WatchTankSpec() arme depuis Create() -- cette branche n'y est jamais
+        -- atteinte a cause du garde `next(bars)` en tete du handler.
+        WatchTankSpec()
         -- Retry deferred : UnitHealthMax retourne 0 juste apres un reload tant que le serveur n'a pas repondu
         local retryCount = 0
         local function RetryHealth()
