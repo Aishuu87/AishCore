@@ -244,6 +244,10 @@ Colors.RegisterCallback(function()
     if AurasNS and AurasNS.RollDefaultGlow then pcall(AurasNS.RollDefaultGlow) end
     if AurasNS and AurasNS.RefreshDefaultGlowWidgets then pcall(AurasNS.RefreshDefaultGlowWidgets) end
 
+    -- Fond colore du logo d'en-tete du panneau d'options
+    local panel = ns.SettingsPanel or _G["AishCoreSettingsPanel"]
+    if panel and panel.RefreshBrandLogo then pcall(panel.RefreshBrandLogo, panel) end
+
     -- Accent thematique du panneau d'options (Theme.gold/accent, ~60 accents dores)
     local SW = ns.SharedWidgets
     if SW and SW.RefreshAccentTheme then pcall(SW.RefreshAccentTheme) end

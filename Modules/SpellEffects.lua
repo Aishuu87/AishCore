@@ -73,17 +73,58 @@ end
 -- et les tickers de refresh live, pour eviter un retrecissement brutal au 1er tick.
 local function GetBaseSizeForAnchor(anchor)
   local anchorName = anchor and anchor.GetName and anchor:GetName() or ""
-  return (anchorName == "AishCoreMissingBuffFrame") and 500 or 200
+  if anchorName == "AishCoreMissingBuffFrame" then return 500 end
+  -- Logos : un seul combo sert deux logos de tailles differentes (en-tete du panneau,
+  -- 74 px fixes / mode AFK, dimensions configurables). La base suit donc la taille de
+  -- l'ancre, pour un rendu proportionnel des deux cotes. Le facteur 2.7 redonne
+  -- exactement 200 -- la base commune aux autres ancres -- sur le logo du panneau.
+  if anchorName == "AishCoreGuiLogoAnchor" or anchorName == "AishCoreAFKLogoAnchor" then
+    local w = (anchor.GetWidth and anchor:GetWidth()) or 74
+    return math.max(80, w * 2.7)
+  end
+  return 200
 end
 
+-- Decalages (anchorX/anchorY) proportionnels a la taille de l'ancre pour les logos : un
+-- meme reglage doit tomber au meme endroit sur le logo du panneau (74 px) et sur celui du
+-- mode AFK, bien plus gros. 200 = base commune des autres ancres (cf. GetBaseSizeForAnchor),
+-- donc un facteur de 1 sur le logo du panneau : les valeurs reglees la-bas font reference,
+-- l'ecran AFK les transpose a son echelle.
+-- La position 3D interne du modele (SetPosition) n'est pas concernee : elle vit dans
+-- l'espace du modele et suit deja la taille du frame.
+local function GetAnchorOffsetScale(anchor)
+  local anchorName = anchor and anchor.GetName and anchor:GetName() or ""
+  if anchorName == "AishCoreGuiLogoAnchor" or anchorName == "AishCoreAFKLogoAnchor" then
+    return GetBaseSizeForAnchor(anchor) / 200
+  end
+  return 1
+end
+
+-- Strate immediatement inferieure : sert au niveau "arriere-plan" des logos, seul moyen
+-- de passer DERRIERE la fenetre qui porte l'ancre (un niveau de frame ne suffit pas,
+-- l'animation reste dans la strate du panneau).
+local STRATA_BELOW = {
+  TOOLTIP           = "FULLSCREEN_DIALOG",
+  FULLSCREEN_DIALOG = "FULLSCREEN",
+  FULLSCREEN        = "DIALOG",
+  DIALOG            = "HIGH",
+  HIGH              = "MEDIUM",
+  MEDIUM            = "LOW",
+  LOW               = "BACKGROUND",
+  BACKGROUND        = "BACKGROUND",
+}
+
 -- overrideAnchor = parent (visibilite hierarchique) ; pointAnchor optionnel = reference de position pour SetPoint.
-local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor)
+-- skipModel : reapplique tout sauf le modele 3D. Sert aux reglages en direct (section
+-- "Logos"), ou un ClearModel/SetModel a chaque cran de slider ferait saccader le rendu.
+local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor, skipModel)
   local anchor = overrideAnchor or GetAnchor()
   local pAnchor = pointAnchor or anchor
 
   f:SetParent(anchor)
   f:ClearAllPoints()
-  f:SetPoint("CENTER", pAnchor, "CENTER", anim.anchorX or 0, anim.anchorY or 0)
+  local offScale = GetAnchorOffsetScale(pAnchor)
+  f:SetPoint("CENTER", pAnchor, "CENTER", (anim.anchorX or 0) * offScale, (anim.anchorY or 0) * offScale)
 
   local strata = anim.strata or "BACKGROUND"
   -- Profil visuel (taille/strate) derive de pAnchor (reference de position), pas du parent.
@@ -91,6 +132,7 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor)
   local isOoc = (anchorName == "AishCoreHealthRing")
   local isOrb = anchorName:find("^AishCoreSecDot") or anchorName:find("^AishCoreOCSecDot")
   local isMissingBuff = (anchorName == "AishCoreMissingBuffFrame")
+  local isLogo = (anchorName == "AishCoreGuiLogoAnchor" or anchorName == "AishCoreAFKLogoAnchor")
 
   local baseSize = GetBaseSizeForAnchor(pAnchor)
   local sz = (anim.scale or 1) * baseSize
@@ -130,6 +172,23 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor)
     else
       f:SetFrameStrata("BACKGROUND")
     end
+  elseif isLogo then
+    -- Logos, 3 niveaux (l'ancre porte la geometrie, un frame "art" 4 niveaux au-dessus
+    -- porte le logo et son fond -- cf. SettingsPanel et AFKMode) :
+    --   premier plan : devant la fenetre ET le logo
+    --   moyen plan   : devant la fenetre, derriere le logo (entre l'ancre et l'art)
+    --   arriere-plan : derriere la fenetre, donc derriere le logo aussi -- une strate
+    --                  en dessous, sinon l'animation reste prisonniere du panneau.
+    if strata == "FOREGROUND" then
+      f:SetFrameStrata(anchor:GetFrameStrata())
+      f:SetFrameLevel(anchor:GetFrameLevel() + 6)
+    elseif strata == "HIGH" or strata == "MEDIUM" then
+      f:SetFrameStrata(anchor:GetFrameStrata())
+      f:SetFrameLevel(anchor:GetFrameLevel() + 2)
+    else
+      f:SetFrameStrata(STRATA_BELOW[anchor:GetFrameStrata()] or "BACKGROUND")
+      f:SetFrameLevel(1)
+    end
   else
     -- Sorts configurés (cercle de ressource combat)
     if strata == "FOREGROUND" then
@@ -144,9 +203,12 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor)
     end
   end
 
-  f:ClearModel()
-  local okModel, errModel = pcall(function() f:SetModel(tonumber(anim.modelID)) end)
-  if SpellEffects._debugAll then
+  local okModel, errModel = true, nil
+  if not skipModel then
+    f:ClearModel()
+    okModel, errModel = pcall(function() f:SetModel(tonumber(anim.modelID)) end)
+  end
+  if SpellEffects._debugAll and not skipModel then
     local P = "|cff00ffff[SE-DEBUG]|r "
     print(P .. "  -> SetModel(" .. tostring(anim.modelID) .. ") ok=" .. tostring(okModel)
       .. " err=" .. tostring(errModel)
@@ -827,7 +889,8 @@ function SpellEffects.PreviewLoop(anim, overrideAnchors)
 
       -- Anchor
       ef:ClearAllPoints()
-      ef:SetPoint("CENTER", anchor, "CENTER", a.anchorX or 0, a.anchorY or 0)
+      local offScale = GetAnchorOffsetScale(anchor)
+      ef:SetPoint("CENTER", anchor, "CENTER", (a.anchorX or 0) * offScale, (a.anchorY or 0) * offScale)
 
       -- Strata (même logique que ApplyAnimConfig — détection par anchor)
       local strata = a.strata or "BACKGROUND"
@@ -981,7 +1044,8 @@ function SpellEffects.PreviewComboLoop(combo, overrideAnchors)
         ef:SetSize(sz, sz)
         ef:SetAlpha(a.alpha or 1)
         ef:ClearAllPoints()
-        ef:SetPoint("CENTER", anchor, "CENTER", a.anchorX or 0, a.anchorY or 0)
+        local offScale = GetAnchorOffsetScale(anchor)
+        ef:SetPoint("CENTER", anchor, "CENTER", (a.anchorX or 0) * offScale, (a.anchorY or 0) * offScale)
       end
     end
   end)
@@ -1050,6 +1114,8 @@ function SpellEffects.SetGuiMode(on)
   guiSuppressDeco = (on == true)
   if guiSuppressDeco then
     SpellEffects.StopAllDeco()
+    -- ... sauf les logos : cf. StartLogoDeco
+    SpellEffects.StartLogoDeco()
   else
     SpellEffects.RefreshDecorations()
   end
@@ -1248,6 +1314,87 @@ function SpellEffects.StopOocDeco()
   if not decoOocActive then return end
   decoOocActive = false
   ReleaseDecoByTag("ooc")
+end
+
+--- Résout le combo "Logos" : spé courante puis repli sur le global de la classe.
+--- Meme regle que le cercle OOC : la spe surcharge le global.
+local function ResolveLogoCombo()
+  local cfg = ns.GetCfg("spellEffects")
+  if not cfg or not cfg.enabled then return nil end
+  local logoCombos = cfg.logoCombos
+  if not logoCombos then return nil end
+  local _, cls = UnitClass("player")
+  cls = cls or ""
+  local specIdx = GetSpecialization and GetSpecialization()
+  if specIdx then
+    local combo = logoCombos["spec_" .. cls .. "_" .. specIdx]
+    if combo and #combo > 0 then return combo end
+  end
+  local global = logoCombos["global_" .. cls]
+  if global and #global > 0 then return global end
+  return nil
+end
+
+-- Les deux logos qui portent l'animation : en-tete du panneau d'options et mode AFK.
+-- Chacun a son tag de pool, ils apparaissent et disparaissent independamment.
+local LOGO_ANCHORS = {
+  { name = "AishCoreGuiLogoAnchor", tag = "logo_gui" },
+  { name = "AishCoreAFKLogoAnchor", tag = "logo_afk" },
+}
+local decoLogoActive = {}   -- [tag] = true tant que la boucle tourne sur cette ancre
+
+--- Démarre les décorations sur chaque logo actuellement visible.
+function SpellEffects.StartLogoDeco()
+  -- Pas de garde guiSuppressDeco ici, contrairement aux autres decos : le logo du
+  -- panneau n'est visible QUE panneau ouvert -- le supprimer en mode GUI reviendrait a
+  -- ne jamais le voir. Seule une preview en cours l'emporte (sinon modeles en double).
+  if #decoPreviewEntries > 0 then return end
+  if AnimationsBlockedByGroupState() then return end
+  local combo = ResolveLogoCombo()
+  if not combo then return end
+  for _, def in ipairs(LOGO_ANCHORS) do
+    local anchor = _G[def.name]
+    -- IsVisible (pas IsShown) : le logo AFK depend de tout le chainage de l'overlay,
+    -- celui du panneau de la fenetre de reglages.
+    if anchor and anchor:IsVisible() and not decoLogoActive[def.tag] then
+      decoLogoActive[def.tag] = true
+      StartDecoLoop(combo, anchor, def.tag)
+    end
+  end
+end
+
+--- Stoppe les décorations des deux logos.
+function SpellEffects.StopLogoDeco()
+  for _, def in ipairs(LOGO_ANCHORS) do
+    if decoLogoActive[def.tag] then
+      decoLogoActive[def.tag] = nil
+      ReleaseDecoByTag(def.tag)
+    end
+  end
+end
+
+--- Relance les décos de logo : appelée quand l'un des deux logos apparait ou disparait
+--- (ouverture du panneau, entree/sortie du mode AFK, toggle du logo AFK), et apres tout
+--- changement de STRUCTURE du combo (ajout/retrait d'une animation).
+function SpellEffects.RefreshLogoDeco()
+  SpellEffects.StopLogoDeco()
+  SpellEffects.StartLogoDeco()
+end
+
+--- Re-applique les reglages aux decos de logo deja en cours, sans recharger les modeles
+--- (sauf si le modele lui-meme a change). La section "Logos" du panneau n'a pas de preview
+--- dediee : le logo affiche l'animation REELLE, elle doit donc suivre chaque cran de slider.
+function SpellEffects.RefreshLogoDecoConfig()
+  for i = 1, decoPoolSize do
+    local entry = decoPool[i]
+    if entry.inUse and entry.tag and entry.tag:find("^logo_") and entry.anim and entry.anchor then
+      local mid = tonumber(entry.anim.modelID) or 0
+      local sameModel = (mid == entry.lastLogoModelID)
+      entry.lastLogoModelID = mid
+      ApplyAnimConfig(entry.frame, entry.anim, entry.anchor, nil, sameModel)
+      entry.frame:Show()
+    end
+  end
 end
 
 --- Synchronise le fade des décorations OOC avec l'animation du cercle de vie (HealthCircle.AnimateVisibility).
@@ -1620,6 +1767,7 @@ end
 function SpellEffects.StopAllDeco()
   SpellEffects.StopOocDeco()
   SpellEffects.StopOrbDeco()
+  SpellEffects.StopLogoDeco()
 end
 
 --- Rafraîchit les décorations (stop + restart si frames visibles).
@@ -1634,6 +1782,8 @@ function SpellEffects.RefreshDecorations()
   if GetVisibleDotCount() > 0 then
     SpellEffects.StartOrbDeco()
   end
+  -- Logos : StartLogoDeco ne retient que les ancres reellement visibles
+  SpellEffects.StartLogoDeco()
 end
 
 -- Deco Preview : modèles persistants 30 fps pour la preview OOC/Orbes du panneau Settings.
@@ -1707,7 +1857,8 @@ function SpellEffects.StartDecoPreview(combo, overrideAnchors)
 
       -- Anchor
       ef:ClearAllPoints()
-      ef:SetPoint("CENTER", anchor, "CENTER", a.anchorX or 0, a.anchorY or 0)
+      local offScale = GetAnchorOffsetScale(anchor)
+      ef:SetPoint("CENTER", anchor, "CENTER", (a.anchorX or 0) * offScale, (a.anchorY or 0) * offScale)
 
       -- Strata
       local strata = a.strata or "BACKGROUND"
@@ -1758,6 +1909,9 @@ function SpellEffects.StopDecoPreview()
     ReleaseDecoModel(de.entry)
   end
   wipe(decoPreviewEntries)
+  -- La preview bloquait les decos de logo (StartLogoDeco) : les reprendre tout de suite,
+  -- sans attendre la sortie du mode GUI.
+  SpellEffects.StartLogoDeco()
 end
 
 --- Retourne true si une preview décorative est active.
@@ -2331,6 +2485,14 @@ function SpellEffects.Init()
       oocRing:HookScript("OnHide", function()
         SpellEffects.StopOocDeco()
       end)
+    end
+
+    -- Logo de l'en-tete du panneau d'options : existe des le chargement, contrairement
+    -- a celui du mode AFK (cree a la volee, qui se branche lui-meme).
+    local guiLogo = _G["AishCoreGuiLogoAnchor"]
+    if guiLogo then
+      guiLogo:HookScript("OnShow", function() SpellEffects.RefreshLogoDeco() end)
+      guiLogo:HookScript("OnHide", function() SpellEffects.RefreshLogoDeco() end)
     end
   end)
 

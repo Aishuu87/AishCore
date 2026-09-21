@@ -41,13 +41,29 @@ SW.ApplyPanelBackground(MainFrame)
 
 -- Logo sticker AishUI (badge épinglé, déborde au-dessus du coin gauche)
 local LOGO_SZ = 74
-local _headerLogo = CreateFrame("Frame", nil, MainFrame)
+-- Nom global : sert d'ancre aux animations 3D de la section "Logos" (cf. SpellEffects).
+local _headerLogo = CreateFrame("Frame", "AishCoreGuiLogoAnchor", MainFrame)
 _headerLogo:SetSize(LOGO_SZ, LOGO_SZ)
 _headerLogo:SetPoint("CENTER", MainFrame, "TOPLEFT", 22, -12)
 _headerLogo:SetFrameLevel(MainFrame:GetFrameLevel() + 10)
-local _logoTex = _headerLogo:CreateTexture(nil, "ARTWORK")
+-- Le logo et son fond vivent sur un frame dedie, 4 niveaux au-dessus de l'ancre : une
+-- animation 3D "Logos" peut ainsi se glisser ENTRE la fenetre et le logo (niveau moyen
+-- plan), ce qu'un simple sous-niveau de texture ne permet pas. Cf. ApplyAnimConfig.
+_headerLogo.art = CreateFrame("Frame", nil, _headerLogo)
+_headerLogo.art:SetAllPoints(_headerLogo)
+_headerLogo.art:SetFrameLevel(_headerLogo:GetFrameLevel() + 4)
+
+local _logoTex = _headerLogo.art:CreateTexture(nil, "ARTWORK")
 _logoTex:SetAllPoints()
-_logoTex:SetTexture("Interface\\AddOns\\AishCore\\Media\\Logo\\AishUILogo")
+-- Variante re-evaluee a chaque ShowUI : ici AishaddonDB n'est pas encore chargee.
+_logoTex:SetTexture(ns.GetBrandLogoPath())
+
+-- Fond plein sous le logo ajoure : sous-niveau -1 pour passer derriere lui, et SetAllPoints
+-- sur le logo lui-meme pour rester colle a sa geometrie. Champ du frame plutot que locale
+-- de haut niveau (limite des 200). Teinte posee par MainFrame:RefreshBrandLogo().
+_headerLogo.bgTex = _headerLogo.art:CreateTexture(nil, "ARTWORK", nil, -1)
+_headerLogo.bgTex:SetTexture(ns.GetBrandLogoBgPath())
+_headerLogo.bgTex:SetAllPoints(_logoTex)
 
 -- Numero de version, colle au bord droit du logo. Bloc do...end pour ne pas ajouter de locale de haut niveau (limite des 200 deja frolee).
 do
@@ -1174,6 +1190,42 @@ function Build.RotationHelper(container)
   local cbRHSpecColor = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_USE_SPEC_COLOR"],
     L["SETTINGS_PB_USE_SPEC_COLOR_TT"], W))
   BindCheckbox(cbRHSpecColor, "rotationHelper", "useSpecGlowColor")
+
+  -- Raccourci clavier du sort suggere, cf. ns.GetKeybindForSpell (Core.lua)
+  ctx:Spacer(4)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_KEYBIND"], W))
+  local cbRHKb = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_SHOW_KEYBIND"],
+    L["SETTINGS_SHOW_KEYBIND_TT"], W))
+  BindCheckbox(cbRHKb, "rotationHelper", "showKeybind")
+
+  local ddRHKbPos = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_POSITION"], {
+    { value = "TOPLEFT",     text = L["SETTINGS_ANCHOR_TOPLEFT"]     },
+    { value = "TOP",         text = L["SETTINGS_ANCHOR_TOP"]         },
+    { value = "TOPRIGHT",    text = L["SETTINGS_ANCHOR_TOPRIGHT"]    },
+    { value = "LEFT",        text = L["SETTINGS_ANCHOR_LEFT"]        },
+    { value = "CENTER",      text = L["SETTINGS_ANCHOR_CENTER"]      },
+    { value = "RIGHT",       text = L["SETTINGS_ANCHOR_RIGHT"]       },
+    { value = "BOTTOMLEFT",  text = L["SETTINGS_ANCHOR_BOTTOMLEFT"]  },
+    { value = "BOTTOM",      text = L["SETTINGS_ANCHOR_BOTTOM"]      },
+    { value = "BOTTOMRIGHT", text = L["SETTINGS_ANCHOR_BOTTOMRIGHT"] },
+  }, W))
+  BindDropdown(ddRHKbPos, "rotationHelper", "keybindPosition")
+
+  local _rhSL3 = math.floor((W - 16) / 3)
+  local slRHKbX = SW.CreateSlider(container, L["SETTINGS_OFFSET_X"], -40, 40, 1, _rhSL3)
+  BindSlider(slRHKbX, "rotationHelper", "keybindOffsetX")
+  local slRHKbY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -40, 40, 1, _rhSL3)
+  BindSlider(slRHKbY, "rotationHelper", "keybindOffsetY")
+  local slRHKbSize = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 8, 32, 1, _rhSL3)
+  BindSlider(slRHKbSize, "rotationHelper", "keybindFontSize")
+  ctx:AddRow(8, slRHKbX, slRHKbY, slRHKbSize)
+
+  local ddRHKbFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), W))
+  BindDropdown(ddRHKbFont, "rotationHelper", "keybindFont")
+
+  local colRHKb = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TEXT_COLOR"], W))
+  BindColorButton(colRHKb, "rotationHelper", "keybindColor")
 
   ctx:Spacer(4)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_POSITION"], W))
@@ -2372,10 +2424,11 @@ end
 -- Section active et sélection inter-sections (Sorts / Orbes / OOC / Auras / Buffs manquants)
 -- "missingBuffs" réutilise seSelectedAuraID (même sélection, section distincte
 -- uniquement par la valeur de seActiveSection — cf. GetActiveComboTable).
-local seActiveSection      = "spells"  -- "spells" | "orbs" | "ooc" | "auras" | "missingBuffs"
+local seActiveSection      = "spells"  -- "spells" | "orbs" | "ooc" | "logos" | "auras" | "missingBuffs"
 local seSelectedTriggerKey = nil       -- trigger key pour orbs/ooc
 local seOrbList            = nil       -- frame pour la liste de triggers orbes
 local seOocList            = nil       -- frame pour la liste de triggers OOC
+local seLogoList           = nil       -- frame pour la liste de triggers Logos
 
 -- Triggers prédéfinis pour Globes Externes par classe
 local ORB_TRIGGERS = {
@@ -2449,6 +2502,15 @@ local function GetOocCombosDB()
   return ns.DB.spellEffects.oocCombos
 end
 
+-- Accesseur combos "Logos" : animation jouee derriere le logo de l'en-tete du panneau
+-- et celui du mode AFK (cf. SpellEffects.StartLogoDeco)
+local function GetLogoCombosDB()
+  if not ns.DB then ns.DB = {} end
+  if not ns.DB.spellEffects then ns.DB.spellEffects = {} end
+  if not ns.DB.spellEffects.logoCombos then ns.DB.spellEffects.logoCombos = {} end
+  return ns.DB.spellEffects.logoCombos
+end
+
 -- Accesseur combos d'auras (déclenchés par la présence d'une aura, joueur ou cible)
 local function GetAuraCombosDB()
   if not ns.DB then ns.DB = {} end
@@ -2482,6 +2544,8 @@ local function GetActiveComboTable()
     return GetOrbCombosDB(), OrbKeyForClass(seSelectedTriggerKey)
   elseif seActiveSection == "ooc" and seSelectedTriggerKey then
     return GetOocCombosDB(), seSelectedTriggerKey
+  elseif seActiveSection == "logos" and seSelectedTriggerKey then
+    return GetLogoCombosDB(), seSelectedTriggerKey
   elseif seActiveSection == "spells" and seSelectedSpellID then
     return GetCombosDB(), seSelectedSpellID
   elseif seActiveSection == "auras" and seSelectedAuraID then
@@ -2504,6 +2568,10 @@ local function GetPreviewAnchor()
     return _G["AishCoreMissingBuffFrame"]
   elseif seActiveSection == "ooc" then
     return _G["AishCoreHealthRing"]
+  elseif seActiveSection == "logos" then
+    -- Le logo du mode AFK n'est pas affiche pendant la config : preview sur celui de
+    -- l'en-tete du panneau, toujours present.
+    return _G["AishCoreGuiLogoAnchor"]
   elseif seActiveSection == "orbs" then
     -- Collecter TOUS les globes visibles pour multi-anchor preview
     local anchors = {}
@@ -2531,6 +2599,21 @@ local function GetOocTriggers()
     local _, specName = GetSpecializationInfo(i)
     if specName then
       triggers[#triggers + 1] = { key = SpecKeyForClass(i), label = string.format(L["SETTINGS_TRIGGER_REGEN_SPEC"], specName) }
+    end
+  end
+  return triggers
+end
+
+-- Triggers "Logos" : meme structure que l'OOC -- un global par classe, puis une entree
+-- par spe. Une entree de spe configuree l'emporte sur le global (cf. ResolveLogoCombo).
+local function GetLogoTriggers()
+  local cls = ns._playerClass or ""
+  local triggers = { { key = "global_" .. cls, label = L["SETTINGS_TRIGGER_LOGO_GLOBAL"] } }
+  local numSpecs = GetNumSpecializations and GetNumSpecializations() or 0
+  for i = 1, numSpecs do
+    local _, specName = GetSpecializationInfo(i)
+    if specName then
+      triggers[#triggers + 1] = { key = SpecKeyForClass(i), label = string.format(L["SETTINGS_TRIGGER_LOGO_SPEC"], specName) }
     end
   end
   return triggers
@@ -2565,6 +2648,7 @@ end
 -- Forward declarations
 local RefreshSpellList, RefreshAnimList, RefreshAnimEditor, RefreshAliasRow
 local RefreshOrbList, RefreshOocList, RefreshAuraList, RefreshMissingBuffsList, RelayoutSections
+local RefreshLogoList
 
 -- Lookup : FileID ? nom de modèle via AishCoreModelPaths (Data\ModelPaths.lua)
 local seModelNameCache = {}  -- fileID(number) ? "name.m2"
@@ -4209,6 +4293,22 @@ local function AddSimpleTooltip(widget, text)
 end
 
 -- Anim List Row (une entrEe dans le combo du sort)
+-- Section "Logos" : pas de preview dediee, le logo du panneau affiche l'animation REELLE.
+-- Chaque edition faite hors de l'editeur (couche BG/MG/FG et ON/OFF, edites directement
+-- sur la ligne de combo) doit donc se repercuter tout de suite.
+--   structural = true : la liste d'animations jouees change -> relance complete
+--   sinon               : simple re-application des reglages, sans recharger les modeles
+local function NotifyLogoAnimEdited(structural)
+  if seActiveSection ~= "logos" then return end
+  local SE = ns.Modules and ns.Modules.SpellEffects
+  if not SE then return end
+  if structural then
+    if SE.RefreshLogoDeco then SE.RefreshLogoDeco() end
+  elseif SE.RefreshLogoDecoConfig then
+    SE.RefreshLogoDecoConfig()
+  end
+end
+
 local function BuildAnimRow(parent, idx, anim, width, onClick, onTriggerChange, hideHC, hideMidLayer)
   local TRIG_CB_W  = 24  -- largeur de colonne par checkbox S/I (gauche)
   local LAYER_CB_W = 22  -- largeur de colonne par checkbox BG/MG/FG (droite)
@@ -4288,17 +4388,19 @@ local function BuildAnimRow(parent, idx, anim, width, onClick, onTriggerChange, 
   layerMg:SetPoint("LEFT", layerBg, "LEFT", LAYER_CB_W, 0)
   layerFg:SetPoint("LEFT", layerMg, "LEFT", LAYER_CB_W, 0)
 
-  local function SetLayer(strata)
+  local function SetLayer(strata, live)
     anim.strata = strata
     layerBg:SetChecked(strata ~= "HIGH" and strata ~= "MEDIUM" and strata ~= "FOREGROUND")
     layerMg:SetChecked(strata == "HIGH" or strata == "MEDIUM")
     layerFg:SetChecked(strata == "FOREGROUND")
+    -- live : seulement sur action de l'utilisateur, pas a la construction de la ligne
+    if live then NotifyLogoAnimEdited(false) end
   end
   SetLayer(anim.strata or "BACKGROUND")
 
-  layerBg.onChanged = function(val) SetLayer(val and "BACKGROUND" or "HIGH") end
-  layerMg.onChanged = function(val) SetLayer(val and "HIGH" or "BACKGROUND") end
-  layerFg.onChanged = function(val) SetLayer(val and "FOREGROUND" or "BACKGROUND") end
+  layerBg.onChanged = function(val) SetLayer(val and "BACKGROUND" or "HIGH", true) end
+  layerMg.onChanged = function(val) SetLayer(val and "HIGH" or "BACKGROUND", true) end
+  layerFg.onChanged = function(val) SetLayer(val and "FOREGROUND" or "BACKGROUND", true) end
 
   AddSimpleTooltip(layerBg, L["SETTINGS_LAYER_BACKGROUND"])
   AddSimpleTooltip(layerMg, L["SETTINGS_LAYER_MIDGROUND"])
@@ -4324,6 +4426,8 @@ local function BuildAnimRow(parent, idx, anim, width, onClick, onTriggerChange, 
   toggleBtn.onChanged = function(val)
     anim.enabled = val
     UpdateToggle()
+    -- Changement de structure : une anim desactivee doit cesser d'etre jouee
+    NotifyLogoAnimEdited(true)
   end
   row._toggleBtn = toggleBtn
 
@@ -4386,7 +4490,14 @@ local function BuildTriggerRow(parent, triggerDef, width, sectionType, onClick)
   row._fxTxt = fxTxt
 
   local function UpdateFxCount()
-    local db = (sectionType == "orbs") and GetOrbCombosDB() or GetOocCombosDB()
+    local db
+    if sectionType == "orbs" then
+      db = GetOrbCombosDB()
+    elseif sectionType == "logos" then
+      db = GetLogoCombosDB()
+    else
+      db = GetOocCombosDB()
+    end
     local dbKey = (sectionType == "orbs") and OrbKeyForClass(triggerDef.key) or triggerDef.key
     local combo = db[dbKey]
     if combo and #combo > 0 then
@@ -4624,6 +4735,7 @@ function Build.SpellEffects(container)
     RefreshSpellList()
     if RefreshOrbList then RefreshOrbList() end
     if RefreshOocList then RefreshOocList() end
+    if RefreshLogoList then RefreshLogoList() end
     if RefreshAuraList then RefreshAuraList() end
     if RefreshMissingBuffsList then RefreshMissingBuffsList() end
     RefreshAnimList()
@@ -4781,17 +4893,39 @@ function Build.SpellEffects(container)
   local MISSING_BUFFS_BODY_H = math.max(150, PANEL_H - SECTIONS_OVERHEAD)
   secMissingBuffs.body:SetHeight(MISSING_BUFFS_BODY_H)
 
-  -- Sections ordonnées : OOC, Sorts, Orbes, Auras, Buffs manquants
+  -- Section Logos : logo de l'en-tete du panneau + logo du mode AFK
+  local secLogos = { expanded = false, id = "logos" }
+  secLogos.header = CreateSectionHdr(leftContent, L["SETTINGS_SEC_LOGOS"])
+  secLogos.body = CreateFrame("Frame", nil, leftContent)
+  secLogos.body:SetWidth(LEFT_W - 20)
+  secLogos.body:Hide()
+
+  local logoScroll = CreateFrame("ScrollFrame", nil, secLogos.body, "UIPanelScrollFrameTemplate")
+  logoScroll:SetPoint("TOPLEFT", secLogos.body, "TOPLEFT", 0, 0)
+  logoScroll:SetPoint("BOTTOMRIGHT", secLogos.body, "BOTTOMRIGHT", -18, 0)
+  local logoContent = CreateFrame("Frame", nil, logoScroll)
+  logoContent:SetSize(LEFT_W - 38, 10)
+  logoScroll:SetScrollChild(logoContent)
+  seLogoList = logoContent
+  seLogoList._rows = {}
+  SetupModernScroll(logoScroll)
+
+  local logoTriggers = GetLogoTriggers()
+  secLogos.body:SetHeight(math.max(60, #logoTriggers * 28 + 4))
+
+  -- Sections ordonnées : OOC, Sorts, Orbes, Auras, Buffs manquants, Logos
   seSections[1] = secOoc
   seSections[2] = secSpells
   seSections[3] = secOrbs
   seSections[4] = secAuras
   seSections[5] = secMissingBuffs
+  seSections[6] = secLogos
 
   secOoc.divider    = CreateSectionDivider(leftContent)
   secSpells.divider = CreateSectionDivider(leftContent)
   secOrbs.divider   = CreateSectionDivider(leftContent)
   secAuras.divider  = CreateSectionDivider(leftContent)
+  secMissingBuffs.divider = CreateSectionDivider(leftContent)
   -- pas de divider après la dernière section
 
   for _, sec in ipairs(seSections) do UpdateArrow(sec) end
@@ -4875,6 +5009,7 @@ function Build.SpellEffects(container)
   secOrbs.header:SetScript("OnClick",   function() ToggleSection(3) end)
   secAuras.header:SetScript("OnClick",  function() ToggleSection(4) end)
   secMissingBuffs.header:SetScript("OnClick", function() ToggleSection(5) end)
+  secLogos.header:SetScript("OnClick", function() ToggleSection(6) end)
 
   -- Aucune section ouverte par défaut (l'utilisateur choisit) -- les flèches
   -- sont déjà à jour (cf. boucle UpdateArrow plus haut).
@@ -5106,6 +5241,11 @@ function Build.SpellEffects(container)
     local combo = db[key]
     if not combo or not combo[seSelectedAnimIdx] then return end
     combo[seSelectedAnimIdx][field] = value
+    -- Logos : l'animation reelle tient lieu de preview, elle doit suivre en direct.
+    if seActiveSection == "logos" then
+      local SE = ns.Modules.SpellEffects
+      if SE and SE.RefreshLogoDecoConfig then SE.RefreshLogoDecoConfig() end
+    end
   end
 
   -- ModelID input + Model name display
@@ -5365,6 +5505,7 @@ function Build.SpellEffects(container)
         RefreshSpellList()
         if RefreshOrbList then RefreshOrbList() end
         if RefreshOocList then RefreshOocList() end
+        if RefreshLogoList then RefreshLogoList() end
         if RefreshAuraList then RefreshAuraList() end
     if RefreshMissingBuffsList then RefreshMissingBuffsList() end
         RefreshAnimList()
@@ -5441,6 +5582,12 @@ function Build.SpellEffects(container)
   end
 
   RefreshAnimList = function()
+    -- Logos : toute edition passe par un rebuild de cette liste (ajout, retrait, couche,
+    -- modele) -- on relance la deco reelle, seul "apercu" de cette section.
+    if seActiveSection == "logos" then
+      local SE = ns.Modules.SpellEffects
+      if SE and SE.RefreshLogoDeco then SE.RefreshLogoDeco() end
+    end
     for _, row in ipairs(seAnimList._rows) do row:Hide() end
     wipe(seAnimList._rows)
 
@@ -5476,6 +5623,11 @@ function Build.SpellEffects(container)
       end
     elseif seActiveSection == "ooc" then
       local triggers = GetOocTriggers()
+      for _, t in ipairs(triggers) do
+        if t.key == key then titleText = string.format(L["SETTINGS_COMBO_TITLE"], t.label); break end
+      end
+    elseif seActiveSection == "logos" then
+      local triggers = GetLogoTriggers()
       for _, t in ipairs(triggers) do
         if t.key == key then titleText = string.format(L["SETTINGS_COMBO_TITLE"], t.label); break end
       end
@@ -5557,6 +5709,13 @@ function Build.SpellEffects(container)
       if seAnimEditor._refreshStrata then seAnimEditor._refreshStrata() end
     end
 
+    -- Section "Logos" : pas de preview dediee. Le logo du panneau affiche deja
+    -- l'animation reelle et tient lieu d'apercu -- une preview par-dessus donnerait
+    -- deux jeux de modeles superposes.
+    local showPreviewBtns = (seActiveSection ~= "logos")
+    previewBtn:SetShown(showPreviewBtns)
+    previewComboBtn:SetShown(showPreviewBtns)
+
     -- Masquer délai/durée pour les sections orbes et OOC (boucle sans fin)
     local showTimingSliders = (seActiveSection == "spells")
     if seAnimEditor._sliders["delay"] then
@@ -5593,6 +5752,7 @@ function Build.SpellEffects(container)
         RefreshSpellList()
         RefreshOrbList()
         RefreshOocList()
+        if RefreshLogoList then RefreshLogoList() end
         if RefreshAuraList then RefreshAuraList() end
     if RefreshMissingBuffsList then RefreshMissingBuffsList() end
         RefreshAnimList()
@@ -5630,6 +5790,7 @@ function Build.SpellEffects(container)
         RefreshSpellList()
         RefreshOrbList()
         RefreshOocList()
+        if RefreshLogoList then RefreshLogoList() end
         if RefreshAuraList then RefreshAuraList() end
     if RefreshMissingBuffsList then RefreshMissingBuffsList() end
         RefreshAnimList()
@@ -5641,6 +5802,48 @@ function Build.SpellEffects(container)
       yy = yy + 28
     end
     seOocList:SetHeight(math.max(10, yy))
+  end
+
+  RefreshLogoList = function()
+    for _, row in ipairs(seLogoList._rows) do row:Hide() end
+    wipe(seLogoList._rows)
+
+    local triggers = GetLogoTriggers()
+    local rowW = LEFT_W - 38
+    local yy = 0
+    for _, tDef in ipairs(triggers) do
+      local row = BuildTriggerRow(seLogoList, tDef, rowW, "logos", function(clickedKey)
+        seActiveSection = "logos"
+        do local MB = ns.Auras and ns.Auras.MissingBuffs; if MB and MB.SetPreview then MB.SetPreview(false) end end
+        seSelectedTriggerKey = clickedKey
+        seSelectedSpellID = nil
+        seSelectedAuraID = nil
+        seSelectedAnimIdx = nil
+        local db = GetLogoCombosDB()
+        if not db[clickedKey] then db[clickedKey] = {} end
+        -- Couper une preview laissee par une autre section : ici l'animation reelle
+        -- du logo est le seul apercu.
+        local SE = ns.Modules.SpellEffects
+        if SE then
+          if SE.StopPreview then SE.StopPreview() end
+          if SE.StopComboPreview then SE.StopComboPreview() end
+          if SE.StopDecoPreview then SE.StopDecoPreview() end
+        end
+        RefreshSpellList()
+        RefreshOrbList()
+        RefreshOocList()
+        if RefreshLogoList then RefreshLogoList() end
+        if RefreshAuraList then RefreshAuraList() end
+        if RefreshMissingBuffsList then RefreshMissingBuffsList() end
+        RefreshAnimList()
+        RefreshAnimEditor()
+      end)
+      row:SetPoint("TOPLEFT", seLogoList, "TOPLEFT", 0, -yy)
+      row:SetSelected(seActiveSection == "logos" and seSelectedTriggerKey == tDef.key)
+      seLogoList._rows[#seLogoList._rows + 1] = row
+      yy = yy + 28
+    end
+    seLogoList:SetHeight(math.max(10, yy))
   end
 
   RefreshAuraList = function()
@@ -5717,6 +5920,7 @@ function Build.SpellEffects(container)
           RefreshSpellList()
           RefreshOrbList()
           RefreshOocList()
+          if RefreshLogoList then RefreshLogoList() end
           RefreshAuraList()
                 if RefreshMissingBuffsList then RefreshMissingBuffsList() end
           RefreshAnimList()
@@ -5804,6 +6008,7 @@ function Build.SpellEffects(container)
         RefreshSpellList()
         RefreshOrbList()
         RefreshOocList()
+        if RefreshLogoList then RefreshLogoList() end
         if RefreshAuraList then RefreshAuraList() end
             RefreshMissingBuffsList()
         RefreshAnimList()
@@ -6050,8 +6255,9 @@ function Build.SpellEffects(container)
       if modelName then seModelNameCache[fileID] = modelName end
       RefreshAnimList()
       RefreshAnimEditor()
-      -- Section orbs/OOC : lancer immédiatement un DecoPreview sur l'anim ajoutée
-      if seActiveSection ~= "spells" then
+      -- Section orbs/OOC : lancer immédiatement un DecoPreview sur l'anim ajoutée.
+      -- Les logos en sont exclus : ils affichent deja l'animation reelle (cf. RefreshAnimList).
+      if seActiveSection ~= "spells" and seActiveSection ~= "logos" then
         local SE = ns.Modules.SpellEffects
         if SE then
           if SE.StopDecoPreview then SE.StopDecoPreview() end
@@ -6291,6 +6497,7 @@ function Build.SpellEffects(container)
   RefreshSpellList()
   RefreshOrbList()
   RefreshOocList()
+  if RefreshLogoList then RefreshLogoList() end
   RefreshAuraList()
   RefreshMissingBuffsList()
   RefreshAnimList()
@@ -6721,6 +6928,43 @@ function Build.PriorityBar(container)
 
   local colCharges = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_PB_CHARGES_COLOR"], W))
   BindColorButton(colCharges, "priorityBar", "chargeColor")
+
+  ctx:Spacer(4)
+
+  -- Raccourci clavier du sort affiche, cf. ns.GetKeybindForSpell (Core.lua)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_KEYBIND"], W))
+
+  local cbPBKb = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_SHOW_KEYBIND"],
+    L["SETTINGS_SHOW_KEYBIND_TT"], W))
+  BindCheckbox(cbPBKb, "priorityBar", "showKeybind")
+
+  local ddPBKbPos = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_POSITION"], {
+    { value = "TOPLEFT",     text = L["SETTINGS_ANCHOR_TOPLEFT"]     },
+    { value = "TOP",         text = L["SETTINGS_ANCHOR_TOP"]         },
+    { value = "TOPRIGHT",    text = L["SETTINGS_ANCHOR_TOPRIGHT"]    },
+    { value = "LEFT",        text = L["SETTINGS_ANCHOR_LEFT"]        },
+    { value = "CENTER",      text = L["SETTINGS_ANCHOR_CENTER"]      },
+    { value = "RIGHT",       text = L["SETTINGS_ANCHOR_RIGHT"]       },
+    { value = "BOTTOMLEFT",  text = L["SETTINGS_ANCHOR_BOTTOMLEFT"]  },
+    { value = "BOTTOM",      text = L["SETTINGS_ANCHOR_BOTTOM"]      },
+    { value = "BOTTOMRIGHT", text = L["SETTINGS_ANCHOR_BOTTOMRIGHT"] },
+  }, W))
+  BindDropdown(ddPBKbPos, "priorityBar", "keybindPosition")
+
+  local slPBKbX = SW.CreateSlider(container, L["SETTINGS_OFFSET_X"], -40, 40, 1, _pbSL3)
+  BindSlider(slPBKbX, "priorityBar", "keybindOffsetX")
+  local slPBKbY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -40, 40, 1, _pbSL3)
+  BindSlider(slPBKbY, "priorityBar", "keybindOffsetY")
+  local slPBKbSize = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 8, 32, 1, _pbSL3)
+  BindSlider(slPBKbSize, "priorityBar", "keybindFontSize")
+  ctx:AddRow(8, slPBKbX, slPBKbY, slPBKbSize)
+
+  local ddPBKbFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), W))
+  BindDropdown(ddPBKbFont, "priorityBar", "keybindFont")
+
+  local colPBKb = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TEXT_COLOR"], W))
+  BindColorButton(colPBKb, "priorityBar", "keybindColor")
 
   ctx:Spacer(4)
 
@@ -10684,7 +10928,8 @@ function Build.CDM(container, dbKey)
   BindSlider(slFadeAlpha, dbKey, "fadeAlpha")
   local cbFadeCombat = SW.CreateCheckbox(container, L["SETTINGS_CDM_FADE_COMBAT"], nil, SL_W2)
   BindCheckbox(cbFadeCombat, dbKey, "fadeInCombat")
-  local cbFadeTarget = SW.CreateCheckbox(container, L["SETTINGS_CDM_FADE_TARGET"], nil, SL_W2)
+  local cbFadeTarget = SW.CreateCheckbox(container, L["SETTINGS_CDM_FADE_TARGET"],
+    L["SETTINGS_CDM_FADE_TARGET_TT"], SL_W2)
   BindCheckbox(cbFadeTarget, dbKey, "fadeOnTarget")
   ctx:AddRow(8, cbFadeCombat, cbFadeTarget)
   local cbFadeCasting = SW.CreateCheckbox(container, L["SETTINGS_CDM_FADE_CASTING"], nil, SL_W2)
@@ -12301,10 +12546,22 @@ function MainFrame:RefreshValues()
 end
 
 -- ShowUI / Toggle
+--- Logo d'en-tete : la variante (Ko-fi / classique) comme la teinte du fond dependent de
+--- donnees chargees apres ce fichier -- tout est (re)resolu ici. Appele a chaque ouverture du
+--- panneau et sur chaque Broadcast du module Couleurs.
+function MainFrame:RefreshBrandLogo()
+  if ns.GetBrandLogoPath then _logoTex:SetTexture(ns.GetBrandLogoPath()) end
+  if _headerLogo.bgTex and ns.GetBrandLogoBgColor then
+    local c = ns.GetBrandLogoBgColor()
+    _headerLogo.bgTex:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
+  end
+end
+
 function MainFrame:ShowUI()
   if self._versionTxt and ns.GetVersionString then
     self._versionTxt:SetText(ns.GetVersionString())
   end
+  self:RefreshBrandLogo()
   self:Show()
   PlaySound(SOUNDKIT.IG_CHARACTER_INFO_OPEN)
 end

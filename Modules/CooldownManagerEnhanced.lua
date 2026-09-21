@@ -53,20 +53,55 @@ local function SetTextureOrAtlas(region, texture, useAtlasSize)
   end
 end
 
--- Bordure (icone/backdrop)
+-- BORDURE D'ICONE : quatre textures ancrees, PAS un frame "BackdropTemplate".
+--
+-- Depuis le patch 12.x, la taille des frames du Cooldown Viewer est une valeur secrete.
+-- Un frame BackdropTemplate ancre dessus en herite, et le SetupTextureCoordinates de
+-- Blizzard (Blizzard_SharedXML/Backdrop.lua) fait de l'arithmetique sur cette taille a
+-- chaque OnSizeChanged : sous une pile taintee par l'addon, cela leve en boucle
+-- "attempt to perform arithmetic on local 'width' (a secret number value)".
+-- Des textures positionnees uniquement par SetPoint sont dimensionnees par le moteur de
+-- layout, sans aucun calcul Lua sur la taille : le probleme disparait a la source.
+--
 -- `anchorTo` : region que la bordure doit epouser. On memorise le choix sur la frame
 -- pour que les rafraichissements ulterieurs (qui ne le repassent pas) gardent la meme
 -- cible. Par defaut le parent, comme avant.
-local function SetBackdropBorderSize(frame, borderSize, anchorTo)
+local function SetBorderEdgeSize(frame, borderSize, anchorTo)
   anchorTo = anchorTo or frame.__borderAnchor or frame:GetParent()
   frame.__borderAnchor = anchorTo
   frame:ClearAllPoints()
   frame:SetPoint("TOPLEFT", anchorTo, "TOPLEFT", 0, 0)
   frame:SetPoint("BOTTOMRIGHT", anchorTo, "BOTTOMRIGHT", 0, 0)
-  frame:SetBackdrop({
-    edgeFile = "Interface\\Buttons\\WHITE8x8",
-    edgeSize = borderSize,
-  })
+
+  local s = (borderSize and borderSize > 0) and borderSize or 1
+  -- Bords horizontaux pleine largeur, bords verticaux en retrait de l'epaisseur : les
+  -- coins ne se superposent pas, donc pas de double alpha sur une couleur translucide.
+  frame.__top:ClearAllPoints()
+  frame.__top:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+  frame.__top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+  frame.__top:SetHeight(s)
+
+  frame.__bottom:ClearAllPoints()
+  frame.__bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+  frame.__bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+  frame.__bottom:SetHeight(s)
+
+  frame.__left:ClearAllPoints()
+  frame.__left:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -s)
+  frame.__left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, s)
+  frame.__left:SetWidth(s)
+
+  frame.__right:ClearAllPoints()
+  frame.__right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, -s)
+  frame.__right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, s)
+  frame.__right:SetWidth(s)
+end
+
+local function SetBorderEdgeColor(frame, r, g, b, a)
+  if not frame or not frame.__edges then return end
+  for _, tex in ipairs(frame.__edges) do
+    tex:SetColorTexture(r, g, b, a or 1)
+  end
 end
 
 local function CreateBorder(frame, frameName, cfg)
@@ -79,10 +114,15 @@ local function CreateBorder(frame, frameName, cfg)
     frame = frame:GetParent()
   end
   local edgeSize = (cfg.backdropSize and cfg.backdropSize > 0) and cfg.backdropSize or 1
-  local border = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-  SetBackdropBorderSize(border, edgeSize, anchorTo)
+  local border = CreateFrame("Frame", nil, frame)
+  border.__top    = border:CreateTexture(nil, "OVERLAY")
+  border.__bottom = border:CreateTexture(nil, "OVERLAY")
+  border.__left   = border:CreateTexture(nil, "OVERLAY")
+  border.__right  = border:CreateTexture(nil, "OVERLAY")
+  border.__edges  = { border.__top, border.__bottom, border.__left, border.__right }
+  SetBorderEdgeSize(border, edgeSize, anchorTo)
   local c = cfg.backdropColor or { 0, 0, 0, 1 }
-  border:SetBackdropBorderColor(c[1], c[2], c[3], c[4] or 1)
+  SetBorderEdgeColor(border, c[1], c[2], c[3], c[4] or 1)
   frame:SetClampedToScreen(false)
   return border
 end
@@ -90,7 +130,7 @@ end
 local function SetBorderColor(button, color)
   if not button or not color then return end
   if button.__iconBorder then
-    button.__iconBorder:SetBackdropBorderColor(color[1], color[2], color[3], color[4] or 1)
+    SetBorderEdgeColor(button.__iconBorder, color[1], color[2], color[3], color[4] or 1)
   end
 end
 
@@ -723,8 +763,11 @@ local function SetFrameAlpha(frame, toAlpha)
 end
 
 local function ShouldFadeIn(cfg, isHover)
+  -- "Cible selectionnee" suit la regle commune ns.ShouldShowForTargetMode : en combat
+  -- meme sans cible, hors combat seulement sur cible attaquable, et sans condition de
+  -- cible hors combat en spe de soin.
   return (cfg.fadeInCombat and UnitAffectingCombat("player"))
-    or (cfg.fadeOnTarget and UnitExists("target"))
+    or (cfg.fadeOnTarget and ns.ShouldShowForTargetMode())
     or (cfg.fadeOnCasting and (UnitCastingInfo("player") ~= nil or UnitChannelInfo("player") ~= nil))
     or (cfg.fadeOnHover and isHover)
     or false
@@ -768,6 +811,8 @@ local fadeEventFrame = CreateFrame("Frame")
 fadeEventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 fadeEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 fadeEventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+fadeEventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+fadeEventFrame:RegisterUnitEvent("UNIT_FACTION", "target")
 fadeEventFrame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
 fadeEventFrame:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
 fadeEventFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
@@ -891,8 +936,9 @@ local function Hook_Layout(self)
         child.__iconBorder:Show()
       elseif child.Icon and child.__iconBorder then
         if forceUpdate then
-          SetBackdropBorderSize(child.__iconBorder, cfg.backdropSize)
-          child.__iconBorder:SetBackdropBorderColor(unpack(cfg.backdropColor))
+          SetBorderEdgeSize(child.__iconBorder, cfg.backdropSize)
+          local bc = cfg.backdropColor
+          SetBorderEdgeColor(child.__iconBorder, bc[1], bc[2], bc[3], bc[4] or 1)
         end
         child.__iconBorder:Show()
       end

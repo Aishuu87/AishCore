@@ -21,15 +21,24 @@ local AFK_TEX_BASE = "Interface\\AddOns\\AishCore\\Media\\AFK\\"
 -- Un seul style depuis la standardisation sur les assets Blizzard ; les jeux "sltheme" et
 -- "releaf-flat" ont ete retires (fichiers supprimes, et la categorie "classes" avec eux -- elle
 -- n'avait aucune variante Blizzard, cf. le blason de classe supprime du panneau).
+-- "" = chemin sans extension : le client resout .blp ou .tga tout seul. Necessaire pour
+-- les blasons de race, ou le set d'origine (.blp) cotoie les ajouts maison (.tga).
 local AFK_TEX_EXT = {
-  race         = { blizzard = "blp" },
+  race         = { blizzard = "" },
   factioncrest = { blizzard = "blp" },
   factionlogo  = { blizzard = "tga" },
   expansion    = { blizzard = "tga" },
 }
 
--- Mechagnome -> fichier MechaGnome.blp (seule divergence connue du set)
-local RACE_FILE_OVERRIDE = { Mechagnome = "MechaGnome" }
+-- Jeton de race renvoye par UnitRace -> nom de fichier, quand les deux divergent
+-- (verifiable en jeu avec /aishdebug afkrace).
+--   Earthen  : les deux factions partagent le jeton "EarthenDwarf"
+--   Haranir  : le jeton interne s'ecrit "Harronir", avec deux r
+local RACE_FILE_OVERRIDE = {
+  Mechagnome   = "MechaGnome",
+  EarthenDwarf = "Earthen",
+  Harronir     = "Haranir",
+}
 
 -- Jetons par extension WoW : seul "blizzard" a un fichier par extension
 local EXPANSION_TOKENS = {
@@ -53,7 +62,9 @@ local function ResolveTexturePath(category, style, token, override)
   local ext = AFK_TEX_EXT[category] and AFK_TEX_EXT[category][style]
   if not ext then return nil end
   local file = override and override[token] or token
-  return AFK_TEX_BASE .. category .. "\\" .. style .. "\\" .. file .. "." .. ext
+  local path = AFK_TEX_BASE .. category .. "\\" .. style .. "\\" .. file
+  if ext ~= "" then path = path .. "." .. ext end
+  return path
 end
 
 local function ResolveExpansionTexture(style)
@@ -114,12 +125,13 @@ local GRAPHIC_ELEMENTS = {
   { key = "logoExpansion", panel = "top",    anchor = "TOPLEFT",     category = "expansion" },
   { key = "aishLogo",      panel = "top",    anchor = "TOPRIGHT",    category = nil }, -- texture fixe, pas de style
 }
--- Logo AishCore (meme fichier que l'en-tete du panneau de reglages)
-local AISH_LOGO_PATH = "Interface\\AddOns\\AishCore\\Media\\Logo\\AishUILogo"
 AFKMode.TEXT_ELEMENTS    = TEXT_ELEMENTS
 AFKMode.GRAPHIC_ELEMENTS = GRAPHIC_ELEMENTS
 
 -- Etat interne
+local aishLogoBg     -- fond colore derriere le logo ajoure (cf. ApplyGraphicStyle)
+local aishLogoAnchor -- porte la geometrie du logo, ancre des animations 3D "Logos"
+local aishLogoArt    -- frame au-dessus de l'ancre : porte le logo et son fond
 local frame          -- overlay plein ecran
 local topPanel, bottomPanel
 local modelHolder, model
@@ -371,6 +383,18 @@ local function ApplyGraphicStyle(key, def, texturePath)
   local tex = graphics[key]
   local shown = ec.enable and texturePath and true or false
   tex:SetShown(shown)
+  -- Logo : c'est l'ancre qui porte taille et position, le logo et son fond la remplissent.
+  if key == "aishLogo" and aishLogoAnchor then
+    aishLogoAnchor:SetShown(shown)
+    aishLogoBg:SetShown(shown)
+    if not shown then return end
+    local c = ns.GetBrandLogoBgColor()
+    aishLogoBg:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
+    aishLogoAnchor:SetSize(ec.width or 40, ec.height or 40)
+    AnchorElement(aishLogoAnchor, def.panel, def, ec)
+    tex:SetTexture(texturePath)
+    return
+  end
   if not shown then return end
   tex:SetSize(ec.width or 40, ec.height or 40)
   AnchorElement(tex, def.panel, def, ec)
@@ -401,7 +425,8 @@ local function RefreshGraphics()
       end
       ApplyGraphicStyle(def.key, def, path)
     elseif def.key == "aishLogo" then
-      ApplyGraphicStyle(def.key, def, ec.enable and AISH_LOGO_PATH or nil)
+      -- Meme logo que l'en-tete du panneau de reglages, variante selon la version
+      ApplyGraphicStyle(def.key, def, ec.enable and ns.GetBrandLogoPath() or nil)
     else
       local override = (def.key == "crestRace") and RACE_FILE_OVERRIDE or nil
       local path = ec.enable and ResolveTexturePath(def.category, ec.style, TOKEN_BY_KEY[def.key], override) or nil
@@ -665,7 +690,34 @@ end
 local function CreateGraphics()
   for _, def in ipairs(GRAPHIC_ELEMENTS) do
     local panel = (def.panel == "top") and topPanel or bottomPanel
-    graphics[def.key] = panel:CreateTexture(nil, "ARTWORK")
+    if def.key == "aishLogo" then
+      -- Meme montage que l'en-tete du panneau de reglages : une ancre qui porte la
+      -- geometrie (et sert de parent aux animations 3D), un frame "art" 4 niveaux
+      -- au-dessus qui porte le logo et son fond. Une animation peut ainsi passer
+      -- entre le panneau AFK et le logo.
+      aishLogoAnchor = CreateFrame("Frame", "AishCoreAFKLogoAnchor", panel)
+      aishLogoAnchor:SetFrameLevel(panel:GetFrameLevel() + 10)
+      aishLogoAnchor:Hide()
+      local function RefreshLogoDeco()
+        local SE = ns.Modules and ns.Modules.SpellEffects
+        if SE and SE.RefreshLogoDeco then SE.RefreshLogoDeco() end
+      end
+      aishLogoAnchor:SetScript("OnShow", RefreshLogoDeco)
+      aishLogoAnchor:SetScript("OnHide", RefreshLogoDeco)
+
+      aishLogoArt = CreateFrame("Frame", nil, aishLogoAnchor)
+      aishLogoArt:SetAllPoints(aishLogoAnchor)
+      aishLogoArt:SetFrameLevel(aishLogoAnchor:GetFrameLevel() + 4)
+
+      graphics[def.key] = aishLogoArt:CreateTexture(nil, "ARTWORK")
+      graphics[def.key]:SetAllPoints(aishLogoArt)
+      aishLogoBg = aishLogoArt:CreateTexture(nil, "ARTWORK", nil, -1)
+      aishLogoBg:SetTexture(ns.GetBrandLogoBgPath())
+      aishLogoBg:SetAllPoints(aishLogoArt)
+      aishLogoBg:Hide()
+    else
+      graphics[def.key] = panel:CreateTexture(nil, "ARTWORK")
+    end
   end
 end
 

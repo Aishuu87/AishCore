@@ -17,6 +17,7 @@ local testMode = false
 local dragUnlocked = false -- glisser/deposer arme (bouton "reglages > position"), cf. EnableDrag
 local previewMode = false
 local previewIcon = nil -- icone dediee au SetPreview du panneau de reglages, cf. plus bas
+local PREVIEW_KEYBIND = "S-3" -- raccourci factice affiche par SetPreview (aucun scan de barre en apercu)
 
 -- Debug
 local function Debug(msg)
@@ -34,17 +35,8 @@ local function GetSpellIcon(spellID)
   return nil
 end
 
--- Noms des boutons d'action standard Blizzard / ABE
-local BUTTON_PREFIXES = {
-  "ActionButton",
-  "MultiBarBottomLeftButton",
-  "MultiBarBottomRightButton",
-  "MultiBarRightButton",
-  "MultiBarLeftButton",
-  "MultiBar5Button",
-  "MultiBar6Button",
-  "MultiBar7Button",
-}
+-- Boutons d'action scannes (Blizzard/ABE + ElvUI) : table partagee avec PriorityBar, cf. Core.lua
+local BUTTON_PREFIXES = ns.ACTION_BUTTON_PREFIXES
 
 -- Verifie si un bouton est mis en surbrillance par l'assistant de rotation
 local function ButtonHasGlow(button)
@@ -72,6 +64,10 @@ local function GetButtonSpellID(button)
   end
   return nil
 end
+
+-- Raccourci clavier : helpers partages avec PriorityBar, cf. Core.lua
+local GetKeybindForSpell      = ns.GetKeybindForSpell
+local GetButtonKeybindText    = ns.GetActionButtonKeybindText
 
 -- API Blizzard directe pour le sort suggere (meme source que PriorityBar.lua), plus fiable que scanner les boutons un par un
 local C_AC_GetNextCastSpell = C_AssistedCombat and C_AssistedCombat.GetNextCastSpell
@@ -178,6 +174,13 @@ local function CreateSpellIcon(spellID)
     frame.icon:SetTexture(tex)
     frame.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
   end
+
+  -- Raccourci clavier : sur un calque dedie au-dessus du glow partage (cf. bloc GLOW PARTAGE)
+  frame.kbLayer = CreateFrame("Frame", nil, frame)
+  frame.kbLayer:SetAllPoints()
+  frame.kbLayer:SetFrameLevel(frame:GetFrameLevel() + 6)
+  frame.keybindText = frame.kbLayer:CreateFontString(nil, "OVERLAY")
+  frame.keybindText:Hide()
 
   -- Glow non porte par l'icone : instance unique partagee sur containerFrame (cf. bloc GLOW PARTAGE plus bas)
 
@@ -371,6 +374,30 @@ local function StopGlow()
   rhLoopFlipTex:SetAlpha(0); rhLoopFlipTex:Hide()
 end
 
+-- Police/position/couleur du texte de raccourci (memes conventions que le compteur de charges de PriorityBar)
+local function ApplyKeybindStyle(icon)
+  if not icon or not icon.keybindText then return end
+  ns.ApplyKeybindFontString(icon.keybindText, icon, ns.GetCfg("rotationHelper") or {})
+end
+
+-- Renseigne le raccourci du sort porte par l'icone (nil = masque le texte)
+local function UpdateKeybindText(icon, forcedText)
+  if not icon or not icon.keybindText then return end
+  local cfg = ns.GetCfg("rotationHelper") or {}
+  if not cfg.showKeybind then
+    icon.keybindText:Hide()
+    return
+  end
+  local txt = forcedText or GetKeybindForSpell(icon.spellID)
+  if not txt then
+    icon.keybindText:Hide()
+    return
+  end
+  ApplyKeybindStyle(icon)
+  icon.keybindText:SetText(txt)
+  icon.keybindText:Show()
+end
+
 -- Layout : une seule icone possible (cf. ShowSpellIcon), toujours centree.
 local function LayoutIcons()
   if not containerFrame then return end
@@ -408,6 +435,8 @@ local function ShowSpellIcon(spellID)
   table.insert(activeIcons, spellID)
   activeSet[spellID] = true
   LayoutIcons()
+
+  UpdateKeybindText(icon)
 
   icon.hideAG:Stop()
   icon:Show()
@@ -458,7 +487,10 @@ local function ShouldShowIcons()
   -- Zone de repos : les modes "Cible uniquement"/"En combat" overrident ce masquage s'ils sont satisfaits, seul "Toujours" y reste soumis
   if cfg.ignoreWhileResting and IsResting and IsResting() then
     if vMode == "target" then
-      if not IsTargetAttackable() then return false end
+      -- En zone de repos, seul un vrai engagement leve le masquage : la tolerance
+      -- "spe de soin hors combat" de ns.ShouldShowForTargetMode rendrait sinon ce
+      -- reglage inoperant pour les soigneurs, qui verraient l'icone en permanence en ville.
+      if not (UnitAffectingCombat("player") or IsTargetAttackable()) then return false end
     elseif vMode == "combat" then
       if not UnitAffectingCombat("player") then return false end
     else
@@ -467,8 +499,8 @@ local function ShouldShowIcons()
   end
   if cfg.alwaysInInstance and ns.inInstance then return true end
   if vMode == "always" then return true end
-  -- "Cible uniquement" : vrai seulement si la cible est reellement attaquable (pas juste presente)
-  if vMode == "target" then return IsTargetAttackable() and true or false end
+  -- Regle commune du mode "Cible uniquement", cf. ns.ShouldShowForTargetMode
+  if vMode == "target" then return ns.ShouldShowForTargetMode() end
   return UnitAffectingCombat("player") and true or false
 end
 
@@ -557,6 +589,22 @@ function RotationHelper.Init()
   -- Installer les hooks apres un bref delai (les boutons doivent etre prets)
   C_Timer.After(1, HookActionButtons)
   
+  -- Raccourci clavier : re-scan quand les bindings ou le contenu des barres changent
+  local bindFrame = CreateFrame("Frame")
+  bindFrame:RegisterEvent("UPDATE_BINDINGS")
+  bindFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+  bindFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
+  bindFrame:SetScript("OnEvent", function()
+    -- L'ordre de declenchement entre frames n'est pas garanti : on vide le cache
+    -- partage nous-memes plutot que de compter sur celui de Core.lua.
+    ns.InvalidateKeybindCache()
+    if previewMode then return end
+    if not (ns.GetCfg("rotationHelper") or {}).showKeybind then return end
+    for _, spellID in ipairs(activeIcons) do
+      UpdateKeybindText(iconPool[spellID])
+    end
+  end)
+
   -- Rafraîchissement forcé quand on entre en combat
   local combatFrame = CreateFrame("Frame")
   combatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -591,6 +639,15 @@ function RotationHelper.ApplySettings()
     icon:SetSize(size, size)
     icon.icon:SetPoint("TOPLEFT", 2, -2)
     icon.icon:SetPoint("BOTTOMRIGHT", -2, 2)
+    ApplyKeybindStyle(icon)
+  end
+  -- Texte du raccourci : l'apercu garde sa valeur factice, les icones reelles sont rescannees
+  if previewMode and previewIcon then
+    UpdateKeybindText(previewIcon, PREVIEW_KEYBIND)
+  else
+    for _, spellID in ipairs(activeIcons) do
+      UpdateKeybindText(iconPool[spellID])
+    end
   end
 
   -- Re-applique le glow (type/couleur/taille) : instance partagee (cf. GLOW PARTAGE), redemarre l'affichage seulement si une icone est visible
@@ -643,6 +700,7 @@ function RotationHelper.SetPreview(on)
     previewIcon:ClearAllPoints()
     previewIcon:SetPoint("CENTER", containerFrame, "CENTER", 0, 0)
     previewIcon:SetAlpha(1)
+    UpdateKeybindText(previewIcon, PREVIEW_KEYBIND)
     previewIcon:Show()
     StartGlow()
   else
@@ -711,6 +769,13 @@ function RotationHelper.ToggleDebug()
   print("  Polling: " .. (pollTicker and "active" or "inactive"))
   print("  Hooks: " .. (buttonsHooked and "installed" or "not installed"))
   print("  Active icons: " .. #activeIcons)
+  do
+    local cfg = ns.GetCfg("rotationHelper") or {}
+    local sid = activeIcons[1]
+    print("  Keybind: showKeybind=" .. tostring(cfg.showKeybind)
+      .. ", sort actif=" .. tostring(sid)
+      .. ", trouve=" .. tostring(sid and GetKeybindForSpell(sid) or "-"))
+  end
 
   print("--- Button Scan ---")
   local totalButtons, visibleButtons, glowCount, spellButtons = 0, 0, 0, 0
@@ -751,8 +816,10 @@ function RotationHelper.ToggleDebug()
               if ok and n then name = n end
             end
 
+            local kb = GetButtonKeybindText(button, prefix, i) or "-"
+
             local color = hasGlow and "|cff00ff00" or "|cffaaaaaa"
-            detailLines[#detailLines + 1] = color .. prefix .. i .. "|r: " .. spellID .. " (" .. name .. ") SHT:shown=" .. shtShown .. ",alpha=" .. shtAlpha .. ",vis=" .. shtVisible .. " Anim:" .. shaPlaying .. (hasGlow and " |cff00ff00** GLOW **|r" or "")
+            detailLines[#detailLines + 1] = color .. prefix .. i .. "|r: " .. spellID .. " (" .. name .. ") KB:" .. kb .. " SHT:shown=" .. shtShown .. ",alpha=" .. shtAlpha .. ",vis=" .. shtVisible .. " Anim:" .. shaPlaying .. (hasGlow and " |cff00ff00** GLOW **|r" or "")
           end
         end
       end

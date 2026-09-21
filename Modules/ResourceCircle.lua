@@ -530,7 +530,8 @@ function ResourceCircle.ShouldShow()
   if cfg.alwaysInInstance and ns.inInstance then return true end
   local vMode = cfg.visibilityMode or "combat"
   if vMode == "always" then return true end
-  if vMode == "target" then return UnitExists("target") end
+  -- Regle commune du mode "Cible uniquement", cf. ns.ShouldShowForTargetMode
+  if vMode == "target" then return ns.ShouldShowForTargetMode() end
   -- "combat"
   if UnitAffectingCombat("player") then return true end
   return false

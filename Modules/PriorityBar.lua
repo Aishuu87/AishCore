@@ -1406,6 +1406,12 @@ local function CreateSlotFrame(index, parent)
   frame.chargeText:SetTextColor(cc[1], cc[2], cc[3], cc[4] or 1)
   frame.chargeText:Hide()
 
+  -- Raccourci clavier du sort affiche : meme calque que les charges, ancre sur inner
+  -- pour pouvoir deborder de l'icone (position "TOP" avec decalage positif).
+  frame.keybindText = cdOverlay:CreateFontString(nil, "OVERLAY")
+  ns.ApplyKeybindFontString(frame.keybindText, inner, cfg)
+  frame.keybindText:Hide()
+
   -- Tooltip
   frame:EnableMouse(true)
   frame:SetScript("OnEnter", function(self)
@@ -2015,6 +2021,17 @@ local function UpdateSlotExtras(slot)
   elseif slot.chargeText then
     slot.chargeText:Hide()
   end
+
+  -- Raccourci clavier du sort actuellement affiche par le slot
+  if slot.keybindText then
+    local kb = cfg.showKeybind and ns.GetKeybindForSpell(slot.currentSpellID) or nil
+    if kb then
+      slot.keybindText:SetText(kb)
+      slot.keybindText:Show()
+    else
+      slot.keybindText:Hide()
+    end
+  end
 end
 
 -- Mise a jour d'un slot : icone + glow
@@ -2233,7 +2250,8 @@ local function PBShouldShow()
   if cfg.alwaysInInstance and ns.inInstance then return true end
   local vMode = cfg.visibilityMode or "combat"
   if vMode == "always" then return true end
-  if vMode == "target"  then return UnitExists("target") end
+  -- Regle commune du mode "Cible uniquement", cf. ns.ShouldShowForTargetMode
+  if vMode == "target"  then return ns.ShouldShowForTargetMode() end
   -- "combat"
   return UnitAffectingCombat("player") and true or false
 end
@@ -3584,6 +3602,12 @@ function PriorityBar.ApplySettings()
         local cc = cfg.chargeColor or { 1, 1, 1, 1 }
         slot.chargeText:SetTextColor(cc[1], cc[2], cc[3], cc[4] or 1)
         if not cfg.showCharges then slot.chargeText:Hide() end
+      end
+
+      -- Raccourci clavier
+      if slot.keybindText then
+        ns.ApplyKeybindFontString(slot.keybindText, slot.innerFrame or slot, cfg)
+        if not cfg.showKeybind then slot.keybindText:Hide() end
       end
     end
   end

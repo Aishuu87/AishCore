@@ -166,6 +166,14 @@ SlashCmdList["AISHDEBUG"] = function(msg)
             print("|cff00ccffAishCore Debug|r |cffff4444Module Skyriding introuvable (pas encore chargé ?).|r")
         end
 
+    elseif msg == "afkrace" then
+        -- Jeton de race renvoye par l'API, a comparer au nom de fichier dans
+        -- Media/AFK/race/blizzard (cf. RACE_FILE_OVERRIDE dans Modules/AFKMode.lua) :
+        -- les races recentes divergent parfois (Earthen -> "EarthenDwarf").
+        local raceName, raceToken = UnitRace("player")
+        print(string.format("|cff00ccffAishCore Debug|r race = %s | jeton de fichier = |cffff9900%s|r",
+            tostring(raceName), tostring(raceToken)))
+
     elseif msg == "cdm" then
         DumpCooldownViewer()
 
@@ -400,6 +408,7 @@ SlashCmdList["AISHDEBUG"] = function(msg)
         print("  /aishdebug |cffffff00cdm|r     — dump Blizzard CooldownViewer (Utility)")
         print("  /aishdebug |cffffff00cdmbuff|r — dump BuffIcon/BuffBar CooldownViewer (duree buffs)")
         print("  /aishdebug |cffffff00bars|r    — etat interne des barres de duree (binding natif)")
+        print("  /aishdebug |cffffff00afkrace|r — jeton de race utilise pour le blason AFK (Media/AFK/race)")
         print("  /aishdebug |cffffff00cdvoff|r  — désactive le scan CDViewer (test icones)")
         print("  /aishdebug |cffffff00cdvon|r   — réactive le scan CDViewer")
         print("  /aishdebug |cffffff00pbslots|r — dump état des 4 slots PriorityBar")

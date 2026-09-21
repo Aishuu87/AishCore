@@ -24,6 +24,59 @@ function ns.GetVersionString()
   return "v" .. dots .. tostring(ns.addonVersion or "?")
 end
 
+-- Logo de marque : variante "hollow" AishUI sur les versions Ko-fi (cf. HasHeroicFeatures),
+-- AishCore sinon. Resolu a l'appel, pas au chargement : AishaddonDB n'existe pas encore
+-- quand les fichiers de l'addon sont executes. Ne concerne pas l'icone de minimap.
+function ns.GetBrandLogoPath()
+  local heroic = ns.HasHeroicFeatures and ns.HasHeroicFeatures()
+  return "Interface\\AddOns\\AishCore\\Media\\Logo\\" .. (heroic and "aishui_hollow" or "aishcore_hollow")
+end
+
+-- Fond plein place DERRIERE le logo ajoure et teinte avec la couleur "powercircle"
+-- du module Couleurs. Une seule image pour les deux variantes : les deux logos
+-- partagent la meme silhouette.
+function ns.GetBrandLogoBgPath()
+  return "Interface\\AddOns\\AishCore\\Media\\Logo\\aishui_hollow_bg"
+end
+
+--- Couleur "powercircle" de la spe active, pour teinter ce fond. Blanc si le module
+--- Couleurs n'est pas encore charge.
+function ns.GetBrandLogoBgColor()
+  local CLR = ns.Modules and ns.Modules.Colors
+  local c = CLR and CLR.Get and CLR.Get("powercircle")
+  return c or { 1, 1, 1, 1 }
+end
+
+-- Specialisations qui jouent sur des cibles alliees. Le role Blizzard "HEALER" les
+-- couvre toutes sauf Augmentation (1473), classee DAMAGER mais qui cible ses allies.
+local HEALER_LIKE_SPECS = { [1473] = true }
+
+--- Vrai en spe de soin (ou assimilee, cf. HEALER_LIKE_SPECS).
+function ns.IsHealerLikeSpec()
+  local idx = GetSpecialization and GetSpecialization()
+  if not idx or idx == 0 then return false end
+  if GetSpecializationRole and GetSpecializationRole(idx) == "HEALER" then return true end
+  local specID = ns._specID
+  if not specID and GetSpecializationInfo then
+    specID = select(1, GetSpecializationInfo(idx))
+  end
+  return (specID and HEALER_LIKE_SPECS[specID]) and true or false
+end
+
+--- Regle commune du mode de visibilite "Cible uniquement" (Barres de vie, Cercle
+--- central, Barre de rotation, Bouton de rotation) :
+---   - en combat : visible meme sans cible ;
+---   - hors combat : visible seulement si la cible est attaquable ;
+---   - hors combat en spe de soin : visible quelle que soit la cible (leur cible
+---     naturelle est un allie, la condition "attaquable" les masquerait en permanence).
+function ns.ShouldShowForTargetMode()
+  if UnitAffectingCombat("player") then return true end
+  if ns.IsHealerLikeSpec() then return true end
+  return UnitExists("target")
+     and not UnitIsDeadOrGhost("target")
+     and UnitCanAttack("player", "target") and true or false
+end
+
 -- Registre d'evenements internes leger (pub/sub)
 local CallbackRegistry = {}
 CallbackRegistry.events = {}
@@ -131,6 +184,198 @@ ns.Media = {
 -- native au client donc jamais manquante. Cle de ns.BAR_TEXTURES (cf. plus bas), pas un chemin.
 ns.BAR_TEXTURE_DEFAULT = "flat"
 
+-- ============================================================
+-- RACCOURCIS CLAVIER DES BARRES D'ACTION
+-- Partage par RotationHelper et PriorityBar : retrouve la touche assignee a un sort
+-- en le localisant sur une barre d'action.
+-- ============================================================
+
+-- Barres Blizzard / ABE, puis barres ElvUI (memes boutons securises, autre nommage).
+-- Les prefixes ElvUI sont presents inconditionnellement : sans ElvUI, _G[...] renvoie
+-- nil et le scan les ignore, donc la detection des barres classiques reste intacte.
+ns.ACTION_BUTTON_PREFIXES = {
+  "ActionButton",
+  "MultiBarBottomLeftButton",
+  "MultiBarBottomRightButton",
+  "MultiBarRightButton",
+  "MultiBarLeftButton",
+  "MultiBar5Button",
+  "MultiBar6Button",
+  "MultiBar7Button",
+}
+for bar = 1, 15 do
+  ns.ACTION_BUTTON_PREFIXES[#ns.ACTION_BUTTON_PREFIXES + 1] = "ElvUI_Bar" .. bar .. "Button"
+end
+
+-- Binding associe a chaque prefixe, utilise seulement en repli quand le FontString
+-- HotKey du bouton est vide (texte des raccourcis desactive dans les options).
+local ACTION_BUTTON_BINDINGS = {
+  ActionButton              = "ACTIONBUTTON",
+  MultiBarBottomLeftButton  = "MULTIACTIONBAR1BUTTON",
+  MultiBarBottomRightButton = "MULTIACTIONBAR2BUTTON",
+  MultiBarRightButton       = "MULTIACTIONBAR3BUTTON",
+  MultiBarLeftButton        = "MULTIACTIONBAR4BUTTON",
+  MultiBar5Button           = "MULTIACTIONBAR5BUTTON",
+  MultiBar6Button           = "MULTIACTIONBAR6BUTTON",
+  MultiBar7Button           = "MULTIACTIONBAR7BUTTON",
+}
+
+--- SpellID porte par un bouton d'action (slot d'action, sinon methode GetSpellID des boutons TWW).
+function ns.GetActionButtonSpellID(button)
+  if not button then return nil end
+  if button.action and type(button.action) == "number" then
+    local ok, aType, id = pcall(GetActionInfo, button.action)
+    if ok and aType == "spell" and id and id > 0 then return id end
+  end
+  if button.GetSpellID then
+    local ok, sid = pcall(button.GetSpellID, button)
+    if ok and sid and type(sid) == "number" and sid > 0 then return sid end
+  end
+  return nil
+end
+
+--- Texte du raccourci d'un bouton. Le FontString HotKey est prioritaire : deja abrege,
+--- correct en page de barre alternative, et il respecte les abreviations d'ElvUI. S'il est
+--- vide, on resout le binding -- ElvUI expose son nom exact via keyBoundTarget
+--- ("ELVUIBAR2BUTTON1"..., mais "ACTIONBUTTON1" pour sa barre 1).
+function ns.GetActionButtonKeybindText(button, prefix, index)
+  if not button then return nil end
+  if button.HotKey then
+    local ok, txt = pcall(button.HotKey.GetText, button.HotKey)
+    if ok and txt and txt ~= "" and txt ~= RANGE_INDICATOR then
+      return txt
+    end
+  end
+  local action = button.keyBoundTarget or button.bindingAction
+  if not action then
+    local base = ACTION_BUTTON_BINDINGS[prefix]
+    if base then action = base .. index end
+  end
+  if type(action) ~= "string" then return nil end
+  local key = GetBindingKey(action)
+  if not key or key == "" then return nil end
+  local abbrev = GetBindingText(key, "KEY_", 1)
+  return (abbrev ~= "" and abbrev) or key
+end
+
+-- Sort de base d'un ID : l'assistant de rotation renvoie parfois un override (talent,
+-- forme, aura) alors que la barre porte le sort de base, et inversement.
+local function GetBaseSpell(spellID)
+  if not spellID then return nil end
+  if FindBaseSpellByID then
+    local ok, base = pcall(FindBaseSpellByID, spellID)
+    if ok and base and base > 0 then return base end
+  end
+  return spellID
+end
+
+-- INDEX INVERSE spellID -> touche.
+--
+-- Une seule passe sur les barres construit la table pour TOUS les sorts qui s'y trouvent,
+-- au lieu de relancer un balayage complet par sort interroge. Le cout d'une invalidation
+-- ne depend donc plus du nombre de sorts affiches : ~280 lectures _G une fois, puis toutes
+-- les consultations sont en O(1), y compris les sorts absents des barres (nil immediat,
+-- sans rebalayage).
+--
+-- Priorite aux boutons VISIBLES : avec ElvUI les boutons Blizzard existent toujours mais
+-- sont masques, et porteraient un binding different. Une entree issue d'un bouton masque
+-- n'est donc jamais ecrasee par une autre, et ne peut jamais ecraser une entree visible.
+local _keybindIndex = {}      -- [spellID] = texte de la touche
+local _fromVisible  = {}      -- [spellID] = true si l'entree vient d'un bouton visible
+local _indexDirty   = true
+local _lastBuild    = 0
+
+local function IndexButton(spellID, txt, visible)
+  if not spellID then return end
+  if _keybindIndex[spellID] and (_fromVisible[spellID] or not visible) then return end
+  _keybindIndex[spellID] = txt
+  _fromVisible[spellID] = visible or nil
+end
+
+local function BuildKeybindIndex()
+  wipe(_keybindIndex)
+  wipe(_fromVisible)
+  local found = 0
+  for _, prefix in ipairs(ns.ACTION_BUTTON_PREFIXES) do
+    for i = 1, 12 do
+      local button = _G[prefix .. i]
+      if button then
+        local sid = ns.GetActionButtonSpellID(button)
+        if sid then
+          local txt = ns.GetActionButtonKeybindText(button, prefix, i)
+          if txt then
+            local visible = button:IsVisible()
+            IndexButton(sid, txt, visible)
+            -- Le sort de base est indexe en plus : l'assistant de rotation renvoie
+            -- parfois un override (talent, forme, aura) la ou la barre porte la base.
+            local base = GetBaseSpell(sid)
+            if base ~= sid then IndexButton(base, txt, visible) end
+            found = found + 1
+          end
+        end
+      end
+    end
+  end
+  _indexDirty = false
+  _lastBuild = GetTime()
+  -- Index vide : les barres ne sont probablement pas encore creees (login, ElvUI pas
+  -- charge). On se remet en "sale" pour retenter, avec un delai plancher pour ne pas
+  -- rebalayer a chaque tick sur un personnage aux barres reellement vides.
+  if found == 0 then _indexDirty = true end
+end
+
+--- Invalide l'index des raccourcis. Appele par les evenements de barre/binding, et
+--- directement par les modules qui reagissent aux memes evenements (l'ordre de
+--- declenchement entre plusieurs frames n'est pas garanti).
+function ns.InvalidateKeybindCache()
+  _indexDirty = true
+  -- Remet le compteur a zero : le delai plancher ne concerne QUE la retentative d'un
+  -- index vide, jamais une invalidation reelle, qui doit etre prise en compte tout de suite.
+  _lastBuild = 0
+end
+
+do
+  local f = CreateFrame("Frame")
+  for _, ev in ipairs({
+    "UPDATE_BINDINGS", "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED",
+    "UPDATE_BONUS_ACTIONBAR", "PLAYER_ENTERING_WORLD", "ACTIVE_TALENT_GROUP_CHANGED",
+  }) do
+    f:RegisterEvent(ev)
+  end
+  f:SetScript("OnEvent", ns.InvalidateKeybindCache)
+end
+
+--- Touche assignee a `spellID`, ou nil si le sort n'est sur aucune barre.
+function ns.GetKeybindForSpell(spellID)
+  if not spellID then return nil end
+  if _indexDirty and (GetTime() - _lastBuild) > 0.5 then
+    BuildKeybindIndex()
+  end
+  local txt = _keybindIndex[spellID]
+  if txt then return txt end
+  local base = GetBaseSpell(spellID)
+  if base ~= spellID then return _keybindIndex[base] end
+  return nil
+end
+
+--- Applique police/taille/couleur/position d'un FontString de raccourci depuis `cfg`,
+--- avec le prefixe de cles `keybind*`. SetFont est protege : un chemin mort (media pack
+--- desinstallee, profil importe) interromprait sinon la creation du frame appelant.
+function ns.ApplyKeybindFontString(fs, anchorTo, cfg)
+  if not fs or not cfg then return end
+  local pos = cfg.keybindPosition or "TOP"
+  fs:ClearAllPoints()
+  fs:SetPoint(pos, anchorTo, pos, cfg.keybindOffsetX or 0, cfg.keybindOffsetY or 0)
+  local path = cfg.keybindFont or ns.FONT_FALLBACK
+  local size = cfg.keybindFontSize or 12
+  if not pcall(fs.SetFont, fs, path, size, "OUTLINE") then
+    fs:SetFont(ns.FONT_FALLBACK, size, "OUTLINE")
+  end
+  local c = cfg.keybindColor or { 1, 1, 1, 1 }
+  fs:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+end
+
+
 -- Validation des chemins de police. FontString:SetFont() leve une erreur Lua quand le
 -- fichier est absent (media pack desinstallee, profil importe d'un autre setup...) : la
 -- creation du frame appelant est alors interrompue en plein milieu, d'ou les cascades
@@ -168,6 +413,8 @@ end
 --- qu'a la casse, ce qui est sans risque et evite un doublon dans les menus. La protection
 --- contre un chemin mort reste entiere a l'application (SetFont est enveloppe dans un
 --- pcall avec repli, cf. ns.ApplyTextOutlineStyle / ns.ApplyFont).
+local BROKEN_2002 = "Fonts" .. string.char(200) .. "2.TTF"
+
 function ns.SanitizeFontPaths(tbl, _seen)
   if type(tbl) ~= "table" then return end
   _seen = _seen or {}
@@ -178,6 +425,12 @@ function ns.SanitizeFontPaths(tbl, _seen)
     local tv = type(v)
     if tv == "table" then
       ns.SanitizeFontPaths(v, _seen)
+    elseif tv == "string" and v == BROKEN_2002 then
+      -- Valeur ecrite par un defaut mal echappe : un seul antislash dans la source Lua
+      -- fait lire \\200 comme un escape decimal (caractere 200), d'ou un chemin
+      -- illisible dans les dropdowns et un SetFont en echec. Reparation ciblee : cette
+      -- chaine exacte ne peut venir de nulle part ailleurs.
+      tbl[k] = ns.FONT_FALLBACK
     elseif tv == "string" and v ~= ns.FONT_FALLBACK and string.lower(v) == fallbackLower then
       -- Meme police, autre casse (vieux profils ecrits avec "Fonts\\2002.ttf") : on
       -- normalise, sinon le dropdown ne retrouve pas la valeur et affiche du vide.

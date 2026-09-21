@@ -297,6 +297,9 @@ ns.Defaults = {
     combos = {},
     orbCombos = {},
     oocCombos = {},
+    -- Animations jouees derriere les deux logos (en-tete du panneau + mode AFK) :
+    -- meme schema de cles que oocCombos (global_CLASSE et spec_CLASSE_N)
+    logoCombos = {},
   },
 
   -- Assistant de rotation : icone du sort highlighte, miroir du highlight Blizzard
@@ -312,6 +315,14 @@ ns.Defaults = {
     glowColor = { 1, 0.85, 0, 0.8 },
     glowSize = 4,
     useSpecGlowColor = false,  -- si true, utilise la couleur Glow du module Couleurs (spec active)
+    -- Raccourci clavier du sort affiche (repere sur les barres d'action, cf. ns.GetKeybindForSpell)
+    showKeybind = false,
+    keybindFont = "Fonts\\2002.TTF",
+    keybindFontSize = 12,
+    keybindPosition = "TOP",
+    keybindOffsetX = 0,
+    keybindOffsetY = 6,
+    keybindColor = { 1, 1, 1, 1 },
     -- Visibilite : memes reglages que priorityBar
     visibilityMode = "combat",
     alwaysInInstance = false,
@@ -341,6 +352,14 @@ ns.Defaults = {
     chargeFont     = "Fonts\\2002.TTF",
     chargeFontSize = 12,
     chargeColor = { 1, 1, 1, 1 },
+    -- Raccourci clavier du sort affiche (repere sur les barres d'action, cf. ns.GetKeybindForSpell)
+    showKeybind = false,
+    keybindFont = "Fonts\\2002.TTF",
+    keybindFontSize = 12,
+    keybindPosition = "TOP",
+    keybindOffsetX = 0,
+    keybindOffsetY = 6,
+    keybindColor = { 1, 1, 1, 1 },
     -- Texte de cooldown
     showCooldownText = false,
     cooldownFont     = "Fonts\\2002.TTF",

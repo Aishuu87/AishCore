@@ -218,8 +218,10 @@ local function ShouldShowBar(frame)
         return UnitExists(unit)
     elseif vMode == "combat" then
         return UnitAffectingCombat("player") and UnitExists(unit)
-    else  -- "target" : n'affiche RIEN sans cible, meme la barre du joueur (garde explicite sur target)
-        return UnitExists("target") and UnitExists(unit)
+    else  -- "target" : regle commune, cf. ns.ShouldShowForTargetMode (combat sans cible,
+          -- cible attaquable hors combat, spe de soin hors combat). La barre d'une unite
+          -- inexistante reste masquee : en combat sans cible, seule celle du joueur sort.
+        return ns.ShouldShowForTargetMode() and UnitExists(unit)
     end
 end
 
