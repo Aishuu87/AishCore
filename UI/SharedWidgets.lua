@@ -300,7 +300,12 @@ function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width)
   return container
 end
 
--- Section Header — style AishUI (gold dot + texte uppercase + gold hairline)
+-- Section Header — style AishUI (gold dot + texte uppercase + gold hairline).
+-- Un TITRE DE SECTION (SharedWidgets.MakeSectionTitle) reprend le meme habillage en
+-- deux points pres : libelle 2 tailles au-dessus, et couple de teintes distinct.
+local HEADER_FONT_SIZE = 11
+local TITLE_FONT_SIZE  = 13
+local TITLE_HEIGHT     = 26
 function SharedWidgets.CreateSectionHeader(parent, text, width, colorOverride)
   width = width or 280
   local f = CreateFrame("Frame", nil, parent)
@@ -318,11 +323,14 @@ function SharedWidgets.CreateSectionHeader(parent, text, width, colorOverride)
 
   -- Label uppercase (Theme.accentText, suit RefreshAccentTheme, distinct du dot/hairline)
   local lbl = f:CreateFontString(nil, "OVERLAY")
-  lbl:SetFont(ns.Media.fontGui, 11)
+  lbl:SetFont(ns.Media.fontGui, HEADER_FONT_SIZE)
   lbl:SetPoint("LEFT", 14, 0)
   local tc = colorOverride or Theme.accentText or { 0.776, 0.710, 0.471 }
   lbl:SetTextColor(tc[1], tc[2], tc[3], 1)
-  lbl:SetText((text or ""):upper())
+  -- Libelle "nu", sans le prefixe +/- d'un en-tete repliable : SetHeaderCollapsedState
+  -- le reecrit a chaque pli, il lui faut donc la base intacte.
+  f._baseText = (text or ""):upper()
+  lbl:SetText(f._baseText)
   f.text = lbl
 
   -- Hairline or dégradé (du bord droit du texte jusqu'à la fin)
@@ -347,16 +355,92 @@ function SharedWidgets.CreateSectionHeader(parent, text, width, colorOverride)
   function f:RefreshColor()
     -- Un header colorOverride garde sa teinte propre (couleur de classe) --
     -- seuls les headers "neutres" suivent le theme d'accent global.
-    local c = colorOverride or Theme.gold or Theme.accent
+    local c, tc
+    if f._isSectionTitle then
+      -- Titre de page : point + filet en "Decorations B", libelle en "Cercle de puissance".
+      c  = colorOverride or Theme.accentText or Theme.gold
+      tc = colorOverride or SharedWidgets.GetSectionTitleColor()
+    else
+      c  = colorOverride or Theme.gold or Theme.accent
+      tc = colorOverride or Theme.accentText or c
+    end
     dot:SetVertexColor(c[1], c[2], c[3], 1)
     ApplyGradient(c)
-    local tc = colorOverride or Theme.accentText or c
     lbl:SetTextColor(tc[1], tc[2], tc[3], 1)
   end
+
+  -- Marqueur lu par le systeme de layout (NewLayout, SettingsPanel.lua) pour decouper
+  -- une page en sections repliables. Les en-tetes pliables "maison" de certaines pages
+  -- (Animations 3D, Ecran AFK, Armurerie...) ne passent pas par ctx:Add et ne sont donc
+  -- jamais concernes.
+  f._isSectionHeader = true
+  f._dot = dot
+  f._lbl = lbl
 
   SharedWidgets._sectionHeaders = SharedWidgets._sectionHeaders or {}
   table.insert(SharedWidgets._sectionHeaders, f)
 
+  return f
+end
+
+-- Transforme un section header en en-tete repliable : le libelle est prefixe de
+-- "+ " / "- " (meme rendu que les sous-sections de l'Ecran AFK : point dore, puis
+-- le signe, puis le titre) et un bouton transparent par-dessus capte clic et survol.
+-- Idempotent. L'etat n'est PAS stocke ici : l'appelant fournit onToggle et pilote
+-- l'affichage via SharedWidgets.SetHeaderCollapsedState.
+function SharedWidgets.MakeHeaderCollapsible(f, onToggle)
+  if not f or f._collapseReady then return f end
+  f._collapseReady = true
+
+  local hitbox = CreateFrame("Button", nil, f)
+  hitbox:SetAllPoints(f)
+  hitbox:SetFrameLevel(f:GetFrameLevel() + 1)
+  local hl = hitbox:CreateTexture(nil, "BACKGROUND")
+  hl:SetAllPoints()
+  hl:SetColorTexture(1, 1, 1, 0.06)
+  hl:Hide()
+  hitbox:SetScript("OnEnter", function() hl:Show() end)
+  hitbox:SetScript("OnLeave", function() hl:Hide() end)
+  hitbox:SetScript("OnClick", function()
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    if onToggle then onToggle() end
+  end)
+  f._hitbox = hitbox
+
+  return f
+end
+
+--- Met a jour le seul prefixe +/- (aucun effet sur un header non pliable).
+function SharedWidgets.SetHeaderCollapsedState(f, collapsed)
+  if not f or not f._collapseReady or not f._lbl then return end
+  f._lbl:SetText((collapsed and "+ " or "- ") .. (f._baseText or ""))
+end
+
+-- Couleur du libelle d'un titre de section : "Cercle de puissance" de la spe active
+-- (meme source que ResourceCircle), repli sur l'ocre statique si le theme GUI est coupe
+-- ou le module Couleurs indisponible.
+local TITLE_TEXT_STATIC = { 0.78, 0.62, 0.30 }
+function SharedWidgets.GetSectionTitleColor()
+  local useTheme = not (ns.DB and ns.DB.colors and ns.DB.colors.themeGUI == false)
+  if useTheme then
+    local CLR = ns.Modules and ns.Modules.Colors
+    local c = CLR and CLR.Get and CLR.Get("powercircle")
+    if c then return c end
+  end
+  return TITLE_TEXT_STATIC
+end
+
+-- Promeut un section header en TITRE DE SECTION : le premier en-tete d'une page,
+-- jamais repliable, legerement plus gros et dans un couple de teintes distinct
+-- (cf. RefreshColor ci-dessus). Idempotent.
+function SharedWidgets.MakeSectionTitle(f)
+  if not f or f._isSectionTitle then return f end
+  f._isSectionTitle = true
+  -- Plus jamais candidat au decoupage en sections repliables (cf. NewLayout).
+  f._isSectionHeader = nil
+  if f._lbl then f._lbl:SetFont(ns.Media.fontGui, TITLE_FONT_SIZE) end
+  f:SetHeight(TITLE_HEIGHT)
+  if f.RefreshColor then f:RefreshColor() end
   return f
 end
 
@@ -821,6 +905,14 @@ function SharedWidgets.CreateColorButton(parent, label, width)
 
   function container:GetColor()
     return unpack(self.currentColor)
+  end
+
+  -- Grisage : la pastille cesse de reagir a la souris et l'ensemble s'estompe, pour montrer que
+  -- le reglage est ignore (typiquement quand une couleur thematique prend le relais).
+  function container:SetEnabled(enabled)
+    self._enabled = enabled and true or false
+    self._swatch:EnableMouse(self._enabled)
+    self:SetAlpha(self._enabled and 1 or 0.35)
   end
 
   swatch:SetScript("OnEnter", function(self)
@@ -1346,4 +1438,150 @@ function SharedWidgets.CreateCarousel(parent, width, height, images, autoInterva
 
   container.ShowSlide = ShowSlide
   return container
+end
+
+-- Menu contextuel generique, affiche au curseur. Un seul frame reutilise pour tout l'addon :
+-- ouvrir un menu ferme automatiquement le precedent.
+-- items = { { label = "...", onClick = function() end, disabled = bool, color = {r,g,b},
+--             separator = true }, ... }
+-- EasyMenu n'est pas utilise (deprecie), meme choix que le menu de tags du selecteur de modeles.
+local contextMenuFrame
+function SharedWidgets.ShowContextMenu(items)
+  if type(items) ~= "table" or #items == 0 then return end
+
+  if not contextMenuFrame then
+    local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
+
+    -- Fond et bordure poses en TEXTURES plutot que via SetBackdrop : selon le client, le backdrop
+    -- peut ne rien dessiner du tout, et le menu devient alors illisible par transparence.
+    -- Des textures unies fonctionnent partout et ne dependent d'aucun template.
+    local bg = f:CreateTexture(nil, "BACKGROUND", nil, 0)
+    bg:SetAllPoints(f)
+    bg:SetColorTexture(0.05, 0.05, 0.08, 0.97)
+    f._solidBg = bg
+
+    -- Bordure : quatre traits fins, insensibles a l'absence de backdrop.
+    local function EdgeTex()
+      local t = f:CreateTexture(nil, "BORDER")
+      t:SetColorTexture(0.32, 0.32, 0.38, 1)
+      return t
+    end
+    local eTop, eBottom, eLeft, eRight = EdgeTex(), EdgeTex(), EdgeTex(), EdgeTex()
+    eTop:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
+    eTop:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, 0)
+    eTop:SetHeight(1)
+    eBottom:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0)
+    eBottom:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+    eBottom:SetHeight(1)
+    eLeft:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
+    eLeft:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0)
+    eLeft:SetWidth(1)
+    eRight:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, 0)
+    eRight:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+    eRight:SetWidth(1)
+
+    f:EnableMouse(true)
+    f:Hide()
+    f._rows = {}
+
+    -- Lueur diffuse derriere le menu : il se detache du fond du panneau, souvent tres charge.
+    -- Texture de glow doux etiree au-dela des bords, en BACKGROUND pour rester sous le fond opaque
+    -- du menu -- seul le halo deborde.
+    local glow = f:CreateTexture(nil, "BACKGROUND", nil, -8)
+    glow:SetTexture("Interface\Cooldown\star4")
+    glow:SetBlendMode("ADD")
+    glow:SetPoint("TOPLEFT", f, "TOPLEFT", -26, 26)
+    glow:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 26, -26)
+    f._glowTex = glow
+    -- Fermeture des que l'on clique en dehors.
+    f:SetScript("OnShow", function(self)
+      self:SetScript("OnUpdate", function(sf)
+        if (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton"))
+           and not ns.IsFrameMouseOver(sf) then
+          sf:Hide()
+        end
+      end)
+    end)
+    f:SetScript("OnHide", function(self) self:SetScript("OnUpdate", nil) end)
+    contextMenuFrame = f
+  end
+
+  local f = contextMenuFrame
+  f:Hide()
+  for _, r in ipairs(f._rows) do r:Hide() end
+
+  -- Nuance "Lueur" de la spe active, relue a chaque ouverture : elle suit un changement de spe
+  -- ou de couleurs sans qu'il faille recreer le menu. Repli discret si le module est absent.
+  if f._glowTex then
+    local CLR = ns.Modules and ns.Modules.Colors
+    local c = CLR and CLR.Get and CLR.Get("glow")
+    if c then
+      f._glowTex:SetVertexColor(c[1] or 1, c[2] or 1, c[3] or 1, 0.30)
+    else
+      f._glowTex:SetVertexColor(1, 0.85, 0, 0.22)
+    end
+  end
+
+  local ROW_H, PAD, W = 18, 5, 190
+  local y = -PAD
+  for i, item in ipairs(items) do
+    local r = f._rows[i]
+    if not r then
+      r = CreateFrame("Button", nil, f)
+      local bg = r:CreateTexture(nil, "BACKGROUND")
+      bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0)
+      r._bg = bg
+      local lbl = r:CreateFontString(nil, "OVERLAY")
+      lbl:SetFont(ns.Media.fontGui, 10)
+      lbl:SetPoint("LEFT", r, "LEFT", 6, 0)
+      lbl:SetJustifyH("LEFT")
+      r._lbl = lbl
+      f._rows[i] = r
+    end
+    r:SetSize(W - PAD * 2, item.separator and 6 or ROW_H)
+    r:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+    r._lbl:SetText(item.separator and "" or (item.label or ""))
+    if item.separator then
+      r._bg:SetColorTexture(1, 1, 1, 0.10)
+      r:SetScript("OnEnter", nil); r:SetScript("OnLeave", nil); r:SetScript("OnClick", nil)
+      r:EnableMouse(false)
+      y = y - 6
+    else
+      r:EnableMouse(true)
+      r._bg:SetColorTexture(0, 0, 0, 0)
+      local c = item.color
+      if item.disabled then
+        r._lbl:SetTextColor(0.45, 0.45, 0.45)
+      elseif c then
+        r._lbl:SetTextColor(c[1] or 1, c[2] or 1, c[3] or 1)
+      else
+        r._lbl:SetTextColor(unpack(Theme.textNormal))
+      end
+      if item.disabled then
+        r:SetScript("OnEnter", nil); r:SetScript("OnLeave", nil); r:SetScript("OnClick", nil)
+      else
+        r:SetScript("OnEnter", function(self) self._bg:SetColorTexture(1, 1, 1, 0.08) end)
+        r:SetScript("OnLeave", function(self) self._bg:SetColorTexture(0, 0, 0, 0) end)
+        r:SetScript("OnClick", function()
+          f:Hide()
+          if item.onClick then item.onClick() end
+        end)
+      end
+      y = y - ROW_H
+    end
+    r:Show()
+  end
+
+  f:SetSize(W, math.abs(y) + PAD)
+  -- Positionnement au curseur, en coordonnees UIParent.
+  local scale = UIParent:GetEffectiveScale()
+  local cx, cy = GetCursorPosition()
+  f:ClearAllPoints()
+  f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cx / scale, cy / scale)
+  f:Show()
+end
+
+function SharedWidgets.HideContextMenu()
+  if contextMenuFrame then contextMenuFrame:Hide() end
 end

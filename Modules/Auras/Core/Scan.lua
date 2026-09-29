@@ -60,6 +60,18 @@ end
 -- GetAuraApplicationDisplayCount, GetAuraDuration) : cdmData ne sert qu'a lister les spellID actifs, la
 -- donnee reelle vient de GetPlayerAuraBySpellID (joueur, echoue pour totems/enchant d'arme) ou en repli
 -- de GetAuraDataByIndex matche par nom (plus fiable que spellID ici).
+
+-- Unite qui PORTE reellement l'aura. Identique a l'unite logique sauf pour les buffs poses sur le
+-- familier (ns.PetAuraSpells, ex. Sombre transformation) : traites comme des buffs du joueur dans
+-- tout le pipeline, mais lisibles uniquement sur "pet" par C_UnitAuras.
+local function PhysicalUnit(unit, spellID)
+    if unit == "player" and ns.GetPetAuraUnit then
+        local petUnit = ns.GetPetAuraUnit(spellID)
+        if petUnit and UnitExists(petUnit) then return petUnit end
+    end
+    return unit
+end
+
 local function FindAuraInList(unit, filter, spellID, name)
     if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return nil end
     for i = 1, 40 do
@@ -86,11 +98,12 @@ end
 -- (ex. Maelstrom Weapon via applications). En combat, voir ns.cdmAuraSwipePresence / ns.SubscribeCDMAuraSwipe
 -- (CDMHooks.lua), canal event-driven alimente par le CDM lui-meme, independant de C_UnitAuras.
 local function GetAuraDataForSpell(unit, spellID, name)
+    unit = PhysicalUnit(unit, spellID)
     if unit == "player" and C_UnitAuras.GetPlayerAuraBySpellID then
         local ok, auraData = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
         if ok and auraData then return auraData end
     end
-    local filter = (unit == "player") and "HELPFUL" or "HARMFUL"
+    local filter = (unit == "target") and "HARMFUL" or "HELPFUL"
     return FindAuraInList(unit, filter, spellID, name)
 end
 
@@ -146,7 +159,7 @@ local function MakeEntry(unit, spellID, cdmName)
     instID = okInst and instID or nil
     local durObj
     if instID then
-        local okDur, d = pcall(GetAuraDuration, unit, instID)
+        local okDur, d = pcall(GetAuraDuration, PhysicalUnit(unit, spellID), instID)
         durObj = okDur and d or nil
     end
     -- Repli direct duration/expirationTime : GetAuraDuration echoue silencieusement pour certaines auras
@@ -270,6 +283,18 @@ local function CollectFromCDM(unit)
         if keep then
             local entry = MakeEntry(unit, spellID, cdmEntry.name)
             if entry then tinsert(all, entry) end
+        end
+    end
+
+    -- Auras posees sur le familier (ns.PetAuraSpells) : le CDM ne les rapporte pas cote joueur, donc
+    -- elles n'entrent jamais dans cdmData. Lecture directe sur l'unite du pet, uniquement pour celles
+    -- que l'utilisateur track vraiment (whitelist) afin de ne pas payer un scan d'auras pour rien.
+    if unit == "player" and anyWL and ns.PetAuraSpells then
+        for spellID, def in pairs(ns.PetAuraSpells) do
+            if anyWL[spellID] == true and not cdmDataU[spellID] and UnitExists(def.unit) then
+                local entry = MakeEntry(unit, spellID, nil)
+                if entry then tinsert(all, entry) end
+            end
         end
     end
     return all

@@ -17,8 +17,11 @@ local frameStates = {}  -- [frame] = { alpha = <alpha courant interpole> }
 local hoverUntil  = {}  -- [frame] = timestamp GetTime() jusqu'auquel considere survole (math.huge = en cours)
 local hookedHover = {}  -- [frame] = true une fois OnEnter/OnLeave attaches
 
+-- Table reutilisee : cette fonction est appelee 50 fois par seconde par le ticker, une
+-- table neuve a chaque passage alimentait le ramasse-miettes en continu pour rien.
+local _framesBuf = {}
 local function GetElvUIBuffsFrames()
-  local frames = {}
+  local frames = wipe(_framesBuf)
   for _, name in ipairs(ELVUI_BUFFS_FRAME_CANDIDATES) do
     local f = _G[name]
     if f then frames[#frames + 1] = f end

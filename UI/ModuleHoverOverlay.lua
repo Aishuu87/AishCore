@@ -28,6 +28,7 @@ local STATIC_ENTRIES = {
       local XB = ns.Modules and ns.Modules.XPBar
       return XB and XB.GetHoverFrame and XB.GetHoverFrame()
     end },
+  { category = "location", getFrame = function() return G("AishCoreLocation") end },
   -- Skyriding : AishCoreSkyridingFrame n'est qu'une ancre technique, sans rapport avec le cercle
   -- visible, donc GetHoverFrame() cible ce cercle directement.
   { category = "skyriding", getFrame = function()

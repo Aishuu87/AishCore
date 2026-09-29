@@ -741,10 +741,10 @@ function TopTargetBar.Create()
         local hbar = FindTargetHealthBarInTree()
         -- Fonctions pré-allouées pour les hooks OnValueChanged (évite une closure inline à chaque changement de HP)
         local function _ApplyTargetBarValue(v)
-            f_target.bar:SetMinMaxValues(0, 1); f_target.bar:SetValue(v)
+            f_target.bar:SetMinMaxValues(0, 1); ns.SmoothBarValue(f_target.bar, v)
         end
         local function _ApplyTTBarValue(v)
-            f_tt.bar:SetMinMaxValues(0, 1); f_tt.bar:SetValue(v)
+            f_tt.bar:SetMinMaxValues(0, 1); ns.SmoothBarValue(f_tt.bar, v)
         end
 
         if hbar then
@@ -784,7 +784,7 @@ local function _TickTargetHP()
     local cur = UnitHealth("target")
     local max = UnitHealthMax("target")
     f_target.bar:SetMinMaxValues(0, max)
-    f_target.bar:SetValue(cur)
+    ns.SmoothBarValue(f_target.bar, cur)
     if f_target.hpTxt then
         local txt = ShortenHP(cur)
         f_target.hpTxt:SetText(txt)
@@ -797,7 +797,7 @@ local function _TickTTHP()
     local cur = UnitHealth("targettarget")
     local max = UnitHealthMax("targettarget")
     f_tt.bar:SetMinMaxValues(0, max)
-    f_tt.bar:SetValue(cur)
+    ns.SmoothBarValue(f_tt.bar, cur)
 end
 local function _TickTargetPower()
     if not f_target.powerBar or not f_target.powerBar:IsShown() then return end
@@ -805,7 +805,7 @@ local function _TickTargetPower()
     local max = UnitPowerMax("target")
     if max <= 0 then max = 1 end
     f_target.powerBar:SetMinMaxValues(0, max)
-    f_target.powerBar:SetValue(cur)
+    ns.SmoothBarValue(f_target.powerBar, cur)
 end
 
 C_Timer.NewTicker(0.1, function()

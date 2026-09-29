@@ -12,7 +12,8 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
     local TC = 0.07
 
     local y=0; local cfg=ns.db and ns.db.equipment or {}; local al=cfg.layout or "grid_fixed"
-    local dH=SW.CreateSectionHeader(p,L["AURASMENU_EQUIPMENT_SECTION_DISPOSITION"],cw-20); dH:SetPoint("TOPLEFT",10,-y); y=y+22
+    -- Premier en-tete de la page = son titre de section : jamais repliable.
+    local dH=SW.MakeSectionTitle(SW.CreateSectionHeader(p,L["AURASMENU_EQUIPMENT_SECTION_DISPOSITION"],cw-20)); dH:SetPoint("TOPLEFT",10,-y); y=y+24
     local cards={{key="grid_fixed",name=ns.LAYOUT_NAMES.GRID_FIXED,fb="ability_warrior_shieldwall"},{key="grid_free",name=ns.LAYOUT_NAMES.GRID_FREE,fb="ability_rogue_sprint"}}
     local sx=math.max(10,(cw-2*155)/2)
     local wgCards = {}
@@ -292,7 +293,7 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
         cc:SetColor(curBC[1], curBC[2], curBC[3])
         cc.onChanged=function(col) if ns.db and ns.db.equipment then ns.db.equipment.borderColor={col[1],col[2],col[3],0.8} end; pcall(function() ns.Providers:Layout() end) end
         cy=cy+30; c:SetHeight(cy) end}
-    SW.CreateSectionStack(p, wgSections, cw, y)
+    SW.CreateSectionStack(p, wgSections, cw, y, "equipment")
     -- Flag de preview : actif uniquement quand le menu est réellement affiché
     p:SetScript("OnShow", function() ns._equipmentPreview = true; pcall(function() ns.Providers:Refresh() end) end)
     p:SetScript("OnHide", function() ns._equipmentPreview = false; pcall(function() ns.Providers:Refresh() end) end)

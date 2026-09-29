@@ -28,8 +28,29 @@ local RING_FRAME   = "AishCoreRingBar"
 local pool       = {}   -- { frame, inUse, timer }
 local poolSize   = 0
 
+local OOC_RING_FRAME = "AishCoreHealthRing"
+
+--- Ancre des animations, et facteur d'echelle a leur appliquer.
+--- Les combos sont concus pour le cercle central. Quand celui-ci est masque, ils ne sont plus
+--- visibles nulle part : on les reporte sur le cercle de vie hors combat, qui occupe le meme role
+--- a l'ecran. Le second retour est le rapport des deux diametres, pour que l'animation garde la
+--- meme taille ET la meme position RELATIVES -- un cercle deux fois plus petit recoit une
+--- animation deux fois plus petite, au meme endroit proportionnel.
+--- Renvoie 1 dans le cas normal : aucun changement tant que le cercle central est visible.
 local function GetAnchor()
-  return _G[RING_FRAME] or UIParent
+  local ring = _G[RING_FRAME]
+  if ring and ring:IsVisible() then return ring, 1 end
+
+  local ooc = _G[OOC_RING_FRAME]
+  if ooc and ooc:IsVisible() then
+    local rw = (ring and ring.GetWidth and ring:GetWidth()) or 0
+    local ow = (ooc.GetWidth and ooc:GetWidth()) or 0
+    -- Sans dimensions exploitables on preferera ne pas redimensionner plutot que de deformer.
+    local ratio = (rw > 0 and ow > 0) and (ow / rw) or 1
+    return ooc, ratio
+  end
+
+  return ring or UIParent, 1
 end
 
 --- Vrai si les toggles "Desactiver en Raid/Groupe" bloquent les animations reelles (jamais les previews GUI).
@@ -118,12 +139,17 @@ local STRATA_BELOW = {
 -- skipModel : reapplique tout sauf le modele 3D. Sert aux reglages en direct (section
 -- "Logos"), ou un ClearModel/SetModel a chaque cran de slider ferait saccader le rendu.
 local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor, skipModel)
-  local anchor = overrideAnchor or GetAnchor()
+  -- reportScale : rapport de taille quand l'animation est reportee du cercle central vers le
+  -- cercle hors combat (cf. GetAnchor). Il ne s'applique QUE dans ce cas -- une ancre imposee
+  -- (overrideAnchor), comme celle des animations propres au cercle hors combat ou aux globes,
+  -- garde sa taille d'origine.
+  local anchor, reportScale = overrideAnchor, 1
+  if not anchor then anchor, reportScale = GetAnchor() end
   local pAnchor = pointAnchor or anchor
 
   f:SetParent(anchor)
   f:ClearAllPoints()
-  local offScale = GetAnchorOffsetScale(pAnchor)
+  local offScale = GetAnchorOffsetScale(pAnchor) * reportScale
   f:SetPoint("CENTER", pAnchor, "CENTER", (anim.anchorX or 0) * offScale, (anim.anchorY or 0) * offScale)
 
   local strata = anim.strata or "BACKGROUND"
@@ -135,7 +161,7 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor, skipModel)
   local isLogo = (anchorName == "AishCoreGuiLogoAnchor" or anchorName == "AishCoreAFKLogoAnchor")
 
   local baseSize = GetBaseSizeForAnchor(pAnchor)
-  local sz = (anim.scale or 1) * baseSize
+  local sz = (anim.scale or 1) * baseSize * reportScale
   f:SetSize(sz, sz)
 
   if isMissingBuff then
@@ -300,6 +326,161 @@ local function ResolveComboSpellID(spellID, combos)
     end
   end
   return nil
+end
+
+--- Relie automatiquement les sorts du personnage aux combos configures sous un AUTRE spellID
+--- portant le meme nom et la meme icone.
+--- Cas concret : une configuration faite sur un client ou le sort porte un autre identifiant
+--- (rangs successifs, refonte d'un sort). Les animations existent, mais restent introuvables parce
+--- que la cle ne correspond pas -- et reconfigurer chaque sort a la main represente un travail
+--- considerable.
+--- On ecrit un ALIAS plutot que de deplacer le combo : la configuration d'origine reste intacte,
+--- l'operation est reversible, et les deux identifiants continuent de fonctionner.
+--- Un alias existant n'est jamais ecrase : un lien choisi a la main prime toujours.
+function SpellEffects.AutoLinkCombosByName()
+  local cfg = ns.GetCfg("spellEffects")
+  if not (cfg and cfg.combos) then return 0 end
+  if not ns.SpellIdentityKey then return 0 end
+
+  local aliases = cfg.combosAliases
+  if not aliases then aliases = {}; cfg.combosAliases = aliases end
+
+  -- Index identite -> spellID configure. En cas de doublons, on garde le premier rencontre.
+  local byIdentity = {}
+  for sid in pairs(cfg.combos) do
+    if type(sid) == "number" then
+      local key = ns.SpellIdentityKey(sid)
+      if key and not byIdentity[key] then byIdentity[key] = sid end
+    end
+  end
+  if not next(byIdentity) then return 0 end
+
+  local PB = ns.Modules and ns.Modules.PriorityBar
+  if not (PB and PB.GetSpecSpells) then return 0 end
+  local okList, list = pcall(PB.GetSpecSpells)
+  if not (okList and type(list) == "table") then return 0 end
+
+  local linked = 0
+  for _, e in ipairs(list) do
+    local sid = e.id
+    -- Un sort qui a deja son propre combo, ou deja un alias, n'a rien a recuperer.
+    if sid and not cfg.combos[sid] and not aliases[sid] then
+      local key = ns.SpellIdentityKey(sid)
+      local target = key and byIdentity[key]
+      if target and target ~= sid then
+        aliases[sid] = target
+        linked = linked + 1
+      end
+    end
+  end
+  return linked
+end
+
+-- /selink : relie les sorts du personnage aux combos configures sous un autre identifiant.
+SLASH_SELINK1 = "/selink"
+SlashCmdList["SELINK"] = function()
+  local P = "|cff00ffff[AishCore]|r "
+  local n = SpellEffects.AutoLinkCombosByName and SpellEffects.AutoLinkCombosByName() or 0
+  print(P .. tostring(n) .. " sort(s) relie(s) a une animation existante."
+    .. (n > 0 and " Rouvre la page Animations 3D pour les voir." or ""))
+
+  -- Quand rien n'est relie, dire POURQUOI : la cause est toujours l'une de ces trois-la.
+  if n > 0 then return end
+  local cfg = ns.GetCfg("spellEffects")
+  local combos = cfg and cfg.combos or {}
+  local nCombos, nReadable = 0, 0
+  local unreadable = {}
+  for sid in pairs(combos) do
+    if type(sid) == "number" then
+      nCombos = nCombos + 1
+      local key = ns.SpellIdentityKey and ns.SpellIdentityKey(sid)
+      if key then
+        nReadable = nReadable + 1
+      elseif #unreadable < 5 then
+        unreadable[#unreadable + 1] = tostring(sid)
+      end
+    end
+  end
+  print(P .. "combos configures : " .. nCombos .. "  |  dont le nom est lisible sur ce client : " .. nReadable)
+  if #unreadable > 0 then
+    print(P .. "identifiants illisibles ici (donc non rattachables) : " .. table.concat(unreadable, ", "))
+  end
+
+  local PB = ns.Modules and ns.Modules.PriorityBar
+  local okList, list = false, nil
+  if PB and PB.GetSpecSpells then okList, list = pcall(PB.GetSpecSpells) end
+  print(P .. "sorts du grimoire lus : " .. tostring(okList and type(list) == "table" and #list or "echec"))
+
+  -- Comparaison directe : les deux cotes produisent-ils la meme cle d'identite ?
+  if okList and type(list) == "table" and list[1] then
+    local e = list[1]
+    print(P .. "exemple grimoire : id=" .. tostring(e.id) .. " nom=" .. tostring(e.name)
+      .. " cle=" .. tostring(ns.SpellIdentityKey and ns.SpellIdentityKey(e.id)))
+  end
+  for sid in pairs(combos) do
+    if type(sid) == "number" then
+      print(P .. "exemple combo : id=" .. tostring(sid)
+        .. " cle=" .. tostring(ns.SpellIdentityKey and ns.SpellIdentityKey(sid)))
+      break
+    end
+  end
+end
+
+--- Enregistre, pour chaque animation configuree, le NOM du sort et la CLASSE du personnage.
+--- Ces deux informations n'existent que sur le client ou le sort existe reellement : ailleurs,
+--- le spellID ne renvoie ni nom ni classe et l'entree devient une ligne anonyme, impossible a
+--- retrouver. Stockees dans la configuration, elles voyagent avec les SavedVariables.
+--- A lancer sur chaque personnage : seuls les sorts de SON grimoire peuvent etre attribues.
+function SpellEffects.TagCombosWithOwner()
+  local cfg = ns.GetCfg("spellEffects")
+  if not (cfg and cfg.combos) then return 0, 0 end
+  if not cfg.manualSpells then cfg.manualSpells = {} end
+  if not cfg.combosMeta   then cfg.combosMeta   = {} end
+
+  local _, cls = UnitClass("player")
+  if not cls then return 0, 0 end
+
+  -- Grimoire du personnage : ce qu'il peut revendiquer.
+  local known = {}
+  local PB = ns.Modules and ns.Modules.PriorityBar
+  if PB and PB.GetSpecSpells then
+    local ok, list = pcall(PB.GetSpecSpells)
+    if ok and type(list) == "table" then
+      for _, e in ipairs(list) do if e.id then known[e.id] = e.name end end
+    end
+  end
+
+  local tagged, named = 0, 0
+  for sid in pairs(cfg.combos) do
+    if type(sid) == "number" then
+      -- Nom : des qu'il est lisible ici, on le retient -- meme pour un sort hors grimoire.
+      local nm = known[sid]
+      if not nm and C_Spell and C_Spell.GetSpellName then
+        local okN, n = pcall(C_Spell.GetSpellName, sid)
+        if okN then nm = n end
+      end
+      if nm and cfg.combosMeta[sid] ~= nm then
+        cfg.combosMeta[sid] = nm
+        named = named + 1
+      end
+      -- Classe : uniquement si le sort appartient au grimoire de CE personnage, seule preuve
+      -- d'appartenance dont on dispose. Un tag existant n'est jamais ecrase.
+      if known[sid] and not cfg.manualSpells[sid] then
+        cfg.manualSpells[sid] = cls
+        tagged = tagged + 1
+      end
+    end
+  end
+  return tagged, named
+end
+
+-- /setag : attribue les animations configurees au personnage courant (classe + nom du sort).
+SLASH_SETAG1 = "/setag"
+SlashCmdList["SETAG"] = function()
+  local P = "|cff00ffff[AishCore]|r "
+  local tagged, named = SpellEffects.TagCombosWithOwner()
+  print(P .. tagged .. " animation(s) attribuee(s) a cette classe, " .. named .. " nom(s) memorise(s).")
+  print(P .. "A relancer sur chacun de tes personnages, puis recopie tes SavedVariables.")
 end
 
 --- Joue les animations "onhit" configurées pour un spellID.
@@ -2350,6 +2531,13 @@ function SpellEffects.Init()
   if _initialized then return end
   _initialized = true
   MigrateOocLegacyKeys()
+
+  -- Recuperation des animations configurees sous un autre identifiant (cf.
+  -- AutoLinkCombosByName). Differee : le grimoire n'est pas encore lisible a l'initialisation,
+  -- et sans lui il n'y aurait aucun sort a relier.
+  C_Timer.After(5, function()
+    pcall(SpellEffects.AutoLinkCombosByName)
+  end)
 
   -- Crée le conteneur sentinelle dès que possible, hors combat (échoue silencieusement en combat ;
   -- PLAYER_REGEN_ENABLED ci-dessous rattrape un reload en plein pull).

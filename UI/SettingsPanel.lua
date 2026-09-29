@@ -221,61 +221,280 @@ MainFrame:SetScript("OnSizeChanged", function(self, w, h)
 end)
 
 -- Utilitaires de layout
+-- ============================================================
+-- TITRE DE SECTION + SECTIONS REPLIABLES
+-- Le PREMIER SW.CreateSectionHeader ajoute via ctx:Add sur le conteneur d'une page est
+-- promu "titre de section" (SW.MakeSectionTitle) : plus gros, teintes propres, et jamais
+-- repliable -- c'est le titre de la page, pas une section. Chaque header suivant ouvre
+-- une section repliable ; tout ce qui suit lui appartient jusqu'au header d'apres. Un
+-- clic sur l'en-tete replie/deplie le bloc et la page est redisposee.
+--
+-- Seul le ctx de la PAGE (celui dont le conteneur est la frame de categorie) decoupe en
+-- sections : les ctx imbriques (detail d'une barre, sous-panneau...) sont poses par le
+-- flux parent, qui lit leur hauteur -- les replier de l'interieur laisserait la page a
+-- l'ancienne hauteur.
+--
+-- L'etat vit UNIQUEMENT en memoire de session (jamais dans la DB, demande explicite) :
+-- au /reload tout repart replie. Il est garde dans une table a part plutot que sur la
+-- frame, pour survivre aux rebuilds de page (_invalidateCategory).
+-- ============================================================
+local _sectionCollapsed = {}   -- ["<catId>@<index>@<libelle>"] = false si deplie
+local _buildingCatId = nil     -- categorie en cours de construction (cf. GetOrBuildContainer)
+local _buildingFrame = nil     -- frame de cette categorie : identifie le ctx "de page"
+
 local function NewLayout(container)
-  local ctx = { y = 0, widgets = {} }
+  local ctx = {
+    y = 0,
+    widgets  = {},
+    flow     = {},   -- suite ordonnee des operations, rejouee a chaque pli/depli
+    sections = {},   -- sections declarees par les headers rencontres
+    _section = nil,  -- section courante (nil = contenu d'avant le 1er header)
+    _tracked = 0,    -- widgets passes par le flux, compare a #widgets par Finalize
+    _shadowY = 0,    -- y attendu si personne n'a touche ctx.y en direct
+    _isPage  = (_buildingFrame ~= nil and container == _buildingFrame),
+  }
+
+  -- Un panneau qui positionne des widgets lui-meme (ctx.y / ctx.widgets manipules
+  -- directement, cf. Animations 3D, Ecran AFK, Armurerie...) ne peut pas etre redispose
+  -- sans casser ces elements : on y renonce au pli, la page garde son rendu actuel.
+  local function Track(w)
+    ctx._tracked = ctx._tracked + 1
+    table.insert(ctx.widgets, w)
+  end
+
+  local function Advance(h)
+    ctx.y = ctx.y + h
+    ctx._shadowY = ctx._shadowY + h
+  end
 
   function ctx:Add(w)
+    if w._isSectionHeader and self._isPage then
+      if not self._titleDone then
+        -- Premier en-tete de la page : c'est son titre, pas une section.
+        self._titleDone = true
+        SW.MakeSectionTitle(w)
+      else
+        local sec = { header = w }
+        self.sections[#self.sections + 1] = sec
+        self._section = sec
+      end
+    end
+    local item = { kind = "widget", w = w, section = self._section }
+    self.flow[#self.flow + 1] = item
     w:ClearAllPoints()
     w:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -self.y)
     w:Show()
-    self.y = self.y + (w:GetHeight() or ROW_HEIGHT) + 2
-    table.insert(self.widgets, w)
+    Advance((w:GetHeight() or ROW_HEIGHT) + 2)
+    Track(w)
     return w
   end
 
   function ctx:Spacer(h)
-    self.y = self.y + (h or SECTION_GAP)
+    h = h or SECTION_GAP
+    self.flow[#self.flow + 1] = { kind = "spacer", h = h, section = self._section }
+    Advance(h)
   end
 
-  function ctx:Finalize()
-    container:SetHeight(self.y + PADDING)
+  local function AddRowInternal(self, gap, centered, args)
+    local rowH = 0
+    for _, w in ipairs(args) do
+      local wh = w:GetHeight() or ROW_HEIGHT
+      if wh > rowH then rowH = wh end
+    end
+    self.flow[#self.flow + 1] = { kind = "row", widgets = args, gap = gap,
+                                  centered = centered, rowH = rowH, section = self._section }
+
+    local xOff = 0
+    for _, w in ipairs(args) do
+      w:ClearAllPoints()
+      local yOff = centered and math.floor((rowH - (w:GetHeight() or ROW_HEIGHT)) / 2) or 0
+      w:SetPoint("TOPLEFT", container, "TOPLEFT", xOff, -(self.y + yOff))
+      w:Show()
+      xOff = xOff + (w:GetWidth() or 0) + gap
+      Track(w)
+    end
+    Advance(rowH + 2)
   end
 
   function ctx:AddRow(gap, ...)
-    local args = { ... }
-    local xOff = 0
-    local rowH = 0
-    for _, w in ipairs(args) do
-      w:ClearAllPoints()
-      w:SetPoint("TOPLEFT", container, "TOPLEFT", xOff, -self.y)
-      w:Show()
-      local wh = w:GetHeight() or ROW_HEIGHT
-      if wh > rowH then rowH = wh end
-      xOff = xOff + (w:GetWidth() or 0) + gap
-      table.insert(self.widgets, w)
-    end
-    self.y = self.y + rowH + 2
+    AddRowInternal(self, gap, false, { ... })
   end
 
   -- Comme AddRow, mais centre verticalement chaque widget sur la hauteur de la rangee (ex: checkbox + slider de tailles differentes).
   function ctx:AddRowCentered(gap, ...)
-    local args = { ... }
-    local rowH = 0
-    for _, w in ipairs(args) do
-      local wh = w:GetHeight() or ROW_HEIGHT
-      if wh > rowH then rowH = wh end
+    AddRowInternal(self, gap, true, { ... })
+  end
+
+  -- Element place a la main : ancrage ou indentation propres (sous-sections indentees,
+  -- blocs centres...). Passer par ici plutot que d'ecrire ctx.y / ctx.widgets en direct,
+  -- sinon la page entiere renonce au pli (cf. garde-fou de Finalize).
+  function ctx:Manual(w, x, point)
+    x = x or 0
+    point = point or "TOPLEFT"
+    self.flow[#self.flow + 1] = { kind = "manual", w = w, x = x, point = point,
+                                  section = self._section }
+    w:ClearAllPoints()
+    w:SetPoint(point, container, point, x, -self.y)
+    w:Show()
+    Advance((w:GetHeight() or ROW_HEIGHT) + 2)
+    Track(w)
+    return w
+  end
+
+  -- Bloc pose par la page elle-meme : `place(y)` (re)positionne ses widgets a partir de
+  -- l'ordonnee fournie et `height` est la place verticale consommee. `place` est rejoue a
+  -- chaque redisposition, donc le bloc suit les plis comme le reste. A utiliser des que
+  -- le placement ne tient pas dans Add/AddRow/Manual (rangee a x libre, multi-colonnes...).
+  function ctx:ManualGroup(place, height, widgets)
+    self.flow[#self.flow + 1] = { kind = "group", place = place, h = height,
+                                  widgets = widgets or {}, section = self._section }
+    place(self.y)
+    for _, w in ipairs(widgets or {}) do Track(w) end
+    Advance(height)
+  end
+
+  -- Plancher vertical : le flux reprend au moins a `minY` (ex. contenu pose a cote d'un
+  -- apercu plus haut que lui).
+  function ctx:MinY(minY)
+    self.flow[#self.flow + 1] = { kind = "minY", y = minY, section = self._section }
+    if self.y < minY then
+      local delta = minY - self.y
+      Advance(delta)
     end
-    local xOff = 0
-    for _, w in ipairs(args) do
-      w:ClearAllPoints()
-      local wh = w:GetHeight() or ROW_HEIGHT
-      local yOff = math.floor((rowH - wh) / 2)
-      w:SetPoint("TOPLEFT", container, "TOPLEFT", xOff, -(self.y + yOff))
-      w:Show()
-      xOff = xOff + (w:GetWidth() or 0) + gap
-      table.insert(self.widgets, w)
+  end
+
+  -- Page volontairement non repliable (Profils...) : les en-tetes gardent leur rendu
+  -- normal, sans prefixe +/- ni clic. Le titre de section, lui, reste promu.
+  function ctx:DisableCollapse()
+    self._noCollapse = true
+  end
+
+  -- Widget suivi (refresh, teardown) mais positionne par la page elle-meme et hors flux
+  -- vertical : apercus en surimpression, calques absolus.
+  function ctx:Overlay(w)
+    Track(w)
+    return w
+  end
+
+  -- Repositionne toute la page d'apres le flux enregistre, en sautant le contenu des
+  -- sections repliees. Les widgets masques sont caches pour ne pas rester cliquables.
+  -- Un widget masque par le pli est reaffiche par le depli, mais un widget que la page a
+  -- cache elle-meme (option conditionnelle) ne doit JAMAIS etre reaffiche ici : on ne
+  -- touche qu'a ce qu'on a masque soi-meme, trace par item.byCollapse.
+  local function SetItemShown(item, w, show)
+    if show then
+      if item.byCollapse then w:Show() end
+    else
+      w:Hide()
     end
-    self.y = self.y + rowH + 2
+  end
+
+  function ctx:Relayout()
+    local y = 0
+    for _, item in ipairs(self.flow) do
+      -- Le header porte sa propre section : il reste visible quand elle est repliee.
+      local isHeader = (item.kind == "widget" and item.section and item.w == item.section.header)
+      local hidden = item.section and item.section.collapsed and not isHeader
+
+      if item.kind == "spacer" then
+        if not hidden then y = y + item.h end
+      elseif item.kind == "group" then
+        if hidden then
+          for _, w in ipairs(item.widgets) do SetItemShown(item, w, false) end
+        else
+          item.place(y)
+          for _, w in ipairs(item.widgets) do SetItemShown(item, w, true) end
+          y = y + item.h
+        end
+      elseif item.kind == "minY" then
+        if not hidden and y < item.y then y = item.y end
+      elseif item.kind == "manual" then
+        if hidden then
+          SetItemShown(item, item.w, false)
+        else
+          item.w:ClearAllPoints()
+          item.w:SetPoint(item.point, container, item.point, item.x, -y)
+          SetItemShown(item, item.w, true)
+          y = y + (item.w:GetHeight() or ROW_HEIGHT) + 2
+        end
+      elseif item.kind == "widget" then
+        if hidden then
+          SetItemShown(item, item.w, false)
+        else
+          item.w:ClearAllPoints()
+          item.w:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y)
+          SetItemShown(item, item.w, true)
+          y = y + (item.w:GetHeight() or ROW_HEIGHT) + 2
+        end
+      elseif item.kind == "row" then
+        if hidden then
+          for _, w in ipairs(item.widgets) do SetItemShown(item, w, false) end
+        else
+          local xOff = 0
+          for _, w in ipairs(item.widgets) do
+            w:ClearAllPoints()
+            local yOff = item.centered
+              and math.floor((item.rowH - (w:GetHeight() or ROW_HEIGHT)) / 2) or 0
+            w:SetPoint("TOPLEFT", container, "TOPLEFT", xOff, -(y + yOff))
+            SetItemShown(item, w, true)
+            xOff = xOff + (w:GetWidth() or 0) + item.gap
+          end
+          y = y + item.rowH + 2
+        end
+      end
+      item.byCollapse = hidden or nil
+    end
+    self.y = y
+    container:SetHeight(y + PADDING)
+
+    -- Le scroll child ne suit pas tout seul : sa hauteur n'est recalculee qu'au
+    -- changement de categorie. Sans ca, plier/deplier laisse la barre de defilement
+    -- sur l'ancienne plage. On reclampe aussi le scroll, qui peut se retrouver
+    -- au-dela du contenu apres un repli.
+    if container:IsShown() then
+      content:SetHeight(container:GetHeight())
+      local range = scrollFrame:GetVerticalScrollRange() or 0
+      if (scrollFrame:GetVerticalScroll() or 0) > range then
+        scrollFrame:SetVerticalScroll(math.max(0, range))
+      end
+    end
+  end
+
+  function ctx:Finalize()
+    self._finalized = true
+    container:SetHeight(self.y + PADDING)
+
+    -- Garde-fou : widget place hors du flux, ou ctx.y ecrit en direct. On ne touche a
+    -- rien, la page reste telle qu'elle est aujourd'hui (en-tetes non cliquables).
+    local clean = (self._tracked == #self.widgets)
+                  and (math.abs(self.y - self._shadowY) < 0.5)
+                  and (#self.sections > 0)
+                  and not self._noCollapse
+    if not clean then
+      self.noCollapse = true
+      return
+    end
+
+    for idx, sec in ipairs(self.sections) do
+      local key = (_buildingCatId or "?") .. "@" .. idx .. "@" .. (sec.header._baseText or "")
+      sec.key = key
+      -- Replie par defaut : absent de la table = replie.
+      sec.collapsed = (_sectionCollapsed[key] ~= false)
+      SW.MakeHeaderCollapsible(sec.header, function()
+        sec.collapsed = not sec.collapsed
+        -- Pas de `x and false or nil` ici : en Lua `false or nil` vaut toujours nil,
+        -- l'etat "deplie" ne serait jamais memorise.
+        if sec.collapsed then
+          _sectionCollapsed[sec.key] = nil
+        else
+          _sectionCollapsed[sec.key] = false
+        end
+        SW.SetHeaderCollapsedState(sec.header, sec.collapsed)
+        self:Relayout()
+      end)
+      SW.SetHeaderCollapsedState(sec.header, sec.collapsed)
+    end
+    self:Relayout()
   end
 
   return ctx
@@ -305,6 +524,7 @@ local function GetModKey(dbKey)
     characterArmory            = "CharacterArmory",
     afkMode                    = "AFKMode",
     bigCursor                  = "BigCursor",
+    location                   = "Location",
   }
   return map[dbKey]
 end
@@ -513,7 +733,7 @@ function Build.ResourceCircle(container)
 
   -- Taille / taille d'arc / epaisseur d'arc sur une seule ligne : les trois se reglent
   -- ensemble en pratique, les separer obligeait a faire l'aller-retour en scrollant.
-  local _rcSL3 = math.floor((W - 16) / 3)
+  local _rcSL3 = math.floor((W - 24) / 4)
   local slSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 20, 200, 1, _rcSL3)
   BindSlider(slSize, "resourceCircle", "size")
   local slRCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE_RATIO"], 0.5, 1.0, 0.05, _rcSL3)
@@ -521,12 +741,24 @@ function Build.ResourceCircle(container)
   -- Max étendu à 1.2 (au lieu de 0.99) : les quartiers radiaux sont surdimensionnés de 20%, leur bord déborde donc un peu au-delà du rayon nominal.
   local slRCThick = SW.CreateSlider(container, L["SETTINGS_ARC_THICKNESS"], 0.0, 1.2, 0.01, _rcSL3)
   BindSlider(slRCThick, "resourceCircle", "overlayRatio")
-  ctx:AddRow(8, slSize, slRCArcSize, slRCThick)
+  -- Fond de texte : cache noir sur un arc noir, donc invisible au repos. Chaque reglage
+  -- allume un halo derriere lui le temps de le situer (cf. ns.FlashTextBackdropGlow).
+  local slRCTextBd = SW.CreateSlider(container, L["SETTINGS_TEXT_BACKDROP"], 1, 120, 1, _rcSL3)
+  BindSlider(slRCTextBd, "resourceCircle", "textBackdropSize")
+  do
+    local orig = slRCTextBd.onChanged
+    slRCTextBd.onChanged = function(v)
+      if orig then orig(v) end
+      local RC = ns.Modules and ns.Modules.ResourceCircle
+      if RC and RC.FlashTextBackdrop then RC.FlashTextBackdrop() end
+    end
+  end
+  ctx:AddRow(8, slSize, slRCArcSize, slRCThick, slRCTextBd)
 
   -- Bascule remplissage vertical / radial
   local cbRCRadial = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_RC_RADIAL_FILL"] or "Remplissage radial (expérimental)",
-    L["SETTINGS_RC_RADIAL_FILL_TT"] or "Bascule entre le remplissage vertical (par défaut) et un remplissage radial en arc de jauge.",
+    L["SETTINGS_RC_RADIAL_FILL"] or "Radial fill",
+    L["SETTINGS_RC_RADIAL_FILL_TT"] or "Switches between the vertical fill (default) and a radial gauge-arc fill.",
     W))
   BindCheckbox(cbRCRadial, "resourceCircle", "radialFillTest")
 
@@ -963,13 +1195,25 @@ function Build.OutOfCombat(container)
     L["SETTINGS_LOCK_POSITION_TT"], W))
   BindCheckbox(cbHCLock, "healthCircle", "locked")
 
-  local slHCSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, SL_W3)
+  local _hcSL4 = math.floor((W - 24) / 4)
+  local slHCSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, _hcSL4)
   BindSlider(slHCSize, "healthCircle", "size")
-  local slHCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.5, 1.0, 0.05, SL_W3)
+  local slHCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.5, 1.0, 0.05, _hcSL4)
   BindSlider(slHCArcSize, "healthCircle", "arcSizeRatio")
-  local slHCThick = SW.CreateSlider(container, L["SETTINGS_THICKNESS"], 0.0, 0.99, 0.01, SL_W3)
+  local slHCThick = SW.CreateSlider(container, L["SETTINGS_THICKNESS"], 0.0, 0.99, 0.01, _hcSL4)
   BindSlider(slHCThick, "healthCircle", "overlayRatio")
-  ctx:AddRow(8, slHCSize, slHCArcSize, slHCThick)
+  -- Fond de texte : meme reglage et meme halo de reperage que le cercle central.
+  local slHCTextBd = SW.CreateSlider(container, L["SETTINGS_TEXT_BACKDROP"], 1, 80, 1, _hcSL4)
+  BindSlider(slHCTextBd, "healthCircle", "textBackdropSize")
+  do
+    local orig = slHCTextBd.onChanged
+    slHCTextBd.onChanged = function(v)
+      if orig then orig(v) end
+      local HC = ns.Modules and ns.Modules.HealthCircle
+      if HC and HC.FlashTextBackdrop then HC.FlashTextBackdrop() end
+    end
+  end
+  ctx:AddRow(8, slHCSize, slHCArcSize, slHCThick, slHCTextBd)
 
   local slHCDelay = SW.CreateSlider(container, L["SETTINGS_HIDE_DELAY_S"], 0.5, 10, 0.5, SL_W2)
   BindSlider(slHCDelay, "healthCircle", "hideDelay")
@@ -978,6 +1222,13 @@ function Build.OutOfCombat(container)
   ctx:AddRow(8, slHCDelay, slHCFont)
   local ddHCFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
   BindDropdown(ddHCFont, "healthCircle", "font")
+
+  -- Soins previsionnels : second arc rempli a (vie + soins), cf. Modules/HealthCircle.lua
+  local cbHCHealPred = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_HC_HEALPRED"], L["SETTINGS_HC_HEALPRED_TT"], W))
+  BindCheckbox(cbHCHealPred, "healthCircle", "showHealPrediction")
+  local colHCHealPred = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_HC_HEALPRED_COLOR"], math.min(220, W)))
+  BindColorButton(colHCHealPred, "healthCircle", "healPredColor")
 
   ctx:Spacer(4)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_HC_VISIBILITY"], W))
@@ -1028,8 +1279,8 @@ function Build.OutOfCombat(container)
 
   -- Bascule remplissage vertical / radial (même système que le cercle principal)
   local cbOCRCRadial = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_RC_RADIAL_FILL"] or "Remplissage radial (expérimental)",
-    L["SETTINGS_RC_RADIAL_FILL_TT"] or "Bascule entre le remplissage vertical (par défaut) et un remplissage radial en arc de jauge.",
+    L["SETTINGS_RC_RADIAL_FILL"] or "Radial fill",
+    L["SETTINGS_RC_RADIAL_FILL_TT"] or "Switches between the vertical fill (default) and a radial gauge-arc fill.",
     W))
   BindCheckbox(cbOCRCRadial, "outOfCombatResourceCircle", "radialFillTest")
 
@@ -1599,6 +1850,21 @@ function Build.UnitBars(container)
     cbAbsorbRev:SetChecked(UBGlobal("absorbReversed") == true)
     cbAbsorbRev.onChanged = function(val) UBGlobalSet("absorbReversed", val) end
 
+    local cbHealPred = pctx:Add(SW.CreateCheckbox(preBars,
+      L["SETTINGS_UB_HEALPRED"],
+      L["SETTINGS_UB_HEALPRED_TT"], preBarsW))
+    cbHealPred:SetChecked(UBGlobal("showHealPrediction") ~= false)
+    cbHealPred.onChanged = function(val) UBGlobalSet("showHealPrediction", val) end
+
+    local swHealPred = pctx:Add(SW.CreateColorSwatch(preBars,
+      L["SETTINGS_UB_HEALPRED_COLOR"],
+      L["SETTINGS_UB_HEALPRED_COLOR_TT"], preBarsW))
+    local _hpC = UBGlobal("healPredColor") or { 0.15, 0.85, 0.35, 1 }
+    swHealPred:SetColor(_hpC[1], _hpC[2], _hpC[3], _hpC[4])
+    swHealPred.onChanged = function(r, g, b, a)
+      UBGlobalSet("healPredColor", { r, g, b, a or 1 })
+    end
+
     local swAbsorb = pctx:Add(SW.CreateColorSwatch(preBars,
       L["SETTINGS_UB_ABSORB_COLOR"],
       L["SETTINGS_UB_ABSORB_COLOR_TT"], preBarsW))
@@ -1609,11 +1875,7 @@ function Build.UnitBars(container)
     end
     pctx:Finalize()
 
-    preBars:ClearAllPoints()
-    preBars:SetPoint("TOPLEFT", container, "TOPLEFT", UB_SECTION_INDENT, -ctx.y)
-    preBars:Show()
-    ctx.y = ctx.y + preBars:GetHeight() + 2
-    table.insert(ctx.widgets, preBars)
+    ctx:Manual(preBars, UB_SECTION_INDENT)
   end
 
   ctx:Spacer(10)
@@ -1624,11 +1886,7 @@ function Build.UnitBars(container)
     ctx:Spacer(4)
     local headerW = W - UB_SECTION_INDENT
     local header, collapsed = UBCollapsibleHeader(container, headerW, entry.label, bk, barOff)
-    header:ClearAllPoints()
-    header:SetPoint("TOPLEFT", container, "TOPLEFT", UB_SECTION_INDENT, -ctx.y)
-    header:Show()
-    ctx.y = ctx.y + header:GetHeight() + 2
-    table.insert(ctx.widgets, header)
+    ctx:Manual(header, UB_SECTION_INDENT)
 
     if not collapsed then
       local detailW = W - UB_SECTION_INDENT
@@ -1665,11 +1923,7 @@ function Build.UnitBars(container)
       dctx:Add(MakeXYRow(detail, detailW, bk, "nameOffX", "nameOffY"))
       dctx:Finalize()
 
-      detail:ClearAllPoints()
-      detail:SetPoint("TOPLEFT", container, "TOPLEFT", UB_SECTION_INDENT, -ctx.y)
-      detail:Show()
-      ctx.y = ctx.y + detail:GetHeight() + 2
-      table.insert(ctx.widgets, detail)
+      ctx:Manual(detail, UB_SECTION_INDENT)
     end
   end
 
@@ -1802,7 +2056,7 @@ function Build.GroupNumber(container)
     -- Re-synchronise a chaque reaffichage de la page : les valeurs peuvent avoir
     -- change sans passer par onChanged (changement de profil, import...).
     preview:SetScript("OnShow", function(self) self:Update() end)
-    table.insert(ctx.widgets, preview)
+    ctx:Overlay(preview)
   end
 
   -- Rafraichit l'apercu apres l'action normale du widget.
@@ -1856,7 +2110,7 @@ function Build.GroupNumber(container)
   ctx:AddRow(8, Live(slGNBadgeX), Live(slGNBadgeY))
 
   -- Numero : la section passe sous l'apercu, donc de nouveau en pleine largeur.
-  if preview and ctx.y < PREVIEW_H + 6 then ctx.y = PREVIEW_H + 6 end
+  if preview then ctx:MinY(PREVIEW_H + 6) end
   ctx:Spacer(6)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_GN_NUMBER"], WALL))
 
@@ -1940,6 +2194,30 @@ function Build.CastBar(container)
   local ddCBTex = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_BAR_TEXTURE"], ns.GetBarTextureList(), W))
   ddCBTex:SetValue(CBGet("barTexture") or ns.BAR_TEXTURE_DEFAULT)
   ddCBTex.onChanged = function(val) CBSet("barTexture", val) end
+
+  -- Couleur de remplissage. CBGet/CBSet et non BindColorButton : cette page ecrit ses reglages via
+  -- ses propres accesseurs, qui declenchent CastBar.ApplySettings pour un rendu immediat.
+  local colCBBar = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_CB_BAR_COLOR"], W))
+  do
+    local c = CBGet("barColor")
+    if type(c) == "table" then colCBBar:SetColor(c[1], c[2], c[3], c[4] or 1) end
+  end
+  colCBBar.onChanged = function(val) CBSet("barColor", val) end
+
+  local cbCBSpecColor = SW.CreateCheckbox(container,
+    L["SETTINGS_CB_USE_SPEC_COLOR"], L["SETTINGS_CB_USE_SPEC_COLOR_TT"], W)
+  cbCBSpecColor:SetChecked(CBGet("useSpecColor") == true)
+  -- La couleur fixe n'a plus d'effet quand la nuance de spe prend le relais : on la grise pour que
+  -- ce soit visible, plutot que de laisser un reglage sans consequence.
+  local function RefreshCBColorState()
+    colCBBar:SetEnabled(not (CBGet("useSpecColor") == true))
+  end
+  cbCBSpecColor.onChanged = function(val)
+    CBSet("useSpecColor", val)
+    RefreshCBColorState()
+  end
+  RefreshCBColorState()
+  ctx:Add(cbCBSpecColor)
 
   -- Position
   ctx:Spacer(6)
@@ -2928,18 +3206,112 @@ local function SetupModernScroll(scrollFrame, width, xOffset)
   return track
 end
 
+-- Coloration des noms de modeles, au niveau du fichier et non dans EnsureModelPicker : cette
+-- derniere ne s'execute qu'a la premiere ouverture du selecteur, si bien que la coloration des
+-- listes d'animations restait inactive tant qu'on ne l'avait pas ouvert au moins une fois.
+local function HasCustomTag(fileID, tagLabel)
+  -- Acces direct plutot qu'un appel a GetCustomTags : celle-ci vit dans EnsureModelPicker et
+  -- n'existe donc pas tant que le selecteur n'a pas ete ouvert -- la coloration des noms de
+  -- modeles echouait alors en silence. Pas de fonction intermediaire au niveau du fichier non
+  -- plus : le chunk atteint la limite de 200 locales de Lua.
+  local ct = ns.DB and ns.DB.modelCustomTags
+  if not ct then return false end
+  return ct[fileID] and ct[fileID][tagLabel]
+end
+
+-- Détermine les tags matchés pour un nom de modèle + fileID
+local function GetMatchingTags(modelName, fileID)
+  local matched = {}
+  local nameLower = strlower(modelName or "")
+  for _, tag in ipairs(MODEL_TAGS) do
+    local found = false
+    -- Match par keywords
+    for _, kw in ipairs(tag.keywords) do
+      if nameLower:find(kw, 1, true) then found = true; break end
+    end
+    -- Match par custom tag
+    if not found and HasCustomTag(fileID, tag.label) then found = true end
+    if found then matched[#matched + 1] = tag end
+  end
+  return matched
+end
+
+-- Formate un nom de modèle avec les keywords colorés par tag
+local function FormatNameWithKeywordHighlights(modelName)
+  if not modelName or modelName == "" then return modelName end
+  local nameLower = strlower(modelName)
+  -- Collecter tous les spans (startPos, endPos, color) pour chaque keyword matché
+  local spans = {}
+  for _, tag in ipairs(MODEL_TAGS) do
+    local c = tag.color
+    local hex = string.format("|cFF%02x%02x%02x",
+      math.floor(c[1] * 255 + 0.5),
+      math.floor(c[2] * 255 + 0.5),
+      math.floor(c[3] * 255 + 0.5))
+    for _, kw in ipairs(tag.keywords) do
+      if kw ~= "" then
+        local searchStart = 1
+        while true do
+          local s, e = nameLower:find(kw, searchStart, true)
+          if not s then break end
+          spans[#spans + 1] = { s = s, e = e, hex = hex }
+          searchStart = e + 1
+        end
+      end
+    end
+  end
+  if #spans == 0 then return modelName end
+  -- Trier par position de début, puis par longueur décroissante (plus long match d'abord)
+  table.sort(spans, function(a, b)
+    if a.s ~= b.s then return a.s < b.s end
+    return a.e > b.e
+  end)
+  -- Fusionner les overlaps : garder le premier span qui couvre chaque position
+  local merged = {}
+  local coveredUntil = 0
+  for _, sp in ipairs(spans) do
+    if sp.s > coveredUntil then
+      merged[#merged + 1] = sp
+      coveredUntil = sp.e
+    elseif sp.e > coveredUntil then
+      -- Overlap partiel : tronquer le début
+      merged[#merged + 1] = { s = coveredUntil + 1, e = sp.e, hex = sp.hex }
+      coveredUntil = sp.e
+    end
+  end
+  -- Construire la chaîne finale
+  local parts = {}
+  local pos = 1
+  for _, sp in ipairs(merged) do
+    if sp.s > pos then
+      parts[#parts + 1] = modelName:sub(pos, sp.s - 1)
+    end
+    parts[#parts + 1] = sp.hex .. modelName:sub(sp.s, sp.e) .. "|r"
+    pos = sp.e + 1
+  end
+  if pos <= #modelName then
+    parts[#parts + 1] = modelName:sub(pos)
+  end
+  return table.concat(parts)
+end
+
+-- Exposee pour les listes d'animations : le nom du modele y est colore de la meme facon que
+-- dans le selecteur, ce qui permet de reconnaitre une famille d'effets d'un coup d'oeil.
+
+ns.FormatModelNameColored = FormatNameWithKeywordHighlights
+
 local function EnsureModelPicker()
+  local function GetCustomTags()
+    if not ns.DB then ns.DB = {} end
+    if not ns.DB.modelCustomTags then ns.DB.modelCustomTags = {} end
+    return ns.DB.modelCustomTags
+  end
   if ModelPickerFrame then return ModelPickerFrame end
 
   local TAG_W = 110  -- largeur colonne tags
   local TAG_MAX_INDICATORS = 6  -- max de petits rectangles colorés avant chaque nom
 
   -- Custom tags stockés en DB : { [fileID] = { [tagLabel] = true, ... } }
-  local function GetCustomTags()
-    if not ns.DB then ns.DB = {} end
-    if not ns.DB.modelCustomTags then ns.DB.modelCustomTags = {} end
-    return ns.DB.modelCustomTags
-  end
 
   local function AddCustomTag(fileID, tagLabel)
     local ct = GetCustomTags()
@@ -2952,86 +3324,6 @@ local function EnsureModelPicker()
     if ct[fileID] then ct[fileID][tagLabel] = nil end
   end
 
-  local function HasCustomTag(fileID, tagLabel)
-    local ct = GetCustomTags()
-    return ct[fileID] and ct[fileID][tagLabel]
-  end
-
-  -- Détermine les tags matchés pour un nom de modèle + fileID
-  local function GetMatchingTags(modelName, fileID)
-    local matched = {}
-    local nameLower = strlower(modelName or "")
-    for _, tag in ipairs(MODEL_TAGS) do
-      local found = false
-      -- Match par keywords
-      for _, kw in ipairs(tag.keywords) do
-        if nameLower:find(kw, 1, true) then found = true; break end
-      end
-      -- Match par custom tag
-      if not found and HasCustomTag(fileID, tag.label) then found = true end
-      if found then matched[#matched + 1] = tag end
-    end
-    return matched
-  end
-
-  -- Formate un nom de modèle avec les keywords colorés par tag
-  local function FormatNameWithKeywordHighlights(modelName)
-    if not modelName or modelName == "" then return modelName end
-    local nameLower = strlower(modelName)
-    -- Collecter tous les spans (startPos, endPos, color) pour chaque keyword matché
-    local spans = {}
-    for _, tag in ipairs(MODEL_TAGS) do
-      local c = tag.color
-      local hex = string.format("|cFF%02x%02x%02x",
-        math.floor(c[1] * 255 + 0.5),
-        math.floor(c[2] * 255 + 0.5),
-        math.floor(c[3] * 255 + 0.5))
-      for _, kw in ipairs(tag.keywords) do
-        if kw ~= "" then
-          local searchStart = 1
-          while true do
-            local s, e = nameLower:find(kw, searchStart, true)
-            if not s then break end
-            spans[#spans + 1] = { s = s, e = e, hex = hex }
-            searchStart = e + 1
-          end
-        end
-      end
-    end
-    if #spans == 0 then return modelName end
-    -- Trier par position de début, puis par longueur décroissante (plus long match d'abord)
-    table.sort(spans, function(a, b)
-      if a.s ~= b.s then return a.s < b.s end
-      return a.e > b.e
-    end)
-    -- Fusionner les overlaps : garder le premier span qui couvre chaque position
-    local merged = {}
-    local coveredUntil = 0
-    for _, sp in ipairs(spans) do
-      if sp.s > coveredUntil then
-        merged[#merged + 1] = sp
-        coveredUntil = sp.e
-      elseif sp.e > coveredUntil then
-        -- Overlap partiel : tronquer le début
-        merged[#merged + 1] = { s = coveredUntil + 1, e = sp.e, hex = sp.hex }
-        coveredUntil = sp.e
-      end
-    end
-    -- Construire la chaîne finale
-    local parts = {}
-    local pos = 1
-    for _, sp in ipairs(merged) do
-      if sp.s > pos then
-        parts[#parts + 1] = modelName:sub(pos, sp.s - 1)
-      end
-      parts[#parts + 1] = sp.hex .. modelName:sub(sp.s, sp.e) .. "|r"
-      pos = sp.e + 1
-    end
-    if pos <= #modelName then
-      parts[#parts + 1] = modelName:sub(pos)
-    end
-    return table.concat(parts)
-  end
 
   local f = CreateFrame("Frame", "AishCoreModelPicker", UIParent, "BackdropTemplate")
   f:SetSize(900 + TAG_W, 640)
@@ -4197,6 +4489,110 @@ local function ForwardMouseWheelToScrollParent(row)
   end)
 end
 
+-- Presse-papier d'animations, partage par toutes les listes de la page Animations 3D.
+-- Vit le temps de la session : copier puis coller d'une entree a l'autre evite de reconstruire
+-- a la main des combos identiques, ce qui represente l'essentiel du travail de configuration.
+local seAnimClipboard = nil      -- liste d'animations copiees (copie profonde)
+local seAnimClipboardName = nil  -- nom de l'entree d'origine, affiche dans le menu
+
+local function SetAnimClipboard(list, name)
+  seAnimClipboard = list
+  seAnimClipboardName = name
+end
+
+--- Copie profonde d'une liste d'animations : le presse-papier ne doit jamais partager ses tables
+--- avec la configuration, sinon editer l'original modifierait aussi ce qui sera colle.
+local function CopyAnimList(list)
+  if type(list) ~= "table" then return nil end
+  local out = {}
+  for i, a in ipairs(list) do out[i] = ns.DeepCopy(a) end
+  return out
+end
+
+--- Menu contextuel d'une entree de liste (sort, aura...) : copier / coller ses animations.
+--- getList / setList isolent l'origine des donnees, la meme mecanique servant a plusieurs listes.
+local function ShowEntryContextMenu(label, getList, setList, onChanged)
+  local current = getList()
+  local nCur = (type(current) == "table") and #current or 0
+  local nClip = seAnimClipboard and #seAnimClipboard or 0
+
+  local items = {}
+  items[#items + 1] = {
+    label = string.format(L["SETTINGS_CTX_COPY"], nCur),
+    disabled = nCur == 0,
+    onClick = function()
+      seAnimClipboard = CopyAnimList(getList())
+      seAnimClipboardName = label
+    end,
+  }
+  items[#items + 1] = { separator = true }
+  items[#items + 1] = {
+    label = string.format(L["SETTINGS_CTX_PASTE_REPLACE"], nClip),
+    disabled = nClip == 0,
+    onClick = function()
+      if not seAnimClipboard then return end
+      setList(CopyAnimList(seAnimClipboard))
+      if onChanged then onChanged() end
+    end,
+  }
+  items[#items + 1] = {
+    label = string.format(L["SETTINGS_CTX_PASTE_APPEND"], nClip),
+    disabled = nClip == 0,
+    onClick = function()
+      if not seAnimClipboard then return end
+      local dst = getList()
+      if type(dst) ~= "table" then dst = {} end
+      for _, a in ipairs(CopyAnimList(seAnimClipboard)) do dst[#dst + 1] = a end
+      setList(dst)
+      if onChanged then onChanged() end
+    end,
+  }
+  if seAnimClipboardName then
+    items[#items + 1] = { separator = true }
+    items[#items + 1] = {
+      label = string.format(L["SETTINGS_CTX_CLIPBOARD_FROM"], seAnimClipboardName),
+      disabled = true,
+    }
+  end
+  SW.ShowContextMenu(items)
+end
+
+-- Menu contextuel d'une ligne d'animation (colonne de droite) : dupliquer, copier, supprimer.
+-- Definie au niveau du fichier et non dans Build.SpellEffects : imbriquee, elle ajoutait autant
+-- d'upvalues a cette fonction, qui atteint la limite de 60 de Lua 5.1.
+local function ShowAnimRowContextMenu(animIdx)
+  local db, key = GetActiveComboTable()
+  local list = db and key and db[key]
+  if not list or not list[animIdx] then return end
+
+  local function AfterChange()
+    if RefreshAnimList   then RefreshAnimList()   end
+    if RefreshAnimEditor then RefreshAnimEditor() end
+    if RefreshSpellList  then RefreshSpellList()  end
+    local SE = ns.Modules and ns.Modules.SpellEffects
+    if SE and SE.RefreshLogoDeco then SE.RefreshLogoDeco() end
+  end
+
+  SW.ShowContextMenu({
+    { label = L["SETTINGS_CTX_DUPLICATE"], onClick = function()
+        -- Inseree juste apres l'originale : c'est l'interet meme de la duplication quand on
+        -- decline une variante, les deux restent cote a cote.
+        table.insert(list, animIdx + 1, ns.DeepCopy(list[animIdx]))
+        seSelectedAnimIdx = animIdx + 1
+        AfterChange()
+      end },
+    { label = L["SETTINGS_CTX_COPY_ONE"], onClick = function()
+        SetAnimClipboard({ ns.DeepCopy(list[animIdx]) }, tostring(animIdx))
+      end },
+    { separator = true },
+    { label = L["SETTINGS_CTX_DELETE"], color = { 0.95, 0.45, 0.45 }, onClick = function()
+        table.remove(list, animIdx)
+        seSelectedAnimIdx = nil
+        AfterChange()
+      end },
+  })
+end
+
 -- Spell List (panneau gauche : liste des sorts configurEs)
 local function BuildSpellListRow(parent, spellID, width, onClick, combosDB)
   local row = CreateFrame("Button", nil, parent)
@@ -4261,7 +4657,23 @@ local function BuildSpellListRow(parent, spellID, width, onClick, combosDB)
 
   row:SetScript("OnEnter", function(self) self.hover:Show() end)
   row:SetScript("OnLeave", function(self) self.hover:Hide() end)
-  row:SetScript("OnClick", function(self)
+  row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  row:SetScript("OnClick", function(self, button)
+    if button == "RightButton" then
+      -- Copier / coller les animations de cette entree, sans avoir a la selectionner.
+      local db = combosDB or GetCombosDB()
+      local sid = self.spellID
+      ShowEntryContextMenu(GetSpellInfo3D(sid) or tostring(sid),
+        function() return db[sid] end,
+        function(list) db[sid] = list end,
+        function()
+          if RefreshSpellList then RefreshSpellList() end
+          if RefreshAnimList  then RefreshAnimList()  end
+          local SE = ns.Modules and ns.Modules.SpellEffects
+          if SE and SE.RefreshLogoDeco then SE.RefreshLogoDeco() end
+        end)
+      return
+    end
     if onClick then onClick(self.spellID) end
   end)
   ForwardMouseWheelToScrollParent(row)
@@ -4435,7 +4847,14 @@ local function BuildAnimRow(parent, idx, anim, width, onClick, onTriggerChange, 
   local delayStr = (anim.delay and anim.delay > 0) and string.format(" +%.1fs", anim.delay) or ""
   local modelName = GetModelNameByFileID(mid)
   if modelName then
-    row.label:SetText(string.format(L["SETTINGS_ANIM_ROW_NAMED"], idx, modelName, delayStr))
+    -- Meme colorisation que dans le selecteur de modeles (ns.FormatModelNameColored) : les
+    -- mots-cles reconnus prennent la couleur de leur tag.
+    local shown = modelName
+    if ns.FormatModelNameColored then
+      local okFmt, colored = pcall(ns.FormatModelNameColored, modelName)
+      if okFmt and colored then shown = colored end
+    end
+    row.label:SetText(string.format(L["SETTINGS_ANIM_ROW_NAMED"], idx, shown, delayStr))
   else
     row.label:SetText(string.format(L["SETTINGS_ANIM_ROW_UNNAMED"], idx, mid, delayStr))
   end
@@ -4443,7 +4862,12 @@ local function BuildAnimRow(parent, idx, anim, width, onClick, onTriggerChange, 
 
   row:SetScript("OnEnter", function(self) self.hover:Show() end)
   row:SetScript("OnLeave", function(self) self.hover:Hide() end)
-  row:SetScript("OnClick", function(self)
+  row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  row:SetScript("OnClick", function(self, button)
+    if button == "RightButton" then
+      if row._onContextMenu then row._onContextMenu(self.animIdx) end
+      return
+    end
     if onClick then onClick(self.animIdx) end
   end)
   ForwardMouseWheelToScrollParent(row)
@@ -4631,7 +5055,6 @@ function Build.SpellEffects(container)
   -- Conteneur horizontal
   local hPanel = CreateFrame("Frame", nil, container)
   hPanel:SetSize(W, PANEL_H)
-  local hPanelCtxY = ctx.y  -- offset du hPanel dans le container (avant ajout)
   ctx:Add(hPanel)
 
   -- GAUCHE : Sections repliables (Sorts / Orbes / Cercle OOC)
@@ -4982,7 +5405,9 @@ function Build.SpellEffects(container)
     local rh = rightPanel and rightPanel:GetHeight() or PANEL_H
     local newH = math.max(totalH, rh)
     hPanel:SetHeight(newH)
-    container:SetHeight(hPanelCtxY + newH + 2 + PADDING)
+    -- La hauteur du container est recalculee par le flux, qui relit hPanel:GetHeight() :
+    -- pas d'offset absolu memorise, qui serait faux des qu'une section est repliee.
+    if ctx._finalized then ctx:Relayout() end
   end
 
   local function ToggleSection(secIdx)
@@ -5421,7 +5846,7 @@ function Build.SpellEffects(container)
       rightPanel:SetHeight(panelH)
       -- hPanel a déjà été ajouté au layout avec l'ancienne hauteur (PANEL_H) :
       -- corriger l'accumulateur pour que ctx:Finalize() dimensionne le conteneur correctement.
-      ctx.y = ctx.y + (panelH - PANEL_H)
+      ctx:Spacer(panelH - PANEL_H)
     end
   end
 
@@ -5432,8 +5857,34 @@ function Build.SpellEffects(container)
 
     local combos = GetCombosDB()
     local sorted = {}
+    local seenSid = {}
+    -- Sorts issus du grimoire : ils appartiennent au personnage par construction, inutile de les
+    -- repasser par IsPlayerSpell -- absent sur certains clients, il les rejetterait tous.
+    local fromSpellbook = {}
     for sid in pairs(combos) do
-      if type(sid) == "number" then sorted[#sorted + 1] = sid end
+      if type(sid) == "number" then
+        sorted[#sorted + 1] = sid
+        seenSid[sid] = true
+      end
+    end
+
+    -- Tous les sorts du grimoire du personnage, pas seulement ceux deja configures : sans cela il
+    -- fallait ajouter chaque sort a la main par son ID avant de pouvoir lui donner une animation.
+    -- GetSpecSpells est deja filtre (sorts actifs, hors passifs) et regroupe par rang.
+    do
+      local PB = ns.Modules and ns.Modules.PriorityBar
+      if PB and PB.GetSpecSpells then
+        local okList, list = pcall(PB.GetSpecSpells)
+        if okList and type(list) == "table" then
+          for _, e in ipairs(list) do
+            if e.id and not seenSid[e.id] then
+              sorted[#sorted + 1] = e.id
+              seenSid[e.id] = true
+              fromSpellbook[e.id] = true
+            end
+          end
+        end
+      end
     end
 
     -- Filtrer : n'afficher que les sorts de la classe/spEc actuelle
@@ -5456,6 +5907,7 @@ function Build.SpellEffects(container)
     manualSpells[48778] = manualSpells[48778] or (combos[48778] and "DEATHKNIGHT") or nil
 
     local function IsCurrentClassSpell(sid)
+      if fromSpellbook[sid] then return true end
       local ps = PSEUDO_SPELLS_3D[sid]
       if ps then
         -- Pseudo-sort : afficher seulement pour la spEc correspondante
@@ -5660,6 +6112,7 @@ function Build.SpellEffects(container)
         -- Callback when trigger checkbox changed: refresh row checkboxes
         RefreshAnimList()
       end, hideHC, hideMidLayer)
+      row._onContextMenu = ShowAnimRowContextMenu
       row:SetPoint("TOPLEFT", seAnimList, "TOPLEFT", 0, -yy)
       row:SetSelected(idx == seSelectedAnimIdx)
       seAnimList._rows[#seAnimList._rows + 1] = row
@@ -6554,6 +7007,11 @@ function Build.XPBar(container)
     L["SETTINGS_XP_ENABLE_TT"], W))
   BindCheckbox(cb, "xpBar", "enabled")
 
+  local cbAlways = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_XP_ALWAYS_VISIBLE"],
+    L["SETTINGS_XP_ALWAYS_VISIBLE_TT"], W))
+  BindCheckbox(cbAlways, "xpBar", "alwaysVisible")
+
   local cbRest = ctx:Add(SW.CreateCheckbox(container,
     L["SETTINGS_XP_REST_INDICATOR"],
     L["SETTINGS_XP_REST_INDICATOR_TT"], W))
@@ -6670,7 +7128,7 @@ function Build.PriorityBar(container)
 
   ctx:Spacer(8)
 
-  -- Disposition (5 choix visuels, spec-specific)
+  -- Disposition (6 choix visuels, spec-specific)
   do
     local TEX_BASE = "Interface\\AddOns\\AishCore\\Media\\textures\\"
     local LAYOUT_TEX = {
@@ -6679,6 +7137,7 @@ function Build.PriorityBar(container)
       ["4x4line"] = "layout_4x4inline",
       ["4x4sq"]   = "layout_4x4",
       ["6x6"]     = "layout_6x6",
+      ["6x6v"]    = "layout_6x6bis",
     }
     local LAYOUT_LABELS = {
       ["2x2"]     = L["SETTINGS_LAYOUT_2X2"],
@@ -6686,6 +7145,7 @@ function Build.PriorityBar(container)
       ["4x4line"] = L["SETTINGS_LAYOUT_4X4_INLINE"],
       ["4x4sq"]   = L["SETTINGS_LAYOUT_4X4_SQUARE"],
       ["6x6"]     = L["SETTINGS_LAYOUT_6X6"],
+      ["6x6v"]    = L["SETTINGS_LAYOUT_6X6_VERTICAL"],
     }
     -- Les textures layout_*.tga font 230x80px (ratio ~2.875:1) : on dimensionne
     -- l'icone en consequence pour eviter tout etirement.
@@ -6770,12 +7230,12 @@ function Build.PriorityBar(container)
 
     ctx:Spacer(6)
 
-    -- Ligne 2 : 4x4 Carré, 6x6 (2 cartes)
+    -- Ligne 2 : 4x4 Carré, 6x6, 6x6 vertical (3 cartes)
     local row2 = CreateFrame("Frame", nil, container)
     row2:SetSize(W, cardH)
     ctx:Add(row2)
-    local sx2 = math.max(0, (W - (2 * cardW + gap)) / 2)
-    for i, lk in ipairs({"4x4sq", "6x6"}) do
+    local sx2 = math.max(0, (W - (3 * cardW + 2 * gap)) / 2)
+    for i, lk in ipairs({"4x4sq", "6x6", "6x6v"}) do
       MakeCard(row2, lk, sx2 + (i - 1) * (cardW + gap))
     end
 
@@ -6849,6 +7309,31 @@ function Build.PriorityBar(container)
   local cbDesat = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_DESATURATE"],
     L["SETTINGS_PB_DESATURATE_TT"], W))
   BindCheckbox(cbDesat, "priorityBar", "desaturateOnCooldown")
+
+  local cbOOR = SW.CreateCheckbox(container, L["SETTINGS_PB_OOR_TINT"],
+    L["SETTINGS_PB_OOR_TINT_TT"], _pbSL3)
+  BindCheckbox(cbOOR, "priorityBar", "outOfRangeTint")
+
+  local colOOR = SW.CreateColorButton(container, L["SETTINGS_PB_OOR_COLOR"], _pbSL3)
+  BindColorButton(colOOR, "priorityBar", "outOfRangeColor")
+
+  local cbOORTheme = SW.CreateCheckbox(container, L["SETTINGS_PB_OOR_THEME"],
+    L["SETTINGS_PB_OOR_THEME_TT"], _pbSL3)
+  BindCheckbox(cbOORTheme, "priorityBar", "outOfRangeUseTheme")
+
+  -- La couleur fixe n'a plus d'effet quand la couleur thematique est active : on la grise pour
+  -- que ce soit visible, au lieu de laisser un reglage qui ne change rien.
+  local function RefreshOORColorState()
+    colOOR:SetEnabled(not DBGet("priorityBar", "outOfRangeUseTheme"))
+  end
+  local origOORTheme = cbOORTheme.onChanged
+  cbOORTheme.onChanged = function(val)
+    origOORTheme(val)
+    RefreshOORColorState()
+  end
+  RefreshOORColorState()
+
+  ctx:AddRow(8, cbOOR, colOOR, cbOORTheme)
 
   local cbHideUnlearned = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_HIDE_UNLEARNED"],
     L["SETTINGS_PB_HIDE_UNLEARNED_TT"], W))
@@ -7213,7 +7698,14 @@ function Build.PriorityBar(container)
   -- Section editeur de slots (par spec)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SLOT_SPELLS"], W))
 
-  local slotBaseY = ctx.y
+  -- L'editeur de slots est construit en differe et se reconstruit (changement de spec,
+  -- edition d'un slot) : il vit dans un conteneur dedie dont le flux gere la position.
+  -- Sans cela ses frames resteraient a une ordonnee absolue, fausse des qu'une section
+  -- au-dessus est repliee, et son container:SetHeight ecraserait celui de la mise en page.
+  local slotHolder = CreateFrame("Frame", nil, container)
+  slotHolder:SetWidth(W)
+  slotHolder:SetHeight(1)
+  ctx:Manual(slotHolder)
 
   -- Creation du SpellPicker en lazy (singleton global)
   if not SpellPickerFrame then
@@ -7338,7 +7830,8 @@ function Build.PriorityBar(container)
 
     local PB = ns.Modules.PriorityBar
     if not (PB and PB.GetCurrentSpecSlots) then
-      container:SetHeight(slotBaseY + 20)
+      slotHolder:SetHeight(20)
+      if ctx._finalized then ctx:Relayout() end
       return
     end
 
@@ -7358,7 +7851,7 @@ function Build.PriorityBar(container)
       for _, n in ipairs(layoutDef.rightNames) do allNames[#allNames + 1] = n end
     end
 
-    local yOff  = slotBaseY
+    local yOff  = 0
     local ROW_H = 22
     local HEAD_H = 26
 
@@ -7368,9 +7861,9 @@ function Build.PriorityBar(container)
       local slotName = allNames[slotIndex] or slotData.name or string.format(L["SETTINGS_SLOT_FALLBACK_NAME"], slotIndex)
 
       -- En-tête du slot
-      local hdr = CreateFrame("Frame", nil, container)
+      local hdr = CreateFrame("Frame", nil, slotHolder)
       hdr:SetSize(W, HEAD_H)
-      hdr:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -yOff)
+      hdr:SetPoint("TOPLEFT", slotHolder, "TOPLEFT", 0, -yOff)
       local hBg = hdr:CreateTexture(nil, "BACKGROUND")
       hBg:SetAllPoints(); hBg:SetColorTexture(0.07, 0.07, 0.12, 0.85)
       local hAccent = hdr:CreateTexture(nil, "ARTWORK")
@@ -7390,9 +7883,9 @@ function Build.PriorityBar(container)
         local capturedRow   = rowIdx
         local capturedSIDs  = spellIDs
         local capturedSlot  = slotIndex
-        local row = CreateFrame("Frame", nil, container)
+        local row = CreateFrame("Frame", nil, slotHolder)
         row:SetSize(W, ROW_H)
-        row:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -yOff)
+        row:SetPoint("TOPLEFT", slotHolder, "TOPLEFT", 0, -yOff)
         local rbg = row:CreateTexture(nil, "BACKGROUND")
         rbg:SetAllPoints()
         rbg:SetColorTexture(rowIdx % 2 == 0 and 0.05 or 0.04, 0.05, 0.07, 0.6)
@@ -7528,9 +8021,9 @@ function Build.PriorityBar(container)
       end
 
       -- Bouton "+ Ajouter un sort"
-      local addBtn = CreateFrame("Button", nil, container)
+      local addBtn = CreateFrame("Button", nil, slotHolder)
       addBtn:SetSize(W, 22)
-      addBtn:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -yOff)
+      addBtn:SetPoint("TOPLEFT", slotHolder, "TOPLEFT", 0, -yOff)
       local addBg = addBtn:CreateTexture(nil, "BACKGROUND")
       addBg:SetAllPoints(); addBg:SetColorTexture(0.07, 0.11, 0.07, 0.75)
       addBtn:SetScript("OnEnter", function() addBg:SetColorTexture(0.10,0.16,0.10,0.9) end)
@@ -7553,8 +8046,9 @@ function Build.PriorityBar(container)
       yOff = yOff + 22 + 4
     end
 
-    -- Hauteur reelle du container
-    container:SetHeight(yOff + 16)
+    -- Hauteur reelle du bloc, puis redisposition de la page (le flux replace ce qui suit)
+    slotHolder:SetHeight(math.max(1, yOff + 16))
+    if ctx._finalized then ctx:Relayout() end
   end
 
   container._buildSlotEditor = BuildSlotEditorUI
@@ -7603,6 +8097,8 @@ function Build.TopTargetBar(container)
     sB.onChanged = function(val) TTBSet(propB, val) end
     ctx:AddRow(10, sA, sB)
   end
+
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_TOP_TARGET"], W))
 
   -- Activer / désactiver le module
   local cbTTB = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_TTB_ENABLE"],
@@ -7879,9 +8375,6 @@ function Build.TargetAuras(container)
 
     local collapsed = TACollapsed(group)
     local header = SW.CreateSectionHeader(container, (collapsed and "+ " or "- ") .. title, W)
-    header:ClearAllPoints()
-    header:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -ctx.y)
-    header:Show()
     local hitbox = CreateFrame("Button", nil, header)
     hitbox:SetAllPoints(header)
     hitbox:SetFrameLevel(header:GetFrameLevel() + 1)
@@ -7890,8 +8383,7 @@ function Build.TargetAuras(container)
     hitbox:SetScript("OnEnter", function() hl:Show() end)
     hitbox:SetScript("OnLeave", function() hl:Hide() end)
     hitbox:SetScript("OnClick", function() TAToggleCollapsed(group) end)
-    ctx.y = ctx.y + header:GetHeight() + 2
-    table.insert(ctx.widgets, header)
+    ctx:Manual(header)
     if collapsed then return end
 
     local dw       = W - TA_GROUP_INDENT
@@ -8107,13 +8599,11 @@ function Build.TargetAuras(container)
     dctx:AddRow(8, ddCntAnc, ddCntRel, slCntOffX, slCntOffY)
 
     dctx:Finalize()
-    detail:ClearAllPoints()
-    detail:SetPoint("TOPLEFT", container, "TOPLEFT", TA_GROUP_INDENT, -ctx.y)
-    detail:Show()
-    ctx.y = ctx.y + detail:GetHeight() + 2
-    table.insert(ctx.widgets, detail)
+    ctx:Manual(detail, TA_GROUP_INDENT)
   end
   -- /BuildGroupSection
+
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_TARGET_AURAS"], W))
 
   -- Section globale (enabled, offset, row spacing)
   local cbEn = ctx:Add(SW.CreateCheckbox(container,
@@ -8174,7 +8664,8 @@ function Build.Colors(container)
   local classSections = {}
 
   -- -- Couleurs thematiques (header standard + 2 toggles) ----------------
-  local secHeader = SW.CreateSectionHeader(container, L["SETTINGS_COLOR_MODE_HEADER"], CONTENT_W)
+  local secHeader = SW.MakeSectionTitle(
+    SW.CreateSectionHeader(container, L["SETTINGS_COLOR_MODE_HEADER"], CONTENT_W))
   secHeader:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0)
 
   -- Toggle 1 : theme du GUI lui-meme (points de section, hairlines, fond
@@ -8695,11 +9186,7 @@ local function AFKBuildElementSection(container, ctx, W, key, label, isGraphic)
 
   local headerW = W - AFK_SECTION_INDENT
   local header, collapsed = AFKCollapsibleHeader(container, headerW, label, key)
-  header:ClearAllPoints()
-  header:SetPoint("TOPLEFT", container, "TOPLEFT", AFK_SECTION_INDENT, -ctx.y)
-  header:Show()
-  ctx.y = ctx.y + header:GetHeight() + 2
-  table.insert(ctx.widgets, header)
+  ctx:Manual(header, AFK_SECTION_INDENT)
   if collapsed then return end
 
   local detailIndent = AFK_SECTION_INDENT + AFK_DETAIL_INDENT
@@ -8788,11 +9275,8 @@ local function AFKBuildElementSection(container, ctx, W, key, label, isGraphic)
   end
   dctx:Finalize()
 
-  -- Pose manuelle (indentation) puis comptabilisation dans le ctx exterieur,
-  -- equivalent a ctx:Add(detail) mais avec un decalage x != 0.
-  detail:ClearAllPoints()
-  detail:SetPoint("TOPLEFT", container, "TOPLEFT", detailIndent, -ctx.y)
-  detail:Show()
+  -- La pose est faite plus bas par ctx:Manual(detail, detailIndent) : equivalent a
+  -- ctx:Add(detail) mais avec un decalage x != 0, et rejoue a chaque pli/depli.
 
   -- Ligne-guide verticale, entre l'en-tete de la sous-section (x =
   -- AFK_SECTION_INDENT) et son contenu (x = detailIndent) -- relie
@@ -8803,8 +9287,7 @@ local function AFKBuildElementSection(container, ctx, W, key, label, isGraphic)
   guide:SetPoint("BOTTOMLEFT", detail, "BOTTOMLEFT", -math.floor(AFK_DETAIL_INDENT / 2), 0)
   guide:SetColorTexture(0.776, 0.710, 0.471, 0.35) -- meme teinte que le point/hairline des en-tetes (or discret)
 
-  ctx.y = ctx.y + detail:GetHeight() + 2
-  table.insert(ctx.widgets, detail)
+  ctx:Manual(detail, detailIndent)
 
   -- Fondu a l'ouverture : la sous-section est reconstruite a chaque depli
   -- (rebuild de page), une anim douce vaut mieux qu'un pop-in instantane.
@@ -9294,6 +9777,10 @@ function Build.Skyriding(container)
   end
 
   ctx:Spacer()
+  -- Alignement sur les autres pages : sans Finalize le container gardait une hauteur de 1,
+  -- donc pas de defilement, et ses widgets n'etaient pas rendus a MainFrame:RefreshValues.
+  ctx:Finalize()
+  return ctx.widgets
 end
 
 -- BUILD : Visibilité (Global) – transparence d'éléments tiers (ElvUI...)
@@ -9322,6 +9809,180 @@ function Build.Visibility(container)
 
   ctx:Spacer()
   ctx:Finalize()
+end
+
+-- BUILD : Localisation -- nom de zone / sous-zone (equivalent LocationPlus)
+function Build.Location(container)
+  local ctx = NewLayout(container)
+  local W   = CONTENT_W
+  local W2  = math.floor((W - 8) / 2)
+  local LOC = ns.Modules and ns.Modules.Location
+
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_LOCATION"], W))
+
+  local cbLocEnable = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_LOC_ENABLE"], L["SETTINGS_LOC_ENABLE_TT"], W))
+  BindCheckbox(cbLocEnable, "location", "enabled")
+
+  local cbLocShowZone = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_LOC_SHOW_ZONE"], L["SETTINGS_LOC_SHOW_ZONE_TT"], W))
+  BindCheckbox(cbLocShowZone, "location", "showZone")
+
+  -- -- Texte ---------------------------------------------------------------
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_LOC_TEXT"], W))
+
+  local ddLocFont = SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), W2)
+  BindDropdown(ddLocFont, "location", "font")
+  local ddLocOutline = SW.CreateDropdown(container, L["SETTINGS_TEXT_OUTLINE"], ns.GetTextOutlineStyles(), W2)
+  BindDropdown(ddLocOutline, "location", "textOutlineStyle")
+  ctx:AddRow(8, ddLocFont, ddLocOutline)
+
+  local slLocSize = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 32, 1, W2)
+  BindSlider(slLocSize, "location", "fontSize")
+  local slLocWidth = SW.CreateSlider(container, L["SETTINGS_LOC_WIDTH"], 60, 800, 5, W2)
+  BindSlider(slLocWidth, "location", "width")
+  ctx:AddRow(8, slLocSize, slLocWidth)
+
+  -- La troncature n'est pas un reglage a part : tout ce qui depasse la boite est
+  -- coupe avec "...", d'ou ce rappel sous le slider de largeur.
+  local locWidthHint = container:CreateFontString(nil, "OVERLAY")
+  locWidthHint:SetFont(ns.Media.fontGui, 10)
+  locWidthHint:SetTextColor(0.55, 0.55, 0.55, 1)
+  locWidthHint:SetText(L["SETTINGS_LOC_WIDTH_TT"])
+  locWidthHint:SetJustifyH("LEFT")
+  locWidthHint:SetSize(W - 10, 18)
+  ctx:Add(locWidthHint)
+
+  local cbLocShadow = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_LOC_SHADOW"], L["SETTINGS_LOC_SHADOW_TT"], W))
+  BindCheckbox(cbLocShadow, "location", "shadow")
+
+  -- Alignement dans la boite : widget partage (meme que Cast Bar / Top Target)
+  local alignLoc = ctx:Add(SW.CreateAlignRow(container, L["SETTINGS_LOC_ALIGNMENT"], W))
+  alignLoc:SetValue(DBGet("location", "align") or "CENTER")
+  alignLoc.onChanged = function(val) DBSet("location", "align", val); LiveApply("location") end
+
+  -- -- Couleur -------------------------------------------------------------
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_COLORS"], W))
+
+  -- La couleur par statut de zone (comportement LocationPlus par defaut) prend le pas
+  -- sur la couleur fixe : la pastille est grisee tant qu'elle est active.
+  local colLocText = SW.CreateColorButton(container, L["SETTINGS_TEXT_COLOR"], W2)
+  BindColorButton(colLocText, "location", "textColor")
+
+  local cbLocZoneColor = SW.CreateCheckbox(container,
+    L["SETTINGS_LOC_ZONE_COLOR"], L["SETTINGS_LOC_ZONE_COLOR_TT"], W2)
+  BindCheckbox(cbLocZoneColor, "location", "useZoneColor")
+  local _locZoneColorChanged = cbLocZoneColor.onChanged
+  cbLocZoneColor.onChanged = function(val)
+    if _locZoneColorChanged then _locZoneColorChanged(val) end
+    colLocText:SetEnabled(not val)
+  end
+  colLocText:SetEnabled(DBGet("location", "useZoneColor") == false)
+  ctx:AddRowCentered(8, cbLocZoneColor, colLocText)
+
+  -- -- Visibilite ----------------------------------------------------------
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_VISIBILITY"], W))
+
+  local slLocAlpha = SW.CreateSlider(container, L["SETTINGS_OPACITY"], 0, 1, 0.05, W2)
+  BindSlider(slLocAlpha, "location", "alpha")
+  local slLocHoverAlpha = SW.CreateSlider(container, L["SETTINGS_LOC_HOVER_ALPHA"], 0, 1, 0.05, W2)
+  BindSlider(slLocHoverAlpha, "location", "hoverAlpha")
+  ctx:AddRow(8, slLocAlpha, slLocHoverAlpha)
+
+  local locMoHint = container:CreateFontString(nil, "OVERLAY")
+  locMoHint:SetFont(ns.Media.fontGui, 10)
+  locMoHint:SetTextColor(0.55, 0.55, 0.55, 1)
+  locMoHint:SetText(L["SETTINGS_LOC_HOVER_ALPHA_TT"])
+  locMoHint:SetJustifyH("LEFT")
+  locMoHint:SetSize(W - 10, 18)
+  ctx:Add(locMoHint)
+
+  local cbLocMouseover = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_LOC_MOUSEOVER"], L["SETTINGS_LOC_MOUSEOVER_TT"], W))
+  BindCheckbox(cbLocMouseover, "location", "mouseover")
+
+  local cbLocHideCombat = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_LOC_HIDE_COMBAT"], L["SETTINGS_LOC_HIDE_COMBAT_TT"], W))
+  BindCheckbox(cbLocHideCombat, "location", "hideInCombat")
+
+  -- -- Position ------------------------------------------------------------
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_POSITION"], W))
+
+  -- Bouton de placement (meme bascule que Cast Bar) : deverrouille le drag ET force la
+  -- pleine opacite, sinon un nom de zone en mode survol/masque en combat serait
+  -- introuvable a la souris.
+  local locDragActive = false
+  local locDragBtn = CreateFrame("Button", nil, container)
+  locDragBtn:SetSize(W - 4, 26)
+
+  local _locBg = locDragBtn:CreateTexture(nil, "BACKGROUND")
+  _locBg:SetAllPoints()
+  _locBg:SetColorTexture(0.10, 0.10, 0.13, 1)
+
+  local _locBorder = locDragBtn:CreateTexture(nil, "BORDER")
+  _locBorder:SetPoint("TOPLEFT",     locDragBtn, "TOPLEFT",     -1,  1)
+  _locBorder:SetPoint("BOTTOMRIGHT", locDragBtn, "BOTTOMRIGHT",  1, -1)
+  _locBorder:SetColorTexture(unpack(ns.Theme.border))
+
+  local _locLabel = locDragBtn:CreateFontString(nil, "OVERLAY")
+  _locLabel:SetFont(ns.Media.fontGui, 11)
+  _locLabel:SetPoint("CENTER")
+  _locLabel:SetTextColor(unpack(ns.Theme.textNormal))
+  _locLabel:SetText(L["UI_MOVE_DRAG_DROP"])
+
+  local function SetLocDragBtnState(active)
+    if active then
+      _locBg:SetColorTexture(0.05, 0.18, 0.08, 1)
+      _locLabel:SetTextColor(0.3, 1.0, 0.3, 1)
+      _locLabel:SetText(L["SETTINGS_LOC_DRAG_HINT"])
+    else
+      _locBg:SetColorTexture(0.10, 0.10, 0.13, 1)
+      _locLabel:SetTextColor(unpack(ns.Theme.textNormal))
+      _locLabel:SetText(L["UI_MOVE_DRAG_DROP"])
+    end
+  end
+
+  locDragBtn:SetScript("OnEnter", function()
+    if not locDragActive then
+      _locBg:SetColorTexture(0.16, 0.15, 0.20, 1)
+      _locLabel:SetTextColor(unpack(ns.Theme.textHighlight))
+    end
+  end)
+  locDragBtn:SetScript("OnLeave", function()
+    SetLocDragBtnState(locDragActive)
+  end)
+
+  -- Avant-declaration : le bouton de drag recopie la position lachee dans ces sliders.
+  local slLocX, slLocY
+
+  locDragBtn:SetScript("OnClick", function()
+    locDragActive = not locDragActive
+    SetLocDragBtnState(locDragActive)
+    if LOC and LOC.SetDragUnlocked then LOC.SetDragUnlocked(locDragActive) end
+    if not locDragActive then
+      if LOC and LOC.ApplySettings then LOC.ApplySettings() end
+      local db = ns.DB and ns.DB.location
+      if slLocX then slLocX:SetValue(math.floor((db and db.x) or 0)) end
+      if slLocY then slLocY:SetValue(math.floor((db and db.y) or 0)) end
+    end
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+  end)
+  ctx:Add(locDragBtn)
+
+  slLocX = SW.CreateSlider(container, L["SETTINGS_OFFSET_X"], -800, 800, 1, W2)
+  BindSlider(slLocX, "location", "x")
+  slLocY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -800, 800, 1, W2)
+  BindSlider(slLocY, "location", "y")
+  ctx:AddRow(8, slLocX, slLocY)
+
+  ctx:Spacer()
+  ctx:Finalize()
+  return ctx.widgets
 end
 
 -- BUILD : Profils  –  helpers popup
@@ -9619,6 +10280,8 @@ function Build.Profiles(container)
   local P   = ns.Profiles
 
   -- -- Profil actuel + Réinitialiser ------------------------------------
+  -- Page volontairement plate : tout se lit d'un coup d'oeil, replier n'y gagne rien.
+  ctx:DisableCollapse()
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_PROFILES"], W))
 
   local currentLabel = container:CreateFontString(nil, "OVERLAY")
@@ -9626,8 +10289,10 @@ function Build.Profiles(container)
   currentLabel:SetTextColor(unpack(ns.Theme.textNormal))
   currentLabel:SetJustifyH("LEFT")
   currentLabel:SetSize(W, 18)
-  currentLabel:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -ctx.y)
-  ctx.y = ctx.y + 20
+  ctx:ManualGroup(function(y)
+    currentLabel:ClearAllPoints()
+    currentLabel:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y)
+  end, 20, { currentLabel })
 
   local function UpdateCurrentLabel()
     currentLabel:SetText(string.format(L["SETTINGS_CURRENT_PROFILE"], "|cffffd700" .. P.GetActive() .. "|r"))
@@ -9718,13 +10383,15 @@ function Build.Profiles(container)
   okBtn:SetScript("OnClick", function() DoCreateProfile() end)
 
   -- Décalage de 15px à droite pour éviter le crop du bord InputBoxTemplate
-  nameEB:ClearAllPoints()
-  nameEB:SetPoint("TOPLEFT", container, "TOPLEFT", 15, -ctx.y)
+  -- okBtn reste caché jusqu'à saisie : il n'est PAS confie au ctx, sinon la
+  -- redisposition le reafficherait.
+  ctx:ManualGroup(function(y)
+    nameEB:ClearAllPoints()
+    nameEB:SetPoint("TOPLEFT", container, "TOPLEFT", 15, -y)
+    okBtn:ClearAllPoints()
+    okBtn:SetPoint("TOPLEFT", container, "TOPLEFT", 15 + EB_NEW_W + 4, -y)
+  end, 22 + 2, { nameEB })
   nameEB:Show()
-  okBtn:ClearAllPoints()
-  okBtn:SetPoint("TOPLEFT", container, "TOPLEFT", 15 + EB_NEW_W + 4, -ctx.y)
-  -- okBtn reste caché jusqu'à saisie
-  ctx.y = ctx.y + 22 + 2
 
   -- -- Profils existants ------------------------------------------------
   ctx:Spacer(10)
@@ -10429,6 +11096,7 @@ local MODULE_CATEGORIES = {
       ModEntry("outOfCombatResourceCircle", L["SETTINGS_SEC_OCRC"],          "outOfCombatResourceCircle", "enabled"),
       ModEntry("xpBar",     L["SETTINGS_CAT_XP_BAR"],    "xpBar",     "enabled"),
       ModEntry("skyriding", L["SETTINGS_CAT_SKYRIDING"], "skyriding", "enabled"),
+      ModEntry("location",  L["SETTINGS_CAT_LOCATION"],  "location",  "enabled", L["SETTINGS_LOC_ENABLE_TT"]),
       ModEntry("afkMode",   L["SETTINGS_CAT_AFK_MODE"],  "afkMode",   "enabled"),
       ModEntry("characterArmory", L["SETTINGS_CAT_CHARACTER_ARMORY"], "characterArmory", "enabled"),
       ModEntry("visibility", L["SETTINGS_MOD_ELVUI_BUFFS"], "visibility", "elvuiBuffsEnabled", L["SETTINGS_MOD_ELVUI_BUFFS_TT"]),
@@ -10668,16 +11336,20 @@ function Build.ModulesOverview(container)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_MODULES"], W))
   ctx:Spacer(6)
 
-  local baseY = ctx.y
-  local colW  = math.floor((W - 2 * MOD_COL_GAP) / 3)
-  local maxH  = 0
+  -- Trois colonnes cote a cote, construites dans un conteneur dedie : Build.CategoryColumn
+  -- CREE des frames, le rejouer a chaque redisposition en ferait des doublons. On ne
+  -- deplace donc que le conteneur, une seule fois construit.
+  local cols = CreateFrame("Frame", nil, container)
+  cols:SetWidth(W)
+  local colW = math.floor((W - 2 * MOD_COL_GAP) / 3)
+  local maxH = 0
   for i, catKeys in ipairs(MOD_COLUMNS) do
     local x = (i - 1) * (colW + MOD_COL_GAP)
-    local h = Build.CategoryColumn(container, catKeys, x, colW, baseY)
+    local h = Build.CategoryColumn(cols, catKeys, x, colW, 0)
     if h > maxH then maxH = h end
   end
-
-  ctx.y = baseY + maxH
+  cols:SetHeight(math.max(1, maxH))
+  ctx:Manual(cols)
   ctx:Finalize()
 end
 
@@ -10771,6 +11443,9 @@ function Build.CDM(container, dbKey)
   local W = CONTENT_W
   local SL_W2 = math.floor((W - 8) / 2)
   local SL_W3 = math.floor((W - 16) / 3)
+
+  ctx:Add(SW.CreateSectionHeader(container,
+    dbKey == "cdmUtility" and L["SETTINGS_CAT_CDM_UTILITY"] or L["SETTINGS_CAT_CDM_ESSENTIAL"], W))
 
   local cbEnable = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_CDM_ENABLE"], L["SETTINGS_CDM_ENABLE_TT"], W))
   BindCheckbox(cbEnable, dbKey, "enabled")
@@ -11241,10 +11916,6 @@ do
     ctx:Spacer(4)
     local collapsed = CACollapsed(key)
     local header = SW.CreateSectionHeader(container, (collapsed and "+ " or "- ") .. label, W)
-    header:ClearAllPoints()
-    header:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -ctx.y)
-    header:Show()
-
     local hitbox = CreateFrame("Button", nil, header)
     hitbox:SetAllPoints(header)
     hitbox:SetFrameLevel(header:GetFrameLevel() + 1)
@@ -11254,18 +11925,13 @@ do
     hitbox:SetScript("OnLeave", function() hl:Hide() end)
     hitbox:SetScript("OnClick", function() CAToggleCollapsed(key) end)
 
-    ctx.y = ctx.y + header:GetHeight() + 2
-    table.insert(ctx.widgets, header)
+    ctx:Manual(header)
     if collapsed then return end
 
     local detail = CreateFrame("Frame", nil, container)
     detail:SetWidth(W)
     buildFn(detail) -- construit + Finalize (SetHeight) tout seul
-    detail:ClearAllPoints()
-    detail:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -ctx.y)
-    detail:Show()
-    ctx.y = ctx.y + detail:GetHeight() + 2
-    table.insert(ctx.widgets, detail)
+    ctx:Manual(detail)
   end
 
   Build.CharacterSheet = function(container)
@@ -11481,17 +12147,11 @@ function Build.HeroicSupport(container)
   thanks:SetWidth(thanksW)
   thanks:SetText(L["SETTINGS_HEROIC_SUPPORT_THANKYOU"])
   thanks:SetHeight(thanks:GetStringHeight())
-  thanks:ClearAllPoints()
-  thanks:SetPoint("TOP", container, "TOP", 0, -ctx.y)
-  ctx.y = ctx.y + thanks:GetHeight() + 2
-  table.insert(ctx.widgets, thanks)
+  ctx:Manual(thanks, 0, "TOP")
   ctx:Spacer(10)
 
   local carousel = SW.CreateCarousel(container, carouselW, math.floor(carouselW * CAROUSEL_IMG_RATIO), HEROIC_SUPPORT_IMAGES, 6)
-  carousel:ClearAllPoints()
-  carousel:SetPoint("TOP", container, "TOP", 0, -ctx.y)
-  ctx.y = ctx.y + carousel:GetHeight() + 2
-  table.insert(ctx.widgets, carousel)
+  ctx:Manual(carousel, 0, "TOP")
   ctx:Spacer(18)
 
   -- Bloc 2 colonnes sous le carrousel, centre (meme largeur/alignement que
@@ -11618,10 +12278,10 @@ function Build.HeroicSupport(container)
     end
   end)
 
-  block:ClearAllPoints()
-  block:SetPoint("TOP", container, "TOP", 0, -ctx.y)
-  ctx.y = ctx.y + colH + 2
-  table.insert(ctx.widgets, block)
+  ctx:ManualGroup(function(y)
+    block:ClearAllPoints()
+    block:SetPoint("TOP", container, "TOP", 0, -y)
+  end, colH + 2, { block })
   ctx:Spacer(THANKS_GAP)
 
   -- "Special Thanks" : sous les 2 colonnes (pas dans la colonne des logos),
@@ -11635,10 +12295,7 @@ function Build.HeroicSupport(container)
   specialThanks:SetWidth(blockW)
   specialThanks:SetText(L["SETTINGS_HEROIC_SPECIAL_THANKS"])
   specialThanks:SetHeight(specialThanks:GetStringHeight())
-  specialThanks:ClearAllPoints()
-  specialThanks:SetPoint("TOP", container, "TOP", 0, -ctx.y)
-  ctx.y = ctx.y + specialThanks:GetHeight() + 2
-  table.insert(ctx.widgets, specialThanks)
+  ctx:Manual(specialThanks, 0, "TOP")
 
   ctx:Finalize()
   return ctx.widgets
@@ -11741,6 +12398,12 @@ local CATEGORIES = {
     label = L["SETTINGS_CAT_XP_BAR"],
     icon  = "Interface\\Icons\\inv_misc_note_01",
     build = Build.XPBar,
+  },
+  {
+    id    = "location",
+    label = L["SETTINGS_CAT_LOCATION"],
+    icon  = "Interface\\Icons\\INV_Misc_Map_01",
+    build = Build.Location,
   },
   {
     id    = "afkMode",
@@ -11849,7 +12512,7 @@ local SIDEBAR_GROUPS = {
   { label = L["SETTINGS_GROUP_GLOBAL"],      ids = { "modulesOverview", "colors", "profiles", "heroicSupport" } },
   { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "castBar", "targetCastBar", "topTargetBar", "targetAuras", "groupNumber" } },
   { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "cdmEssential", "cdmUtility", "bigCursor", "rotationHelper" } },
-  { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "xpBar", "skyriding", "afkMode", "visibility", "characterArmory" } },
+  { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "xpBar", "skyriding", "location", "afkMode", "visibility", "characterArmory" } },
   { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasTrinkets", "aurasMissingBuffs", "spellEffects" } },
 }
 
@@ -12279,7 +12942,15 @@ GetOrBuildContainer = function(catId)
   frame:SetHeight(1)
   frame:Hide()
 
-  local widgets = cat.build(frame)
+  -- Renseignes pendant le build : NewLayout s'en sert pour cler l'etat de pli des
+  -- sections (memoire de session, cf. _sectionCollapsed) et pour reconnaitre le ctx
+  -- de la page -- le seul a promouvoir un titre et a decouper en sections.
+  _buildingCatId = catId
+  _buildingFrame = frame
+  local ok, widgets = pcall(cat.build, frame)
+  _buildingCatId = nil
+  _buildingFrame = nil
+  if not ok then error(widgets, 0) end
   categoryContainers[catId] = { frame = frame, widgets = widgets }
   return categoryContainers[catId]
 end
@@ -12770,6 +13441,8 @@ MainFrame:SetScript("OnHide", function(self)
   local TCB = ns.Modules.TargetCastBar
   if TCB  and TCB.SetPreview      then TCB.SetPreview(false)      end
   if TCB  and TCB.SetDragUnlocked then TCB.SetDragUnlocked(false) end
+  local LOC = ns.Modules.Location
+  if LOC  and LOC.SetDragUnlocked then LOC.SetDragUnlocked(false) end
   if SR   and SR.SetLayoutMode   then SR.SetLayoutMode(false)   end
   if SR   and SR.SetPreview      then SR.SetPreview(false)      end
   if RH   and RH.SetPreview      then RH.SetPreview(false)      end
@@ -13083,3 +13756,16 @@ ns.SettingsPanel = MainFrame
 -- dans ns.Auras.db, pas ns.DB) -- sans ca, toggler cette case-la depuis sa
 -- propre page laissait la ligne miroir de la page "Modules" figee.
 MainFrame.InvalidateCategory = function(catId) if _invalidateCategory then _invalidateCategory(catId) end end
+
+-- Resynchronise la zone de defilement sur la hauteur courante d'un conteneur de page.
+-- Pour les pages qui se redimensionnent APRES leur construction sans passer par le flux
+-- de NewLayout (accordeons des menus Auras, cf. Modules/Auras/UI/SharedWidgets.lua) :
+-- sans ca, plier/deplier laisse la barre de defilement sur l'ancienne plage.
+MainFrame.SyncScrollTo = function(frame)
+  if not (frame and frame.IsShown and frame:IsShown()) then return end
+  content:SetHeight(frame:GetHeight())
+  local range = scrollFrame:GetVerticalScrollRange() or 0
+  if (scrollFrame:GetVerticalScroll() or 0) > range then
+    scrollFrame:SetVerticalScroll(math.max(0, range))
+  end
+end

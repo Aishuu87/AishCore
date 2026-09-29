@@ -385,6 +385,58 @@ SlashCmdList["AISHDEBUG"] = function(msg)
             auras.DebugTestMultiGroup(spellIDs)
         end
 
+    elseif msg:match("^petgrid%s+center") then
+        local auras = ns.Auras
+        if not (auras and auras.DebugCenterPetContainers) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugCenterPetContainers introuvable.|r")
+        else
+            auras.DebugCenterPetContainers()
+        end
+
+    elseif msg:match("^petgrid%s+show") then
+        local auras = ns.Auras
+        if not (auras and auras.DebugShowPetContainers) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugShowPetContainers introuvable.|r")
+        else
+            auras.DebugShowPetContainers()
+        end
+
+    elseif msg:match("^petgrid") then
+        local sid = tonumber(msg:match("^petgrid%s+(%d+)"))
+        local auras = ns.Auras
+        if not (auras and auras.DebugDumpPetGrid) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugDumpPetGrid introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugDumpPetGrid(sid)
+        end
+
+    elseif msg:match("^testpetmix%s+%d") then
+        local argsStr = msg:match("^testpetmix%s+(.+)$")
+        local spellIDs = {}
+        for numStr in argsStr:gmatch("%d+") do
+            spellIDs[#spellIDs + 1] = tonumber(numStr)
+        end
+        local auras = ns.Auras
+        if not (auras and auras.DebugTestPetMixGroup) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugTestPetMixGroup introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugTestPetMixGroup(spellIDs)
+        end
+
+    elseif msg:match("^testpet%s+%d") then
+        local argsStr = msg:match("^testpet%s+(.+)$")
+        local spellIDs = {}
+        for numStr in argsStr:gmatch("%d+") do
+            spellIDs[#spellIDs + 1] = tonumber(numStr)
+        end
+        local unit = argsStr:match("%s+(%a+)%s*$")
+        local auras = ns.Auras
+        if not (auras and auras.DebugTestPetGroup) then
+            print("|cff00ccffAishCore Debug|r |cffff4444ns.Auras.DebugTestPetGroup introuvable (module pas chargé ?).|r")
+        else
+            auras.DebugTestPetGroup(spellIDs, unit)
+        end
+
     elseif msg:match("^testpercolor%s+%d") then
         local argsStr = msg:match("^testpercolor%s+(.+)$")
         local spellIDs = {}
@@ -422,6 +474,11 @@ SlashCmdList["AISHDEBUG"] = function(msg)
         print("  /aishdebug |cffffff00testcontainer <spellID> [spellID2...]|r — [TEST] cree un AuraContainer natif isole (icone+stacks+cooldown) pour valider l'approche, hors combat uniquement")
         print("  /aishdebug |cffffff00testbar <spellID> [spellID2...]|r — [TEST] AddAuraGroup sans icone/sans flow layout, juste une StatusBar via SetDurationBar (prepare la migration Circle Bars)")
         print("  /aishdebug |cffffff00testmulti <spellID1> <spellID2>|r — [TEST] AddAuraGroup maxFrameCount=3, 2+ sorts DIFFERENTS -- verifie si 2 candidats simultanes peuvent s'afficher en meme temps (isole de Circle Bars)")
+        print("  /aishdebug |cffffff00petgrid center|r — ramene les 4 grilles familier au centre de l'ecran (sortie de secours si une grille est hors ecran, donc inattrapable a l'Alt+clic)")
+        print("  /aishdebug |cffffff00petgrid show|r — colore et etiquette les conteneurs familier pendant 20 s, avec leurs coordonnees ecran")
+        print("  /aishdebug |cffffff00petgrid [spellID]|r — [DIAG] suit la chaine d'une aura de familier (declaration -> decouverte -> whitelist -> ordre -> conteneur pet) et montre le premier maillon casse")
+        print("  /aishdebug |cffffff00testpetmix <spellID>|r — [TEST] groupe visant le pet sur un conteneur lie au joueur — decide si la barre peut s'integrer a la pile existante ou s'il faut un conteneur pet dedie")
+        print("  /aishdebug |cffffff00testpet <spellID> [unite]|r — [TEST] AuraContainer lie au FAMILIER (SetUnit(\"pet\")) — verifie si l'API native peut afficher une aura qui vit sur le pet (Sombre transformation)")
         print("  /aishdebug |cffffff00testpercolor <spellID1> <spellID2>|r — [TEST] UN AddAuraGroup DEDIE par sort (maxFrameCount=1) -- verifie si la couleur/glow PAR SORT est possible avec le systeme natif")
         print("  /aishdebug |cffffff00iconsflow [spellID]|r — [DEBUG] dump de l'etat du rendu natif 'icons' (conteneur/groupe/boutons/layout) ; spellID = ne garder que ce sort")
         print("  /aishdebug |cffffff00circlebarsflow|r — [DEBUG] dump complet de l'etat du rendu natif 'Circle Bars' (Buffs.lua/freebars)")

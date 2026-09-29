@@ -45,6 +45,7 @@ ns.SpellClassificationOverrides = {
     [33786]   = { source = "debuff" }, -- Cyclone
     [34914]   = { source = "debuff" }, -- Toucher vampirique
     [42650]   = { source = "totem" }, -- Armee des morts
+    [47541]   = { source = "buff" }, -- Voile mortel
     [48181]   = { source = "debuff" }, -- Hanter
     [49206]   = { source = "totem" }, -- Invocation d'une gargouille
     [51485]   = { source = "totem" }, -- Totem de poigne de terre
@@ -55,6 +56,7 @@ ns.SpellClassificationOverrides = {
     [73920]   = { source = "totem" }, -- Pluie guerisseuse
     [77472]   = { deleted = true }, -- Vague de soins
     [77505]   = { source = "debuff" }, -- Seisme
+    [77575]   = { source = "debuff" }, -- Poussee de fievre
     [79206]   = { source = "buff" }, -- Grace du marcheur des esprits
     [81281]   = { source = "debuff" }, -- Croissance fongique
     [82691]   = { source = "debuff" }, -- Anneau de givre
@@ -107,6 +109,7 @@ ns.SpellClassificationOverrides = {
     [207777]  = { source = "debuff" }, -- Demantelement
     [209749]  = { source = "debuff" }, -- Essaim de lucioles
     [210824]  = { source = "debuff" }, -- Toucher des magi
+    [215406]  = { source = "debuff" }, -- Malade
     [217200]  = { source = "debuff" }, -- Tir acere
     [232559]  = { source = "debuff" }, -- Epines
     [247456]  = { source = "debuff" }, -- Fragilite
@@ -176,6 +179,7 @@ ns.SpellClassificationOverrides = {
     [453848]  = { source = "buff" }, -- Impulsion electrique
     [455122]  = { source = "debuff" }, -- Lances de pergelisol
     [457129]  = { source = "debuff" }, -- Marque de necrotraqueur
+    [458128]  = { source = "buff" }, -- Faux purulente
     [458169]  = { source = "debuff" }, -- Hyperpyrexie
     [459808]  = { source = "debuff" }, -- Fleche gemissante
     [460697]  = { source = "totem" }, -- Totem de courroux
@@ -183,9 +187,11 @@ ns.SpellClassificationOverrides = {
     [467745]  = { source = "debuff" }, -- Dague de l'ombre
     [1221389] = { source = "debuff" }, -- Gel
     [1222865] = { source = "debuff" }, -- Pointe glaciaire !
+    [1233448] = { source = "buff" }, -- Sombre transformation
     [1241521] = { source = "buff" }, -- Faucheur d'ame
     [1246032] = { source = "debuff" }, -- Potentiel explosif
     [1246832] = { source = "debuff" }, -- Glacons
+    [1247378] = { source = "debuff" }, -- Putrefier
     [1253138] = { source = "debuff" }, -- Attaque !
     [1253171] = { source = "debuff" }, -- Bombe de feu de brousse
     [1253601] = { source = "debuff" }, -- Marque de sentinelle
@@ -216,3 +222,17 @@ ns.SpellClassificationOverrides = {
     [1307531] = { deleted = true }, -- Saignee
     [1307888] = { source = "totem" }, -- Pluie guerisseuse
 }
+
+-- Auras que le joueur lance sur SON familier mais qui lui appartiennent (buff perso). Aucun viewer
+-- CDM ne les liste cote joueur -- l'aura vit sur le pet -- elles ne seraient donc ni auto-decouvertes
+-- ni scannees. Declarees ici, elles sont enregistrees pour la spec voulue (source "buff", categorie
+-- Buffs) par CDMHooks, et Scan lit leur duree/leurs stacks sur l'unite indiquee.
+-- specKey : cle ns.GetSpecKey() ("CLASSE_SPE", cf. Defaults.lua::SPEC_MAP), nil = toutes les specs.
+ns.PetAuraSpells = {
+    [1233448] = { unit = "pet", specKey = "DEATHKNIGHT_UNHOLY" }, -- Sombre transformation
+}
+
+function ns.GetPetAuraUnit(spellID)
+    local def = spellID and ns.PetAuraSpells and ns.PetAuraSpells[spellID]
+    return def and def.unit or nil
+end

@@ -7,6 +7,8 @@ ns.Defaults = {
     locked = false,   -- verrou du glisser-deposer (cf. SetDraggable)
     enabled = true,
     size = 80,
+    -- Cache sombre sous le texte central, en pixels (cf. bar.textBackdrop).
+    textBackdropSize = 35,
     bgSize = 88,
     arcSize = 64,
     arcOffsetX = 27,
@@ -41,7 +43,7 @@ ns.Defaults = {
     -- Arc circulaire (circle_piecrop) + overlay masque centre
     arcSizeRatio = 1.0,  -- taille de l'arc par rapport a cfg.size
     overlayRatio = 0.75, -- taille de l'overlay par rapport a l'arc (0.0 - 0.99)
-    -- [EXPERIMENTAL] Remplissage radial (horaire, depuis midi) au lieu du
+    -- Remplissage radial (horaire, depuis midi) au lieu du
     -- remplissage vertical bas->haut. Bascule via /rcradial. Voir ResourceCircle.lua.
     radialFillTest = false,
     -- Arc secondaire de stagger (Moine Brasseur)
@@ -104,6 +106,9 @@ ns.Defaults = {
     locked = false,   -- verrou du glisser-deposer (cf. SetDraggable)
     enabled = true,
     size = 40,
+    -- Cache sombre sous le texte, en pixels. Par defaut la meme proportion que le
+    -- cercle central (35 px pour un diametre de 80).
+    textBackdropSize = 18,
     bgSize = 44,
     arcSize = 32,
     arcOffsetX = 13,
@@ -129,6 +134,9 @@ ns.Defaults = {
       { -9, 1 }, { -5, 1 }, { 0, 0 }, { 5, 1 }, { 9, 1 },
     },
     hideDelay = 2.5,  -- secondes sans changement de vie avant de considérer full
+    -- Soins previsionnels : second arc rempli a (vie + soins), sous celui de la vie
+    showHealPrediction = true,
+    healPredColor      = { 0.45, 1, 0.55, 1 },
     -- Arc circulaire (circle_piecrop) + overlay masque centre
     arcSizeRatio = 1.0,  -- taille de l'arc par rapport a cfg.size
     overlayRatio = 0.75, -- taille de l'overlay par rapport a l'arc (0.0 - 0.99)
@@ -160,7 +168,7 @@ ns.Defaults = {
     -- Arc circulaire (circle_piecrop) + overlay masque centre
     arcSizeRatio = 1.0,  -- taille de l'arc par rapport a cfg.size (0.5 - 1.0)
     overlayRatio = 0.75, -- taille de l'overlay par rapport a l'arc (0.0 - 0.99)
-    -- [EXPERIMENTAL] Remplissage radial (comme resourceCircle) au lieu du vertical.
+    -- Remplissage radial (comme resourceCircle) au lieu du vertical.
     radialFillTest = false,
     -- Globes de Puissance Sacrée en spé Protection / Vindicte (hors combat)
     holyPowerAllSpecs = false,
@@ -177,6 +185,9 @@ ns.Defaults = {
   -- Barre d'experience (visible lors d'un gain XP ou au survol du coin bas-gauche)
   xpBar = {
     enabled = true,
+    -- Garde la barre affichee en permanence. Les informations detaillees (total, tooltip) restent
+    -- reservees au survol : c'est la barre qui devient permanente, pas tout son contenu.
+    alwaysVisible  = false,
     repEnabled     = true,        -- affiche la réputation au niveau max
     companionXP    = true,         -- affiche l'XP du compagnon de gouffre si en gouffre
     repDisplayMode = "tracked",   -- "tracked" | "lastGained"
@@ -367,6 +378,10 @@ ns.Defaults = {
     cooldownTextColor = { 1, 1, 1, 1 },
     -- Desaturation
     desaturateOnCooldown = true,
+    -- Teinte hors de portee (meme principe que les viewers CDM Blizzard)
+    outOfRangeTint = false,
+    outOfRangeColor = { 0.9, 0.25, 0.25, 1 },
+    outOfRangeUseTheme = false,
     -- Masquer les sorts non appris
     hideUnlearned = true,
     -- Glow
@@ -564,6 +579,9 @@ ns.Defaults = {
     hideOutOfCombat  = false,  -- legacy, remplace par visibilityMode
     -- Mode de visibilite : "always" | "target" | "combat" (default)
     visibilityMode   = "combat",
+    -- Soins previsionnels : segment ajoute au bord droit du fill HP, avant l'absorb
+    showHealPrediction = true,
+    healPredColor      = { 0.15, 0.85, 0.35, 1 },    -- vert opaque
     showAbsorb       = true,   -- afficher la barre de bouclier (absorb) en bleu sur les barres de vie
     absorbColor      = { 0, 1, 0.918, 1 },  -- couleur de la barre d'absorb (#00FFEA par défaut)
     absorbReversed   = false,               -- true = absorb à gauche (miroir), false = à droite (défaut)
@@ -631,6 +649,33 @@ ns.Defaults = {
     textOutlineStyle = "OUTLINE",
     textColor = { 1, 1, 1, 1 },
     textOffsetX = 0, textOffsetY = 0,
+  },
+
+  -- Nom de zone / sous-zone, cf. Modules/Location.lua
+  location = {
+    enabled = true,
+    -- Position (ancre TOP de UIParent par defaut, sous le bord haut de l'ecran)
+    point = "TOP", relativePoint = "TOP", x = 0, y = -12,
+    -- Contenu : "Zone: Sous-zone" quand les deux different, sous-zone seule si decoche
+    showZone = true,
+    -- Texte
+    font = "Fonts\\2002.TTF",
+    fontSize = 14,
+    textOutlineStyle = "OUTLINE",
+    shadow = true,
+    align = "CENTER",
+    textColor = { 1, 1, 1, 1 },
+    -- Couleur selon le statut PvP de la zone (sanctuaire/ami/hostile/conteste),
+    -- comportement par defaut de LocationPlus : le reglage textColor est alors ignore
+    -- (sauf son alpha).
+    useZoneColor = true,
+    -- Largeur de la boite : au-dela, le texte est tronque ("...")
+    width = 240,
+    -- Visibilite
+    alpha = 1,           -- opacite de base, appliquee que le mode survol soit actif ou non
+    hideInCombat = false,
+    mouseover = false,
+    hoverAlpha = 1,      -- opacite sous le curseur quand mouseover est actif
   },
 
   -- Curseur en combat, cf. Modules/BigCursor.lua. cursorSize est un INDEX

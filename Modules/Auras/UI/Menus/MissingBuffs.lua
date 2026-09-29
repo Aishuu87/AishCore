@@ -197,10 +197,11 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     local SW = ns.SharedWidgets
     local Theme = ns.THEME
 
-    local hdr = SW.CreateSectionHeader(p, L["MISSINGBUFFS_HEADER"] or "Buffs manquants", cw - 20)
+    local hdr = SW.MakeSectionTitle(
+        SW.CreateSectionHeader(p, L["MISSINGBUFFS_HEADER"] or "Buffs manquants", cw - 20))
     hdr:SetPoint("TOPLEFT", 10, 0)
 
-    local y = -30
+    local y = -34
     local cfg = Cfg()
 
     local cbEnable = SW.CreateCheckbox(p, L["MISSINGBUFFS_ENABLE"] or "Activer", cw - 30)
@@ -277,113 +278,120 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     end
     y = y - 62
 
-    -- Apparence icone : taille / bordure / masque de forme. Chaque onChanged rafraichit en direct.
+    -- Apparence icone / texte : deux sections repliables en tete de l'accordeon, devant
+    -- les sections de classe. Chaque onChanged rafraichit l'icone en direct.
     local function Refresh()
         if ns.MissingBuffs then ns.MissingBuffs.RefreshAppearance() end
     end
 
-    local hdrIcon = SW.CreateSectionHeader(p, L["MISSINGBUFFS_ICON_HEADER"] or "Apparence de l'icone", cw - 20)
-    hdrIcon:SetPoint("TOPLEFT", 10, y)
-    y = y - 30
+    local function BuildIconSection(c, w)
+        local cy, x, fw = 0, 5, w - 10
 
-    local slIconSize = SW.CreateSlider(p, L["MISSINGBUFFS_ICON_SIZE"] or "Taille de l'icone", 32, 128, 1, cw - 30)
-    slIconSize:SetPoint("TOPLEFT", 15, y)
-    slIconSize:SetValue(cfg.iconSize or 64)
-    slIconSize.onChanged = function(v) Cfg().iconSize = v; Refresh() end
-    y = y - 62
+        local slIconSize = SW.CreateSlider(c, L["MISSINGBUFFS_ICON_SIZE"] or "Taille de l'icone", 32, 128, 1, fw)
+        slIconSize:SetPoint("TOPLEFT", x, -cy)
+        slIconSize:SetValue(cfg.iconSize or 64)
+        slIconSize.onChanged = function(v) Cfg().iconSize = v; Refresh() end
+        cy = cy + 62
 
-    local cbBorder = SW.CreateCheckbox(p, L["MISSINGBUFFS_BORDER_ENABLE"] or "Bordure", cw - 30)
-    cbBorder:SetPoint("TOPLEFT", 15, y)
-    cbBorder:SetChecked(cfg.borderEnabled ~= false)
-    cbBorder.onChanged = function(v) Cfg().borderEnabled = v; Refresh() end
-    y = y - 26
+        local cbBorder = SW.CreateCheckbox(c, L["MISSINGBUFFS_BORDER_ENABLE"] or "Bordure", fw)
+        cbBorder:SetPoint("TOPLEFT", x, -cy)
+        cbBorder:SetChecked(cfg.borderEnabled ~= false)
+        cbBorder.onChanged = function(v) Cfg().borderEnabled = v; Refresh() end
+        cy = cy + 26
 
-    local colBorder = SW.CreateColorButton(p, L["MISSINGBUFFS_BORDER_COLOR"] or "Couleur de bordure", cw - 30)
-    colBorder:SetPoint("TOPLEFT", 15, y)
-    colBorder:SetColor(unpack(cfg.borderColor or { 1, 0.15, 0.15, 0.9 }))
-    colBorder.onChanged = function(rgb)
-        local c = Cfg()
-        local a = (c.borderColor and c.borderColor[4]) or 0.9
-        c.borderColor = { rgb[1], rgb[2], rgb[3], a }
-        Refresh()
+        local colBorder = SW.CreateColorButton(c, L["MISSINGBUFFS_BORDER_COLOR"] or "Couleur de bordure", fw)
+        colBorder:SetPoint("TOPLEFT", x, -cy)
+        colBorder:SetColor(unpack(cfg.borderColor or { 1, 0.15, 0.15, 0.9 }))
+        colBorder.onChanged = function(rgb)
+            local c2 = Cfg()
+            local a = (c2.borderColor and c2.borderColor[4]) or 0.9
+            c2.borderColor = { rgb[1], rgb[2], rgb[3], a }
+            Refresh()
+        end
+        cy = cy + 30
+
+        local slBorderThick = SW.CreateSlider(c, L["MISSINGBUFFS_BORDER_THICKNESS"] or "Epaisseur de bordure", 1, 6, 1, fw)
+        slBorderThick:SetPoint("TOPLEFT", x, -cy)
+        slBorderThick:SetValue(cfg.borderThickness or 2)
+        slBorderThick.onChanged = function(v) Cfg().borderThickness = v; Refresh() end
+        cy = cy + 62
+
+        local ddMask = SW.CreateDropdown(c, L["MISSINGBUFFS_ICON_SHAPE"] or "Forme", ns.MISSING_BUFF_ICON_MASKS, fw)
+        ddMask:SetPoint("TOPLEFT", x, -cy)
+        ddMask:SetValue(cfg.iconMaskIndex or 1)
+        ddMask.onChanged = function(v) Cfg().iconMaskIndex = v; Refresh() end
+        cy = cy + 48
+
+        c:SetHeight(cy)
     end
-    y = y - 30
 
-    local slBorderThick = SW.CreateSlider(p, L["MISSINGBUFFS_BORDER_THICKNESS"] or "Epaisseur de bordure", 1, 6, 1, cw - 30)
-    slBorderThick:SetPoint("TOPLEFT", 15, y)
-    slBorderThick:SetValue(cfg.borderThickness or 2)
-    slBorderThick.onChanged = function(v) Cfg().borderThickness = v; Refresh() end
-    y = y - 62
+    local function BuildTextSection(c, w)
+        local cy, x, fw = 0, 5, w - 10
 
-    local ddMask = SW.CreateDropdown(p, L["MISSINGBUFFS_ICON_SHAPE"] or "Forme", ns.MISSING_BUFF_ICON_MASKS, cw - 30)
-    ddMask:SetPoint("TOPLEFT", 15, y)
-    ddMask:SetValue(cfg.iconMaskIndex or 1)
-    ddMask.onChanged = function(v) Cfg().iconMaskIndex = v; Refresh() end
-    y = y - 48
+        local ddFont = SW.CreateDropdown(c, L["MISSINGBUFFS_TEXT_FONT"] or "Police", _addon.GetFontList(), fw)
+        ddFont:SetPoint("TOPLEFT", x, -cy)
+        ddFont:SetValue(cfg.textFont or ns.Media.font)
+        ddFont.onChanged = function(v) Cfg().textFont = v; Refresh() end
+        cy = cy + 48
 
-    -- Apparence texte : police / taille / couleur / position / animation
-    local hdrText = SW.CreateSectionHeader(p, L["MISSINGBUFFS_TEXT_HEADER"] or "Apparence du texte", cw - 20)
-    hdrText:SetPoint("TOPLEFT", 10, y)
-    y = y - 30
+        local slTextSize = SW.CreateSlider(c, L["MISSINGBUFFS_TEXT_SIZE"] or "Taille du texte", 8, 24, 1, fw)
+        slTextSize:SetPoint("TOPLEFT", x, -cy)
+        slTextSize:SetValue(cfg.textSize or 12)
+        slTextSize.onChanged = function(v) Cfg().textSize = v; Refresh() end
+        cy = cy + 62
 
-    local ddFont = SW.CreateDropdown(p, L["MISSINGBUFFS_TEXT_FONT"] or "Police", _addon.GetFontList(), cw - 30)
-    ddFont:SetPoint("TOPLEFT", 15, y)
-    ddFont:SetValue(cfg.textFont or ns.Media.font)
-    ddFont.onChanged = function(v) Cfg().textFont = v; Refresh() end
-    y = y - 48
+        local colText = SW.CreateColorButton(c, L["MISSINGBUFFS_TEXT_COLOR"] or "Couleur du texte", fw)
+        colText:SetPoint("TOPLEFT", x, -cy)
+        colText:SetColor(unpack(cfg.textColor or { 1, 0.9, 0.3 }))
+        colText.onChanged = function(rgb) Cfg().textColor = { rgb[1], rgb[2], rgb[3] }; Refresh() end
+        cy = cy + 30
 
-    local slTextSize = SW.CreateSlider(p, L["MISSINGBUFFS_TEXT_SIZE"] or "Taille du texte", 8, 24, 1, cw - 30)
-    slTextSize:SetPoint("TOPLEFT", 15, y)
-    slTextSize:SetValue(cfg.textSize or 12)
-    slTextSize.onChanged = function(v) Cfg().textSize = v; Refresh() end
-    y = y - 62
+        local halfW = math.floor((fw - 8) / 2)
+        local slOffX = SW.CreateSlider(c, L["SETTINGS_OFFSET_X"] or "Decalage X", -50, 50, 1, halfW)
+        slOffX:SetPoint("TOPLEFT", x, -cy)
+        slOffX:SetValue(cfg.textOffsetX or 0)
+        slOffX.onChanged = function(v) Cfg().textOffsetX = v; Refresh() end
+        local slOffY = SW.CreateSlider(c, L["SETTINGS_OFFSET_Y"] or "Decalage Y", -50, 50, 1, halfW)
+        slOffY:SetPoint("TOPLEFT", x + halfW + 8, -cy)
+        slOffY:SetValue(cfg.textOffsetY or -2)
+        slOffY.onChanged = function(v) Cfg().textOffsetY = v; Refresh() end
+        cy = cy + 62
 
-    local colText = SW.CreateColorButton(p, L["MISSINGBUFFS_TEXT_COLOR"] or "Couleur du texte", cw - 30)
-    colText:SetPoint("TOPLEFT", 15, y)
-    colText:SetColor(unpack(cfg.textColor or { 1, 0.9, 0.3 }))
-    colText.onChanged = function(rgb) Cfg().textColor = { rgb[1], rgb[2], rgb[3] }; Refresh() end
-    y = y - 30
+        -- Toggles combinables (pas un dropdown exclusif), sur 3 colonnes
+        local w3 = math.floor((fw - 16) / 3)
+        local cbPulse = SW.CreateCheckbox(c, L["MISSINGBUFFS_TEXT_ANIM_PULSE"] or "Pulsation", w3)
+        cbPulse:SetPoint("TOPLEFT", x, -cy)
+        cbPulse:SetChecked(cfg.textAnimPulse and true or false)
+        cbPulse.onChanged = function(v) Cfg().textAnimPulse = v; Refresh() end
 
-    local halfW = math.floor((cw - 30 - 8) / 2)
-    local slOffX = SW.CreateSlider(p, L["SETTINGS_OFFSET_X"] or "Decalage X", -50, 50, 1, halfW)
-    slOffX:SetPoint("TOPLEFT", 15, y)
-    slOffX:SetValue(cfg.textOffsetX or 0)
-    slOffX.onChanged = function(v) Cfg().textOffsetX = v; Refresh() end
-    local slOffY = SW.CreateSlider(p, L["SETTINGS_OFFSET_Y"] or "Decalage Y", -50, 50, 1, halfW)
-    slOffY:SetPoint("TOPLEFT", 15 + halfW + 8, y)
-    slOffY:SetValue(cfg.textOffsetY or -2)
-    slOffY.onChanged = function(v) Cfg().textOffsetY = v; Refresh() end
-    y = y - 62
+        local cbBounce = SW.CreateCheckbox(c, L["MISSINGBUFFS_TEXT_ANIM_BOUNCE"] or "Rebond", w3)
+        cbBounce:SetPoint("TOPLEFT", x + w3 + 8, -cy)
+        cbBounce:SetChecked(cfg.textAnimBounce and true or false)
+        cbBounce.onChanged = function(v) Cfg().textAnimBounce = v; Refresh() end
 
-    -- Toggles combinables (pas un dropdown exclusif), sur 3 colonnes
-    local w3 = math.floor((cw - 30 - 16) / 3)
-    local cbPulse = SW.CreateCheckbox(p, L["MISSINGBUFFS_TEXT_ANIM_PULSE"] or "Pulsation", w3)
-    cbPulse:SetPoint("TOPLEFT", 15, y)
-    cbPulse:SetChecked(cfg.textAnimPulse and true or false)
-    cbPulse.onChanged = function(v) Cfg().textAnimPulse = v; Refresh() end
+        local cbBlink = SW.CreateCheckbox(c, L["MISSINGBUFFS_TEXT_ANIM_BLINK"] or "Clignotement", w3)
+        cbBlink:SetPoint("TOPLEFT", x + (w3 + 8) * 2, -cy)
+        cbBlink:SetChecked(cfg.textAnimBlink and true or false)
+        cbBlink.onChanged = function(v) Cfg().textAnimBlink = v; Refresh() end
+        cy = cy + 26
 
-    local cbBounce = SW.CreateCheckbox(p, L["MISSINGBUFFS_TEXT_ANIM_BOUNCE"] or "Rebond", w3)
-    cbBounce:SetPoint("TOPLEFT", 15 + w3 + 8, y)
-    cbBounce:SetChecked(cfg.textAnimBounce and true or false)
-    cbBounce.onChanged = function(v) Cfg().textAnimBounce = v; Refresh() end
+        local ddOutline = SW.CreateDropdown(c, L["SETTINGS_TEXT_OUTLINE"] or "Contour", ns.GetTextOutlineStyles(), fw)
+        ddOutline:SetPoint("TOPLEFT", x, -cy)
+        ddOutline:SetValue(cfg.textOutlineStyle or "OUTLINE")
+        ddOutline.onChanged = function(v) Cfg().textOutlineStyle = v; Refresh() end
+        cy = cy + 48
 
-    local cbBlink = SW.CreateCheckbox(p, L["MISSINGBUFFS_TEXT_ANIM_BLINK"] or "Clignotement", w3)
-    cbBlink:SetPoint("TOPLEFT", 15 + (w3 + 8) * 2, y)
-    cbBlink:SetChecked(cfg.textAnimBlink and true or false)
-    cbBlink.onChanged = function(v) Cfg().textAnimBlink = v; Refresh() end
-    y = y - 26
+        c:SetHeight(cy)
+    end
 
-    local ddOutline = SW.CreateDropdown(p, L["SETTINGS_TEXT_OUTLINE"] or "Contour", ns.GetTextOutlineStyles(), cw - 30)
-    ddOutline:SetPoint("TOPLEFT", 15, y)
-    ddOutline:SetValue(cfg.textOutlineStyle or "OUTLINE")
-    ddOutline.onChanged = function(v) Cfg().textOutlineStyle = v; Refresh() end
-    y = y - 48
-
-    local sections = {}
+    local sections = {
+        { name = L["MISSINGBUFFS_ICON_HEADER"] or "Apparence de l'icone", build = BuildIconSection },
+        { name = L["MISSINGBUFFS_TEXT_HEADER"] or "Apparence du texte",   build = BuildTextSection },
+    }
     for _, cs in ipairs(CLASS_SECTIONS) do
         sections[#sections + 1] = { name = ClassLabel(cs.class), build = cs.build }
     end
-    SW.CreateSectionStack(p, sections, cw, -y)
+    SW.CreateSectionStack(p, sections, cw, -y, "missingbuffs")
 
     return p
 end

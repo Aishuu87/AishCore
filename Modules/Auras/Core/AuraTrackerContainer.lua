@@ -601,6 +601,209 @@ function ns.DebugTestPerSpellGroup(spellIDs)
     P("=> Active chaque sort UN PAR UN puis EN MEME TEMPS : chacun doit apparaitre dans SA PROPRE couleur fixe (celle de son groupe dedie), meme quand plusieurs sont actifs simultanement. Si tout disparait, se melange, ou qu'un seul groupe reste visible, plusieurs AddAuraGroup sur un meme conteneur/flow ne cohabitent pas proprement.")
 end
 
+-- TEST ISOLE : /aishdebug testpet <spellID> [unite] -- meme montage que testpercolor, mais le
+-- conteneur est lie au FAMILIER. Question a trancher avant tout raccordement : un AuraContainer
+-- natif peut-il lier une aura qui vit sur le pet (Sombre transformation) ? Les 4 destinations font
+-- toutes SetUnit("player") (+ une variante "target"), donc une aura du pet n'a aujourd'hui aucun
+-- conteneur candidat -- c'est la vraie raison pour laquelle elle ne s'affiche jamais, le pipeline
+-- Scan/cdmData n'etant plus celui du rendu.
+local testPetContainer
+local testPetGroupsAdded = {}
+function ns.DebugTestPetGroup(spellIDs, unit)
+    local P = function(s) print("|cff33aaff[TestPet]|r " .. s) end
+    unit = unit or "pet"
+    if not spellIDs or #spellIDs < 1 then
+        P("usage : /aishdebug testpet <spellID> [unite] -- unite par defaut : pet")
+        return
+    end
+    if InCombatLockdown and InCombatLockdown() then
+        P("|cffff4444refuse en combat (creation AuraContainer interdite en combat)|r")
+        return
+    end
+    P(string.format("UnitExists(%s)=%s  UnitName=%s", unit, tostring(UnitExists(unit)),
+        tostring(UnitName and UnitName(unit))))
+
+    if not testPetContainer then
+        local okCreate, result = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+        if not okCreate or not result then
+            P("|cffff4444echec CreateFrame AuraContainer : " .. tostring(result) .. "|r")
+            return
+        end
+        testPetContainer = result
+        testPetContainer:SetSize(400, 400)
+        testPetContainer:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        testPetContainer:SetFrameStrata("TOOLTIP")
+
+        local okEnable, errEnable = pcall(testPetContainer.SetEnabled, testPetContainer, true)
+        local okUnit, errUnit = pcall(testPetContainer.SetUnit, testPetContainer, unit)
+        testPetContainer:Show()
+        P(string.format("SetEnabled : ok=%s%s | SetUnit(%s) : ok=%s%s",
+            tostring(okEnable), okEnable and "" or (" err=" .. tostring(errEnable)), unit,
+            tostring(okUnit), okUnit and "" or (" err=" .. tostring(errUnit))))
+        if not okUnit then
+            P("|cffff4444SetUnit a echoue : un AuraContainer natif refuse cette unite, il faudra un autre canal de rendu.|r")
+        end
+
+        pcall(testPetContainer.SetFlowLayoutAnchorPoint, testPetContainer, "TOP")
+        pcall(testPetContainer.SetFlowLayoutAxis, testPetContainer, 1)
+        pcall(testPetContainer.SetFlowLayoutGrowthDirection, testPetContainer, 1, -1)
+        pcall(testPetContainer.SetFlowLayoutMaximumLineSize, testPetContainer, 900)
+    end
+
+    for _, sid in ipairs(spellIDs) do
+        if not testPetGroupsAdded[sid] then
+            local okAdd, errAdd = pcall(function()
+                testPetContainer:AddAuraGroup("aishTestPet_" .. tostring(sid), "HELPFUL", {
+                    maxFrameCount = 1,
+                    candidateFilters = { includeSpellIDs = { [sid] = true } },
+                    layout = { elementSpacing = 10, lineSpacing = 10, elementWidth = 150, elementHeight = 150, layoutIndex = 1 },
+                    initializeFrame = function(auraButton)
+                        if not (auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()) then
+                            P(string.format("|cffff4444initializeFrame (sort %d) : CanBeAccessedInContext=false|r", sid))
+                            return
+                        end
+                        pcall(function()
+                            auraButton:SetSize(150, 150)
+                            local bg = auraButton:CreateTexture(nil, "BACKGROUND")
+                            bg:SetAllPoints(); bg:SetColorTexture(0.2, 1, 0.2, 0.5)
+                            local icon = auraButton:CreateTexture(nil, "ARTWORK")
+                            icon:SetAllPoints(auraButton)
+                            icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+                            auraButton:SetIcon(icon)
+                            local label = auraButton:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+                            label:SetPoint("BOTTOM", 0, 4); label:SetText(tostring(sid))
+                        end)
+                        -- initializeFrame passe a la CREATION des boutons du pool, pas a la liaison
+                        -- d'une aura : ce message ne prouve rien a lui seul, seul l'affichage compte.
+                        P(string.format("initializeFrame (sort %d) : un bouton du pool est cree (pas encore une preuve de liaison)", sid))
+                    end,
+                })
+            end)
+            P(string.format("AddAuraGroup (spellID=%d, unite=%s) : ok=%s%s",
+                sid, unit, tostring(okAdd), okAdd and "" or (" err=" .. tostring(errAdd))))
+            testPetGroupsAdded[sid] = true
+        end
+    end
+
+    if testPetContainer.UpdateAllAuras then
+        local okUpd, errUpd = pcall(testPetContainer.UpdateAllAuras, testPetContainer)
+        P(string.format("UpdateAllAuras : ok=%s%s", tostring(okUpd), okUpd and "" or (" err=" .. tostring(errUpd))))
+    end
+
+    P("=> SEUL L'AFFICHAGE FAIT FOI : invoque ton familier, lance le sort, et regarde le centre de l'ecran. Un carre VERT avec l'icone du sort = l'aura du pet est bien liee. Aucun carre = l'API native ne lie pas les auras du familier, quoi que disent les lignes ci-dessus.")
+end
+
+-- TEST ISOLE : /aishdebug testpetmix <spellID> -- suite de testpet, qui a deja valide qu'un
+-- AuraContainer SetUnit("pet") lie bien l'aura du familier. Question restante, qui decide du volume
+-- de code a ecrire : un groupe peut-il viser une AUTRE unite que celle du conteneur ? Si oui, un
+-- simple AddAuraGroup de plus sur le conteneur "player" existant suffit, et la barre s'insere dans
+-- la meme pile flow que les autres buffs. Sinon il faut un conteneur pet par destination, avec sa
+-- propre grille ancree a celle du joueur.
+-- 1) dump des methodes de l'AuraContainer (cherche un SetAuraGroupUnit ou equivalent)
+-- 2) essai d'un groupe portant unit="pet" sur un conteneur SetUnit("player")
+local testPetMixContainer
+function ns.DebugTestPetMixGroup(spellIDs)
+    local P = function(s) print("|cff33aaff[TestPetMix]|r " .. s) end
+    if not spellIDs or #spellIDs < 1 then
+        P("usage : /aishdebug testpetmix <spellID>")
+        return
+    end
+    if InCombatLockdown and InCombatLockdown() then
+        P("|cffff4444refuse en combat (creation AuraContainer interdite en combat)|r")
+        return
+    end
+
+    if not testPetMixContainer then
+        local okCreate, result = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+        if not okCreate or not result then
+            P("|cffff4444echec CreateFrame AuraContainer : " .. tostring(result) .. "|r")
+            return
+        end
+        testPetMixContainer = result
+        testPetMixContainer:SetSize(400, 400)
+        testPetMixContainer:SetPoint("CENTER", UIParent, "CENTER", 250, 0)
+        testPetMixContainer:SetFrameStrata("TOOLTIP")
+        pcall(testPetMixContainer.SetEnabled, testPetMixContainer, true)
+        -- Conteneur volontairement lie au JOUEUR : c'est tout l'objet du test.
+        pcall(testPetMixContainer.SetUnit, testPetMixContainer, "player")
+        testPetMixContainer:Show()
+        pcall(testPetMixContainer.SetFlowLayoutAnchorPoint, testPetMixContainer, "TOP")
+        pcall(testPetMixContainer.SetFlowLayoutAxis, testPetMixContainer, 1)
+        pcall(testPetMixContainer.SetFlowLayoutGrowthDirection, testPetMixContainer, 1, -1)
+        pcall(testPetMixContainer.SetFlowLayoutMaximumLineSize, testPetMixContainer, 900)
+    end
+
+    -- 1) Inventaire des methodes : une methode par-groupe portant "Unit" reglerait la question.
+    do
+        local seen, names = {}, {}
+        local idx = getmetatable(testPetMixContainer)
+        idx = idx and idx.__index
+        local depth = 0
+        while type(idx) == "table" and depth < 8 do
+            for k, v in pairs(idx) do
+                if type(v) == "function" and not seen[k] then
+                    seen[k] = true
+                    if k:find("Unit") or k:find("Group") or k:find("Filter") then
+                        names[#names + 1] = k
+                    end
+                end
+            end
+            local m2 = getmetatable(idx)
+            idx = m2 and m2.__index
+            depth = depth + 1
+        end
+        table.sort(names)
+        P("methodes Unit/Group/Filter : " .. (next(names) and table.concat(names, ", ") or "|cffff4444aucune lisible (metatable protegee)|r"))
+    end
+
+    -- 2) Groupe vise sur "pet" alors que le conteneur est sur "player". Les deux orthographes
+    -- plausibles sont tentees : unit au niveau des options, et unit dans candidateFilters.
+    local sid = spellIDs[1]
+    local fired = false
+    local okAdd, errAdd = pcall(function()
+        testPetMixContainer:AddAuraGroup("aishTestPetMix_" .. tostring(sid), "HELPFUL", {
+            maxFrameCount = 1,
+            unit = "pet",
+            candidateFilters = { includeSpellIDs = { [sid] = true }, unit = "pet" },
+            layout = { elementSpacing = 10, lineSpacing = 10, elementWidth = 150, elementHeight = 150, layoutIndex = 1 },
+            initializeFrame = function(auraButton)
+                if not (auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()) then return end
+                fired = true
+                pcall(function()
+                    auraButton:SetSize(150, 150)
+                    local bg = auraButton:CreateTexture(nil, "BACKGROUND")
+                    bg:SetAllPoints(); bg:SetColorTexture(1, 0.4, 0.1, 0.5)
+                    local icon = auraButton:CreateTexture(nil, "ARTWORK")
+                    icon:SetAllPoints(auraButton)
+                    icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+                    auraButton:SetIcon(icon)
+                end)
+                P(string.format("|cff33ff33initializeFrame (sort %d) APPELE sur un conteneur player => un groupe PEUT viser une autre unite|r", sid))
+            end,
+        })
+    end)
+    P(string.format("AddAuraGroup(unit=\"pet\" sur conteneur player) : ok=%s%s", tostring(okAdd), okAdd and "" or (" err=" .. tostring(errAdd))))
+
+    if testPetMixContainer.UpdateAllAuras then
+        pcall(testPetMixContainer.UpdateAllAuras, testPetMixContainer)
+    end
+    if not fired then
+        P("initializeFrame pas encore appele -- lance le sort sur ton familier et regarde si un carre ORANGE apparait a droite du centre.")
+    end
+    P("=> Carre ORANGE visible : un seul AddAuraGroup suffira, la barre s'integrera a la pile des Buffs. Rien : il faut un conteneur pet dedie par destination.")
+end
+
+-- Vrai si au moins un sort traque de cette destination est une aura de familier. Sans ce garde-fou,
+-- les grilles familier creeraient quatre conteneurs vides qui reserveraient de la place et
+-- capteraient les Alt+clic sur leur zone, alors qu'aucun sort ne les alimente.
+local function AnyPetAuraInOrder(order)
+    if not (order and ns.GetPetAuraUnit) then return false end
+    for _, spellID in ipairs(order) do
+        if ns.GetPetAuraUnit(spellID) then return true end
+    end
+    return false
+end
+
 -- Couleur/glow PAR SORT -- helpers partages par Icons/Free Bars/Icon List (pas Circle Bars, qui a son
 -- propre CBApplySpellColor avec support degrade). Declares ici, avant toute section qui les utilise :
 -- portee lexicale Lua, doivent preceder la premiere section appelante dans le fichier.
@@ -1710,6 +1913,349 @@ iconsTargetChangeFrame:SetScript("OnEvent", function()
     end
 end)
 
+-- Grille native familier pour "Icons" -- declinaison du miroir cible ci-dessus. Un AuraContainer
+-- n'ayant qu'un seul SetUnit, une aura qui vit sur le familier (Sombre transformation, cf.
+-- ns.PetAuraSpells) n'est candidate d'aucun conteneur joueur : il lui faut le sien, SetUnit("pet")
+-- + "HELPFUL". Ne route que les sorts declares dans ns.PetAuraSpells. Mele au flow des buffs joueur
+-- est impossible (le flow layout appartient au conteneur) : empile par defaut sous la grille cible,
+-- et devient librement placable des le premier Alt+clic gauche (cfg.petX/petY).
+local iconsFlowContainerPet
+local iconsFlowButtonsPet = {}
+local iconsPerSpellGroupsPet = {}
+
+function ns.GetIconsNativeContainerPet()
+    return iconsFlowContainerPet
+end
+
+local function EnsureIconsFlowContainerPet()
+    if iconsFlowContainerPet then return iconsFlowContainerPet end
+    if InCombatLockdown and InCombatLockdown() then return nil end
+    local ok, result = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+    if not ok or not result then
+        DBG(string.format("|cffff4444EnsureIconsFlowContainerPet: CreateFrame AuraContainer a echoue -- ok=%s result=%s|r", tostring(ok), tostring(result)))
+        return nil
+    end
+    iconsFlowContainerPet = result
+    iconsFlowContainerPet:SetSize(8, 8)
+    local okEn, errEn = pcall(iconsFlowContainerPet.SetEnabled, iconsFlowContainerPet, true)
+    local okUn, errUn = pcall(iconsFlowContainerPet.SetUnit, iconsFlowContainerPet, "pet")
+    if not okEn or not okUn then
+        DBG(string.format("|cffff4444EnsureIconsFlowContainerPet: SetEnabled ok=%s%s | SetUnit ok=%s%s|r",
+            tostring(okEn), okEn and "" or (" err="..tostring(errEn)),
+            tostring(okUn), okUn and "" or (" err="..tostring(errUn))))
+    end
+
+    -- Position libre : des que l'utilisateur a deplace cette grille une fois (Alt+clic gauche), sa
+    -- position prend le pas sur l'empilement par defaut. C'est le seul moyen de la coller au bout de
+    -- la pile des buffs joueur, un meme flow ne pouvant pas melanger deux unites.
+    do
+        local cfgPos = ns.db and ns.db.icons
+        if cfgPos and cfgPos.petX and cfgPos.petY then
+            iconsFlowContainerPet:ClearAllPoints()
+            iconsFlowContainerPet:SetPoint("CENTER", UIParent, "CENTER", cfgPos.petX, cfgPos.petY)
+        end
+    end
+    iconsFlowContainerPet:SetMovable(true)
+    iconsFlowContainerPet:SetClampedToScreen(true)
+    if _addon.EnableMouseOnlyOnAlt then _addon.EnableMouseOnlyOnAlt(iconsFlowContainerPet) end
+    iconsFlowContainerPet:SetPropagateMouseClicks(true)
+    iconsFlowContainerPet:SetScript("OnMouseDown", function(s, b)
+        if b == "LeftButton" and IsAltKeyDown() then s:StartMoving() end
+    end)
+    iconsFlowContainerPet:SetScript("OnMouseUp", function(s)
+        s:StopMovingOrSizing()
+        -- GetCenter()/GetEffectiveScale() peuvent renvoyer secret une fois le conteneur lie a une
+        -- vraie aura : abandon silencieux plutot que crash, meme garde que la grille joueur.
+        pcall(function()
+            local cx, cy = s:GetCenter()
+            if not (cx and cy) then return end
+            local cfgSave = ns.db and ns.db.icons
+            if not cfgSave then return end
+            local sc = s:GetEffectiveScale() / UIParent:GetEffectiveScale()
+            cfgSave.petX = cx * sc - GetScreenWidth() / 2
+            cfgSave.petY = cy * sc - GetScreenHeight() / 2
+            s:ClearAllPoints()
+            s:SetPoint("CENTER", UIParent, "CENTER", cfgSave.petX, cfgSave.petY)
+        end)
+    end)
+    iconsFlowContainerPet:Show()
+    return iconsFlowContainerPet
+end
+
+-- Meme style que ApplyIconsFlowButtonStyle (joueur), factoree separement pour ne jamais toucher aux
+-- widgets/variables du pool joueur.
+local function ApplyIconsFlowButtonStylePet(auraButton)
+    local liveCfg = ns.db and ns.db.icons or ns.Defaults.icons
+    local okCheck, canAccess = pcall(function()
+        return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
+    end)
+    if not (okCheck and canAccess) then return end
+    local okStyle, errStyle = pcall(function()
+        local liveIw, liveIh = liveCfg.iconW or 26, liveCfg.iconH or 26
+        auraButton:SetSize(liveIw, liveIh)
+
+        if auraButton._aishStackFS then
+            local st = auraButton._aishStackFS
+            ns.ApplyFont(st, liveCfg.stackFont or ns.Media.font, liveCfg.stackSize or 10, "OUTLINE")
+            st:ClearAllPoints()
+            st:SetPoint(liveCfg.stackPos or "BOTTOMRIGHT", auraButton, liveCfg.stackPos or "BOTTOMRIGHT", liveCfg.stackOffX or 0, liveCfg.stackOffY or 0)
+            st:SetTextColor(liveCfg.stackColorR or 1, liveCfg.stackColorG or 1, liveCfg.stackColorB or 1)
+        end
+
+        if auraButton._aishCD then
+            local cd = auraButton._aishCD
+            cd:SetDrawSwipe(liveCfg.swipeEnabled == true)
+            cd:SetDrawEdge(liveCfg.swipeEnabled == true)
+            cd:SetHideCountdownNumbers(liveCfg.timerIconEnabled ~= true)
+            if liveCfg.timerIconEnabled then
+                ApplyNativeCountdownStyle(cd, liveCfg, auraButton)
+            end
+        end
+
+        local liveSpells = ns.GetSpecSpells()
+        local liveSi = ns.GetStyleInfo(auraButton._aishSpellID)
+
+        if auraButton._aishDurBar then
+            local bar = auraButton._aishDurBar
+            local cR, cG, cB = SpellBarColorRGB(liveCfg, liveSi)
+            bar:SetStatusBarColor(cR, cG, cB)
+            if auraButton._aishSpark then
+                pcall(ApplyNativeBarSparkColor, auraButton._aishSpark, liveCfg, {cR, cG, cB})
+            end
+        end
+
+        if ns.HideGlow then pcall(ns.HideGlow, auraButton) end
+        local okGlow, errGlow = pcall(ApplySpellGlow, auraButton, liveCfg, liveSi, liveIw, liveIh)
+        if not okGlow then
+            DBG(string.format("|cffff4444ApplyIconsFlowButtonStylePet: ApplySpellGlow a echoue -- err=%s|r", tostring(errGlow)))
+        end
+    end)
+    if not okStyle then
+        DBG(string.format("|cffff4444ApplyIconsFlowButtonStylePet: bloc principal a echoue -- err=%s|r", tostring(errStyle)))
+    end
+end
+
+function ns.RefreshIconsNativeGridStylePet()
+    if InCombatLockdown and InCombatLockdown() then return end
+    for _, btn in ipairs(iconsFlowButtonsPet) do
+        ApplyIconsFlowButtonStylePet(btn)
+    end
+end
+
+-- Repositionne le conteneur cible juste sous le conteneur joueur (meme geometrie/flow, decale d'une
+-- hauteur de ligne) -- appelee depuis Whitelist.lua juste apres ns.RepositionIconsNativeGrid (joueur).
+function ns.RepositionIconsNativeGridPet()
+    local c = iconsFlowContainerPet
+    if not c then
+        if not AnyPetAuraInOrder(ns.slotOrderByDest and ns.slotOrderByDest.icons) then return end
+        c = EnsureIconsFlowContainerPet()
+    end
+    if not c then return end
+    local cPlayer = iconsFlowContainer
+    local cfg = ns.db and ns.db.icons or ns.Defaults.icons
+    local growth = cfg.growth or "LEFT"
+    local anchorPoint, hDir, vDir, isH = GrowthToFlowParams(growth)
+
+    c:ClearAllPoints()
+    local iw, ih = cfg.iconW or 26, cfg.iconH or 26
+    local rg = cfg.rowGap or 2
+    -- Empile la rangee cible SOUS la rangee joueur (ou a sa position
+    -- habituelle decalee si le conteneur joueur n'existe pas encore).
+    if cPlayer then
+        if growth == "UP" then
+            c:SetPoint("BOTTOM", cPlayer, "TOP", 0, rg)
+        else
+            c:SetPoint("TOP", cPlayer, "BOTTOM", 0, -rg)
+        end
+    else
+        local x0, y0 = cfg.x or -199, cfg.y or -247
+        c:SetPoint(anchorPoint == "TOPRIGHT" and "RIGHT" or "LEFT", UIParent, "CENTER", x0, y0 - (ih + rg))
+    end
+
+    -- Position libre (Alt+clic gauche) : prioritaire sur l'empilement par defaut, sinon
+    -- chaque rebuild de whitelist ramenerait la grille sous la grille cible.
+    do
+        local cfgPos = ns.db and ns.db.icons
+        if cfgPos and cfgPos.petX and cfgPos.petY then
+            c:ClearAllPoints()
+            c:SetPoint("CENTER", UIParent, "CENTER", cfgPos.petX, cfgPos.petY)
+        end
+    end
+
+    local ok1, err1 = pcall(c.SetFlowLayoutAnchorPoint, c, anchorPoint)
+    local ok2 = SetFlowAxisSmart(c, isH)
+    local ok3, err3 = pcall(c.SetFlowLayoutGrowthDirection, c, hDir, vDir)
+    local order = ns.slotOrderByDest and ns.slotOrderByDest.icons
+    local count = math.max(order and #order or 0, 1)
+    local itemSize = isH and iw or ih
+    local ok4, err4 = pcall(c.SetFlowLayoutMaximumLineSize, c, (itemSize + rg) * count + rg)
+    if not (ok1 and ok2 and ok3 and ok4) then
+        DBG(string.format("|cffff4444RepositionIconsNativeGridPet: SetFlowLayout* a echoue -- anchor=%s growth=%s maxline=%s|r",
+            ok1 and "ok" or tostring(err1), ok3 and "ok" or tostring(err3), ok4 and "ok" or tostring(err4)))
+    end
+
+    -- iconsEnabled vit a la RACINE de ns.db (cf. Defaults.lua, aux cotes de iconlistEnabled/
+    -- circlebarsEnabled/freebarsEnabled), pas dans ns.db.icons : le lire sur cfg renvoyait
+    -- toujours nil, donc `~= false` toujours vrai -- la destination "Icones" restait visible
+    -- quoi qu'on fasse de son interrupteur. Les 3 autres destinations lisent deja ns.db.
+    local visible = (ns.db == nil or ns.db.iconsEnabled ~= false) and not (ns.db and ns.db.useNativeCDM)
+    pcall(function()
+        if visible and not (ns.IsAuraHidingContext and ns.IsAuraHidingContext()) then
+            c:SetAlpha(1)
+        else
+            c:SetAlpha(0)
+        end
+    end)
+    pcall(ns.RefreshIconsNativeGridStylePet)
+end
+
+-- Cree (une seule fois par sort) le groupe natif dedie pour chaque debuff
+-- cible de la destination "icons" (ns.GetPetAuraUnit and ns.GetPetAuraUnit(spellID)). Appelee depuis
+-- Whitelist.lua juste apres ns.EnsureIconsNativeGrid (joueur).
+function ns.EnsureIconsNativeGridPet()
+    if InCombatLockdown and InCombatLockdown() then return end
+    if not AnyPetAuraInOrder(ns.slotOrderByDest and ns.slotOrderByDest.icons) then return end
+    local c = EnsureIconsFlowContainerPet()
+    if not c then return end
+
+    local order = ns.slotOrderByDest and ns.slotOrderByDest.icons
+    if not order or #order == 0 then return end
+
+    local cfg = ns.db and ns.db.icons or ns.Defaults.icons
+    local iw, ih = cfg.iconW or 26, cfg.iconH or 26
+    local rg = cfg.rowGap or 2
+    local elementH = ih
+    if cfg.showBarUnderIcon then elementH = ih + (cfg.rowGap or 2) + (cfg.barUnderHeight or 3) end
+    local spells = ns.GetSpecSpells()
+
+    local currentSet = {}
+    for _, spellID in ipairs(order) do
+        local info = spells and spells[spellID]
+        if info and ns.GetPetAuraUnit and ns.GetPetAuraUnit(spellID) then
+            currentSet[spellID] = true
+            if not iconsPerSpellGroupsPet[spellID] then
+                local groupKey = "aishIconsFlowPet_" .. tostring(spellID)
+                local okAdd, errAdd = pcall(function()
+                    c:AddAuraGroup(groupKey, "HELPFUL", {
+                        maxFrameCount = 1,
+                        candidateFilters = { includeSpellIDs = { [spellID] = true } },
+                        initializeFrame = function(auraButton)
+                            local okCheck, canAccess = pcall(function()
+                                return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
+                            end)
+                            if not (okCheck and canAccess) then return end
+                            local okBuild, errBuild = pcall(function()
+                                local liveCfgAtCreate = ns.db and ns.db.icons or ns.Defaults.icons
+                                auraButton._aishSpellID = spellID
+                                local icon = auraButton:CreateTexture(nil, "ARTWORK")
+                                icon:SetAllPoints(auraButton)
+                                icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+                                auraButton:SetIcon(icon)
+
+                                local border = auraButton:CreateTexture(nil, "BACKGROUND")
+                                border:SetPoint("TOPLEFT", auraButton, "TOPLEFT", -1, 1)
+                                border:SetPoint("BOTTOMRIGHT", auraButton, "BOTTOMRIGHT", 1, -1)
+                                border:SetColorTexture(14/255, 14/255, 14/255, 1)
+
+                                local cd = CreateFrame("Cooldown", nil, auraButton, "CooldownFrameTemplate")
+                                cd:SetAllPoints(auraButton)
+                                cd:SetReverse(true)
+                                auraButton:SetDurationCooldown(cd)
+                                auraButton._aishCD = cd
+
+                                local stackFS = auraButton:CreateFontString(nil, "OVERLAY", nil, 7)
+                                ns.ApplyFont(stackFS, liveCfgAtCreate.stackFont or ns.Media.font, liveCfgAtCreate.stackSize or 10, "OUTLINE")
+                                stackFS:SetJustifyH("RIGHT")
+                                auraButton:SetApplicationCount(stackFS, {})
+                                auraButton._aishStackFS = stackFS
+
+                                if liveCfgAtCreate.showBarUnderIcon then
+                                    local barH = liveCfgAtCreate.barUnderHeight or 3
+                                    local gp = liveCfgAtCreate.rowGap or 2
+                                    local durBar = CreateFrame("StatusBar", nil, auraButton)
+                                    durBar:SetSize(liveCfgAtCreate.iconW or 26, barH)
+                                    if (liveCfgAtCreate.barPosition or "BOTTOM") == "TOP" then
+                                        durBar:SetPoint("BOTTOM", auraButton, "TOP", 0, gp)
+                                    else
+                                        durBar:SetPoint("TOP", auraButton, "BOTTOM", 0, -gp)
+                                    end
+                                    durBar:SetStatusBarTexture(ns.ResolveBarTexFromKey(liveCfgAtCreate.texture))
+                                    durBar:SetReverseFill(liveCfgAtCreate.barReverseFill == true)
+                                    local cR, cG, cB = SpellBarColorRGB(liveCfgAtCreate, ns.GetStyleInfo(spellID))
+                                    durBar:SetStatusBarColor(cR, cG, cB)
+                                    local durBg = durBar:CreateTexture(nil, "BACKGROUND")
+                                    durBg:SetAllPoints()
+                                    durBg:SetColorTexture(liveCfgAtCreate.barBgR or 0, liveCfgAtCreate.barBgG or 0, liveCfgAtCreate.barBgB or 0, liveCfgAtCreate.barBgAlpha or 0)
+                                    local okDurBar, errDurBar = pcall(auraButton.SetDurationBar, auraButton, durBar,
+                                        { direction = Enum.StatusBarTimerDirection.RemainingTime })
+                                    if not okDurBar then
+                                        DBG(string.format("|cffff4444initializeFrame cible (sort %d): SetDurationBar a echoue -- err=%s|r", spellID, tostring(errDurBar)))
+                                    end
+                                    auraButton._aishDurBar = durBar
+                                    auraButton._aishSpark = MakeNativeBarSpark(durBar, liveCfgAtCreate,
+                                        (liveCfgAtCreate.barReverseFill == true) and "LEFT" or "RIGHT", {cR, cG, cB})
+                                end
+
+                                -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                                -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                                -- redondants). No-op dans le cas nominal.
+                                if not auraButton._aishPooled then
+                                    auraButton._aishPooled = true
+                                    iconsFlowButtonsPet[#iconsFlowButtonsPet + 1] = auraButton
+                                end
+                            end)
+                            if not okBuild then
+                                DBG(string.format("|cffff4444initializeFrame cible (sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
+                            end
+                            ApplyIconsFlowButtonStylePet(auraButton)
+                            do
+                                local liveSpells2 = ns.GetSpecSpells()
+                                PlayProcStartOnce(auraButton, ns.GetStyleInfo(spellID), spellID)
+                            end
+                        end,
+                        layout = {
+                            elementSpacing = rg,
+                            lineSpacing = rg,
+                            elementWidth = iw,
+                            elementHeight = elementH,
+                            layoutIndex = 1,
+                        },
+                    })
+                end)
+                if not okAdd then
+                    DBG(string.format("|cffff4444AddAuraGroup DEDIE cible (sort %d) a echoue -- err=%s|r", spellID, tostring(errAdd)))
+                end
+                iconsPerSpellGroupsPet[spellID] = true
+                if c.UpdateAllAuras then
+                    local okUpd, errUpd = pcall(c.UpdateAllAuras, c)
+                    if not okUpd then DBG(string.format("|cffff4444UpdateAllAuras cible (sort %d) a echoue -- err=%s|r", spellID, tostring(errUpd))) end
+                end
+            else
+                pcall(c.SetAuraGroupCandidateFilters, c, "aishIconsFlowPet_" .. tostring(spellID), { includeSpellIDs = { [spellID] = true } })
+            end
+        end
+    end
+
+    for spellID in pairs(iconsPerSpellGroupsPet) do
+        if not currentSet[spellID] then
+            local groupKey = "aishIconsFlowPet_" .. tostring(spellID)
+            pcall(c.SetAuraGroupCandidateFilters, c, groupKey, { includeSpellIDs = { [0] = true } })
+        end
+    end
+end
+
+-- Rafraichit le conteneur cible quand la cible change -- Blizzard ne relie
+-- pas forcement l'affichage tout seul sans un coup de pouce (meme
+-- precaution que PetAuras.lua::OnEvent sur PLAYER_TARGET_CHANGED).
+local iconsPetChangeFrame = CreateFrame("Frame")
+iconsPetChangeFrame:RegisterEvent("UNIT_PET")
+iconsPetChangeFrame:SetScript("OnEvent", function()
+    if iconsFlowContainerPet and iconsFlowContainerPet.UpdateAllAuras then
+        pcall(iconsFlowContainerPet.UpdateAllAuras, iconsFlowContainerPet)
+    end
+end)
+
+
 -- Print de secours dedie a cette section, prefixe distinct de DBG (icons) pour eviter la confusion.
 local function CBDBG(s) print("|cff33aaff[CircleBarsFlow]|r " .. tostring(s)) end
 
@@ -2518,6 +3064,350 @@ circleBarsTargetChangeFrame:SetScript("OnEvent", function()
         pcall(circleBarsFlowContainerTarget.UpdateAllAuras, circleBarsFlowContainerTarget)
     end
 end)
+
+-- Grille native familier pour "Circle Bars" -- declinaison du miroir cible ci-dessus. Un AuraContainer
+-- n'ayant qu'un seul SetUnit, une aura qui vit sur le familier (Sombre transformation, cf.
+-- ns.PetAuraSpells) n'est candidate d'aucun conteneur joueur : il lui faut le sien, SetUnit("pet")
+-- + "HELPFUL". Ne route que les sorts declares dans ns.PetAuraSpells. Mele au flow des buffs joueur
+-- est impossible (le flow layout appartient au conteneur) : empile par defaut sous la grille cible,
+-- et devient librement placable des le premier Alt+clic gauche (cfg.petX/petY).
+local circleBarsFlowContainerPet
+local circleBarsFlowButtonsPet = {}
+local circleBarsPerSpellGroupsPet = {}
+
+function ns.GetCircleBarsNativeContainerPet()
+    return circleBarsFlowContainerPet
+end
+
+local function EnsureCircleBarsFlowContainerPet()
+    if circleBarsFlowContainerPet then return circleBarsFlowContainerPet end
+    if InCombatLockdown and InCombatLockdown() then return nil end
+    local ok, result = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+    if not ok or not result then
+        CBDBG(string.format("|cffff4444EnsureCircleBarsFlowContainerPet: CreateFrame AuraContainer a echoue -- ok=%s result=%s|r", tostring(ok), tostring(result)))
+        return nil
+    end
+    circleBarsFlowContainerPet = result
+
+    local cfg0 = ns.db and ns.db.freebars or ns.Defaults.freebars
+    local maxBars0 = cfg0.maxBars or 8
+    local bw0, bh0, gp0, rg0 = cfg0.barW or 45, cfg0.barH or 3, cfg0.gap or 50, cfg0.rowGap or 6
+    circleBarsFlowContainerPet:SetSize(bw0 * 2 + gp0 * 2, maxBars0 * (bh0 + rg0))
+    circleBarsFlowContainerPet:SetFrameStrata("BACKGROUND")
+    -- Position reelle ici, avant AddAuraGroup/UpdateAllAuras (meme regle que le conteneur joueur) --
+    -- ancre sous le conteneur joueur s'il existe deja, sinon position de repli.
+    if circleBarsFlowContainer then
+        circleBarsFlowContainerPet:SetPoint("TOP", circleBarsFlowContainer, "BOTTOM", 0, -rg0)
+    else
+        circleBarsFlowContainerPet:SetPoint("CENTER", UIParent, "CENTER", cfg0.x or 0, (cfg0.y or -218) - maxBars0 * (bh0 + rg0))
+    end
+
+    local okEn, errEn = pcall(circleBarsFlowContainerPet.SetEnabled, circleBarsFlowContainerPet, true)
+    local okUn, errUn = pcall(circleBarsFlowContainerPet.SetUnit, circleBarsFlowContainerPet, "pet")
+    if not okEn or not okUn then
+        CBDBG(string.format("|cffff4444EnsureCircleBarsFlowContainerPet: SetEnabled ok=%s%s | SetUnit ok=%s%s|r",
+            tostring(okEn), okEn and "" or (" err="..tostring(errEn)),
+            tostring(okUn), okUn and "" or (" err="..tostring(errUn))))
+    end
+
+    -- Position libre : des que l'utilisateur a deplace cette grille une fois (Alt+clic gauche), sa
+    -- position prend le pas sur l'empilement par defaut. C'est le seul moyen de la coller au bout de
+    -- la pile des buffs joueur, un meme flow ne pouvant pas melanger deux unites.
+    do
+        local cfgPos = ns.db and ns.db.freebars
+        if cfgPos and cfgPos.petX and cfgPos.petY then
+            circleBarsFlowContainerPet:ClearAllPoints()
+            circleBarsFlowContainerPet:SetPoint("CENTER", UIParent, "CENTER", cfgPos.petX, cfgPos.petY)
+        end
+    end
+    circleBarsFlowContainerPet:SetMovable(true)
+    circleBarsFlowContainerPet:SetClampedToScreen(true)
+    if _addon.EnableMouseOnlyOnAlt then _addon.EnableMouseOnlyOnAlt(circleBarsFlowContainerPet) end
+    circleBarsFlowContainerPet:SetPropagateMouseClicks(true)
+    circleBarsFlowContainerPet:SetScript("OnMouseDown", function(s, b)
+        if b == "LeftButton" and IsAltKeyDown() then s:StartMoving() end
+    end)
+    circleBarsFlowContainerPet:SetScript("OnMouseUp", function(s)
+        s:StopMovingOrSizing()
+        -- GetCenter()/GetEffectiveScale() peuvent renvoyer secret une fois le conteneur lie a une
+        -- vraie aura : abandon silencieux plutot que crash, meme garde que la grille joueur.
+        pcall(function()
+            local cx, cy = s:GetCenter()
+            if not (cx and cy) then return end
+            local cfgSave = ns.db and ns.db.freebars
+            if not cfgSave then return end
+            local sc = s:GetEffectiveScale() / UIParent:GetEffectiveScale()
+            cfgSave.petX = cx * sc - GetScreenWidth() / 2
+            cfgSave.petY = cy * sc - GetScreenHeight() / 2
+            s:ClearAllPoints()
+            s:SetPoint("CENTER", UIParent, "CENTER", cfgSave.petX, cfgSave.petY)
+        end)
+    end)
+    circleBarsFlowContainerPet:Show()
+    return circleBarsFlowContainerPet
+end
+
+local function ApplyCircleBarsButtonStylePet(auraButton)
+    local liveCfg = ns.db and ns.db.freebars or ns.Defaults.freebars
+    local okCheck, canAccess = pcall(function()
+        return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
+    end)
+    if not (okCheck and canAccess) then return end
+    local okStyle, errStyle = pcall(function()
+        local bw, bh, gp = liveCfg.barW or 45, liveCfg.barH or 3, liveCfg.gap or 50
+        auraButton:SetSize(bw * 2 + gp * 2, bh)
+
+        local tex = ns.ResolveBarTexFromKey(liveCfg.texture)
+        local cR, cG, cB = liveCfg.barColorR or ns.barColor[1], liveCfg.barColorG or ns.barColor[2], liveCfg.barColorB or ns.barColor[3]
+        local bgR = type(liveCfg.barBgR) == "number" and liveCfg.barBgR or 0
+        local bgG = type(liveCfg.barBgG) == "number" and liveCfg.barBgG or 0
+        local bgB = type(liveCfg.barBgB) == "number" and liveCfg.barBgB or 0
+        local bgA = type(liveCfg.barBgAlpha) == "number" and liveCfg.barBgAlpha or 0
+
+        if auraButton._aishBarL then
+            local bar = auraButton._aishBarL
+            bar:SetSize(bw, bh)
+            bar:ClearAllPoints()
+            bar:SetPoint("RIGHT", auraButton, "CENTER", -gp, 0)
+            bar:SetStatusBarTexture(tex)
+            bar:SetStatusBarColor(cR, cG, cB)
+            if auraButton._aishBgL then auraButton._aishBgL:SetColorTexture(bgR, bgG, bgB, bgA) end
+        end
+        if auraButton._aishBarR then
+            local bar = auraButton._aishBarR
+            bar:SetSize(bw, bh)
+            bar:ClearAllPoints()
+            bar:SetPoint("LEFT", auraButton, "CENTER", gp, 0)
+            bar:SetStatusBarTexture(tex)
+            bar:SetStatusBarColor(cR, cG, cB)
+            if auraButton._aishBgR then auraButton._aishBgR:SetColorTexture(bgR, bgG, bgB, bgA) end
+        end
+    end)
+    if not okStyle then
+        CBDBG(string.format("|cffff4444ApplyCircleBarsButtonStylePet: bloc principal a echoue -- err=%s|r", tostring(errStyle)))
+    end
+end
+
+function ns.RefreshCircleBarsNativeGridStylePet()
+    if InCombatLockdown and InCombatLockdown() then return end
+    local liveCfg = ns.db and ns.db.freebars or ns.Defaults.freebars
+    local spells = ns.GetSpecSpells()
+    for _, btn in ipairs(circleBarsFlowButtonsPet) do
+        local okCheck, canAccess = pcall(function()
+            return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext()
+        end)
+        if okCheck and canAccess then
+            local si = ns.GetStyleInfo(btn._aishSpellID)
+            if btn._aishBarL then
+                local okL, rL, gL, bL = pcall(CBApplySpellColor, btn._aishBarL, liveCfg, btn._aishSpellID, si)
+                if btn._aishSparkL and okL then pcall(ApplyNativeBarSparkColor, btn._aishSparkL, liveCfg, {rL, gL, bL}) end
+            end
+            if btn._aishBarR then
+                local okR, rR, gR, bR = pcall(CBApplySpellColor, btn._aishBarR, liveCfg, btn._aishSpellID, si)
+                if btn._aishSparkR and okR then pcall(ApplyNativeBarSparkColor, btn._aishSparkR, liveCfg, {rR, gR, bR}) end
+            end
+            if btn._aishTimerCD then
+                pcall(btn._aishTimerCD.SetHideCountdownNumbers, btn._aishTimerCD, not liveCfg.timerIconEnabled)
+                if liveCfg.timerIconEnabled then
+                    ApplyNativeCountdownStyle(btn._aishTimerCD, liveCfg, btn)
+                end
+            end
+        end
+    end
+end
+
+function ns.RepositionCircleBarsNativeGridPet()
+    local c = circleBarsFlowContainerPet
+    if not c then
+        if not AnyPetAuraInOrder(ns.slotOrderByDest and ns.slotOrderByDest.freebars) then return end
+        c = EnsureCircleBarsFlowContainerPet()
+    end
+    if not c then return end
+    local cfg = ns.db and ns.db.freebars or ns.Defaults.freebars
+
+    local maxBars = cfg.maxBars or 8
+    local bw, bh, gp, rg = cfg.barW or 45, cfg.barH or 3, cfg.gap or 50, cfg.rowGap or 6
+    local rowW = bw * 2 + gp * 2
+    pcall(c.SetSize, c, rowW, maxBars * (bh + rg))
+
+    c:ClearAllPoints()
+    if circleBarsFlowContainer then
+        c:SetPoint("TOP", circleBarsFlowContainer, "BOTTOM", 0, -rg)
+    else
+        c:SetPoint("CENTER", UIParent, "CENTER", cfg.x or 0, (cfg.y or -218) - maxBars * (bh + rg))
+    end
+
+    -- Position libre (Alt+clic gauche) : prioritaire sur l'empilement par defaut, sinon
+    -- chaque rebuild de whitelist ramenerait la grille sous la grille cible.
+    do
+        local cfgPos = ns.db and ns.db.freebars
+        if cfgPos and cfgPos.petX and cfgPos.petY then
+            c:ClearAllPoints()
+            c:SetPoint("CENTER", UIParent, "CENTER", cfgPos.petX, cfgPos.petY)
+        end
+    end
+
+    local okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, "TOP")
+    local okX, errX = pcall(c.SetFlowLayoutAxis, c, 1)
+    local okG, errG = pcall(c.SetFlowLayoutGrowthDirection, c, 1, -1)
+    local okM, errM = pcall(c.SetFlowLayoutMaximumLineSize, c, maxBars * (bh + rg) + rg)
+    if not (okA and okX and okG and okM) then
+        CBDBG(string.format("|cffff4444RepositionCircleBarsNativeGridPet: SetFlowLayout* a echoue -- anchor=%s axis=%s growth=%s maxline=%s|r",
+            okA and "ok" or tostring(errA), okX and "ok" or tostring(errX), okG and "ok" or tostring(errG), okM and "ok" or tostring(errM)))
+    end
+
+    local visible = (ns.db == nil or ns.db.freebarsEnabled ~= false) and not (ns.db and ns.db.useNativeCDM)
+    if visible and not (ns.IsAuraHidingContext and ns.IsAuraHidingContext()) then
+        c:SetAlpha(1)
+    else
+        c:SetAlpha(0)
+    end
+    pcall(ns.RefreshCircleBarsNativeGridStylePet)
+end
+
+-- Cree (une seule fois par sort) un AddAuraGroup dedie par aura du familier de "Circle Bars",
+-- SetUnit("pet")+"HELPFUL". Appelee depuis Whitelist.lua juste apres ns.EnsureCircleBarsNativeGrid.
+function ns.EnsureCircleBarsNativeGridPet()
+    if InCombatLockdown and InCombatLockdown() then return end
+    if not AnyPetAuraInOrder(ns.slotOrderByDest and ns.slotOrderByDest.freebars) then return end
+    local c = EnsureCircleBarsFlowContainerPet()
+    if not c then return end
+
+    local order = ns.slotOrderByDest and ns.slotOrderByDest.freebars
+    if not order or #order == 0 then return end
+
+    local cfg = ns.db and ns.db.freebars or ns.Defaults.freebars
+    local maxBars = cfg.maxBars or 8
+    local bw, bh, gp, rg = cfg.barW or 45, cfg.barH or 3, cfg.gap or 50, cfg.rowGap or 6
+    local rowStep = bh + rg
+    local spells = ns.GetSpecSpells()
+
+    local wl = ns.whitelistByDest and ns.whitelistByDest.freebars
+    local seenInfo, capState = {}, { count = 0 }
+    local currentSet = {}
+    for _, spellID in ipairs(order) do
+        local info = spells and spells[spellID]
+        if info and ns.GetPetAuraUnit and ns.GetPetAuraUnit(spellID) then
+            if not AllowNextCapSlot(wl, spellID, maxBars, seenInfo, capState) then break end
+            currentSet[spellID] = true
+            if not circleBarsPerSpellGroupsPet[spellID] then
+                local groupKey = "aishCircleBarsFlowPet_" .. tostring(spellID)
+                local okAdd, errAdd = pcall(function()
+                    c:AddAuraGroup(groupKey, "HELPFUL", {
+                        maxFrameCount = 1,
+                        candidateFilters = { includeSpellIDs = { [spellID] = true } },
+                        layout = {
+                            elementSpacing = rowStep,
+                            lineSpacing = rowStep,
+                            elementWidth = bw * 2 + gp * 2,
+                            elementHeight = bh,
+                            layoutIndex = 1,
+                        },
+                        initializeFrame = function(auraButton)
+                            local okCheck, canAccess = pcall(function()
+                                return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
+                            end)
+                            if not (okCheck and canAccess) then return end
+                            local okBuild, errBuild = pcall(function()
+                                local liveCfg = ns.db and ns.db.freebars or ns.Defaults.freebars
+                                local lbw, lbh, lgp = liveCfg.barW or 45, liveCfg.barH or 3, liveCfg.gap or 50
+                                local liveSpells = ns.GetSpecSpells()
+                                local liveSi = ns.GetStyleInfo(spellID)
+                                auraButton._aishSpellID = spellID
+                                auraButton:SetSize(lbw * 2 + lgp * 2, lbh)
+
+                                local tex = ns.ResolveBarTexFromKey(liveCfg.texture)
+                                local bgR = liveCfg.barBgR or 0; local bgG = liveCfg.barBgG or 0
+                                local bgB = liveCfg.barBgB or 0; local bgA = liveCfg.barBgAlpha or 0
+
+                                local barL = CreateFrame("StatusBar", nil, auraButton)
+                                barL:SetSize(lbw, lbh)
+                                barL:SetPoint("RIGHT", auraButton, "CENTER", -lgp, 0)
+                                barL:SetStatusBarTexture(tex)
+                                barL:SetReverseFill(true)
+                                local barLR, barLG, barLB = CBApplySpellColor(barL, liveCfg, spellID, liveSi)
+                                local bgL = barL:CreateTexture(nil, "BACKGROUND")
+                                bgL:SetAllPoints(); bgL:SetColorTexture(bgR, bgG, bgB, bgA)
+                                auraButton._aishBarL = barL
+                                auraButton._aishBgL = bgL
+
+                                local barR = CreateFrame("StatusBar", nil, auraButton)
+                                barR:SetSize(lbw, lbh)
+                                barR:SetPoint("LEFT", auraButton, "CENTER", lgp, 0)
+                                barR:SetStatusBarTexture(tex)
+                                local barRR, barRG, barRB = CBApplySpellColor(barR, liveCfg, spellID, liveSi)
+                                local bgR2 = barR:CreateTexture(nil, "BACKGROUND")
+                                bgR2:SetAllPoints(); bgR2:SetColorTexture(bgR, bgG, bgB, bgA)
+                                auraButton._aishBarR = barR
+                                auraButton._aishBgR = bgR2
+
+                                local durOpts = { direction = Enum.StatusBarTimerDirection.RemainingTime }
+                                local okBarL, errBarL = pcall(auraButton.SetDurationBar, auraButton, barL, durOpts)
+                                local okBarR, errBarR = pcall(auraButton.SetDurationBar, auraButton, barR, durOpts)
+                                if not okBarL then CBDBG(string.format("|cffff4444initializeFrame cible (Circle Bars, sort %d): SetDurationBar(barL) a echoue -- err=%s|r", spellID, tostring(errBarL))) end
+                                if not okBarR then CBDBG(string.format("|cffff4444initializeFrame cible (Circle Bars, sort %d): SetDurationBar(barR) a echoue -- err=%s|r", spellID, tostring(errBarR))) end
+
+                                auraButton._aishSparkL = MakeNativeBarSpark(barL, liveCfg, "LEFT", {barLR, barLG, barLB})
+                                auraButton._aishSparkR = MakeNativeBarSpark(barR, liveCfg, "RIGHT", {barRR, barRG, barRB})
+
+                                local timerCD = CreateFrame("Cooldown", nil, auraButton, "CooldownFrameTemplate")
+                                timerCD:SetAllPoints(auraButton)
+                                timerCD:SetDrawSwipe(false); timerCD:SetDrawEdge(false); timerCD:SetDrawBling(false)
+                                timerCD:EnableMouse(false)
+                                local okTimerCD, errTimerCD = pcall(auraButton.SetDurationCooldown, auraButton, timerCD)
+                                if not okTimerCD then
+                                    CBDBG(string.format("|cffff4444initializeFrame cible (Circle Bars, sort %d): SetDurationCooldown(timerCD) a echoue -- err=%s|r", spellID, tostring(errTimerCD)))
+                                end
+                                timerCD:SetHideCountdownNumbers(not liveCfg.timerIconEnabled)
+                                auraButton._aishTimerCD = timerCD
+                                if liveCfg.timerIconEnabled then
+                                    pcall(ApplyNativeCountdownStyle, timerCD, liveCfg, auraButton)
+                                end
+
+                                -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                                -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                                -- redondants). No-op dans le cas nominal.
+                                if not auraButton._aishPooled then
+                                    auraButton._aishPooled = true
+                                    circleBarsFlowButtonsPet[#circleBarsFlowButtonsPet + 1] = auraButton
+                                end
+                            end)
+                            if not okBuild then
+                                CBDBG(string.format("|cffff4444initializeFrame cible (Circle Bars, sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
+                            end
+                        end,
+                    })
+                end)
+                if not okAdd then
+                    CBDBG(string.format("|cffff4444AddAuraGroup DEDIE cible (Circle Bars, sort %d) a echoue -- err=%s|r", spellID, tostring(errAdd)))
+                end
+                circleBarsPerSpellGroupsPet[spellID] = true
+                if c.UpdateAllAuras then
+                    local okUpd, errUpd = pcall(c.UpdateAllAuras, c)
+                    if not okUpd then CBDBG(string.format("|cffff4444UpdateAllAuras cible (Circle Bars, sort %d) a echoue -- err=%s|r", spellID, tostring(errUpd))) end
+                end
+            else
+                pcall(c.SetAuraGroupCandidateFilters, c, "aishCircleBarsFlowPet_" .. tostring(spellID), { includeSpellIDs = { [spellID] = true } })
+            end
+        end
+    end
+
+    for spellID in pairs(circleBarsPerSpellGroupsPet) do
+        if not currentSet[spellID] then
+            local groupKey = "aishCircleBarsFlowPet_" .. tostring(spellID)
+            pcall(c.SetAuraGroupCandidateFilters, c, groupKey, { includeSpellIDs = { [0] = true } })
+        end
+    end
+end
+
+local circleBarsPetChangeFrame = CreateFrame("Frame")
+circleBarsPetChangeFrame:RegisterEvent("UNIT_PET")
+circleBarsPetChangeFrame:SetScript("OnEvent", function()
+    if circleBarsFlowContainerPet and circleBarsFlowContainerPet.UpdateAllAuras then
+        pcall(circleBarsFlowContainerPet.UpdateAllAuras, circleBarsFlowContainerPet)
+    end
+end)
+
 
 -- Grille native pour "Free Bars" (Cooldowns.lua, cle interne circlebars -- l'onglet GUI "Free Bars" est
 -- backe par Cooldowns.lua/circlebars, PAS Buffs.lua/freebars qui est "Circle Bars"). Meme methodologie
@@ -3347,6 +4237,444 @@ freeBarsTargetChangeFrame:SetScript("OnEvent", function()
     end
 end)
 
+-- Grille native familier pour "Free Bars" -- declinaison du miroir cible ci-dessus. Un AuraContainer
+-- n'ayant qu'un seul SetUnit, une aura qui vit sur le familier (Sombre transformation, cf.
+-- ns.PetAuraSpells) n'est candidate d'aucun conteneur joueur : il lui faut le sien, SetUnit("pet")
+-- + "HELPFUL". Ne route que les sorts declares dans ns.PetAuraSpells. Mele au flow des buffs joueur
+-- est impossible (le flow layout appartient au conteneur) : empile par defaut sous la grille cible,
+-- et devient librement placable des le premier Alt+clic gauche (cfg.petX/petY).
+local freeBarsFlowContainerPet
+local freeBarsFlowButtonsPet = {}
+local freeBarsPerSpellGroupsPet = {}
+
+function ns.GetFreeBarsNativeContainerPet()
+    return freeBarsFlowContainerPet
+end
+
+local function EnsureFreeBarsFlowContainerPet()
+    if freeBarsFlowContainerPet then return freeBarsFlowContainerPet end
+    if InCombatLockdown and InCombatLockdown() then return nil end
+    local ok, result = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+    if not ok or not result then
+        FBDBG(string.format("|cffff4444EnsureFreeBarsFlowContainerPet: CreateFrame AuraContainer a echoue -- ok=%s result=%s|r", tostring(ok), tostring(result)))
+        return nil
+    end
+    freeBarsFlowContainerPet = result
+
+    local cfg0 = ns.db and ns.db.circlebars or ns.Defaults.circlebars
+    local maxBars0 = cfg0.maxBars or 8
+    local iw0 = cfg0.hideIcon and 0 or (cfg0.iconW or 28)
+    local gp0 = cfg0.hideIcon and 0 or (cfg0.gap or 3)
+    local bw0, bh0, ih0, rg0 = cfg0.barW or 147, cfg0.barH or 4, cfg0.iconH or 19, cfg0.rowGap or 1
+    local layout0 = cfg0.layout or "side_large"
+    local rowW0, rowH0
+    if layout0 == "side_compact" then rowW0 = bw0*2+iw0+gp0*2; rowH0 = ih0
+    elseif layout0 == "side_banner" then rowW0 = (cfg0.hideIcon and bw0 or iw0); rowH0 = ih0 + gp0 + bh0
+    else rowW0 = iw0 + gp0 + bw0; rowH0 = ih0 end
+    local growth0 = cfg0.growth or "DOWN"
+    local isH0 = (growth0 == "LEFT" or growth0 == "RIGHT")
+    if isH0 then freeBarsFlowContainerPet:SetSize(maxBars0 * (rowW0 + rg0), rowH0)
+    else freeBarsFlowContainerPet:SetSize(rowW0, maxBars0 * (rowH0 + rg0)) end
+    freeBarsFlowContainerPet:SetFrameStrata("MEDIUM")
+
+    -- Position reelle ici, avant AddAuraGroup/UpdateAllAuras (meme regle que le conteneur joueur) --
+    -- ancre sous/a cote du conteneur joueur selon la direction de croissance, sinon position de repli.
+    if freeBarsFlowContainer then
+        if growth0 == "UP" then freeBarsFlowContainerPet:SetPoint("BOTTOM", freeBarsFlowContainer, "TOP", 0, rg0)
+        elseif growth0 == "LEFT" then freeBarsFlowContainerPet:SetPoint("RIGHT", freeBarsFlowContainer, "LEFT", -rg0, 0)
+        elseif growth0 == "RIGHT" then freeBarsFlowContainerPet:SetPoint("LEFT", freeBarsFlowContainer, "RIGHT", rg0, 0)
+        else freeBarsFlowContainerPet:SetPoint("TOP", freeBarsFlowContainer, "BOTTOM", 0, -rg0) end
+    else
+        local x0, y0 = cfg0.x or -502, cfg0.y or 0
+        if growth0 == "UP" then freeBarsFlowContainerPet:SetPoint("BOTTOM", UIParent, "CENTER", x0, y0 + maxBars0 * (rowH0 + rg0))
+        elseif growth0 == "LEFT" then freeBarsFlowContainerPet:SetPoint("RIGHT", UIParent, "CENTER", x0 - maxBars0 * (rowW0 + rg0), y0)
+        elseif growth0 == "RIGHT" then freeBarsFlowContainerPet:SetPoint("LEFT", UIParent, "CENTER", x0 + maxBars0 * (rowW0 + rg0), y0)
+        else freeBarsFlowContainerPet:SetPoint("TOP", UIParent, "CENTER", x0, y0 - maxBars0 * (rowH0 + rg0)) end
+    end
+
+    local okEn, errEn = pcall(freeBarsFlowContainerPet.SetEnabled, freeBarsFlowContainerPet, true)
+    local okUn, errUn = pcall(freeBarsFlowContainerPet.SetUnit, freeBarsFlowContainerPet, "pet")
+    if not okEn or not okUn then
+        FBDBG(string.format("|cffff4444EnsureFreeBarsFlowContainerPet: SetEnabled ok=%s%s | SetUnit ok=%s%s|r",
+            tostring(okEn), okEn and "" or (" err="..tostring(errEn)),
+            tostring(okUn), okUn and "" or (" err="..tostring(errUn))))
+    end
+
+    -- Position libre : des que l'utilisateur a deplace cette grille une fois (Alt+clic gauche), sa
+    -- position prend le pas sur l'empilement par defaut. C'est le seul moyen de la coller au bout de
+    -- la pile des buffs joueur, un meme flow ne pouvant pas melanger deux unites.
+    do
+        local cfgPos = ns.db and ns.db.circlebars
+        if cfgPos and cfgPos.petX and cfgPos.petY then
+            freeBarsFlowContainerPet:ClearAllPoints()
+            freeBarsFlowContainerPet:SetPoint("CENTER", UIParent, "CENTER", cfgPos.petX, cfgPos.petY)
+        end
+    end
+    freeBarsFlowContainerPet:SetMovable(true)
+    freeBarsFlowContainerPet:SetClampedToScreen(true)
+    if _addon.EnableMouseOnlyOnAlt then _addon.EnableMouseOnlyOnAlt(freeBarsFlowContainerPet) end
+    freeBarsFlowContainerPet:SetPropagateMouseClicks(true)
+    freeBarsFlowContainerPet:SetScript("OnMouseDown", function(s, b)
+        if b == "LeftButton" and IsAltKeyDown() then s:StartMoving() end
+    end)
+    freeBarsFlowContainerPet:SetScript("OnMouseUp", function(s)
+        s:StopMovingOrSizing()
+        -- GetCenter()/GetEffectiveScale() peuvent renvoyer secret une fois le conteneur lie a une
+        -- vraie aura : abandon silencieux plutot que crash, meme garde que la grille joueur.
+        pcall(function()
+            local cx, cy = s:GetCenter()
+            if not (cx and cy) then return end
+            local cfgSave = ns.db and ns.db.circlebars
+            if not cfgSave then return end
+            local sc = s:GetEffectiveScale() / UIParent:GetEffectiveScale()
+            cfgSave.petX = cx * sc - GetScreenWidth() / 2
+            cfgSave.petY = cy * sc - GetScreenHeight() / 2
+            s:ClearAllPoints()
+            s:SetPoint("CENTER", UIParent, "CENTER", cfgSave.petX, cfgSave.petY)
+        end)
+    end)
+    freeBarsFlowContainerPet:Show()
+    return freeBarsFlowContainerPet
+end
+
+function ns.RefreshFreeBarsNativeGridStylePet()
+    if InCombatLockdown and InCombatLockdown() then return end
+    local liveCfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
+    local spells = ns.GetSpecSpells()
+    local iw = liveCfg.hideIcon and 0 or (liveCfg.iconW or 28)
+    local ih = liveCfg.iconH or 19
+    for _, btn in ipairs(freeBarsFlowButtonsPet) do
+        local okCheck, canAccess = pcall(function()
+            return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext()
+        end)
+        if okCheck and canAccess then
+            local si = ns.GetStyleInfo(btn._aishSpellID)
+            local cR, cG, cB = SpellBarColorRGB(liveCfg, si)
+            if btn._aishBarL then pcall(btn._aishBarL.SetStatusBarColor, btn._aishBarL, cR, cG, cB) end
+            if btn._aishBarR then pcall(btn._aishBarR.SetStatusBarColor, btn._aishBarR, cR, cG, cB) end
+            if btn._aishBar then pcall(btn._aishBar.SetStatusBarColor, btn._aishBar, cR, cG, cB) end
+            if btn._aishSparkL then pcall(ApplyNativeBarSparkColor, btn._aishSparkL, liveCfg, {cR, cG, cB}) end
+            if btn._aishSparkR then pcall(ApplyNativeBarSparkColor, btn._aishSparkR, liveCfg, {cR, cG, cB}) end
+            if btn._aishSpark then pcall(ApplyNativeBarSparkColor, btn._aishSpark, liveCfg, {cR, cG, cB}) end
+            if btn._aishGlowAnchor then
+                if ns.HideGlow then pcall(ns.HideGlow, btn._aishGlowAnchor) end
+                pcall(ApplySpellGlow, btn._aishGlowAnchor, liveCfg, si, iw, ih)
+            end
+            if btn._aishCD then
+                pcall(btn._aishCD.SetHideCountdownNumbers, btn._aishCD, not liveCfg.timerIconEnabled)
+                if liveCfg.timerIconEnabled then
+                    ApplyNativeCountdownStyle(btn._aishCD, liveCfg, btn._aishCD)
+                end
+            end
+        end
+    end
+end
+
+function ns.RepositionFreeBarsNativeGridPet()
+    local c = freeBarsFlowContainerPet
+    if not c then
+        if not AnyPetAuraInOrder(ns.slotOrderByDest and ns.slotOrderByDest.circlebars) then return end
+        c = EnsureFreeBarsFlowContainerPet()
+    end
+    if not c then return end
+    local cfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
+
+    local maxBars = cfg.maxBars or 8
+    local iw = cfg.hideIcon and 0 or (cfg.iconW or 28)
+    local gp = cfg.hideIcon and 0 or (cfg.gap or 3)
+    local bw, bh, ih, rg = cfg.barW or 147, cfg.barH or 4, cfg.iconH or 19, cfg.rowGap or 1
+    local layout = cfg.layout or "side_large"
+    local rowW, rowH
+    if layout == "side_compact" then rowW = bw*2+iw+gp*2; rowH = ih
+    elseif layout == "side_banner" then rowW = (cfg.hideIcon and bw or iw); rowH = ih + gp + bh
+    else rowW = iw + gp + bw; rowH = ih end
+    local growth = cfg.growth or "DOWN"
+    local isH = (growth == "LEFT" or growth == "RIGHT")
+
+    if isH then pcall(c.SetSize, c, maxBars * (rowW + rg), rowH)
+    else pcall(c.SetSize, c, rowW, maxBars * (rowH + rg)) end
+
+    c:ClearAllPoints()
+    if freeBarsFlowContainer then
+        if growth == "UP" then c:SetPoint("BOTTOM", freeBarsFlowContainer, "TOP", 0, rg)
+        elseif growth == "LEFT" then c:SetPoint("RIGHT", freeBarsFlowContainer, "LEFT", -rg, 0)
+        elseif growth == "RIGHT" then c:SetPoint("LEFT", freeBarsFlowContainer, "RIGHT", rg, 0)
+        else c:SetPoint("TOP", freeBarsFlowContainer, "BOTTOM", 0, -rg) end
+    else
+        local x, y = cfg.x or -502, cfg.y or 0
+        if growth == "UP" then c:SetPoint("BOTTOM", UIParent, "CENTER", x, y + maxBars * (rowH + rg))
+        elseif growth == "LEFT" then c:SetPoint("RIGHT", UIParent, "CENTER", x - maxBars * (rowW + rg), y)
+        elseif growth == "RIGHT" then c:SetPoint("LEFT", UIParent, "CENTER", x + maxBars * (rowW + rg), y)
+        else c:SetPoint("TOP", UIParent, "CENTER", x, y - maxBars * (rowH + rg)) end
+    end
+
+    -- Position libre (Alt+clic gauche) : prioritaire sur l'empilement par defaut, sinon
+    -- chaque rebuild de whitelist ramenerait la grille sous la grille cible.
+    do
+        local cfgPos = ns.db and ns.db.circlebars
+        if cfgPos and cfgPos.petX and cfgPos.petY then
+            c:ClearAllPoints()
+            c:SetPoint("CENTER", UIParent, "CENTER", cfgPos.petX, cfgPos.petY)
+        end
+    end
+
+    local anchorPoint, hDir, vDir, isHFlow = GrowthToFlowParams(growth)
+    local okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, anchorPoint)
+    local okX, errX = pcall(c.SetFlowLayoutAxis, c, isHFlow and 0 or 1)
+    local okG, errG = pcall(c.SetFlowLayoutGrowthDirection, c, hDir, vDir)
+    local itemSize = isH and rowW or rowH
+    local okM, errM = pcall(c.SetFlowLayoutMaximumLineSize, c, (itemSize + rg) * maxBars + rg)
+    if not (okA and okX and okG and okM) then
+        FBDBG(string.format("|cffff4444RepositionFreeBarsNativeGridPet: SetFlowLayout* a echoue -- anchor=%s axis=%s growth=%s maxline=%s|r",
+            okA and "ok" or tostring(errA), okX and "ok" or tostring(errX), okG and "ok" or tostring(errG), okM and "ok" or tostring(errM)))
+    end
+
+    local visible = (ns.db == nil or ns.db.circlebarsEnabled ~= false) and not (ns.db and ns.db.useNativeCDM)
+    if visible and not (ns.IsAuraHidingContext and ns.IsAuraHidingContext()) then
+        c:SetAlpha(1)
+    else
+        c:SetAlpha(0)
+    end
+    pcall(ns.RefreshFreeBarsNativeGridStylePet)
+end
+
+-- Cree (une seule fois par sort) un AddAuraGroup dedie par aura du familier de "Free Bars",
+-- SetUnit("pet")+"HELPFUL". Appelee depuis Whitelist.lua juste apres ns.EnsureFreeBarsNativeGrid.
+function ns.EnsureFreeBarsNativeGridPet()
+    if InCombatLockdown and InCombatLockdown() then return end
+    if not AnyPetAuraInOrder(ns.slotOrderByDest and ns.slotOrderByDest.circlebars) then return end
+    local c = EnsureFreeBarsFlowContainerPet()
+    if not c then return end
+
+    local order = ns.slotOrderByDest and ns.slotOrderByDest.circlebars
+    if not order or #order == 0 then return end
+
+    local cfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
+    local maxBars = cfg.maxBars or 8
+    local iw = cfg.hideIcon and 0 or (cfg.iconW or 28)
+    local gp = cfg.hideIcon and 0 or (cfg.gap or 3)
+    local bw, bh, ih, rg = cfg.barW or 147, cfg.barH or 4, cfg.iconH or 19, cfg.rowGap or 1
+    local layout = cfg.layout or "side_large"
+    local rowW, rowH
+    if layout == "side_compact" then rowW = bw*2+iw+gp*2; rowH = ih
+    elseif layout == "side_banner" then rowW = (cfg.hideIcon and bw or iw); rowH = ih + gp + bh
+    else rowW = iw + gp + bw; rowH = ih end
+    local spells = ns.GetSpecSpells()
+
+    local wl = ns.whitelistByDest and ns.whitelistByDest.circlebars
+    local seenInfo, capState = {}, { count = 0 }
+    local currentSet = {}
+    for _, spellID in ipairs(order) do
+        local info = spells and spells[spellID]
+        if info and ns.GetPetAuraUnit and ns.GetPetAuraUnit(spellID) then
+            if not AllowNextCapSlot(wl, spellID, maxBars, seenInfo, capState) then break end
+            currentSet[spellID] = true
+            if not freeBarsPerSpellGroupsPet[spellID] then
+                local groupKey = "aishFreeBarsFlowPet_" .. tostring(spellID)
+                local si = ns.GetStyleInfo(spellID)
+                local okAdd, errAdd = pcall(function()
+                    c:AddAuraGroup(groupKey, "HELPFUL", {
+                        maxFrameCount = 1,
+                        candidateFilters = { includeSpellIDs = { [spellID] = true } },
+                        layout = { elementSpacing = rg, lineSpacing = rg, elementWidth = rowW, elementHeight = rowH, layoutIndex = 1 },
+                        initializeFrame = function(auraButton)
+                            local okCheck, canAccess = pcall(function()
+                                return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
+                            end)
+                            if not (okCheck and canAccess) then return end
+                            local okBuild, errBuild = pcall(function()
+                                local liveCfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
+                                local liveSpells = ns.GetSpecSpells()
+                                local liveSi = ns.GetStyleInfo(spellID)
+                                auraButton._aishSpellID = spellID
+                                auraButton:SetSize(rowW, rowH)
+
+                                local icon, cd, stackFS
+                                if not liveCfg.hideIcon then
+                                    icon = auraButton:CreateTexture(nil, "ARTWORK")
+                                    if layout == "side_banner" then
+                                        icon:SetSize(iw, ih)
+                                        icon:SetPoint("TOP", auraButton, "TOP", 0, 0)
+                                    elseif layout == "side_compact" then
+                                        icon:SetSize(iw, ih)
+                                        icon:SetPoint("CENTER", auraButton, "CENTER", 0, 0)
+                                    else
+                                        icon:SetSize(iw, ih)
+                                        if (liveCfg.iconPos or "RIGHT") == "RIGHT" then
+                                            icon:SetPoint("RIGHT", auraButton, "RIGHT", 0, 0)
+                                        else
+                                            icon:SetPoint("LEFT", auraButton, "LEFT", 0, 0)
+                                        end
+                                    end
+                                    do
+                                        local TC = 0.07
+                                        local usable = 1 - 2 * TC
+                                        if iw > ih then
+                                            local vSpan = (ih / iw) * usable
+                                            icon:SetTexCoord(TC, 1 - TC, 0.5 - vSpan * 0.5, 0.5 + vSpan * 0.5)
+                                        elseif ih > iw then
+                                            local uSpan = (iw / ih) * usable
+                                            icon:SetTexCoord(0.5 - uSpan * 0.5, 0.5 + uSpan * 0.5, TC, 1 - TC)
+                                        else
+                                            icon:SetTexCoord(TC, 1 - TC, TC, 1 - TC)
+                                        end
+                                    end
+                                    auraButton:SetIcon(icon)
+
+                                    local border = auraButton:CreateTexture(nil, "BACKGROUND")
+                                    border:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
+                                    border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
+                                    border:SetColorTexture(14/255, 14/255, 14/255, 1)
+
+                                    local glowAnchor = CreateFrame("Frame", nil, auraButton)
+                                    glowAnchor:SetAllPoints(icon)
+                                    auraButton._aishGlowAnchor = glowAnchor
+
+                                    cd = CreateFrame("Cooldown", nil, auraButton, "CooldownFrameTemplate")
+                                    cd:SetAllPoints(icon)
+                                    cd:SetReverse(true)
+                                    auraButton:SetDurationCooldown(cd)
+                                    auraButton._aishCD = cd
+
+                                    stackFS = auraButton:CreateFontString(nil, "OVERLAY", nil, 7)
+                                    ns.ApplyFont(stackFS, liveCfg.stackFont or ns.Media.font, liveCfg.stackSize or 10, "OUTLINE")
+                                    stackFS:SetPoint(liveCfg.stackPos or "BOTTOMRIGHT", icon, liveCfg.stackPos or "BOTTOMRIGHT", liveCfg.stackOffX or 0, liveCfg.stackOffY or 0)
+                                    stackFS:SetJustifyH("RIGHT")
+                                    stackFS:SetTextColor(liveCfg.stackColorR or 1, liveCfg.stackColorG or 1, liveCfg.stackColorB or 1)
+                                    auraButton:SetApplicationCount(stackFS, {})
+                                    auraButton._aishStackFS = stackFS
+                                end
+
+                                local barTex = ns.ResolveBarTexFromKey(liveCfg.texture)
+                                local barCR, barCG, barCB = SpellBarColorRGB(liveCfg, liveSi)
+                                local bgR = liveCfg.barBgR or 0; local bgG = liveCfg.barBgG or 0
+                                local bgB = liveCfg.barBgB or 0; local bgA = liveCfg.barBgAlpha or 0
+                                local durOpts = { direction = Enum.StatusBarTimerDirection.RemainingTime }
+
+                                local function MakeNativeBar(anchorFrom, relTo, relPoint, offX, offY, rev)
+                                    local bar = CreateFrame("StatusBar", nil, auraButton)
+                                    bar:SetSize(bw, bh)
+                                    bar:SetPoint(anchorFrom, relTo, relPoint, offX, offY)
+                                    bar:SetStatusBarTexture(barTex)
+                                    bar:SetStatusBarColor(barCR, barCG, barCB)
+                                    if rev then bar:SetReverseFill(true) end
+                                    local bg = bar:CreateTexture(nil, "BACKGROUND")
+                                    bg:SetAllPoints(); bg:SetColorTexture(bgR, bgG, bgB, bgA)
+                                    local okBar, errBar = pcall(auraButton.SetDurationBar, auraButton, bar, durOpts)
+                                    if not okBar then FBDBG(string.format("|cffff4444initializeFrame cible (Free Bars, sort %d): SetDurationBar a echoue -- err=%s|r", spellID, tostring(errBar))) end
+                                    local spark = MakeNativeBarSpark(bar, liveCfg, rev and "LEFT" or "RIGHT", {barCR, barCG, barCB})
+                                    return bar, spark
+                                end
+
+                                if layout == "side_compact" then
+                                    local anchorRef = liveCfg.hideIcon and auraButton or icon
+                                    local relPointL = liveCfg.hideIcon and "CENTER" or "LEFT"
+                                    local relPointR = liveCfg.hideIcon and "CENTER" or "RIGHT"
+                                    auraButton._aishBarL, auraButton._aishSparkL = MakeNativeBar("RIGHT", anchorRef, relPointL, -gp, 0, true)
+                                    auraButton._aishBarR, auraButton._aishSparkR = MakeNativeBar("LEFT", anchorRef, relPointR, gp, 0, false)
+                                elseif layout == "side_banner" then
+                                    local bannerBarW = liveCfg.hideIcon and bw or iw
+                                    local bar = CreateFrame("StatusBar", nil, auraButton)
+                                    bar:SetSize(bannerBarW, bh)
+                                    if liveCfg.hideIcon then
+                                        bar:SetPoint("TOP", auraButton, "TOP", 0, 0)
+                                    else
+                                        bar:SetPoint("TOP", icon, "BOTTOM", 0, -gp)
+                                    end
+                                    bar:SetStatusBarTexture(barTex)
+                                    bar:SetStatusBarColor(barCR, barCG, barCB)
+                                    local isRev = liveCfg.reverse == true
+                                    bar:SetReverseFill(isRev)
+                                    local bg = bar:CreateTexture(nil, "BACKGROUND")
+                                    bg:SetAllPoints(); bg:SetColorTexture(bgR, bgG, bgB, bgA)
+                                    local okBar, errBar = pcall(auraButton.SetDurationBar, auraButton, bar, durOpts)
+                                    if not okBar then FBDBG(string.format("|cffff4444initializeFrame cible (Free Bars, sort %d): SetDurationBar a echoue -- err=%s|r", spellID, tostring(errBar))) end
+                                    auraButton._aishBar = bar
+                                    auraButton._aishSpark = MakeNativeBarSpark(bar, liveCfg, isRev and "LEFT" or "RIGHT", {barCR, barCG, barCB})
+                                else
+                                    -- Vanguard : cf. bloc jumeau plus haut, sens de remplissage
+                                    -- toujours derive de iconPos.
+                                    local iconR = (liveCfg.iconPos or "RIGHT") == "RIGHT"
+                                    local bar = CreateFrame("StatusBar", nil, auraButton)
+                                    bar:SetSize(bw, bh)
+                                    if liveCfg.hideIcon then
+                                        bar:SetPoint(iconR and "RIGHT" or "LEFT", auraButton, iconR and "RIGHT" or "LEFT", 0, 0)
+                                    elseif iconR then
+                                        bar:SetPoint("RIGHT", icon, "LEFT", -gp, 0)
+                                    else
+                                        bar:SetPoint("LEFT", icon, "RIGHT", gp, 0)
+                                    end
+                                    bar:SetStatusBarTexture(barTex)
+                                    bar:SetStatusBarColor(barCR, barCG, barCB)
+                                    local isRev = iconR
+                                    bar:SetReverseFill(isRev)
+                                    local bg = bar:CreateTexture(nil, "BACKGROUND")
+                                    bg:SetAllPoints(); bg:SetColorTexture(bgR, bgG, bgB, bgA)
+                                    local okBar, errBar = pcall(auraButton.SetDurationBar, auraButton, bar, durOpts)
+                                    if not okBar then FBDBG(string.format("|cffff4444initializeFrame cible (Free Bars, sort %d): SetDurationBar a echoue -- err=%s|r", spellID, tostring(errBar))) end
+                                    auraButton._aishBar = bar
+                                    auraButton._aishSpark = MakeNativeBarSpark(bar, liveCfg, isRev and "LEFT" or "RIGHT", {barCR, barCG, barCB})
+                                end
+
+                                if cd then
+                                    cd:SetDrawSwipe(liveCfg.swipeEnabled == true)
+                                    cd:SetDrawEdge(liveCfg.swipeEnabled == true)
+                                    cd:SetHideCountdownNumbers(liveCfg.timerIconEnabled ~= true)
+                                    if liveCfg.timerIconEnabled then
+                                        ApplyNativeCountdownStyle(cd, liveCfg, icon or auraButton)
+                                    end
+                                end
+
+                                if icon then
+                                    ApplySpellGlow(auraButton._aishGlowAnchor, liveCfg, liveSi, iw, ih)
+                                    PlayProcStartOnce(auraButton._aishGlowAnchor, liveSi, spellID)
+                                end
+
+                                -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                                -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                                -- redondants). No-op dans le cas nominal.
+                                if not auraButton._aishPooled then
+                                    auraButton._aishPooled = true
+                                    freeBarsFlowButtonsPet[#freeBarsFlowButtonsPet + 1] = auraButton
+                                end
+                            end)
+                            if not okBuild then
+                                FBDBG(string.format("|cffff4444initializeFrame cible (Free Bars, sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
+                            end
+                        end,
+                    })
+                end)
+                if not okAdd then
+                    FBDBG(string.format("|cffff4444AddAuraGroup DEDIE cible (Free Bars, sort %d) a echoue -- err=%s|r", spellID, tostring(errAdd)))
+                end
+                freeBarsPerSpellGroupsPet[spellID] = true
+                if c.UpdateAllAuras then
+                    local okUpd, errUpd = pcall(c.UpdateAllAuras, c)
+                    if not okUpd then FBDBG(string.format("|cffff4444UpdateAllAuras cible (Free Bars, sort %d) a echoue -- err=%s|r", spellID, tostring(errUpd))) end
+                end
+            else
+                pcall(c.SetAuraGroupCandidateFilters, c, "aishFreeBarsFlowPet_" .. tostring(spellID), { includeSpellIDs = { [spellID] = true } })
+            end
+        end
+    end
+
+    for spellID in pairs(freeBarsPerSpellGroupsPet) do
+        if not currentSet[spellID] then
+            local groupKey = "aishFreeBarsFlowPet_" .. tostring(spellID)
+            pcall(c.SetAuraGroupCandidateFilters, c, groupKey, { includeSpellIDs = { [0] = true } })
+        end
+    end
+end
+
+local freeBarsPetChangeFrame = CreateFrame("Frame")
+freeBarsPetChangeFrame:RegisterEvent("UNIT_PET")
+freeBarsPetChangeFrame:SetScript("OnEvent", function()
+    if freeBarsFlowContainerPet and freeBarsFlowContainerPet.UpdateAllAuras then
+        pcall(freeBarsFlowContainerPet.UpdateAllAuras, freeBarsFlowContainerPet)
+    end
+end)
+
+
 -- Icon List (GUI "Liste d'icones", Debuffs.lua, cle interne iconlist) : meme methodologie que
 -- Icons/Circle Bars/Free Bars. 2 dispositions (cfg.layout) : "center_mirror" (Aegis, defaut) : icone
 -- centree + 2 barres miroir (meme geometrie que Free Bars "side_compact") ; "center_dual" (Berserk) :
@@ -4098,6 +5426,402 @@ iconListTargetChangeFrame:SetScript("OnEvent", function()
     end
 end)
 
+-- Grille native familier pour "Liste d'icones" -- declinaison du miroir cible ci-dessus. Un AuraContainer
+-- n'ayant qu'un seul SetUnit, une aura qui vit sur le familier (Sombre transformation, cf.
+-- ns.PetAuraSpells) n'est candidate d'aucun conteneur joueur : il lui faut le sien, SetUnit("pet")
+-- + "HELPFUL". Ne route que les sorts declares dans ns.PetAuraSpells. Mele au flow des buffs joueur
+-- est impossible (le flow layout appartient au conteneur) : empile par defaut sous la grille cible,
+-- et devient librement placable des le premier Alt+clic gauche (cfg.petX/petY).
+local iconListFlowContainerPet
+local iconListFlowButtonsPet = {}
+local iconListPerSpellGroupsPet = {}
+local iconListDualCounterPet = 0
+
+function ns.GetIconListNativeContainerPet()
+    return iconListFlowContainerPet
+end
+
+local function EnsureIconListFlowContainerPet()
+    if iconListFlowContainerPet then return iconListFlowContainerPet end
+    if InCombatLockdown and InCombatLockdown() then return nil end
+    local ok, result = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+    if not ok or not result then
+        ILDBG(string.format("|cffff4444EnsureIconListFlowContainerPet: CreateFrame AuraContainer a echoue -- ok=%s result=%s|r", tostring(ok), tostring(result)))
+        return nil
+    end
+    iconListFlowContainerPet = result
+
+    local cfg0 = ns.db and ns.db.iconlist or ns.Defaults.iconlist
+    local bw0, bh0, iw0, ih0, gp0, pg0, rg0, layout0, isDual0, maxBars0, a0, b0 = IconListGeom(cfg0)
+    local growth0 = cfg0.growth or "DOWN"
+    if isDual0 then
+        iconListFlowContainerPet:SetSize(a0 * 2 + pg0, b0 * (ih0 + rg0))
+    else
+        local isH0 = (growth0 == "LEFT" or growth0 == "RIGHT")
+        if isH0 then iconListFlowContainerPet:SetSize(maxBars0 * (a0 + rg0), b0)
+        else iconListFlowContainerPet:SetSize(a0, maxBars0 * (b0 + rg0)) end
+    end
+    iconListFlowContainerPet:SetFrameStrata("BACKGROUND")
+
+    -- Position reelle ici, avant AddAuraGroup/UpdateAllAuras -- ancre sous/a cote du conteneur joueur
+    -- selon la direction de croissance, sinon position de repli.
+    if iconListFlowContainer then
+        if growth0 == "UP" then iconListFlowContainerPet:SetPoint("BOTTOM", iconListFlowContainer, "TOP", 0, rg0)
+        elseif growth0 == "LEFT" then iconListFlowContainerPet:SetPoint("RIGHT", iconListFlowContainer, "LEFT", -rg0, 0)
+        elseif growth0 == "RIGHT" then iconListFlowContainerPet:SetPoint("LEFT", iconListFlowContainer, "RIGHT", rg0, 0)
+        else iconListFlowContainerPet:SetPoint("TOP", iconListFlowContainer, "BOTTOM", 0, -rg0) end
+    else
+        local x0, y0 = cfg0.x or 0, cfg0.y or -290
+        local fallbackH0 = isDual0 and (b0 * (ih0 + rg0)) or ((growth0 == "LEFT" or growth0 == "RIGHT") and bh0 or (maxBars0 * (b0 + rg0)))
+        if growth0 == "UP" then iconListFlowContainerPet:SetPoint("BOTTOM", UIParent, "CENTER", x0, y0 + fallbackH0)
+        elseif growth0 == "LEFT" then iconListFlowContainerPet:SetPoint("RIGHT", UIParent, "CENTER", x0 - fallbackH0, y0)
+        elseif growth0 == "RIGHT" then iconListFlowContainerPet:SetPoint("LEFT", UIParent, "CENTER", x0 + fallbackH0, y0)
+        else iconListFlowContainerPet:SetPoint("TOP", UIParent, "CENTER", x0, y0 - fallbackH0) end
+    end
+
+    local okEn, errEn = pcall(iconListFlowContainerPet.SetEnabled, iconListFlowContainerPet, true)
+    local okUn, errUn = pcall(iconListFlowContainerPet.SetUnit, iconListFlowContainerPet, "pet")
+    if not okEn or not okUn then
+        ILDBG(string.format("|cffff4444EnsureIconListFlowContainerPet: SetEnabled ok=%s%s | SetUnit ok=%s%s|r",
+            tostring(okEn), okEn and "" or (" err="..tostring(errEn)),
+            tostring(okUn), okUn and "" or (" err="..tostring(errUn))))
+    end
+
+    -- Position libre : des que l'utilisateur a deplace cette grille une fois (Alt+clic gauche), sa
+    -- position prend le pas sur l'empilement par defaut. C'est le seul moyen de la coller au bout de
+    -- la pile des buffs joueur, un meme flow ne pouvant pas melanger deux unites.
+    do
+        local cfgPos = ns.db and ns.db.iconlist
+        if cfgPos and cfgPos.petX and cfgPos.petY then
+            iconListFlowContainerPet:ClearAllPoints()
+            iconListFlowContainerPet:SetPoint("CENTER", UIParent, "CENTER", cfgPos.petX, cfgPos.petY)
+        end
+    end
+    iconListFlowContainerPet:SetMovable(true)
+    iconListFlowContainerPet:SetClampedToScreen(true)
+    if _addon.EnableMouseOnlyOnAlt then _addon.EnableMouseOnlyOnAlt(iconListFlowContainerPet) end
+    iconListFlowContainerPet:SetPropagateMouseClicks(true)
+    iconListFlowContainerPet:SetScript("OnMouseDown", function(s, b)
+        if b == "LeftButton" and IsAltKeyDown() then s:StartMoving() end
+    end)
+    iconListFlowContainerPet:SetScript("OnMouseUp", function(s)
+        s:StopMovingOrSizing()
+        -- GetCenter()/GetEffectiveScale() peuvent renvoyer secret une fois le conteneur lie a une
+        -- vraie aura : abandon silencieux plutot que crash, meme garde que la grille joueur.
+        pcall(function()
+            local cx, cy = s:GetCenter()
+            if not (cx and cy) then return end
+            local cfgSave = ns.db and ns.db.iconlist
+            if not cfgSave then return end
+            local sc = s:GetEffectiveScale() / UIParent:GetEffectiveScale()
+            cfgSave.petX = cx * sc - GetScreenWidth() / 2
+            cfgSave.petY = cy * sc - GetScreenHeight() / 2
+            s:ClearAllPoints()
+            s:SetPoint("CENTER", UIParent, "CENTER", cfgSave.petX, cfgSave.petY)
+        end)
+    end)
+    iconListFlowContainerPet:Show()
+    return iconListFlowContainerPet
+end
+
+function ns.RefreshIconListNativeGridStylePet()
+    if InCombatLockdown and InCombatLockdown() then return end
+    local liveCfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
+    local spells = ns.GetSpecSpells()
+    local bw, bh, iw, ih = IconListGeom(liveCfg)
+    for _, btn in ipairs(iconListFlowButtonsPet) do
+        local okCheck, canAccess = pcall(function()
+            return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext()
+        end)
+        if okCheck and canAccess then
+            local si = ns.GetStyleInfo(btn._aishSpellID)
+            local cR, cG, cB = SpellBarColorRGB(liveCfg, si)
+            if btn._aishBarL then pcall(btn._aishBarL.SetStatusBarColor, btn._aishBarL, cR, cG, cB) end
+            if btn._aishBarR then pcall(btn._aishBarR.SetStatusBarColor, btn._aishBarR, cR, cG, cB) end
+            if btn._aishBar then pcall(btn._aishBar.SetStatusBarColor, btn._aishBar, cR, cG, cB) end
+            if btn._aishSparkL then pcall(ApplyNativeBarSparkColor, btn._aishSparkL, liveCfg, {cR, cG, cB}) end
+            if btn._aishSparkR then pcall(ApplyNativeBarSparkColor, btn._aishSparkR, liveCfg, {cR, cG, cB}) end
+            if btn._aishSpark then pcall(ApplyNativeBarSparkColor, btn._aishSpark, liveCfg, {cR, cG, cB}) end
+            if btn._aishGlowAnchor then
+                if ns.HideGlow then pcall(ns.HideGlow, btn._aishGlowAnchor) end
+                pcall(ApplySpellGlow, btn._aishGlowAnchor, liveCfg, si, iw, ih)
+            end
+            if btn._aishCD then
+                pcall(btn._aishCD.SetHideCountdownNumbers, btn._aishCD, not liveCfg.timerIconEnabled)
+                if liveCfg.timerIconEnabled then
+                    ApplyNativeCountdownStyle(btn._aishCD, liveCfg, btn._aishCD)
+                end
+            end
+        end
+    end
+end
+
+function ns.RepositionIconListNativeGridPet()
+    local c = iconListFlowContainerPet
+    if not c then
+        if not AnyPetAuraInOrder(ns.slotOrderByDest and ns.slotOrderByDest.iconlist) then return end
+        c = EnsureIconListFlowContainerPet()
+    end
+    if not c then return end
+    local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
+    local bw, bh, iw, ih, gp, pg, rg, layout, isDual, maxBars, a, b = IconListGeom(cfg)
+    local growth = cfg.growth or "DOWN"
+
+    if isDual then
+        pcall(c.SetSize, c, a * 2 + pg, b * (ih + rg))
+    else
+        local isH = (growth == "LEFT" or growth == "RIGHT")
+        if isH then pcall(c.SetSize, c, maxBars * (a + rg), b)
+        else pcall(c.SetSize, c, a, maxBars * (b + rg)) end
+    end
+
+    c:ClearAllPoints()
+    if iconListFlowContainer then
+        if growth == "UP" then c:SetPoint("BOTTOM", iconListFlowContainer, "TOP", 0, rg)
+        elseif growth == "LEFT" then c:SetPoint("RIGHT", iconListFlowContainer, "LEFT", -rg, 0)
+        elseif growth == "RIGHT" then c:SetPoint("LEFT", iconListFlowContainer, "RIGHT", rg, 0)
+        else c:SetPoint("TOP", iconListFlowContainer, "BOTTOM", 0, -rg) end
+    else
+        local x, y = cfg.x or 0, cfg.y or -290
+        local fallbackH = isDual and (b * (ih + rg)) or ((growth == "LEFT" or growth == "RIGHT") and bh or (maxBars * (b + rg)))
+        if growth == "UP" then c:SetPoint("BOTTOM", UIParent, "CENTER", x, y + fallbackH)
+        elseif growth == "LEFT" then c:SetPoint("RIGHT", UIParent, "CENTER", x - fallbackH, y)
+        elseif growth == "RIGHT" then c:SetPoint("LEFT", UIParent, "CENTER", x + fallbackH, y)
+        else c:SetPoint("TOP", UIParent, "CENTER", x, y - fallbackH) end
+    end
+
+    -- Position libre (Alt+clic gauche) : prioritaire sur l'empilement par defaut, sinon
+    -- chaque rebuild de whitelist ramenerait la grille sous la grille cible.
+    do
+        local cfgPos = ns.db and ns.db.iconlist
+        if cfgPos and cfgPos.petX and cfgPos.petY then
+            c:ClearAllPoints()
+            c:SetPoint("CENTER", UIParent, "CENTER", cfgPos.petX, cfgPos.petY)
+        end
+    end
+
+    local okA, okX, okG, okM, errA, errX, errG, errM
+    if isDual then
+        if growth == "UP" then
+            okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, "BOTTOMLEFT")
+            okG, errG = pcall(c.SetFlowLayoutGrowthDirection, c, 1, 1)
+        else
+            okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, "TOPLEFT")
+            okG, errG = pcall(c.SetFlowLayoutGrowthDirection, c, 1, -1)
+        end
+        okX, errX = pcall(c.SetFlowLayoutAxis, c, 0)
+        okM, errM = pcall(c.SetFlowLayoutMaximumLineSize, c, a * 2 + pg + 2)
+    else
+        local anchorPoint, hDir, vDir, isHFlow = GrowthToFlowParams(growth)
+        okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, anchorPoint)
+        okX, errX = pcall(c.SetFlowLayoutAxis, c, isHFlow and 0 or 1)
+        okG, errG = pcall(c.SetFlowLayoutGrowthDirection, c, hDir, vDir)
+        local itemSize = isHFlow and a or b
+        okM, errM = pcall(c.SetFlowLayoutMaximumLineSize, c, (itemSize + rg) * maxBars + rg)
+    end
+    if not (okA and okX and okG and okM) then
+        ILDBG(string.format("|cffff4444RepositionIconListNativeGridPet: SetFlowLayout* a echoue -- anchor=%s axis=%s growth=%s maxline=%s|r",
+            okA and "ok" or tostring(errA), okX and "ok" or tostring(errX), okG and "ok" or tostring(errG), okM and "ok" or tostring(errM)))
+    end
+
+    local visible = (ns.db == nil or ns.db.iconlistEnabled ~= false) and not (ns.db and ns.db.useNativeCDM)
+    if visible and not (ns.IsAuraHidingContext and ns.IsAuraHidingContext()) then
+        c:SetAlpha(1)
+    else
+        c:SetAlpha(0)
+    end
+    pcall(ns.RefreshIconListNativeGridStylePet)
+end
+
+-- Cree (une seule fois par sort) un AddAuraGroup dedie par aura du familier de "Liste d'icones",
+-- SetUnit("pet")+"HELPFUL". Appelee depuis Whitelist.lua juste apres ns.EnsureIconListNativeGrid.
+function ns.EnsureIconListNativeGridPet()
+    if InCombatLockdown and InCombatLockdown() then return end
+    if not AnyPetAuraInOrder(ns.slotOrderByDest and ns.slotOrderByDest.iconlist) then return end
+    local c = EnsureIconListFlowContainerPet()
+    if not c then return end
+
+    local order = ns.slotOrderByDest and ns.slotOrderByDest.iconlist
+    if not order or #order == 0 then return end
+
+    local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
+    local bw, bh, iw, ih, gp, pg, rg, layout, isDual, maxBars, a, b = IconListGeom(cfg)
+    local elemW, elemH = a, ih
+    local groupCap = isDual and (2 * b) or maxBars
+    local spells = ns.GetSpecSpells()
+
+    local wl = ns.whitelistByDest and ns.whitelistByDest.iconlist
+    local seenInfo, capState = {}, { count = 0 }
+    local currentSet = {}
+    for _, spellID in ipairs(order) do
+        local info = spells and spells[spellID]
+        if info and ns.GetPetAuraUnit and ns.GetPetAuraUnit(spellID) then
+            if not AllowNextCapSlot(wl, spellID, groupCap, seenInfo, capState) then break end
+            currentSet[spellID] = true
+            if not iconListPerSpellGroupsPet[spellID] then
+                local groupKey = "aishIconListFlowPet_" .. tostring(spellID)
+                local si = ns.GetStyleInfo(spellID)
+                local okAdd, errAdd = pcall(function()
+                    -- "HELPFUL" (pas juste "HARMFUL") : filtre standard Blizzard restreignant
+                    -- aux auras dont le joueur est la source (cf. PetAuras.lua "onlyPlayer"). Sans
+                    -- ca, candidateFilters seul etait insuffisant : un debuff ennemi etranger pouvait
+                    -- se lier au slot (bug "debuff parasite dans Liste d'icones").
+                    c:AddAuraGroup(groupKey, "HELPFUL", {
+                        maxFrameCount = 1,
+                        candidateFilters = { includeSpellIDs = { [spellID] = true } },
+                        layout = { elementSpacing = (isDual and pg or rg), lineSpacing = rg, elementWidth = elemW, elementHeight = elemH, layoutIndex = 1 },
+                        initializeFrame = function(auraButton)
+                            local okCheck, canAccess = pcall(function()
+                                return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
+                            end)
+                            if not (okCheck and canAccess) then return end
+                            local okBuild, errBuild = pcall(function()
+                                local liveCfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
+                                local liveSpells = ns.GetSpecSpells()
+                                local liveSi = ns.GetStyleInfo(spellID)
+                                auraButton._aishSpellID = spellID
+                                local lbw, lbh, liw, lih, lgp, lpg, lrg, llayout, lisDual = IconListGeom(liveCfg)
+                                auraButton:SetSize(elemW, elemH)
+
+                                local isLeft = true
+                                if lisDual then
+                                    iconListDualCounterPet = iconListDualCounterPet + 1
+                                    isLeft = (iconListDualCounterPet % 2 == 1)
+                                end
+
+                                local icon = auraButton:CreateTexture(nil, "ARTWORK")
+                                auraButton._aishIcon = icon  -- ref pour /aishdebug iconlistrows (comparer texture reelle vs spellID attendu)
+                                icon:SetSize(liw, lih)
+                                if lisDual then
+                                    icon:SetPoint(isLeft and "RIGHT" or "LEFT", auraButton, isLeft and "RIGHT" or "LEFT", 0, 0)
+                                else
+                                    icon:SetPoint("CENTER", auraButton, "CENTER", 0, 0)
+                                end
+                                do
+                                    local TC = 0.07
+                                    local usable = 1 - 2 * TC
+                                    if liw > lih then
+                                        local vSpan = (lih / liw) * usable
+                                        icon:SetTexCoord(TC, 1 - TC, 0.5 - vSpan * 0.5, 0.5 + vSpan * 0.5)
+                                    elseif lih > liw then
+                                        local uSpan = (liw / lih) * usable
+                                        icon:SetTexCoord(0.5 - uSpan * 0.5, 0.5 + uSpan * 0.5, TC, 1 - TC)
+                                    else
+                                        icon:SetTexCoord(TC, 1 - TC, TC, 1 - TC)
+                                    end
+                                end
+                                auraButton:SetIcon(icon)
+
+                                local border = auraButton:CreateTexture(nil, "BACKGROUND")
+                                border:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
+                                border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
+                                border:SetColorTexture(14/255, 14/255, 14/255, 1)
+
+                                local glowAnchor = CreateFrame("Frame", nil, auraButton)
+                                glowAnchor:SetAllPoints(icon)
+                                auraButton._aishGlowAnchor = glowAnchor
+
+                                local cd = CreateFrame("Cooldown", nil, auraButton, "CooldownFrameTemplate")
+                                cd:SetAllPoints(icon)
+                                cd:SetReverse(true)
+                                auraButton:SetDurationCooldown(cd)
+                                auraButton._aishCD = cd
+
+                                local stackFS = auraButton:CreateFontString(nil, "OVERLAY", nil, 7)
+                                ns.ApplyFont(stackFS, liveCfg.stackFont or ns.Media.font, liveCfg.stackSize or 10, "OUTLINE")
+                                stackFS:SetPoint(liveCfg.stackPos or "BOTTOMRIGHT", icon, liveCfg.stackPos or "BOTTOMRIGHT", liveCfg.stackOffX or 0, liveCfg.stackOffY or 0)
+                                stackFS:SetJustifyH("RIGHT")
+                                stackFS:SetTextColor(liveCfg.stackColorR or 1, liveCfg.stackColorG or 1, liveCfg.stackColorB or 1)
+                                auraButton:SetApplicationCount(stackFS, {})
+                                auraButton._aishStackFS = stackFS
+
+                                local barTex = ns.ResolveBarTexFromKey(liveCfg.texture)
+                                local barCR, barCG, barCB = SpellBarColorRGB(liveCfg, liveSi)
+                                local bgR = liveCfg.barBgR or 0; local bgG = liveCfg.barBgG or 0
+                                local bgB = liveCfg.barBgB or 0; local bgA = liveCfg.barBgAlpha or 0
+                                local durOpts = { direction = Enum.StatusBarTimerDirection.RemainingTime }
+
+                                local function MakeNativeBar(anchorFrom, relTo, relPoint, offX, offY, rev)
+                                    local bar = CreateFrame("StatusBar", nil, auraButton)
+                                    bar:SetSize(lbw, lbh)
+                                    bar:SetPoint(anchorFrom, relTo, relPoint, offX, offY)
+                                    bar:SetStatusBarTexture(barTex)
+                                    bar:SetStatusBarColor(barCR, barCG, barCB)
+                                    if rev then bar:SetReverseFill(true) end
+                                    local bg = bar:CreateTexture(nil, "BACKGROUND")
+                                    bg:SetAllPoints(); bg:SetColorTexture(bgR, bgG, bgB, bgA)
+                                    local okBar, errBar = pcall(auraButton.SetDurationBar, auraButton, bar, durOpts)
+                                    if not okBar then ILDBG(string.format("|cffff4444initializeFrame cible (Icon List, sort %d): SetDurationBar a echoue -- err=%s|r", spellID, tostring(errBar))) end
+                                    local spark = MakeNativeBarSpark(bar, liveCfg, rev and "LEFT" or "RIGHT", {barCR, barCG, barCB})
+                                    return bar, spark
+                                end
+
+                                if lisDual then
+                                    if isLeft then
+                                        auraButton._aishBar, auraButton._aishSpark = MakeNativeBar("RIGHT", icon, "LEFT", -lgp, 0, true)
+                                    else
+                                        auraButton._aishBar, auraButton._aishSpark = MakeNativeBar("LEFT", icon, "RIGHT", lgp, 0, false)
+                                    end
+                                else
+                                    auraButton._aishBarL, auraButton._aishSparkL = MakeNativeBar("RIGHT", icon, "LEFT", -lgp, 0, true)
+                                    auraButton._aishBarR, auraButton._aishSparkR = MakeNativeBar("LEFT", icon, "RIGHT", lgp, 0, false)
+                                end
+
+                                cd:SetDrawSwipe(liveCfg.swipeEnabled == true)
+                                cd:SetDrawEdge(liveCfg.swipeEnabled == true)
+                                cd:SetHideCountdownNumbers(liveCfg.timerIconEnabled ~= true)
+                                if liveCfg.timerIconEnabled then
+                                    ApplyNativeCountdownStyle(cd, liveCfg, icon)
+                                end
+
+                                ApplySpellGlow(auraButton._aishGlowAnchor, liveCfg, liveSi, liw, lih)
+                                PlayProcStartOnce(auraButton._aishGlowAnchor, liveSi, spellID)
+
+                                -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
+                                -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
+                                -- redondants). No-op dans le cas nominal.
+                                if not auraButton._aishPooled then
+                                    auraButton._aishPooled = true
+                                    iconListFlowButtonsPet[#iconListFlowButtonsPet + 1] = auraButton
+                                end
+                            end)
+                            if not okBuild then
+                                ILDBG(string.format("|cffff4444initializeFrame cible (Icon List, sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
+                            end
+                        end,
+                    })
+                end)
+                if not okAdd then
+                    ILDBG(string.format("|cffff4444AddAuraGroup DEDIE cible (Icon List, sort %d) a echoue -- err=%s|r", spellID, tostring(errAdd)))
+                end
+                iconListPerSpellGroupsPet[spellID] = true
+                if c.UpdateAllAuras then
+                    local okUpd, errUpd = pcall(c.UpdateAllAuras, c)
+                    if not okUpd then ILDBG(string.format("|cffff4444UpdateAllAuras cible (Icon List, sort %d) a echoue -- err=%s|r", spellID, tostring(errUpd))) end
+                end
+            else
+                pcall(c.SetAuraGroupCandidateFilters, c, "aishIconListFlowPet_" .. tostring(spellID), { includeSpellIDs = { [spellID] = true } })
+            end
+        end
+    end
+
+    for spellID in pairs(iconListPerSpellGroupsPet) do
+        if not currentSet[spellID] then
+            local groupKey = "aishIconListFlowPet_" .. tostring(spellID)
+            pcall(c.SetAuraGroupCandidateFilters, c, groupKey, { includeSpellIDs = { [0] = true } })
+        end
+    end
+end
+
+local iconListPetChangeFrame = CreateFrame("Frame")
+iconListPetChangeFrame:RegisterEvent("UNIT_PET")
+iconListPetChangeFrame:SetScript("OnEvent", function()
+    if iconListFlowContainerPet and iconListFlowContainerPet.UpdateAllAuras then
+        pcall(iconListFlowContainerPet.UpdateAllAuras, iconListFlowContainerPet)
+    end
+end)
+
+
 
 -- /aishdebug groups -- diagnostic de l'usage memoire des groupes natifs : chacune des 4 destinations
 -- cree un AddAuraGroup dedie par spellID la premiere fois qu'il est traque, avec toute une
@@ -4137,6 +5861,171 @@ DumpShownButtons = function(DBG)
     ScanShown("iconlist/c    ", iconListFlowButtonsTarget)
     if not anyShown then
         DBG("   (aucun bouton affiche a cet instant -- relancer PENDANT que le proc est visible)")
+    end
+end
+
+-- /aishdebug petgrid [spellID] -- suit la chaine complete d'une aura de familier, maillon par
+-- maillon : declaration -> decouverte -> whitelist -> ordre de la destination -> conteneur pet.
+-- Le premier maillon rouge est la cause ; tout le reste en aval est consequence.
+-- Compteurs de groupes pet, pour que le diagnostic puisse dire si AddAuraGroup a bien tourne.
+function ns.GetPetGroupTables()
+    return {
+        icons      = iconsPerSpellGroupsPet,
+        freebars   = circleBarsPerSpellGroupsPet,
+        circlebars = freeBarsPerSpellGroupsPet,
+        iconlist   = iconListPerSpellGroupsPet,
+    }
+end
+
+-- /aishdebug petgrid show -- colore et etiquette les 4 conteneurs familier pendant 20 s. Quand tout
+-- le diagnostic logique est vert (groupe cree, alpha=1, shown=true) mais qu'on ne voit rien, la seule
+-- question restante est OU ils sont : empiles en chaine sous les grilles cible, ils peuvent finir
+-- hors de vue ou derriere les barres d'action.
+-- /aishdebug petgrid center -- ramene les 4 grilles familier au centre de l'ecran. Indispensable
+-- comme sortie de secours : une grille posee hors ecran ne peut plus etre attrapee a l'Alt+clic.
+-- Ecrit petX/petY, donc la position survit au rebuild de whitelist comme un placement manuel.
+function ns.DebugCenterPetContainers()
+    local P = function(s) print("|cff33aaff[PetGrid]|r " .. tostring(s)) end
+    local DESTS = {
+        { label = "icons",    dbkey = "icons",      get = ns.GetIconsNativeContainerPet,      dy =  60 },
+        { label = "circleB",  dbkey = "freebars",   get = ns.GetCircleBarsNativeContainerPet, dy =  20 },
+        { label = "freeBars", dbkey = "circlebars", get = ns.GetFreeBarsNativeContainerPet,   dy = -20 },
+        { label = "iconList", dbkey = "iconlist",   get = ns.GetIconListNativeContainerPet,   dy = -60 },
+    }
+    for _, d in ipairs(DESTS) do
+        local cfg = ns.db and ns.db[d.dbkey]
+        if cfg then
+            -- Decalage vertical par destination : sans lui les 4 grilles se superposeraient
+            -- exactement au centre et on ne pourrait en attraper qu'une.
+            cfg.petX, cfg.petY = 0, d.dy
+            local c = d.get and d.get()
+            if c then
+                c:ClearAllPoints()
+                c:SetPoint("CENTER", UIParent, "CENTER", cfg.petX, cfg.petY)
+            end
+            P(string.format("%s : recentre (petX=0 petY=%d)", d.label, d.dy))
+        end
+    end
+    P("Alt+clic gauche sur une grille pour la poser ou tu veux.")
+end
+
+function ns.DebugShowPetContainers()
+    local P = function(s) print("|cff33aaff[PetGrid]|r " .. tostring(s)) end
+    local DESTS = {
+        { label = "icons",    get = ns.GetIconsNativeContainerPet,      col = {1, 0.2, 0.2} },
+        { label = "circleB",  get = ns.GetCircleBarsNativeContainerPet, col = {0.2, 1, 0.2} },
+        { label = "freeBars", get = ns.GetFreeBarsNativeContainerPet,   col = {0.3, 0.5, 1} },
+        { label = "iconList", get = ns.GetIconListNativeContainerPet,   col = {1, 1, 0.2} },
+    }
+    local n = 0
+    for _, d in ipairs(DESTS) do
+        local c = d.get and d.get()
+        if c then
+            n = n + 1
+            if not c._aishDebugTex then
+                local t = c:CreateTexture(nil, "BACKGROUND")
+                t:SetAllPoints(c)
+                c._aishDebugTex = t
+                local fs = c:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+                fs:SetPoint("CENTER", c, "CENTER", 0, 0)
+                c._aishDebugFS = fs
+            end
+            c._aishDebugTex:SetColorTexture(d.col[1], d.col[2], d.col[3], 0.45)
+            c._aishDebugTex:Show()
+            c._aishDebugFS:SetText("pet/" .. d.label)
+            c._aishDebugFS:Show()
+            -- GetCenter peut renvoyer secret une fois le conteneur lie a une aura : pcall.
+            local okC, cx, cy = pcall(function() local x, y = c:GetCenter(); return x, y end)
+            P(string.format("%s : centre ecran x=%s y=%s (ecran %dx%d)", d.label,
+                okC and tostring(cx and math.floor(cx)) or "secret",
+                okC and tostring(cy and math.floor(cy)) or "secret",
+                math.floor(GetScreenWidth()), math.floor(GetScreenHeight())))
+            C_Timer.After(20, function()
+                if c._aishDebugTex then c._aishDebugTex:Hide() end
+                if c._aishDebugFS then c._aishDebugFS:Hide() end
+            end)
+        else
+            P(d.label .. " : pas de conteneur")
+        end
+    end
+    P(string.format("%d conteneur(s) colore(s) pendant 20 s. Si tu vois les rectangles mais pas la barre du buff, le probleme est le bouton ; si tu ne vois aucun rectangle, ils sont hors ecran.", n))
+end
+
+function ns.DebugDumpPetGrid(spellID)
+    local P = function(s) print("|cff33aaff[PetGrid]|r " .. tostring(s)) end
+    local OK = function(b) return b and "|cff33ff33oui|r" or "|cffff4444NON|r" end
+    spellID = spellID or 1233448
+
+    local spells = ns.GetSpecSpells()
+    local info = spells and spells[spellID]
+    local petUnit = ns.GetPetAuraUnit and ns.GetPetAuraUnit(spellID)
+
+    -- Section conteneurs EN TETE : c'est le seul maillon encore inconnu, et la fenetre de chat
+    -- tronque les dumps longs.
+    P(string.format("=== %d === combat=%s  declare=%s  dansListe=%s  pet=%s",
+        spellID, tostring(InCombatLockdown and InCombatLockdown()),
+        OK(petUnit ~= nil), OK(info ~= nil), OK(UnitExists("pet"))))
+
+    local DESTS = {
+        { key = "icons",      label = "icons   ", get = ns.GetIconsNativeContainerPet },
+        { key = "freebars",   label = "circleB ", get = ns.GetCircleBarsNativeContainerPet },
+        { key = "circlebars", label = "freeBars", get = ns.GetFreeBarsNativeContainerPet },
+        { key = "iconlist",   label = "iconList", get = ns.GetIconListNativeContainerPet },
+    }
+    local groupTables = ns.GetPetGroupTables and ns.GetPetGroupTables()
+    for _, d in ipairs(DESTS) do
+        local order = ns.slotOrderByDest and ns.slotOrderByDest[d.key]
+        local wl = ns.whitelistByDest and ns.whitelistByDest[d.key]
+        local inOrder = false
+        if order then
+            for _, sid in ipairs(order) do
+                if sid == spellID then inOrder = true; break end
+            end
+        end
+        local gt = groupTables and groupTables[d.key]
+        local c = d.get and d.get()
+        local cTxt = "|cffff4444sansConteneur|r"
+        if c then
+            local okA, a = pcall(c.GetAlpha, c)
+            local okSh, shown = pcall(c.IsShown, c)
+            local okP, pt, rel = pcall(function()
+                local point, relTo = c:GetPoint(1)
+                return point, relTo and (relTo.GetName and relTo:GetName() or "frame") or "nil"
+            end)
+            cTxt = string.format("alpha=%s shown=%s ancre=%s/%s",
+                okA and tostring(a) or "?", okSh and tostring(shown) or "?",
+                okP and tostring(pt) or "?", okP and tostring(rel) or "?")
+        end
+        P(string.format("%s wl=%s ordre=%s groupe=%s %s",
+            d.label, OK(wl and wl[spellID] ~= nil), OK(inOrder),
+            OK(gt and gt[spellID] or false), cTxt))
+    end
+
+    -- L'aura est-elle lisible sur le familier a cet instant ?
+    if petUnit and UnitExists(petUnit) and C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+        local found = false
+        for i = 1, 40 do
+            local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, petUnit, i, "HELPFUL")
+            if ok and not a then break end
+            if ok and a then
+                local okS, isS = pcall(function() return a.spellId == spellID end)
+                if okS and isS then found = true; break end
+            end
+        end
+        P(string.format("aura lisible sur %s maintenant : %s", petUnit, OK(found)))
+    end
+
+    -- Detail de l'entree, en dernier : deja connu, et c'est ce que la fenetre tronque.
+    if info then
+        local dests = {}
+        if type(info.destinations) == "table" then
+            for k, v in pairs(info.destinations) do
+                if v then dests[#dests + 1] = k end
+            end
+        end
+        P(string.format("entree : source=%s enabled=%s dest=%s",
+            tostring(info.source), tostring(info.enabled),
+            next(dests) and table.concat(dests, ",") or "aucune"))
     end
 end
 

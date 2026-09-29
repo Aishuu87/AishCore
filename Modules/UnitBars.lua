@@ -391,12 +391,42 @@ local function CreateUnitBar(def)
 
     frame._barW = w
 
+    -- Cadre de rognage : tout ce qui s'ajoute a droite du fill HP (soins previsionnels,
+    -- absorb) y est enferme, donc rien ne peut deborder de la barre de vie. Impossible de
+    -- calculer la place restante en Lua : la vie courante est un secret number en combat,
+    -- on ne peut ni la lire ni la soustraire -- le rognage est la seule voie fiable.
+    local clip = CreateFrame("Frame", nil, frame)
+    clip:SetFrameLevel(parentLevel + 2)
+    clip:SetPoint("TOPLEFT",     bgTex, "TOPLEFT",     0, 0)
+    clip:SetPoint("BOTTOMRIGHT", bgTex, "BOTTOMRIGHT", 0, 0)
+    if clip.SetClipsChildren then clip:SetClipsChildren(true) end
+    frame.clipFrame = clip
+
+    -- Soins previsionnels : segment ajoute au bord droit du fill HP, AVANT l'absorb.
+    -- Meme principe que la barre d'absorb : la valeur vient du calculateur et peut etre un
+    -- secret number, donc elle est passee telle quelle a SetValue, jamais lue cote Lua.
+    pcall(function()
+        local healBar = CreateFrame("StatusBar", nil, clip)
+        healBar:SetFrameLevel(clip:GetFrameLevel() + 1)
+        healBar:SetSize(w, barH)
+        healBar:SetPoint("LEFT", sb:GetStatusBarTexture(), "RIGHT", 0, 0)
+        healBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        local _hc = (ns.GetCfg("unitBars") or {}).healPredColor or { 0.15, 0.85, 0.35, 1 }
+        healBar:SetStatusBarColor(_hc[1], _hc[2], _hc[3], _hc[4] or 1)
+        healBar:EnableMouse(false)  -- ne pas intercepter les clics (SecureUnitButtonTemplate parent)
+        healBar:SetMinMaxValues(0, 1)
+        healBar:SetValue(0)
+        frame.healPredBar = healBar
+    end)
+
     -- Barre d'absorb : StatusBar sans REVERSE_FILL, ancrée au bord droit du fill HP (C-side, secret numbers OK)
     pcall(function()
-        local absorbBar = CreateFrame("StatusBar", nil, frame)
-        absorbBar:SetFrameLevel(parentLevel + 2)
+        local absorbBar = CreateFrame("StatusBar", nil, clip)
+        absorbBar:SetFrameLevel(clip:GetFrameLevel() + 2)
         absorbBar:SetSize(w, barH)
-        absorbBar:SetPoint("LEFT", sb:GetStatusBarTexture(), "RIGHT", 0, 0)
+        -- Derriere le segment de soins : sa texture est large de 0 quand il n'y a aucun
+        -- soin en vol, donc l'absorb reste colle au fill HP dans ce cas.
+        absorbBar:SetPoint("LEFT", (frame.healPredBar or sb):GetStatusBarTexture(), "RIGHT", 0, 0)
         absorbBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
         local _ac = (ns.GetCfg("unitBars") or {}).absorbColor or { 0, 1, 0.918, 1 }
         absorbBar:SetStatusBarColor(_ac[1], _ac[2], _ac[3], _ac[4] or 1)
@@ -414,6 +444,11 @@ local function CreateUnitBar(def)
             end
             if calc.SetDamageAbsorbClampMode and Enum and Enum.UnitDamageAbsorbClampMode then
                 calc:SetDamageAbsorbClampMode(Enum.UnitDamageAbsorbClampMode.MaximumHealth)
+            end
+            -- Soins previsionnels : borner au maximum de vie, sinon un gros soin deborde
+            -- largement de la barre.
+            if calc.SetIncomingHealClampMode and Enum and Enum.UnitIncomingHealClampMode then
+                calc:SetIncomingHealClampMode(Enum.UnitIncomingHealClampMode.MaximumHealth)
             end
             frame.hpCalc = calc
         end)
@@ -580,13 +615,13 @@ local function UpdateBarHealth(frame)
             UnitGetDetailedHealPrediction(unit, nil, frame.hpCalc)
             calcUpdated = true
             frame.bar:SetMinMaxValues(0, frame.hpCalc:GetMaximumHealth())
-            frame.bar:SetValue(frame.hpCalc:GetCurrentHealth())
+            ns.SmoothBarValue(frame.bar, frame.hpCalc:GetCurrentHealth())
         end)
     end
     if not calcUpdated then
         pcall(function()
             frame.bar:SetMinMaxValues(0, UnitHealthMax(unit))
-            frame.bar:SetValue(UnitHealth(unit))
+            ns.SmoothBarValue(frame.bar, UnitHealth(unit))
         end)
     end
     -- Absorb via UpdateAbsorb (appelé séparément par le ticker pour toutes les barres)
@@ -596,7 +631,9 @@ local function UpdateBarHealth(frame)
     end
 end
 
--- Mise à jour absorb (commune à toutes les barres, y compris target)
+-- Mise à jour absorb (commune à toutes les barres, y compris target).
+-- Volontairement SANS ns.SmoothSetValue : l'absorb est ancre au bord droit du fill HP et
+-- se repositionne a chaque passage -- une valeur interpolee le ferait flotter a cote.
 local function UpdateAbsorb(frame)
     if not frame.hpCalc or not frame.absorbBar then return end
     local db2  = ns.GetCfg("unitBars")
@@ -621,12 +658,32 @@ local function UpdateAbsorb(frame)
             local maxHP = UnitHealthMax(frame._def.unit) or 1  -- valeur régulière
             frame.absorbBar:SetMinMaxValues(0, maxHP)
         else
-            -- Défaut : ancré au bord droit du fill HP
-            frame.absorbBar:SetPoint("LEFT", frame.bar:GetStatusBarTexture(), "RIGHT", 0, 0)
+            -- Défaut : ancré au bord droit du segment de soins (donc du fill HP quand
+            -- aucun soin n'est en vol -- la texture fait alors 0 de large)
+            frame.absorbBar:SetPoint("LEFT", (frame.healPredBar or frame.bar):GetStatusBarTexture(), "RIGHT", 0, 0)
             frame.absorbBar:SetMinMaxValues(0, frame.hpCalc:GetMaximumHealth())
         end
         frame.absorbBar:SetValue(absorb)
         frame.absorbBar:SetStatusBarColor(ac[1], ac[2], ac[3], ac[4] or 1)
+    end)
+end
+
+-- Soins previsionnels. Comme UpdateAbsorb : pas de lissage (le segment est ancre au bord
+-- droit du fill HP et se repositionne a chaque passage), et aucune valeur n'est lue cote
+-- Lua -- GetIncomingHeals peut renvoyer un secret number en combat.
+local function UpdateHealPrediction(frame)
+    if not frame.hpCalc or not frame.healPredBar then return end
+    local cfg  = ns.GetCfg("unitBars") or {}
+    if cfg.showHealPrediction == false then frame.healPredBar:SetValue(0); return end
+    local hc = cfg.healPredColor or { 0.15, 0.85, 0.35, 1 }
+    pcall(function()
+        -- "player" en 2e argument : c'est ce qui fait ventiler les soins par lanceur. On ne
+        -- garde que le total, mais l'appel doit etre fait pour que GetIncomingHeals reponde.
+        UnitGetDetailedHealPrediction(frame._def.unit, "player", frame.hpCalc)
+        local allHeal = frame.hpCalc:GetIncomingHeals()
+        frame.healPredBar:SetMinMaxValues(0, frame.hpCalc:GetMaximumHealth())
+        frame.healPredBar:SetValue(allHeal)
+        frame.healPredBar:SetStatusBarColor(hc[1], hc[2], hc[3], hc[4] or 1)
     end)
 end
 
@@ -771,11 +828,18 @@ local function ApplyBarSettings(frame)
     frame.bar:ClearAllPoints()
     frame.bar:SetPoint("TOPLEFT", frame.bgTex)
     frame._barW = w
+    if frame.healPredBar then
+        pcall(function()
+            frame.healPredBar:SetSize(w, h)
+            frame.healPredBar:ClearAllPoints()
+            frame.healPredBar:SetPoint("LEFT", frame.bar:GetStatusBarTexture(), "RIGHT", 0, 0)
+        end)
+    end
     if frame.absorbBar then
         pcall(function()
             frame.absorbBar:SetSize(w, h)
             frame.absorbBar:ClearAllPoints()
-            frame.absorbBar:SetPoint("LEFT", frame.bar:GetStatusBarTexture(), "RIGHT", 0, 0)
+            frame.absorbBar:SetPoint("LEFT", (frame.healPredBar or frame.bar):GetStatusBarTexture(), "RIGHT", 0, 0)
         end)
     end
 
@@ -1197,7 +1261,19 @@ local function WatchTankSpec()
     Tick()
 end
 
+-- Les soins previsionnels sont d'abord sortis en vert translucide (alpha 0.5). Le profil
+-- a garde cette valeur, donc changer le defaut ne suffit pas : on la remonte une fois a
+-- l'opaque. Marque par un drapeau, pour ne jamais ecraser un alpha choisi ensuite.
+local function MigrateHealPredOpaque()
+    local db = ns.DB and ns.DB.unitBars
+    if not db or db.healPredOpaqueFix then return end
+    db.healPredOpaqueFix = true
+    local c = db.healPredColor
+    if type(c) == "table" and c[4] == 0.5 then c[4] = 1 end
+end
+
 function UnitBars.Create(parent)
+    MigrateHealPredOpaque()
     -- Avant la boucle : CreateUnitBar lit deja GetEffectiveHeight, autant partir avec la
     -- bonne valeur quand la spe est lisible des maintenant.
     UpdateTankSpec()
@@ -1255,6 +1331,8 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterUnitEvent("UNIT_HEALTH",                 "player", "target", "focus", "pet", "targettarget")
 eventFrame:RegisterUnitEvent("UNIT_MAXHEALTH",               "player", "target", "focus", "pet", "targettarget")
 eventFrame:RegisterUnitEvent("UNIT_ABSORB_AMOUNT_CHANGED",   "player", "target", "focus", "pet", "targettarget")
+eventFrame:RegisterUnitEvent("UNIT_HEAL_PREDICTION",         "player", "target", "focus", "pet", "targettarget")
+eventFrame:RegisterUnitEvent("UNIT_HEAL_ABSORB_AMOUNT_CHANGED", "player", "target", "focus", "pet", "targettarget")
 eventFrame:RegisterUnitEvent("UNIT_TARGET",                  "target")  -- target change de cible => mettre a jour targettarget
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 eventFrame:RegisterEvent("PLAYER_FOCUS_CHANGED")
@@ -1466,6 +1544,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
 
+    if event == "UNIT_HEAL_PREDICTION" or event == "UNIT_HEAL_ABSORB_AMOUNT_CHANGED" then
+        local k = UNIT_KEY[arg1]
+        local f = k and bars[k]
+        if f then pcall(UpdateHealPrediction, f) end
+        return
+    end
+
     -- UNIT_HEALTH / UNIT_MAXHEALTH : pour target, fill géré exclusivement par le ticker 0.1s (health tainté)
     local key = UNIT_KEY[arg1]
     if key and key ~= "target" then
@@ -1483,14 +1568,14 @@ local function _TickUBTargetHP()
         pcall(UnitGetDetailedHealPrediction, "target", nil, tg.hpCalc)
         pcall(function()
             tg.bar:SetMinMaxValues(0, tg.hpCalc:GetMaximumHealth())
-            tg.bar:SetValue(tg.hpCalc:GetCurrentHealth())
+            ns.SmoothBarValue(tg.bar, tg.hpCalc:GetCurrentHealth())
         end)
     else
         -- C-side pur (mode miroir ou pas de calculateur)
         local cur = UnitHealth("target")
         local max = UnitHealthMax("target")
         tg.bar:SetMinMaxValues(0, max)
-        tg.bar:SetValue(cur)
+        ns.SmoothBarValue(tg.bar, cur)
     end
 end
 
@@ -1505,6 +1590,7 @@ C_Timer.NewTicker(0.1, function()
     -- Toutes les barres sauf targettarget : UpdateAbsorb uniforme
     for key, f in pairs(bars) do
         if key ~= "targettarget" and f:GetAlpha() >= 0.01 and UnitExists(f._def.unit) then
+            pcall(UpdateHealPrediction, f)
             pcall(UpdateAbsorb, f)
         end
     end

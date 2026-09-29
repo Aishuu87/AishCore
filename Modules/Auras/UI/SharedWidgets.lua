@@ -147,7 +147,13 @@ function SW.CreateColorButton(parent, label, width)
     return c
 end
 
--- SECTION HEADER (WoW-style: 2 class color dots + label + gradient hairline)
+-- SECTION HEADER (WoW-style: 2 class color dots + label + gradient hairline).
+-- Un TITRE DE SECTION (SW.MakeSectionTitle) reprend le meme habillage, libelle deux
+-- tailles au-dessus et couple de teintes distinct -- cf. UI/SharedWidgets.lua cote
+-- addon principal, meme convention.
+local HEADER_FONT_SIZE = 11
+local TITLE_FONT_SIZE  = 13
+local TITLE_HEIGHT     = 26
 function SW.CreateSectionHeader(parent, text, width)
     width = width or 260
     local f = CreateFrame("Frame",nil,parent); f:SetSize(width, 24)
@@ -161,10 +167,14 @@ function SW.CreateSectionHeader(parent, text, width)
     dot1:SetTexture("Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2")
     dot1:SetVertexColor(g[1],g[2],g[3],1)
     -- Label
-    local lbl = f:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lbl,FONT,11)
+    local lbl = f:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lbl,FONT,HEADER_FONT_SIZE)
     lbl:SetPoint("LEFT",14,0)
     lbl:SetTextColor(tc[1], tc[2], tc[3], 1)
-    lbl:SetText((text or ""):upper())
+    -- Libelle "nu", sans le prefixe +/- d'un en-tete repliable : SetHeaderCollapsedState
+    -- le reecrit a chaque pli, il lui faut donc la base intacte.
+    f._baseText = (text or ""):upper()
+    f._lbl = lbl
+    lbl:SetText(f._baseText)
     -- Gold gradient hairline
     local line = f:CreateTexture(nil,"ARTWORK"); line:SetHeight(1)
     line:SetPoint("LEFT", lbl,"RIGHT", 10, 0); line:SetPoint("RIGHT",-2,0)
@@ -183,8 +193,15 @@ function SW.CreateSectionHeader(parent, text, width)
     -- RefreshColor() + le registre ci-dessous permettent de recolorer au changement de spe sans
     -- reconstruire les menus (cf. SW.RefreshSectionHeaderColors, appele depuis RefreshAccentTheme).
     function f:RefreshColor()
-        local gg = Theme.gold or {0.78, 0.62, 0.30}
-        local tt = Theme.accentText or Theme.textNormal or {0.92, 0.92, 0.93}
+        local gg, tt
+        if f._isSectionTitle then
+            -- Titre de page : point + filet en "Decorations B", libelle en "Cercle de puissance".
+            gg = Theme.accentText or {0.776, 0.710, 0.471}
+            tt = SW.GetSectionTitleColor()
+        else
+            gg = Theme.gold or {0.78, 0.62, 0.30}
+            tt = Theme.accentText or Theme.textNormal or {0.92, 0.92, 0.93}
+        end
         dot1:SetVertexColor(gg[1], gg[2], gg[3], 1)
         lbl:SetTextColor(tt[1], tt[2], tt[3], 1)
         ApplyGradient(gg)
@@ -201,6 +218,58 @@ function SW.RefreshSectionHeaderColors()
     for _, f in ipairs(SW._sectionHeaders or {}) do
         if f.RefreshColor then f:RefreshColor() end
     end
+end
+
+-- Couleur du libelle d'un titre de section : "Cercle de puissance" de la spe active,
+-- repli sur l'ocre statique si le theme GUI est coupe ou le module Couleurs absent.
+local TITLE_TEXT_STATIC = { 0.78, 0.62, 0.30 }
+function SW.GetSectionTitleColor()
+    local useTheme = not (_addon.DB and _addon.DB.colors and _addon.DB.colors.themeGUI == false)
+    if useTheme then
+        local CLR = _addon.Modules and _addon.Modules.Colors
+        local c = CLR and CLR.Get and CLR.Get("powercircle")
+        if c then return c end
+    end
+    return TITLE_TEXT_STATIC
+end
+
+-- Promeut un section header en TITRE DE SECTION : le premier en-tete d'une page,
+-- jamais repliable, legerement plus gros et dans son couple de teintes. Idempotent.
+function SW.MakeSectionTitle(f)
+    if not f or f._isSectionTitle then return f end
+    f._isSectionTitle = true
+    if f._lbl then ns.ApplyFont(f._lbl, FONT, TITLE_FONT_SIZE) end
+    f:SetHeight(TITLE_HEIGHT)
+    if f.RefreshColor then f:RefreshColor() end
+    return f
+end
+
+-- Rend un section header repliable : libelle prefixe de "+ " / "- " et bouton
+-- transparent par-dessus pour le clic et le survol. L'etat est pilote par l'appelant.
+function SW.MakeHeaderCollapsible(f, onToggle)
+    if not f or f._collapseReady then return f end
+    f._collapseReady = true
+
+    local hitbox = CreateFrame("Button", nil, f)
+    hitbox:SetAllPoints(f)
+    hitbox:SetFrameLevel(f:GetFrameLevel() + 1)
+    local hl = hitbox:CreateTexture(nil, "BACKGROUND")
+    hl:SetAllPoints()
+    hl:SetColorTexture(1, 1, 1, 0.06)
+    hl:Hide()
+    hitbox:SetScript("OnEnter", function() hl:Show() end)
+    hitbox:SetScript("OnLeave", function() hl:Hide() end)
+    hitbox:SetScript("OnClick", function()
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+        if onToggle then onToggle() end
+    end)
+    f._hitbox = hitbox
+    return f
+end
+
+function SW.SetHeaderCollapsedState(f, collapsed)
+    if not f or not f._collapseReady or not f._lbl then return end
+    f._lbl:SetText((collapsed and "+ " or "- ") .. (f._baseText or ""))
 end
 
 -- TOGGLE (labeled ON/OFF pill in gold)
@@ -315,24 +384,31 @@ function SW.CreateAccordionStack(parent, sections, cw, startY)
     return wrap
 end
 
--- SECTION STACK : empile les sections verticalement, chacune precedee d'un CreateSectionHeader.
+-- SECTION STACK : empile les sections verticalement, chacune precedee d'un
+-- CreateSectionHeader repliable ("+ " / "- " devant le libelle, cf. SW.MakeHeaderCollapsible).
 -- Remplace CreateAccordionStack pour les menus sans selecteur deroulant.
-function SW.CreateSectionStack(parent, sections, cw, startY)
+--
+-- L'etat de pli vit UNIQUEMENT en memoire de session (jamais dans la config) : au /reload
+-- tout repart replie. Il est garde ici, hors des frames, pour survivre a un rebuild de menu.
+-- `stackId` distingue deux stacks homonymes (un par mode d'affichage, par exemple).
+local _stackCollapsed = {}
+
+function SW.CreateSectionStack(parent, sections, cw, startY, stackId)
     startY = startY or 0
     local W = cw - 20
     local wrap = CreateFrame("Frame",nil,parent)
     wrap:SetPoint("TOPLEFT",10,-startY); wrap:SetPoint("TOPRIGHT",-10,-startY)
     wrap:SetHeight(1)
 
-    local y = 0
+    local entries = {}
+    local Relayout
+
     for i, sec in ipairs(sections) do
-        if i > 1 then y = y + 18 end
-        local hdr = SW.CreateSectionHeader(wrap, sec.name or ("SECTION "..i), W)
-        hdr:SetPoint("TOPLEFT",0,-y)
-        y = y + hdr:GetHeight() + 10
+        local name = sec.name or ("SECTION "..i)
+        local hdr = SW.CreateSectionHeader(wrap, name, W)
 
         local sub = CreateFrame("Frame",nil,wrap)
-        sub:SetPoint("TOPLEFT",0,-y); sub:SetPoint("TOPRIGHT",0,-y); sub:SetHeight(1)
+        sub:SetPoint("TOPLEFT",0,0); sub:SetPoint("TOPRIGHT",0,0); sub:SetHeight(1)
         local ok, err = pcall(sec.build, sub, W)
         if not ok then
             local e = sub:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(e,FONT,10)
@@ -340,11 +416,63 @@ function SW.CreateSectionStack(parent, sections, cw, startY)
             e:SetText("Build error: "..tostring(err))
             sub:SetHeight(30)
         end
-        y = y + math.max(20, sub:GetHeight())
+
+        local entry = { hdr = hdr, sub = sub,
+                        key = (stackId or "?").."@"..i.."@"..name }
+        -- Replie par defaut : absent de la table = replie.
+        entry.collapsed = (_stackCollapsed[entry.key] ~= false)
+        entries[i] = entry
+
+        SW.MakeHeaderCollapsible(hdr, function()
+            entry.collapsed = not entry.collapsed
+            -- Pas de `x and false or nil` : en Lua `false or nil` vaut toujours nil,
+            -- l'etat "deplie" ne serait jamais memorise.
+            if entry.collapsed then
+                _stackCollapsed[entry.key] = nil
+            else
+                _stackCollapsed[entry.key] = false
+            end
+            SW.SetHeaderCollapsedState(hdr, entry.collapsed)
+            Relayout()
+        end)
+        SW.SetHeaderCollapsedState(hdr, entry.collapsed)
     end
 
-    wrap:SetHeight(y)
-    parent:SetHeight(startY + y + 20)
+    Relayout = function()
+        local y = 0
+        for i, entry in ipairs(entries) do
+            -- L'air de separation n'est du qu'apres une section DEPLIEE : une suite
+            -- d'en-tetes replies se serre au meme pas que le panneau principal (26px),
+            -- au lieu de garder l'espace d'un contenu qui n'est plus affiche.
+            if i > 1 and not entries[i-1].collapsed then y = y + 18 end
+            entry.hdr:ClearAllPoints()
+            entry.hdr:SetPoint("TOPLEFT",0,-y)
+            y = y + entry.hdr:GetHeight() + 2
+            if entry.collapsed then
+                entry.sub:Hide()
+            else
+                y = y + 8
+                entry.sub:ClearAllPoints()
+                entry.sub:SetPoint("TOPLEFT",0,-y); entry.sub:SetPoint("TOPRIGHT",0,-y)
+                entry.sub:Show()
+                y = y + math.max(20, entry.sub:GetHeight())
+            end
+        end
+        wrap:SetHeight(math.max(1, y))
+        parent:SetHeight(startY + y + 20)
+        -- La zone de defilement du panneau ne recalcule sa plage qu'au changement de
+        -- categorie : sans ca, plier/deplier la laisse sur l'ancienne hauteur.
+        local SP = _addon.SettingsPanel
+        if SP and SP.SyncScrollTo then SP.SyncScrollTo(parent) end
+    end
+
+    -- Une section qui se redimensionne d'elle-meme apres coup (apercu qui se peuple,
+    -- option conditionnelle) decale tout ce qui la suit : on redispose sur son OnSizeChanged.
+    for _, entry in ipairs(entries) do
+        entry.sub:SetScript("OnSizeChanged", function() Relayout() end)
+    end
+
+    Relayout()
     return wrap
 end
 

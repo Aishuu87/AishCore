@@ -676,6 +676,20 @@ local function HookCDMChargeCountChild(fs, parentFrame)
     end)
 end
 
+-- Unites "familier" rapportees par le CDM. Une aura que le joueur pose sur son pet (Sombre
+-- transformation...) arrive avec auraDataUnit = "pet" : unite absente de cdmData, donc jamais
+-- enregistree ni auto-corrigee en "buff". On la rebascule sur "player" -- c'est un buff perso du
+-- point de vue du joueur -- en memorisant l'unite reelle pour la lecture des durees (cf. Scan.lua).
+local PET_UNITS = { pet = true, playerpet = true }
+local function RemapAuraUnit(unit, spellID)
+    if unit and PET_UNITS[unit] then
+        ns.PetAuraSpells = ns.PetAuraSpells or {}
+        ns.PetAuraSpells[spellID] = ns.PetAuraSpells[spellID] or { unit = unit }
+        return "player"
+    end
+    return unit
+end
+
 local function HookCDMFrame(frame, canMask, source, alwaysMask)
     if not frame or not frame.SetAuraInstanceInfo or hookedFrames[frame] then return end
     hookedFrames[frame] = true
@@ -691,14 +705,14 @@ local function HookCDMFrame(frame, canMask, source, alwaysMask)
         -- doit capter aussi bien la liaison (instID present) que la deliaison (cdmAura/instID nil).
         -- self.auraDataUnit reste lisible meme quand cdmAura est nil (propriete de la frame, pas de l'aura).
         do
-            local puUnit = self.auraDataUnit
+            local puUnit = RemapAuraUnit(self.auraDataUnit, spellID)
             if puUnit then
                 cdmAuraInstancePresence[puUnit] = cdmAuraInstancePresence[puUnit] or {}
                 cdmAuraInstancePresence[puUnit][spellID] = (instID ~= nil)
             end
         end
         if not instID then return end
-        local unit = self.auraDataUnit
+        local unit = RemapAuraUnit(self.auraDataUnit, spellID)
         if not unit or not cdmData[unit] then return end
 
         -- Cle = spellID, pas instID : un auraInstanceID peut etre secret (indexable seulement comme valeur,
@@ -1143,6 +1157,20 @@ function ns.ScanCDMViewers()
         end
         ScanCategory(Enum.CooldownViewerCategory.TrackedBuff, "player")
         ScanCategory(Enum.CooldownViewerCategory.TrackedBar,  "player")
+    end
+
+    -- Auras posees sur le familier (ns.PetAuraSpells, ex. Sombre transformation) : aucune categorie
+    -- CDM ne les expose cote joueur, elles ne seraient donc jamais proposees dans "Auras a tracker".
+    -- Declaration manuelle, restreinte a la spec concernee. frame=nil + unit="player" => source
+    -- "buff" dans AutoDiscoverSpell, soit la categorie Buffs.
+    if ns.PetAuraSpells then
+        local specKey = ns.GetSpecKey and ns.GetSpecKey()
+        for sid, def in pairs(ns.PetAuraSpells) do
+            if (not def.specKey) or (def.specKey == specKey) then
+                local name = GetSpellName and GetSpellName(sid)
+                if name then pcall(AutoDiscoverSpell, sid, name, "player", nil, nil) end
+            end
+        end
     end
 
     -- FALLBACK : frames actives dans les viewers si l'API catégorie n'est pas disponible.

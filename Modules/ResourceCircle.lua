@@ -494,16 +494,46 @@ local RADIAL_FRAG_COUNT = 100
 local RADIAL_ARC_SPAN_DEG  = 280   -- 360 - 80 (trou en bas)
 local RADIAL_ARC_START_DEG = 220   -- bearing (0=midi, horaire) où commence le 0%
 
+-- Geometrie des quartiers radiaux (RadialWedge), en fraction du RAYON de l'arc. L'oversize
+-- les fait se chevaucher (anti-aliasing) : leur bord reellement peint depasse donc le rayon
+-- nominal, ce dont depend VERTICAL_OVERLAY_OFFSET ci-dessous.
+local RADIAL_FRAG_INNER    = 0.05
+local RADIAL_FRAG_OUTER    = 0.98
+local RADIAL_FRAG_OVERSIZE = 1.2
+
+-- Rayon exterieur reellement peint par les quartiers, exprime en fraction du DIAMETRE de
+-- l'arc (~0.5365). L'arc vertical, lui, s'arrete pile au rayon nominal (0.5).
+local RADIAL_OUTER_R = ((RADIAL_FRAG_INNER + RADIAL_FRAG_OUTER) / 2
+                        + (RADIAL_FRAG_OUTER - RADIAL_FRAG_INNER) * RADIAL_FRAG_OVERSIZE / 2) / 2
+
+-- Les deux visualisations ne peignent donc pas jusqu'au meme rayon : a reglage d'epaisseur
+-- identique, l'anneau radial est plus epais que le vertical de (RADIAL_OUTER_R - 0.5) en
+-- rayon. On retranche le double au ratio d'overlay en vertical, pour que le meme cran de
+-- slider donne la MEME epaisseur visible dans les deux modes -- sinon, passer de l'un a
+-- l'autre donne l'impression d'un bug (l'arc vertical devient un filet, voire disparait).
+local VERTICAL_OVERLAY_OFFSET = 2 * (RADIAL_OUTER_R - 0.5)
+
+-- Taille du masque central, dans le mode d'affichage courant. Le clamp a 0.99 garde un
+-- anneau visible en vertical : le slider d'epaisseur du cercle central monte jusqu'a 1.2,
+-- borne prevue pour le radial et son bord debordant.
+local function OverlayPx(cfg, arcPx)
+  local ratio = cfg.overlayRatio or 0.75
+  if not cfg.radialFillTest then
+    ratio = math.min(ratio - VERTICAL_OVERLAY_OFFSET, 0.99)
+  end
+  return arcPx * math.max(0, ratio)
+end
+
 -- Recalcule taille/position/rotation des quartiers radiaux (rappelée depuis ApplySettings pour rester synchro avec le GUI)
 local function LayoutRadialFrags()
   if not bar or not bar.radialFrags then return end
   local cfg = ns.GetCfg("resourceCircle")
   local arcPx = cfg.size * (cfg.arcSizeRatio or 1.0)
   -- Quartiers toujours en taille max ; c'est bar.overlay qui masque le centre par-dessus.
-  local fragInnerR = (arcPx / 2) * 0.05  -- quasi le centre (jamais 0 pile, évite une taille nulle)
-  local fragOuterR = (arcPx / 2) * 0.98
+  local fragInnerR = (arcPx / 2) * RADIAL_FRAG_INNER  -- quasi le centre (jamais 0 pile, évite une taille nulle)
+  local fragOuterR = (arcPx / 2) * RADIAL_FRAG_OUTER
   local fragMidR   = (fragInnerR + fragOuterR) / 2
-  local fragSize = (fragOuterR - fragInnerR) * 1.2  -- surdimensionné pour chevaucher les voisins (anti-aliasing)
+  local fragSize = (fragOuterR - fragInnerR) * RADIAL_FRAG_OVERSIZE  -- chevauche les voisins (anti-aliasing)
   for k = 0, RADIAL_FRAG_COUNT - 1 do
     local frag = bar.radialFrags[k + 1]
     if frag then
@@ -577,8 +607,18 @@ function ResourceCircle.ApplySettings()
     if glowEnabled then bar.bgGlow:Show() else bar.bgGlow:Hide() end
     RecordHome(bar.bgGlow, "CENTER", bar, "CENTER", 0, 0, glowPixelSize, glowPixelSize)
   end
+  -- Fond de texte : le home doit suivre, sinon la prochaine animation le remettrait a
+  -- son ancienne taille (cf. RecordHome / _elemHome).
+  if bar.textBackdrop then
+    local tbPx = math.max(1, cfg.textBackdropSize or 35)
+    bar.textBackdrop:SetSize(tbPx, tbPx)
+    bar.textBackdrop:ClearAllPoints()
+    bar.textBackdrop:SetPoint("CENTER", bar, "CENTER", 0, 0)
+    RecordHome(bar.textBackdrop, "CENTER", bar, "CENTER", 0, 0, tbPx, tbPx)
+    ns.SizeTextBackdropGlow(bar.textBackdropGlow, tbPx)
+  end
   local arcPx     = size * (cfg.arcSizeRatio or 1.0)
-  local overlayPx = arcPx * (cfg.overlayRatio or 0.75)
+  local overlayPx = OverlayPx(cfg, arcPx)
   bar.arc:SetSize(arcPx, arcPx * ARC_CROP_H)
   bar.arc:ClearAllPoints()
   bar.arc:SetPoint("BOTTOM", bar, "CENTER", 0, arcPx / 2 - arcPx * ARC_CROP_H)
@@ -807,7 +847,7 @@ function ResourceCircle.Create(parent)
   RecordHome(arc, "BOTTOM", bar, "CENTER", 0, arcPx / 2 - arcPx * ARC_CROP_H, arcPx, arcPx * ARC_CROP_H)
 
   -- Overlay sombre : masque le centre pour simuler un arc en anneau
-  local overlayPx = arcPx * (cfg.overlayRatio or 0.75)
+  local overlayPx = OverlayPx(cfg, arcPx)
   local overlayFrame = CreateFrame("Frame", nil, bar)
   -- +101 : réserve un niveau distinct à chacun des 100 quartiers radiaux sans dépasser l'overlay.
   overlayFrame:SetFrameLevel(arc:GetFrameLevel() + 101)
@@ -983,13 +1023,20 @@ function ResourceCircle.Create(parent)
   RefreshSecResDeco()
 
   -- Fond sombre sous le power text pour lisibilité (masqué pour Brasseur qui a son propre overlay)
+  local tbPx = math.max(1, cfg.textBackdropSize or 35)
   local textBackdrop = textFrame:CreateTexture(nil, "BACKGROUND")
   textBackdrop:SetTexture(ns.Media.circle)
-  textBackdrop:SetSize(35, 35)
+  textBackdrop:SetSize(tbPx, tbPx)
   textBackdrop:SetPoint("CENTER", bar, "CENTER", 0, 0)
   textBackdrop:SetVertexColor(0x0e/255, 0x0e/255, 0x0e/255, 1)
   bar.textBackdrop = textBackdrop
-  RecordHome(textBackdrop, "CENTER", bar, "CENTER", 0, 0, 35, 35)
+  RecordHome(textBackdrop, "CENTER", bar, "CENTER", 0, 0, tbPx, tbPx)
+
+  -- Halo de reperage : le cache est noir sur fond noir, invisible tant qu'on ne le regle
+  -- pas. Allume par le slider du panneau (cf. ResourceCircle.FlashTextBackdrop), jamais en
+  -- jeu -- il reste donc hors du systeme d'animation.
+  bar.textBackdropGlow = ns.CreateTextBackdropGlow(textFrame, bar)
+  ns.SizeTextBackdropGlow(bar.textBackdropGlow, tbPx)
 
   bar:Show()
   _G.AishCoreRingBar = bar
@@ -1130,7 +1177,9 @@ function ResourceCircle.ApplyRadialMode()
   pcall(ResourceCircle.Update)
 end
 
--- Applique pct (0-100) à l'arc actif (vertical ou radial). Radial : même pct poussé dans chaque quartier via ns.SmoothSetValue.
+-- Applique pct (0-100) à l'arc actif. Vertical : une seule StatusBar, lissée (ns.SmoothBarValue).
+-- Radial : le même pct poussé dans chacun des 100 quartiers, en pose directe -- autant
+-- d'interpolations simultanées coûteraient cher pour un gain invisible (1 seul quartier est partiel).
 local function ApplyArcValue(pct)
   local cfg = ns.GetCfg("resourceCircle")
   if cfg.radialFillTest and bar.radialFrags then
@@ -1138,7 +1187,7 @@ local function ApplyArcValue(pct)
       pcall(ns.SmoothSetValue, frag, pct)
     end
   else
-    pcall(ns.SmoothSetValue, bar.arc, pct)
+    pcall(ns.SmoothBarValue, bar.arc, pct)
   end
 end
 
@@ -1442,9 +1491,16 @@ function ResourceCircle.AnimateVisibility(shouldShow)
 end
 
 -- Mode preview : force l'affichage du cercle pour le settings panel
+--- Allume le halo du fond de texte (appele par le slider du panneau).
+function ResourceCircle.FlashTextBackdrop()
+  if bar then ns.FlashTextBackdropGlow(bar.textBackdropGlow) end
+end
+
 function ResourceCircle.SetPreview(on)
   previewMode = on
   if not bar then return end
+  -- Sortie du panneau : le halo n'a plus lieu d'etre.
+  if not on and bar.textBackdropGlow then ns.HideTextBackdropGlow(bar.textBackdropGlow) end
 
   -- SetPreview est un override manuel : interruption immediate voulue (contrairement a UpdateVisibility).
   -- Remet aussi rcAnimBusy a plat, sinon il resterait bloque a true (son onComplete vient d'etre annule).

@@ -12,17 +12,17 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
     local FONT = ns.Media.font
     local panel = ns.SettingsPanel.panel
 
-    local hdr=SW.CreateSectionHeader(p,L["AURASMENU_EFFECTS_MODULE_HEADER"],cw-20); hdr:SetPoint("TOPLEFT",10,0)
+    local hdr=SW.MakeSectionTitle(SW.CreateSectionHeader(p,L["AURASMENU_EFFECTS_MODULE_HEADER"],cw-20)); hdr:SetPoint("TOPLEFT",10,0)
     local cbFx=SW.CreateCheckbox(p,L["AURASMENU_EFFECTS_ENABLE_3D"],cw-30)
-    cbFx:SetPoint("TOPLEFT",15,-22); cbFx:SetChecked(ns.db and ns.db.effectsEnabled)
+    cbFx:SetPoint("TOPLEFT",15,-24); cbFx:SetChecked(ns.db and ns.db.effectsEnabled)
     -- Auto-disable en raid : économise le GPU dans les combats denses (opt-in)
     local cbAutoRaid=SW.CreateCheckbox(p,L["AURASMENU_EFFECTS_AUTO_DISABLE_RAID"],cw-30)
-    cbAutoRaid:SetPoint("TOPLEFT",15,-44); cbAutoRaid:SetChecked(ns.db and ns.db.effects3DAutoDisableInRaid or false)
+    cbAutoRaid:SetPoint("TOPLEFT",15,-46); cbAutoRaid:SetChecked(ns.db and ns.db.effects3DAutoDisableInRaid or false)
     cbAutoRaid.onChanged=function(v)
         if ns.db then ns.db.effects3DAutoDisableInRaid = v end
         if ns.RefreshEffectsSuspension then pcall(ns.RefreshEffectsSuspension) end
     end
-    local fxCont=CreateFrame("Frame",nil,p); fxCont:SetPoint("TOPLEFT",10,-72); fxCont:SetPoint("TOPRIGHT",-10,-72)
+    local fxCont=CreateFrame("Frame",nil,p); fxCont:SetPoint("TOPLEFT",10,-74); fxCont:SetPoint("TOPRIGHT",-10,-74)
     do local _sfH = (panel and panel._scrollFrame and panel._scrollFrame:GetHeight()) or 668
        fxCont:SetHeight(math.max(560, _sfH - 60)) end
     local function BuildFx()

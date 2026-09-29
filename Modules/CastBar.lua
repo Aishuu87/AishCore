@@ -68,6 +68,21 @@ local function Cfg()
     return db or DEFAULTS
 end
 
+--- Couleur de remplissage de la barre. Sert de repli lorsque la coloration par ecole de magie n'a
+--- trouve aucune correspondance pour le sort en cours -- c'est la seule situation ou cette couleur
+--- est visible, le gradient d'ecole ayant la priorite quand il existe.
+--- Avec useSpecColor, on prend la nuance "Decorations A" de la spe active plutot que la couleur
+--- fixe du profil ; repli sur cette derniere si le module Couleurs ne repond pas.
+local function ResolveBarColor(cfg)
+    cfg = cfg or Cfg()
+    if cfg.useSpecColor then
+        local CLR = ns.Modules and ns.Modules.Colors
+        local c = CLR and CLR.Get and CLR.Get("powerdotsa")
+        if c then return c end
+    end
+    return cfg.barColor or DEFAULTS.barColor
+end
+
 local function FormatTime(t)
     if t >= 60 then
         return string.format("%d:%02d", math.floor(t / 60), math.floor(t % 60))
@@ -160,7 +175,7 @@ local function ApplyBarColor(spellId, spellName, spellIcon)
         end
     end
     ResetBarGradient()
-    local bc = cfg.barColor or DEFAULTS.barColor
+    local bc = ResolveBarColor(cfg)
     frame.bar:SetStatusBarColor(bc[1], bc[2], bc[3], bc[4] or 1)
 end
 
@@ -420,7 +435,7 @@ local function InterruptCast()
         if state.active then return end  -- un nouveau cast a demarre
         frame.bar:SetValue(0)
         ResetBarGradient()
-        local bc2 = Cfg().barColor or DEFAULTS.barColor
+        local bc2 = ResolveBarColor()
         frame.bar:SetStatusBarColor(bc2[1], bc2[2], bc2[3], bc2[4] or 1)
         frame.nameTxt:SetText("")
         frame.nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
@@ -446,7 +461,7 @@ function CastBar.Create(parent)
     local rpt = cfg.relativePoint or DEFAULTS.relativePoint
     local x   = cfg.x        or DEFAULTS.x
     local y   = cfg.y        or DEFAULTS.y
-    local bc  = cfg.barColor or DEFAULTS.barColor
+    local bc  = ResolveBarColor(cfg)
 
     -- Frame racine
     frame = CreateFrame("Frame", "AishCoreCastBar", UIParent)

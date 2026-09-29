@@ -82,7 +82,8 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
 
     local y=0
     local dispLabels={iconlist=L["AURASMENU_RENDER_DISPOSITION_ICONLIST"],circlebars=L["AURASMENU_RENDER_DISPOSITION_CIRCLEBARS"],icons=L["AURASMENU_RENDER_DISPOSITION_ICONS"],freebars=L["AURASMENU_RENDER_DISPOSITION_FREEBARS"],totems=L["AURASMENU_RENDER_DISPOSITION_TOTEMS"]}
-    local dH=SW.CreateSectionHeader(p,string.format(L["AURASMENU_RENDER_DISPOSITION_HEADER"], dispLabels[rk] or ""),cw-20); dH:SetPoint("TOPLEFT",10,-y); y=y+22
+    -- Premier en-tete de la page = son titre de section : jamais repliable.
+    local dH=SW.MakeSectionTitle(SW.CreateSectionHeader(p,string.format(L["AURASMENU_RENDER_DISPOSITION_HEADER"], dispLabels[rk] or ""),cw-20)); dH:SetPoint("TOPLEFT",10,-y); y=y+24
     local lays=({iconlist={"center_mirror","center_dual"},circlebars={"side_large","side_compact","side_banner"},icons={"portrait_small"},freebars={"resource_circle"},totems={"side_large","side_compact","side_banner"}})[rk] or {}
     local cardW,gap=140,15; local sx=math.max(10,(cw-#lays*(cardW+gap)+gap)/2)
     local cfg=ns.db and ns.db[rk]; local al=cfg and cfg.layout
@@ -757,7 +758,7 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
         return na < nb
     end)
 
-    SW.CreateSectionStack(p, sections, cw, y)
+    SW.CreateSectionStack(p, sections, cw, y, "render:"..tostring(rk))
 
     -- Preview live : remplace le contenu de "rk" par de fausses entrees tant que le menu est ouvert.
     -- "totems" ne passe pas par Scan:Run, sa grille doit etre reconstruite explicitement ici.

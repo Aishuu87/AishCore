@@ -32,14 +32,44 @@ local RADIAL_FRAG_COUNT = 100
 local RADIAL_ARC_SPAN_DEG  = 280
 local RADIAL_ARC_START_DEG = 220
 
+-- Geometrie des quartiers radiaux (RadialWedge), en fraction du RAYON de l'arc. L'oversize
+-- les fait se chevaucher (anti-aliasing) : leur bord reellement peint depasse donc le rayon
+-- nominal, ce dont depend VERTICAL_OVERLAY_OFFSET ci-dessous.
+local RADIAL_FRAG_INNER    = 0.05
+local RADIAL_FRAG_OUTER    = 0.98
+local RADIAL_FRAG_OVERSIZE = 1.2
+
+-- Rayon exterieur reellement peint par les quartiers, exprime en fraction du DIAMETRE de
+-- l'arc (~0.5365). L'arc vertical, lui, s'arrete pile au rayon nominal (0.5).
+local RADIAL_OUTER_R = ((RADIAL_FRAG_INNER + RADIAL_FRAG_OUTER) / 2
+                        + (RADIAL_FRAG_OUTER - RADIAL_FRAG_INNER) * RADIAL_FRAG_OVERSIZE / 2) / 2
+
+-- Les deux visualisations ne peignent donc pas jusqu'au meme rayon : a reglage d'epaisseur
+-- identique, l'anneau radial est plus epais que le vertical de (RADIAL_OUTER_R - 0.5) en
+-- rayon. On retranche le double au ratio d'overlay en vertical, pour que le meme cran de
+-- slider donne la MEME epaisseur visible dans les deux modes -- sinon, passer de l'un a
+-- l'autre donne l'impression d'un bug (l'arc vertical devient un filet, voire disparait).
+local VERTICAL_OVERLAY_OFFSET = 2 * (RADIAL_OUTER_R - 0.5)
+
+-- Taille du masque central, dans le mode d'affichage courant. Le clamp a 0.99 garde un
+-- anneau visible en vertical : le slider d'epaisseur du cercle central monte jusqu'a 1.2,
+-- borne prevue pour le radial et son bord debordant.
+local function OverlayPx(cfg, arcPx)
+  local ratio = cfg.overlayRatio or 0.75
+  if not cfg.radialFillTest then
+    ratio = math.min(ratio - VERTICAL_OVERLAY_OFFSET, 0.99)
+  end
+  return arcPx * math.max(0, ratio)
+end
+
 local function LayoutRadialFrags()
   if not bar or not bar.radialFrags then return end
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
   local arcPx = cfg.size * (cfg.arcSizeRatio or 1.0)
-  local fragInnerR = (arcPx / 2) * 0.05
-  local fragOuterR = (arcPx / 2) * 0.98
+  local fragInnerR = (arcPx / 2) * RADIAL_FRAG_INNER
+  local fragOuterR = (arcPx / 2) * RADIAL_FRAG_OUTER
   local fragMidR   = (fragInnerR + fragOuterR) / 2
-  local fragSize   = (fragOuterR - fragInnerR) * 1.2
+  local fragSize   = (fragOuterR - fragInnerR) * RADIAL_FRAG_OVERSIZE
   for k = 0, RADIAL_FRAG_COUNT - 1 do
     local frag = bar.radialFrags[k + 1]
     if frag then
@@ -70,7 +100,8 @@ function OutOfCombatResourceCircle.ApplyRadialMode()
   pcall(OutOfCombatResourceCircle.Update)
 end
 
--- Applique pct (0-100) à l'arc actif (vertical ou radial) via ns.SmoothSetValue pour les deux.
+-- Applique pct (0-100) à l'arc actif. Vertical : lissé (ns.SmoothBarValue). Radial : pose
+-- directe dans chacun des 100 quartiers (cf. ResourceCircle.lua, même raison).
 local function ApplyArcValue(pct)
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
   if cfg.radialFillTest and bar.radialFrags then
@@ -78,7 +109,7 @@ local function ApplyArcValue(pct)
       pcall(ns.SmoothSetValue, frag, pct)
     end
   else
-    pcall(ns.SmoothSetValue, bar.arc, pct)
+    pcall(ns.SmoothBarValue, bar.arc, pct)
   end
 end
 
@@ -246,7 +277,7 @@ function OutOfCombatResourceCircle.ApplySettings()
     if glowEnabled then bar.bgGlow:Show() else bar.bgGlow:Hide() end
   end
   local arcPx     = size * (cfg.arcSizeRatio or 1.0)
-  local overlayPx = arcPx * (cfg.overlayRatio or 0.75)
+  local overlayPx = OverlayPx(cfg, arcPx)
   bar.arc:SetSize(arcPx, arcPx * ARC_CROP_H)
   bar.arc:ClearAllPoints()
   bar.arc:SetPoint("TOP", bar, "CENTER", 0, arcPx / 2)
@@ -389,7 +420,7 @@ function OutOfCombatResourceCircle.Create(parent)
   LayoutRadialFrags()
 
   -- Overlay sombre : masque le centre pour simuler un arc en anneau
-  local overlayPx = arcPx * (cfg.overlayRatio or 0.75)
+  local overlayPx = OverlayPx(cfg, arcPx)
   local overlayFrame = CreateFrame("Frame", nil, bar)
   -- +101 (pas +1) : doit rester au-dessus des 100 quartiers radiaux (frameLevel +1 a +100), sinon caché en mode radial
   overlayFrame:SetFrameLevel(arc:GetFrameLevel() + 101)

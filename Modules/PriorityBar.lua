@@ -262,6 +262,12 @@ local LAYOUT_DEFS = {
   { id = "6x6",     name = L["PRIO_LAYOUT_6X6"],        totalSlots = 12, rows = 2, cols = 3,
     leftNames  = {"A", "B", "C", "D", "E", "F"},
     rightNames = {"X", "Y", "Z", "U", "V", "W"} },
+  -- Meme jeu de 12 slots que "6x6", grille simplement transposee (3 lignes de 2 au lieu de 2
+  -- lignes de 3). Les noms de slots sont identiques a dessein : passer d'un layout a l'autre
+  -- conserve les sorts deja assignes.
+  { id = "6x6v",    name = L["PRIO_LAYOUT_6X6_VERTICAL"], totalSlots = 12, rows = 3, cols = 2,
+    leftNames  = {"A", "B", "C", "D", "E", "F"},
+    rightNames = {"X", "Y", "Z", "U", "V", "W"} },
 }
 PriorityBar.LAYOUT_DEFS = LAYOUT_DEFS
 
@@ -291,6 +297,20 @@ local overrideToBase     = {}  -- overrideSpellID → baseSpellID (reverse map)
 local learnedSpells      = {}  -- spellID → true si IsPlayerSpell (construit hors combat, jamais tainted)
 local spellCDBase        = {}  -- spellID → base cooldown en secondes (construit hors combat)
 local _realCDEndTimes    = {}  -- spellID → GetTime() estimé de fin de CD (en combat)
+-- [spellID] = true des qu'un vrai cooldown a ete constate au moins une fois hors GCD. Distingue un
+-- sort au cooldown inconnu d'un sort qui n'en a pas : ce dernier n'est jamais vu en cooldown hors
+-- GCD. Declaree ici, et non pres de ResolveNonGCD, parce que RebuildChargeCache la purge bien plus
+-- haut dans le fichier.
+local _everHadRealCD     = {}
+-- [spellID] = duree de cooldown mesuree en jeu, pour les sorts dont aucune source ne la connait
+-- (cooldown remanie par les talents ou la hate). On retient la plus COURTE observee : elle ne peut
+-- qu'etre surestimee, l'instant "de nouveau disponible" n'etant constate qu'a la passe suivante.
+local _learnedCD         = {}
+-- [spellID] = instant ou le sort a ete CONSTATE disponible, hors GCD (donc sans ambiguite). Sert a
+-- perimer les preuves de cooldown : un cooldown peut etre remis a zero par un proc (Main brulante
+-- sur Fouet de lave, par exemple), et dans ce cas la prediction posee au cast comme la fenetre
+-- "cast + duree" continueraient a certifier un cooldown qui n'existe plus.
+local _cdFreeSince       = {}
 local estimatedCharges   = {}  -- spellID → nombre estimé de charges actuelles (en combat)
 local chargeRechargeTime = {}  -- spellID → durée de recharge d'une charge en sec
 local chargeTimers             = {}  -- spellID → C_Timer handle pour recharge programmée
@@ -301,7 +321,14 @@ local _chargeHasRecharge       = {}  -- spellID → bool : currentCharges < max 
 local _chargeCountCache        = {}  -- spellID → dernier currentCharges connu (ticker isolé)
 local _chargeHastedRechargeTime = {} -- spellID → durée de recharge hastée (GetSpellCooldown, ticker isolé)
 local _chargeIsOnRealCD        = {}  -- spellID → bool : duration>1.5s (vrai CD) vs GCD (ticker isolé)
+-- Les deux CooldownViewer Blizzard scannes par ScanCooldownViewer. Essential porte les sorts
+-- de rotation, Utility les utilitaires : la barre a besoin des deux.
+local CD_VIEWERS = { "EssentialCooldownViewer", "UtilityCooldownViewer" }
 local _cdViewerState           = {}  -- spellID → { onCD = bool, charges = number|nil }
+local _usableState             = {}  -- spellID → { usable = bool, noPower = bool } (ticker isolé)
+-- spellID → false (cible hors de portee) / true (a portee) / nil (question sans objet : pas de
+-- cible, ou sort qui n'en demande pas). Lu dans le ticker isole comme les autres appels C_Spell.
+local _rangeState              = {}
 local _cdViewerAvail     = false  -- true si le dernier scan CDViewer a trouvé des données
 local _cvDbgSnap         = ""   -- fingerprint du dernier état CDViewer logué
 local _swipeDbg          = {}   -- [slot] → dernier état logué (swipeRunning|spellOnCD|spellID)
@@ -513,7 +540,14 @@ end
 local function RebuildChargeCache()
   if InCombatLockdown() then return end
   wipe(chargeCache)
+  wipe(_chargeCountCache)
   wipe(overrideToBase)
+  -- Memoires d'anticipation du GCD : un changement de talents peut allonger, raccourcir ou
+  -- supprimer le cooldown d'un sort. Les repartir de zero evite qu'un "ce sort a un cooldown"
+  -- appris avant le changement ne grise l'icone a tort pendant les GCD suivants.
+  wipe(_everHadRealCD)
+  wipe(_learnedCD)
+  wipe(_cdFreeSince)
   for i = 1, MAX_SLOTS do
     local slot = slotFrames[i]
     if slot and slot.spellIDs then
@@ -787,6 +821,81 @@ local function SyncCooldownsOOC()
   end
 end
 
+-- Lit une itemFrame d'un CooldownViewer et depose son etat dans _cdViewerState.
+-- Extrait de ScanCooldownViewer pour que la boucle sur les deux viewers reste lisible.
+local function ScanViewerFrame(itemFrame)
+  local info = itemFrame.cooldownInfo
+  if info and info.spellID then
+    local spellID = info.spellID
+    -- CD state : Cooldown:IsShown() = true → en CD
+    -- isOnGCD filtre les frames GCD (booléen natif CDM, lisible en tainté).
+    local onCD = false
+    local cdStart, cdDuration = nil, nil
+    local isGCDFrame = itemFrame.isOnGCD == true
+    if not isGCDFrame and itemFrame.Cooldown then
+      local okS, shown = pcall(itemFrame.Cooldown.IsShown, itemFrame.Cooldown)
+      if okS and shown then onCD = true end
+      -- Temps exacts du swipe via GetCooldownTimes (ms → s)
+      local okT, s, d = pcall(itemFrame.Cooldown.GetCooldownTimes, itemFrame.Cooldown)
+      if okT and s and d and d > 500 then
+        cdStart   = s / 1000
+        cdDuration = d / 1000
+      end
+    end
+
+    -- Charges : lire le FontString (toujours clean, nil si non-charge)
+    local charges = nil
+    if itemFrame.ChargeCount and itemFrame.ChargeCount.Current then
+      local okC, txt = pcall(function()
+        local t = itemFrame.ChargeCount.Current:GetText()
+        if t then local _ = t .. ""; return tonumber(t) end
+        return nil
+      end)
+      if okC then charges = txt end
+    end
+
+    -- Préférer la durée la plus longue si deux frames existent pour le même sort (GCD vs vrai CD)
+    local _prev = _cdViewerState[spellID]
+    local _useNew = not _prev
+                 or (cdDuration and (not _prev.cdDuration or cdDuration > _prev.cdDuration))
+    if _useNew then
+      _cdViewerState[spellID] = { onCD = onCD, charges = charges, cdStart = cdStart, cdDuration = cdDuration }
+      -- Apprendre spellCDBase depuis le CDViewer (couvre les sorts sans GetSpellBaseCooldown en TWW)
+      if cdDuration and cdDuration > 1.5 and not spellCDBase[spellID] then
+        spellCDBase[spellID] = cdDuration
+      end
+    end
+    _cdViewerAvail = true
+
+    -- Indexer aussi sous l'overrideSpellID du cooldownInfo (si différent)
+    if info.overrideSpellID then
+      local okOv, ovID = pcall(function()
+        if info.overrideSpellID ~= spellID and info.overrideSpellID > 0 then
+          return info.overrideSpellID
+        end
+        return nil
+      end)
+      if okOv and ovID then
+        _cdViewerState[ovID] = _cdViewerState[spellID]
+      end
+    end
+
+    -- Indexer aussi sous l'override LIVE (GetOverrideSpell reste lisible en combat, simple lookup)
+    if C_Spell and C_Spell.GetOverrideSpell then
+      local okOv2, ovID2 = pcall(C_Spell.GetOverrideSpell, spellID)
+      if okOv2 and ovID2 and ovID2 ~= spellID and ovID2 > 0 then
+        _cdViewerState[ovID2] = _cdViewerState[spellID]
+      end
+    end
+
+    -- Indexer aussi sous le spellID DE BASE, pour retrouver l'entrée quand slot.spellIDs contient le sort de base
+    local baseOfCD = overrideToBase[spellID]
+    if baseOfCD and baseOfCD ~= spellID then
+      _cdViewerState[baseOfCD] = _cdViewerState[spellID]
+    end
+  end
+end
+
 -- Scan du CooldownViewer Blizzard (seule source fiable de l'état CD en combat en TWW), appelé à chaque tick de PollSlots.
 -- Si indisponible, _cdViewerAvail reste false et UpdateSlotExtras tombe sur le fallback event-driven.
 local function ScanCooldownViewer()
@@ -803,82 +912,35 @@ local function ScanCooldownViewer()
       else
         _chargeIsOnRealCD[chSid] = nil
       end
+
+      -- Charges restantes, lues ICI et pas ailleurs : c'est le seul endroit isole ou
+      -- GetSpellCharges est exploitable en combat (la meme lecture depuis PollSlots revient
+      -- taintee). Sans ca, la desaturation "0 charge" n'avait que le FontString ChargeCount
+      -- et l'estimation predictive, qui ne disent rien de fiable une fois a zero.
+      _chargeCountCache[chSid] = nil
+      if C_Spell.GetSpellCharges then
+        local okCh, chInfo = pcall(C_Spell.GetSpellCharges, chSid)
+        if okCh and chInfo and chInfo.currentCharges ~= nil then
+          -- CleanInt d'abord (valide contre des litteraux), tostring en repli. En combat la
+          -- valeur est secrete et les deux echouent : la desaturation "0 charge" s'appuie alors
+          -- sur le cooldown du sort (swipeIsRealCD), pas sur un compteur.
+          local cur = CleanInt(chInfo.currentCharges)
+          if cur == nil then cur = tonumber(tostring(chInfo.currentCharges)) end
+          _chargeCountCache[chSid] = cur
+        end
+      end
     end
   end
   if ns._cdViewerDisabled then return end
-  local viewer = _G["UtilityCooldownViewer"]
-  if not viewer or not viewer.itemFramePool then return end
-
+  -- Les DEUX viewers : les sorts de rotation vivent dans Essential, les utilitaires dans
+  -- Utility. N'en scanner qu'un laissait l'autre moitie sans etat de CD -- symptome : la
+  -- desaturation marchait sur les utilitaires et jamais sur la rotation.
   local ok = pcall(function()
-    for itemFrame in viewer.itemFramePool:EnumerateActive() do
-      local info = itemFrame.cooldownInfo
-      if info and info.spellID then
-        local spellID = info.spellID
-        -- CD state : Cooldown:IsShown() = true → en CD
-        -- isOnGCD filtre les frames GCD (booléen natif CDM, lisible en tainté).
-        local onCD = false
-        local cdStart, cdDuration = nil, nil
-        local isGCDFrame = itemFrame.isOnGCD == true
-        if not isGCDFrame and itemFrame.Cooldown then
-          local okS, shown = pcall(itemFrame.Cooldown.IsShown, itemFrame.Cooldown)
-          if okS and shown then onCD = true end
-          -- Temps exacts du swipe via GetCooldownTimes (ms → s)
-          local okT, s, d = pcall(itemFrame.Cooldown.GetCooldownTimes, itemFrame.Cooldown)
-          if okT and s and d and d > 500 then
-            cdStart   = s / 1000
-            cdDuration = d / 1000
-          end
-        end
-
-        -- Charges : lire le FontString (toujours clean, nil si non-charge)
-        local charges = nil
-        if itemFrame.ChargeCount and itemFrame.ChargeCount.Current then
-          local okC, txt = pcall(function()
-            local t = itemFrame.ChargeCount.Current:GetText()
-            if t then local _ = t .. ""; return tonumber(t) end
-            return nil
-          end)
-          if okC then charges = txt end
-        end
-
-        -- Préférer la durée la plus longue si deux frames existent pour le même sort (GCD vs vrai CD)
-        local _prev = _cdViewerState[spellID]
-        local _useNew = not _prev
-                     or (cdDuration and (not _prev.cdDuration or cdDuration > _prev.cdDuration))
-        if _useNew then
-          _cdViewerState[spellID] = { onCD = onCD, charges = charges, cdStart = cdStart, cdDuration = cdDuration }
-          -- Apprendre spellCDBase depuis le CDViewer (couvre les sorts sans GetSpellBaseCooldown en TWW)
-          if cdDuration and cdDuration > 1.5 and not spellCDBase[spellID] then
-            spellCDBase[spellID] = cdDuration
-          end
-        end
-        _cdViewerAvail = true
-
-        -- Indexer aussi sous l'overrideSpellID du cooldownInfo (si différent)
-        if info.overrideSpellID then
-          local okOv, ovID = pcall(function()
-            if info.overrideSpellID ~= spellID and info.overrideSpellID > 0 then
-              return info.overrideSpellID
-            end
-            return nil
-          end)
-          if okOv and ovID then
-            _cdViewerState[ovID] = _cdViewerState[spellID]
-          end
-        end
-
-        -- Indexer aussi sous l'override LIVE (GetOverrideSpell reste lisible en combat, simple lookup)
-        if C_Spell and C_Spell.GetOverrideSpell then
-          local okOv2, ovID2 = pcall(C_Spell.GetOverrideSpell, spellID)
-          if okOv2 and ovID2 and ovID2 ~= spellID and ovID2 > 0 then
-            _cdViewerState[ovID2] = _cdViewerState[spellID]
-          end
-        end
-
-        -- Indexer aussi sous le spellID DE BASE, pour retrouver l'entrée quand slot.spellIDs contient le sort de base
-        local baseOfCD = overrideToBase[spellID]
-        if baseOfCD and baseOfCD ~= spellID then
-          _cdViewerState[baseOfCD] = _cdViewerState[spellID]
+    for _, viewerName in ipairs(CD_VIEWERS) do
+      local viewer = _G[viewerName]
+      if viewer and viewer.itemFramePool then
+        for itemFrame in viewer.itemFramePool:EnumerateActive() do
+          ScanViewerFrame(itemFrame)
         end
       end
     end
@@ -1466,20 +1528,24 @@ local function StartSlotGlow(slot)
     slot.loopFlipTex:SetAlpha(1)
     slot.loopFlipTex:Show()
     if not slot.loopFlipAG:IsPlaying() then slot.loopFlipAG:Play() end
-    -- Proc start (one-shot) on first trigger
-    if isNewProc and slot._procStartEnabled then
-      slot.procStartTex:SetVertexColor(gc[1], gc[2], gc[3], gc[4] or 1)
-      slot.procStartTex:SetAlpha(1)
-      slot.procStartTex:Show()
-      slot.procStartAG:Stop()
-      slot.procStartAG:Play()
-    end
   else
     -- Legacy pulse mode
     slot.glow:SetVertexColor(gc[1], gc[2], gc[3], gc[4] or 1)
     slot.glow:SetAlpha(0.6)
     slot.glow:Show()
     if not slot.glowAG:IsPlaying() then slot.glowAG:Play() end
+  end
+
+  -- Animation de proc (one-shot), independante du halo en boucle. Elle etait imbriquee dans la
+  -- branche flipbook ci-dessus : avec le glow "Pulse" -- celui par defaut -- elle n'etait donc
+  -- jamais jouee, quel que soit le reglage choisi. Les deux effets n'ont pourtant rien a voir :
+  -- l'un est un eclat au declenchement, l'autre un halo qui tourne tant que le proc dure.
+  if isNewProc and slot._procStartEnabled then
+    slot.procStartTex:SetVertexColor(gc[1], gc[2], gc[3], gc[4] or 1)
+    slot.procStartTex:SetAlpha(1)
+    slot.procStartTex:Show()
+    slot.procStartAG:Stop()
+    slot.procStartAG:Play()
   end
   Debug("Slot " .. slot.slotIndex .. " GLOW ON → spellID=" .. tostring(slot.currentSpellID))
 end
@@ -1720,18 +1786,30 @@ local function FindCDViewerState(slot)
   local baseDisplayed = overrideToBase[displayedID] or displayedID
 
   -- Auto-expire une entrée cdmCDData si son timing est dépassé (cas "pool return sans Clear()")
-  local function autoExpire(ev)
-    if ev and ev.onCD and ev.cdStart and ev.cdDuration then
+  local function autoExpire(ev, id)
+    if not (ev and ev.onCD) then return end
+    if ev.cdStart and ev.cdDuration then
       if ev.cdStart + ev.cdDuration <= GetTime() + 0.15 then
         ev.onCD = false  -- auto-expire
       end
+      return
+    end
+    -- onCD=true SANS timing exploitable : rien ne pourra jamais l'expirer, la condition ci-dessus
+    -- ne s'executant pas. Sur un sort qui n'a aucun cooldown de base (Frappe purulente et les
+    -- autres sorts a ressource pure), ce residu grisait l'icone jusqu'a la fin de la session --
+    -- l'utilisateur voyait le sort rester terne alors que ses runes etaient revenues. Sans duree
+    -- connue on ne saurait de toute facon pas quand le lever : ne pas desaturer vaut mieux qu'un
+    -- grisement definitif. Un sort avec un vrai CD de base garde le comportement d'origine.
+    local baseDur = id and (spellCDBase[id] or spellCDBase[overrideToBase[id] or id]) or nil
+    if not (baseDur and baseDur > 1.5) then
+      ev.onCD = false
     end
   end
 
   -- Pour un ID donné : préfère cdmEventData pour onCD+timing, enrichit avec les charges du polling.
   local function tryID(id)
     local evEntry = cdmEventData and cdmEventData[id]
-    if evEntry then autoExpire(evEntry) end
+    if evEntry then autoExpire(evEntry, id) end
     local pollEntry = _cdViewerAvail and _cdViewerState[id]
 
     if evEntry then
@@ -1755,7 +1833,7 @@ local function FindCDViewerState(slot)
       local ok, ov = pcall(C_Spell.GetOverrideSpell, id)
       if ok and ov and ov ~= id and ov > 0 then
         local evOv = cdmEventData and cdmEventData[ov]
-        if evOv then autoExpire(evOv) end
+        if evOv then autoExpire(evOv, ov) end
         local pollOv = _cdViewerAvail and _cdViewerState[ov]
         if evOv then
           if pollOv then
@@ -1820,9 +1898,166 @@ local function ClearSlotCDMSubscription(slot)
   end
 end
 
+-- Repli si le profil n'a pas encore de couleur "hors de portee" (profil anterieur a l'option).
+local OUT_OF_RANGE_COLOR_FALLBACK = { 0.9, 0.25, 0.25, 1 }
+
+-- 61304 : le sort "Global Cooldown" de Blizzard, reference standard pour savoir si le GCD tourne.
+local GCD_SPELL_ID = 61304
+local _gcdActiveCache, _gcdActiveAt = false, -1
+local _gcdLog = {}   -- transitions observees de IsGCDActive (diagnostic /pbcddbg)
+local _gcdTrueCount = 0
+
+-- isActive du GCD global. Mis en cache sur le timestamp de la passe : les 4 slots interrogent la
+-- meme chose au meme instant.
+local function IsGCDActive()
+  local now = GetTime()
+  if now == _gcdActiveAt then return _gcdActiveCache end
+  _gcdActiveAt = now
+  _gcdActiveCache = false
+  if C_Spell and C_Spell.GetSpellCooldown then
+    local ok, cd = pcall(C_Spell.GetSpellCooldown, GCD_SPELL_ID)
+    if ok and cd then
+      local okA, act = pcall(function() return cd.isActive and true or false end)
+      _gcdActiveCache = (okA and act) or false
+      if _gcdActiveCache then _gcdTrueCount = _gcdTrueCount + 1 end
+      -- Trace : readOk / isActive lisible / valeur retenue. Un pcall en echec ou un isActive
+      -- toujours faux expliquerait a lui seul le retour des balayages de GCD.
+      local entry = string.format("ok=%s okA=%s val=%s", tostring(ok), tostring(okA), tostring(_gcdActiveCache))
+      if _gcdLog[#_gcdLog] ~= entry then
+        _gcdLog[#_gcdLog + 1] = entry
+        if #_gcdLog > 5 then table.remove(_gcdLog, 1) end
+      end
+    else
+      local entry = "GetSpellCooldown(61304) a echoue"
+      if _gcdLog[#_gcdLog] ~= entry then
+        _gcdLog[#_gcdLog + 1] = entry
+        if #_gcdLog > 5 then table.remove(_gcdLog, 1) end
+      end
+    end
+  end
+  return _gcdActiveCache
+end
+
+function PriorityBar.DebugGCDLog()
+  return _gcdLog, _gcdTrueCount
+end
+
+-- Preuves qu'un cooldown actif PENDANT le GCD est bien celui du sort, et pas seulement le GCD.
+-- Sans elles il faut attendre la fin du GCD pour trancher, soit jusqu'a 1,5 s avant que l'icone ne
+-- se grise -- tres visible en rotation. Chacune est une confirmation POSITIVE : aucune ne peut
+-- empecher un grisage, seulement l'anticiper.
+-- Regle cardinale : une preuve doit attester un cooldown EN COURS. "Ce sort possede un cooldown"
+-- n'en est pas une -- sur ce seul critere, le GCD declenche par n'importe quel autre sort
+-- ternirait d'un coup toutes les icones a cooldown pourtant disponibles.
+local GCD_CAST_WINDOW = 2  -- secondes ; le GCD plafonne a 1,5 s, le reste est une marge
+
+local function HasRealCDEvidence(sid)
+  if not sid then return false end
+  local base = overrideToBase[sid] or sid
+
+  -- Le sort a ete CONSTATE disponible depuis son dernier cast : son cooldown est termine, ou a ete
+  -- remis a zero par un proc. Les preuves ci-dessous reposent toutes sur l'instant du cast et
+  -- continueraient sinon a affirmer un cooldown revolu -- c'est ce qui grisait l'icone a chaque
+  -- GCD une fois le sort lance.
+  local freeAt = _cdFreeSince[sid] or _cdFreeSince[base]
+  if freeAt then
+    local nmF = GetSpellName(sid)
+    local castF = nmF and _lastSuccessTime[nmF]
+    if not castF or freeAt >= castF then return false end
+  end
+
+  -- 1. Prediction posee au cast (UNIT_SPELLCAST_SUCCEEDED) et encore valide : elle date d'un cast
+  -- de CE sort et porte sa duree, donc elle atteste bien un cooldown en cours.
+  local cdEnd = _realCDEndTimes[sid] or _realCDEndTimes[base]
+  if cdEnd and GetTime() < cdEnd then return true end
+
+  -- 2. Le sort a ete lance il y a MOINS longtemps que ne dure son cooldown : il est donc encore
+  -- dedans. La fenetre est bornee par la duree du cooldown, ce qui est capital -- en rotation
+  -- soutenue le GCD est quasi permanent, et toute conclusion non bornee resterait figee jusqu'a
+  -- la fin du combat.
+  local nm = GetSpellName(sid)
+  local castAt = nm and _lastSuccessTime[nm]
+  if castAt then
+    local elapsed = GetTime() - castAt
+    local bd = spellCDBase[sid] or spellCDBase[base]
+              or _learnedCD[sid] or _learnedCD[base]
+    if bd and bd > 1.5 and elapsed < bd then return true end
+    -- Sort dont le cooldown n'a pas encore ete mesure : on n'anticipe que sur la duree d'un GCD,
+    -- le temps d'en apprendre la duree au premier cycle complet.
+    if not bd and (_everHadRealCD[sid] or _everHadRealCD[base])
+       and elapsed <= GCD_CAST_WINDOW then
+      return true
+    end
+  end
+
+  -- cdmCDData n'est VOLONTAIREMENT pas consulte ici : il reste bloque sur onCD=true pour des sorts
+  -- qui n'ont aucun cooldown, et certifiait alors un "vrai cooldown" la ou il n'y a que le GCD.
+  return false
+end
+
+local function ResolveNonGCD(sid, isActive)
+  local inGCD = IsGCDActive()
+
+  if not isActive then
+    -- Le sort est disponible. Constate HORS GCD, c'est aussi l'occasion de mesurer le cooldown
+    -- qui vient de s'ecouler, pour les sorts dont aucune source ne donne la duree.
+    if not inGCD then
+      local nm = GetSpellName(sid)
+      local castAt = nm and _lastSuccessTime[nm]
+      local base = overrideToBase[sid] or sid
+      _cdFreeSince[sid] = GetTime()
+      -- La prediction posee au cast est caduque : le sort est disponible, qu'il ait fini son
+      -- cooldown ou qu'un proc l'ait remis a zero.
+      _realCDEndTimes[sid] = nil
+      if base ~= sid then _realCDEndTimes[base] = nil end
+      -- _everHadRealCD est exige : sans lui, un sort SANS cooldown lance il y a dix secondes
+      -- ferait apprendre "dix secondes de cooldown", duree ensuite servie comme preuve.
+      if castAt and (_everHadRealCD[sid] or _everHadRealCD[base])
+         and not (spellCDBase[sid] or spellCDBase[base]) then
+        local d = GetTime() - castAt
+        -- Au-dela du GCD (sinon c'est un sort sans cooldown) et sous dix minutes (garde-fou
+        -- contre un cast oublie depuis longtemps).
+        if d > GCD_CAST_WINDOW and d < 600 then
+          local prev = _learnedCD[sid]
+          if not prev or d < prev then _learnedCD[sid] = d end
+        end
+      end
+    end
+    return false
+  end
+
+  if not inGCD then
+    -- Hors GCD, un cooldown actif ne peut etre que celui du sort.
+    -- La marque n'est posee que si ce cooldown se prolonge au-dela d'un GCD : la detection du GCD
+    -- global peut accuser une passe de retard sur le debut du GCD, et cet instant suffirait sinon
+    -- a marquer un sort qui n'a aucun cooldown (Chaine d'eclairs et consorts). Ce sont justement
+    -- eux qui se retrouvaient ensuite grises a chaque GCD.
+    local nmM = GetSpellName(sid)
+    local castM = nmM and _lastSuccessTime[nmM]
+    if (not castM) or (GetTime() - castM) > GCD_CAST_WINDOW then
+      _everHadRealCD[sid] = true
+    end
+    return true
+  end
+
+  -- Pendant le GCD, seule une preuve positive tranche. Aucun repli sur un verdict precedent : le
+  -- GCD s'enchainant sans interruption en rotation, un "en cooldown" fige ne serait plus jamais
+  -- reevalue et grisait l'icone a chaque GCD jusqu'a la fin du combat.
+  return HasRealCDEvidence(sid) and true or false
+end
+
 local function UpdateSlotExtras(slot)
   local cfg = ns.GetCfg("priorityBar") or {}
   if not slot.currentSpellID then return end
+
+  -- Verdict "vrai cooldown en cours" calcule par la section swipe ci-dessous, reutilise ensuite par
+  -- la desaturation. Pour un sort A CHARGES c'est le signal de "plus aucune charge" : Blizzard ne
+  -- rapporte un cooldown actif que lorsqu'il n'en reste aucune -- exactement la raison pour
+  -- laquelle le swipe de recharge n'apparait qu'a ce moment. isActive est un booleen lisible en
+  -- combat (la section swipe le teste deja), la ou duration et le compteur de charges sont
+  -- secrets : duration ne survit meme pas a une comparaison, et le texte du compteur est une
+  -- chaine secrete dont tonumber ne tire que nil.
+  local swipeIsRealCD = nil
 
   local actionSlot = FindActionSlotForSpell(slot)
 
@@ -1873,11 +2108,18 @@ local function UpdateSlotExtras(slot)
 
       local _chSwipeSid = chargeCache[curID] and curID
                        or (baseID ~= curID and chargeCache[baseID] and baseID)
-      -- hideGCDSwipe : sorts normaux uniquement (les sorts à charges utilisent isActive nativement, duration=0 en TWW pour eux).
-      if cfg.hideGCDSwipe and isRealCD and not _chSwipeSid then
-        local _cdmD = ns.Auras and ns.Auras.cdmCDData
-        local _cdmE = _cdmD and (_cdmD[curID] or (baseID ~= curID and _cdmD[baseID]) or nil)
-        if not (_cdmE and _cdmE.onCD) then isRealCD = false end
+
+      -- Verdict unique : ce cooldown actif est-il autre chose que le GCD ? Il pilote a la fois le
+      -- swipe et la desaturation, qui ne peuvent donc plus se contredire. L'ancienne garde
+      -- s'appuyait sur cdmCDData, dont les deux sens d'erreur produisaient exactement les symptomes
+      -- observes : un sort grise en permanence d'un cote, un vrai cooldown sans swipe de l'autre.
+      local nonGCD = ResolveNonGCD(curID, isRealCD and true or false)
+      swipeIsRealCD = nonGCD
+
+      -- Masquer le balayage du GCD : au choix de l'utilisateur pour un sort normal, toujours pour
+      -- un sort a charges (un swipe de GCD sur une icone a charges n'a aucun sens).
+      if isRealCD and not nonGCD and (cfg.hideGCDSwipe or _chSwipeSid) then
+        isRealCD = false
       end
 
       if isRealCD then
@@ -1905,8 +2147,12 @@ local function UpdateSlotExtras(slot)
     end
   end
 
-  -- Désaturation : CDViewer source de vérité en combat (charges==0 ou onCD==true), fallback estimatedCharges/_realCDEndTimes.
-  -- Consulté uniquement pour sorts à vrai CD (>1.5s) ou à charges : les fillers sans CD apparaissent aussi dans le CDViewer pendant cast/channel mais ne doivent pas être désaturés.
+  -- Désaturation "si non disponible" -- trois causes, evaluees dans cet ordre :
+  --   1. ressources insuffisantes            -> _usableState (C_Spell.IsSpellUsable, ticker isolé)
+  --   2. sort A CHARGES : 0 charge restante   -> ChargeCount CDM > CDViewer > estimation
+  --   3. sort SANS charges : vrai CD en cours -> cdmCDData.onCD > CDViewer > prédiction
+  -- Le GCD ne desature JAMAIS : cdmCDData filtre les frames GCD via isOnGCD (cf. CDMHooks.lua),
+  -- ScanCooldownViewer fait de meme, et IsSpellUsable ignore le GCD par construction.
   if cfg.desaturateOnCooldown then
     local desat = false
 
@@ -1914,60 +2160,109 @@ local function UpdateSlotExtras(slot)
       local displayedID   = slot.currentSpellID
       local baseDisplayed = overrideToBase[displayedID] or displayedID
 
-      -- isChargeSpell : uniquement le sort AFFICHÉ, jamais un sort caché du slot (qui ne doit pas désaturer le sort affiché disponible).
-      local isChargeSpell = chargeCache[displayedID] or chargeCache[baseDisplayed]
-      local chargeSid     = chargeCache[displayedID] and displayedID
-                         or (chargeCache[baseDisplayed] and baseDisplayed or nil)
+      -- 1) Ressources. Independant du CooldownViewer, donc couvre aussi les sorts de
+      -- rotation qu'aucun viewer ne liste.
+      -- noPower SEUL : `usable == false` couvre aussi "pas de cible valide", "mauvaise
+      -- forme"... qui ne sont pas un manque de ressource et ne doivent pas griser.
+      local usable = _usableState[displayedID]
+                  or (baseDisplayed ~= displayedID and _usableState[baseDisplayed] or nil)
+      if usable and usable.noPower then
+        desat = true
+      end
 
-      local _cdmData  = ns.Auras and ns.Auras.cdmCDData
-      local hasRealCD = (spellCDBase[displayedID] and spellCDBase[displayedID] > 1.5)
-                     or (spellCDBase[baseDisplayed] and spellCDBase[baseDisplayed] > 1.5)
-                     -- Fallback live : CDViewer onCD==true même si spellCDBase l'ignore
-                     or (_cdViewerAvail
-                         and (_cdViewerState[displayedID] and _cdViewerState[displayedID].onCD
-                              or _cdViewerState[baseDisplayed] and _cdViewerState[baseDisplayed].onCD)
-                         and true or false)
-                     -- Fallback event-driven : cdmCDData signale un vrai CD (couvre le cas spellCDBase nil)
-                     or (_cdmData and (_cdmData[displayedID] or _cdmData[baseDisplayed]) and true or false)
-      local cvState = (hasRealCD or isChargeSpell) and FindCDViewerState(slot) or nil
+      if not desat then
+        -- isChargeSpell : uniquement le sort AFFICHÉ, jamais un sort caché du slot (qui ne doit pas désaturer le sort affiché disponible).
+        local isChargeSpell = chargeCache[displayedID] or chargeCache[baseDisplayed]
+        local chargeSid     = chargeCache[displayedID] and displayedID
+                           or (chargeCache[baseDisplayed] and baseDisplayed or nil)
 
-      if isChargeSpell then
-        -- Desat uniquement si charges==0 confirmées : jamais via GetSpellCharges direct (tainté dans PollSlots),
-        -- seulement cvState.charges (CDViewer, ticker isolé) ou estimatedCharges (SyncChargesOOC). Sinon pas de désaturation (optimiste).
-        if chargeSid then
-          local cur = nil
-          -- Source prioritaire : canal event-driven ChargeCount (CDMHooks.lua), zéro-lag vs le poll 0.15s.
-          if CDM_CHARGE_HOOK_ENABLED then
-            local cdmChg = ns.Auras and ns.Auras.cdmChargeData
-            local txt = cdmChg and cdmChg[chargeSid]
-            if txt ~= nil then
-              local okNum, num = pcall(tonumber, txt)
-              if okNum and num then cur = num end
+        local _cdmData  = ns.Auras and ns.Auras.cdmCDData
+        local cdmEntry  = _cdmData and (_cdmData[displayedID] or _cdmData[baseDisplayed]) or nil
+        local hasRealCD = (spellCDBase[displayedID] and spellCDBase[displayedID] > 1.5)
+                       or (spellCDBase[baseDisplayed] and spellCDBase[baseDisplayed] > 1.5)
+                       -- Fallback live : CDViewer onCD==true même si spellCDBase l'ignore
+                       or (_cdViewerAvail
+                           and (_cdViewerState[displayedID] and _cdViewerState[displayedID].onCD
+                                or _cdViewerState[baseDisplayed] and _cdViewerState[baseDisplayed].onCD)
+                           and true or false)
+                       -- Fallback event-driven : cdmCDData signale un vrai CD (couvre le cas spellCDBase nil)
+                       or (cdmEntry and true or false)
+        local cvState = (hasRealCD or isChargeSpell) and FindCDViewerState(slot) or nil
+
+        if isChargeSpell then
+          -- Desat uniquement si charges==0 confirmées : jamais via GetSpellCharges direct (tainté dans PollSlots),
+          -- seulement cvState.charges (CDViewer, ticker isolé) ou estimatedCharges (SyncChargesOOC). Sinon pas de désaturation (optimiste).
+          if chargeSid then
+            -- Source la plus sure : GetSpellCharges lu dans le ticker isolé (cf.
+            -- ScanCooldownViewer). Passe AVANT les FontString : a zero charge, Blizzard
+            -- masque le ChargeCount au lieu d'y ecrire "0", et le canal event-driven
+            -- garde alors la derniere valeur non nulle -- soit exactement le cas a detecter.
+            local cur = _chargeCountCache[chargeSid]
+            if cur == nil and baseDisplayed ~= chargeSid then
+              cur = _chargeCountCache[baseDisplayed]
+            end
+            -- Puis le canal event-driven ChargeCount (CDMHooks.lua), zéro-lag vs le poll 0.15s.
+            -- "Plus aucune charge" = le cooldown du sort est actif (cf. swipeIsRealCD en tete de
+            -- fonction). Place AVANT les deux canaux suivants, qui mentent precisement a zero
+            -- charge : Blizzard masque le ChargeCount au lieu d'y ecrire "0", donc le canal
+            -- event-driven ressert sa derniere valeur non nulle.
+            if cur == nil then
+              local zero = swipeIsRealCD
+              if zero == nil and C_Spell and C_Spell.GetSpellCooldown then
+                -- La section swipe n'a pas tourne (swipe ET compte a rebours desactives) : meme
+                -- lecture, faite ici. isActive se teste, contrairement a duration.
+                local okCD, cdI = pcall(C_Spell.GetSpellCooldown, chargeSid)
+                if okCD and cdI then
+                  local okAct, act = pcall(function() return cdI.isActive and true or false end)
+                  if okAct then zero = act end
+                end
+              end
+              -- 1 est ici un simple "il reste des charges" : seul le test == 0 compte plus bas.
+              if zero ~= nil then cur = zero and 0 or 1 end
+            end
+            if cur == nil and CDM_CHARGE_HOOK_ENABLED then
+              local cdmChg = ns.Auras and ns.Auras.cdmChargeData
+              local txt = cdmChg and cdmChg[chargeSid]
+              if txt ~= nil then
+                local okNum, num = pcall(tonumber, txt)
+                if okNum and num then cur = num end
+              end
+            end
+            if cur == nil and cvState and type(cvState.charges) == "number" then
+              -- Valeur directe : 0, 1, 2 … issue du ChargeCount FontString Blizzard
+              cur = cvState.charges
+            end
+            if cur == nil then
+              -- Fallback estimatedCharges : ne jamais utiliser cvState.onCD comme proxy (onCD=true avec 1 charge restante ≠ désaturé).
+              cur = CleanInt(estimatedCharges[chargeSid])
+            end
+            -- Traces de diagnostic : /pbcddbg les imprime. Elles disent laquelle des sources a
+            -- repondu et ce que la branche a reellement decide, au lieu de le deduire.
+            slot._dbgChargeSid  = chargeSid
+            slot._dbgChargeZero = swipeIsRealCD
+            slot._dbgChargeTxt  = slot.chargeText and select(2, pcall(slot.chargeText.GetText, slot.chargeText)) or nil
+            slot._dbgChargeCur  = cur
+            if cur ~= nil then
+              desat = (cur == 0)
             end
           end
-          if cur == nil and cvState and type(cvState.charges) == "number" then
-            -- Valeur directe : 0, 1, 2 … issue du ChargeCount FontString Blizzard
-            cur = cvState.charges
-          end
-          if cur == nil then
-            -- Fallback estimatedCharges : ne jamais utiliser cvState.onCD comme proxy (onCD=true avec 1 charge restante ≠ désaturé).
-            cur = CleanInt(estimatedCharges[chargeSid])
-          end
-          if cur ~= nil then
-            desat = (cur == 0)
-          end
-        end
-      else
-        -- Sort normal : vrai CD uniquement, jamais GCD. Priorité cvState (event-driven) > _cdViewerState (polling) > _realCDEndTimes.
-        if cvState then
-          desat = cvState.onCD
         else
-          local cvPoll = _cdViewerAvail and (_cdViewerState[displayedID] or _cdViewerState[baseDisplayed])
-          if cvPoll then
-            desat = cvPoll.onCD
+          -- Sort normal : vrai CD uniquement, jamais GCD. L'etat live (swipeIsRealCD, issu de
+          -- GetSpellCooldown.isActive purge du GCD) fait autorite -- cdmCDData ment dans les deux
+          -- sens et grisait soit a tort, soit jamais. Les sources suivantes ne servent plus que
+          -- si la section cooldown n'a pas tourne du tout.
+          if swipeIsRealCD ~= nil then
+            desat = swipeIsRealCD
+          elseif cvState then
+            desat = cvState.onCD
           else
-            local cdEnd = _realCDEndTimes[displayedID] or _realCDEndTimes[baseDisplayed]
-            desat = cdEnd ~= nil and GetTime() < cdEnd
+            local cvPoll = _cdViewerAvail and (_cdViewerState[displayedID] or _cdViewerState[baseDisplayed])
+            if cvPoll then
+              desat = cvPoll.onCD
+            else
+              local cdEnd = _realCDEndTimes[displayedID] or _realCDEndTimes[baseDisplayed]
+              desat = cdEnd ~= nil and GetTime() < cdEnd
+            end
           end
         end
       end
@@ -1976,6 +2271,34 @@ local function UpdateSlotExtras(slot)
     slot.icon:SetDesaturated(desat)
   else
     slot.icon:SetDesaturated(false)
+  end
+
+  -- Teinte "hors de portee", cumulable avec la desaturation ci-dessus (les deux s'appliquent a la
+  -- meme texture : SetDesaturated retire la couleur, SetVertexColor la remplace). L'etat vient du
+  -- ticker isole, jamais d'une lecture directe ici -- meme regle que pour IsSpellUsable.
+  if slot.icon then
+    local tint
+    if cfg.outOfRangeTint then
+      local sid  = slot.currentSpellID
+      local base = sid and (overrideToBase[sid] or sid)
+      local inRange = _rangeState[sid]
+      if inRange == nil and base ~= sid then inRange = _rangeState[base] end
+      if inRange == false then
+        -- Couleur thematique : "Cercle de puissance" de la spe courante (module Couleurs), qui
+        -- prend le pas sur la couleur fixe. Repli sur cette derniere si le module ne repond pas,
+        -- pour ne jamais perdre la teinte.
+        if cfg.outOfRangeUseTheme then
+          local CLR = ns.Modules and ns.Modules.Colors
+          tint = CLR and CLR.Get and CLR.Get("powercircle") or nil
+        end
+        tint = tint or cfg.outOfRangeColor or OUT_OF_RANGE_COLOR_FALLBACK
+      end
+    end
+    if tint then
+      slot.icon:SetVertexColor(tint[1] or 1, tint[2] or 1, tint[3] or 1, tint[4] or 1)
+    else
+      slot.icon:SetVertexColor(1, 1, 1, 1)
+    end
   end
 
   -- Charges : afficher uniquement pour le sort AFFICHÉ (ou son override live), jamais celles d'un autre sort du même slot.
@@ -2156,6 +2479,39 @@ local function UpdateSlot(slot, glowedSpells)
   UpdateSlotExtras(slot)
 end
 
+-- Utilisabilite live des sorts affiches : `usable` tombe a false quand le sort est bloque
+-- (ressources manquantes, condition non remplie), `noPower` isole le cas ressource. Lu dans le
+-- ticker ISOLE, comme les autres lectures C_Spell : la meme lecture depuis la stack PollSlots
+-- peut revenir taintee. Le GCD n'influence pas IsSpellUsable, donc aucun filtre a faire ici.
+local function ScanSpellUsable()
+  wipe(_usableState)
+  wipe(_rangeState)
+  if not (C_Spell and C_Spell.IsSpellUsable) then return end
+  -- Sans cible, la portee n'a pas de sens : on laisse _rangeState vide plutot que de teinter
+  -- toute la barre.
+  local hasTarget = UnitExists("target")
+  for i = 1, MAX_SLOTS do
+    local slot = slotFrames[i]
+    local sid  = slot and slot.currentSpellID
+    if sid and not _usableState[sid] then
+      local ok, usable, noPower = pcall(C_Spell.IsSpellUsable, sid)
+      if ok and usable ~= nil then
+        _usableState[sid] = { usable = usable and true or false,
+                              noPower = noPower and true or false }
+      end
+      -- nil = le sort ne se preoccupe pas de la portee (buff perso, sort de zone...) : aucune
+      -- teinte dans ce cas, seul un false explicite en declenche une.
+      if hasTarget and C_Spell.IsSpellInRange then
+        local okR, inRange = pcall(C_Spell.IsSpellInRange, sid, "target")
+        if okR and inRange ~= nil then
+          local okB, b = pcall(function() return inRange and true or false end)
+          if okB then _rangeState[sid] = b end
+        end
+      end
+    end
+  end
+end
+
 -- Scan isolé de l'état CD live par slot (même ticker que ScanCooldownViewer) pour éviter le taint entre lectures C_Spell
 local function ScanLiveSwipeState()
   wipe(_liveSwipeState)
@@ -2198,6 +2554,7 @@ local function StartPolling()
   if not cdViewerTicker then
     cdViewerTicker = C_Timer.NewTicker(0.15, function()
       ScanCooldownViewer()
+      ScanSpellUsable()
       if CD_SWIPE_ISOLATION_ENABLED then ScanLiveSwipeState() end
     end)
   end
@@ -3262,8 +3619,14 @@ function PriorityBar.Init()
 
   -- /pbcddbg : diagnostic event-driven CD/charges/desat par slot (état interne + état visuel)
   SLASH_PBCDDBG1 = "/pbcddbg"
-  SlashCmdList["PBCDDBG"] = function()
+  SlashCmdList["PBCDDBG"] = function(msg)
     local P = "|cffff8800[PB-CDDBG]|r "
+    -- Filtre optionnel : spellID exact ou fragment de nom. Sans lui le dump couvre tous les slots
+    -- et la fenetre de chat tronque la partie utile.
+    local filter = msg and msg:match("^%s*(.-)%s*$")
+    if filter == "" then filter = nil end
+    local filterID = filter and tonumber(filter) or nil
+    local filterName = (filter and not filterID) and filter:lower() or nil
     local cfg = ns.GetCfg("priorityBar") or {}
     print(P .. "=== CD/CHARGES/DESAT v3 (event-driven) ===")
     print(P .. "InCombat=" .. tostring(InCombatLockdown())
@@ -3272,7 +3635,18 @@ function PriorityBar.Init()
 
     for i = 1, MAX_SLOTS do
       local slot = slotFrames[i]
-      if slot and slot.currentSpellID then
+      local skip = false
+      if slot and slot.currentSpellID and (filterID or filterName) then
+        local sidF  = slot.currentSpellID
+        local baseF = overrideToBase[sidF] or sidF
+        if filterID then
+          skip = (sidF ~= filterID and baseF ~= filterID)
+        else
+          local nm = GetSpellName(sidF)
+          skip = not (nm and nm:lower():find(filterName, 1, true))
+        end
+      end
+      if slot and slot.currentSpellID and not skip then
         local sid = slot.currentSpellID
         local base = overrideToBase[sid] or sid
         local actionSlot = FindActionSlotForSpell(slot)
@@ -3298,6 +3672,11 @@ function PriorityBar.Init()
             else
               print(P .. "  live[" .. label .. "=" .. qid .. "] GetSpellCooldown pcall FAILED")
             end
+            print(P .. "  charges[" .. label .. "=" .. qid .. "] live=" .. tostring(_chargeCountCache[qid])
+              .. " max=" .. tostring(chargeCache[qid]) .. " est=" .. tostring(estimatedCharges[qid]))
+            local usE = _usableState[qid]
+            print(P .. "  usable[" .. label .. "=" .. qid .. "]=" .. (usE and
+              ("usable=" .. tostring(usE.usable) .. " noPower=" .. tostring(usE.noPower)) or "nil"))
             local cdmD = ns.Auras and ns.Auras.cdmCDData
             local cdmE = cdmD and cdmD[qid]
             print(P .. "  cdmCDData[" .. label .. "=" .. qid .. "]=" .. (cdmE and ("onCD=" .. tostring(cdmE.onCD)) or "nil"))
@@ -3330,6 +3709,75 @@ function PriorityBar.Init()
             .. " rechargeTime=" .. tostring(chargeRechargeTime[chSid] and string.format("%.1fs", chargeRechargeTime[chSid]) or "nil")
             .. " timerActive=" .. tostring(chargeTimers[chSid] and true or false))
         end
+
+        -- Regions du slot : quand IsDesaturated() dit false alors que l'icone PARAIT grise, le
+        -- grisement vient d'ailleurs -- swipe de cooldown qui assombrit, calque superpose, alpha
+        -- reduit, ou une seconde texture d'icone. On enumere tout ce qui est affiche.
+        do
+          local okReg, regions = pcall(function() return { slot:GetRegions() } end)
+          if okReg and regions then
+            for ri = 1, #regions do
+              local r = regions[ri]
+              local okT, oType = pcall(function() return r:GetObjectType() end)
+              local okSh, shown = pcall(function() return r:IsShown() end)
+              if okT and oType == "Texture" and okSh and shown then
+                local okD, ds = pcall(function() return r:IsDesaturated() end)
+                local okA, al = pcall(function() return r:GetAlpha() end)
+                local okV, vr, vg, vb, va = pcall(function() return r:GetVertexColor() end)
+                local okTx, tx = pcall(function() return r:GetTexture() end)
+                print(P .. string.format("    region%d %s desat=%s alpha=%s vertex=%s tex=%s",
+                  ri, (r == slot.icon) and "[ICON]" or "",
+                  okD and tostring(ds) or "?", okA and string.format("%.2f", al or 1) or "?",
+                  okV and string.format("%.2f/%.2f/%.2f a=%.2f", vr or 1, vg or 1, vb or 1, va or 1) or "?",
+                  okTx and tostring(tx) or "?"))
+              end
+            end
+          end
+          -- Le swipe d'un Cooldown assombrit l'icone sans toucher a sa saturation : une duree
+          -- residuelle suffit a faire croire a une desaturation qui ne part plus.
+          if slot.cooldown then
+            local okCdSh, cdShown = pcall(function() return slot.cooldown:IsShown() end)
+            local okCdA, cdA = pcall(function() return slot.cooldown:GetAlpha() end)
+            local okCdD, cdDrawSwipe = pcall(function() return slot.cooldown:GetDrawSwipe() end)
+            print(P .. string.format("    cooldownFrame shown=%s alpha=%s drawSwipe=%s",
+              okCdSh and tostring(cdShown) or "?",
+              okCdA and string.format("%.2f", cdA or 1) or "?",
+              okCdD and tostring(cdDrawSwipe) or "?"))
+            -- Piste "le swipe ne s'affiche qu'a 0 charge" : Blizzard ne dessine la recharge d'un
+            -- sort a charges que lorsqu'il n'en reste aucune. Si ces temps different entre 1+ et 0
+            -- charge, ils donnent le booleen "0 charge" que les compteurs refusent de livrer.
+            local okT, st, du = pcall(function()
+              local a, b = slot.cooldown:GetCooldownTimes()
+              return a, b
+            end)
+            local okDur, cdDur = pcall(function() return slot.cooldown:GetCooldownDuration() end)
+            print(P .. string.format("    cooldownTimes ok=%s start=%s duration=%s | GetCooldownDuration ok=%s val=%s",
+              tostring(okT), tostring(okT and st), tostring(okT and du),
+              tostring(okDur), tostring(okDur and cdDur)))
+          end
+          print(P .. string.format("    slotAlpha=%s iconAlpha=%s",
+            tostring(select(1, pcall(function() return string.format("%.2f", slot:GetAlpha()) end)) and string.format("%.2f", slot:GetAlpha()) or "?"),
+            tostring(slot.icon and string.format("%.2f", slot.icon:GetAlpha()) or "?")))
+        end
+
+        print(P .. "    gcdActive=" .. tostring(IsGCDActive()))
+        do
+          local glog, gcount = PriorityBar.DebugGCDLog()
+          print(P .. "    gcdTrueCount=" .. tostring(gcount) .. " (nombre de passes ou le GCD a ete vu actif)")
+          for gi = 1, #glog do print(P .. "    gcdLog[" .. gi .. "] " .. tostring(glog[gi])) end
+          local nm = GetSpellName(sid)
+          local castAt = nm and _lastSuccessTime[nm]
+          print(P .. string.format("    everHadRealCD=%s learnedCD=%s sinceCast=%s",
+            tostring(_everHadRealCD[sid]), tostring(_learnedCD[sid]),
+            castAt and string.format("%.1fs", GetTime() - castAt) or "jamais"))
+        end
+
+        -- Ce que la branche "charges" de la desaturation a vu a sa derniere passe.
+        print(P .. string.format("    desatCharges: chargeSid=%s zeroState=%s text=%s (type=%s) tonumber=%s cur=%s",
+          tostring(slot._dbgChargeSid), tostring(slot._dbgChargeZero),
+          tostring(slot._dbgChargeTxt), type(slot._dbgChargeTxt),
+          tostring(slot._dbgChargeTxt ~= nil and tonumber(slot._dbgChargeTxt) or nil),
+          tostring(slot._dbgChargeCur)))
 
         -- Visual state
         print(P .. "  visual: desat=" .. tostring(slot.icon:IsDesaturated())

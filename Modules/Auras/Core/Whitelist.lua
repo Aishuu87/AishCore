@@ -398,6 +398,12 @@ function ns.BuildWhitelist()
     if ns.EnsureIconsNativeGridTarget then pcall(ns.EnsureIconsNativeGridTarget) end
     if ns.RepositionIconsNativeGridTarget then pcall(ns.RepositionIconsNativeGridTarget) end
 
+    -- Grille familier : les auras que le joueur pose sur son pet (ns.PetAuraSpells, ex. Sombre
+    -- transformation) ne sont candidates d'aucun conteneur joueur/cible -- un AuraContainer n'a
+    -- qu'un seul SetUnit. Rangee supplementaire, SetUnit("pet")+"HELPFUL".
+    if ns.EnsureIconsNativeGridPet then pcall(ns.EnsureIconsNativeGridPet) end
+    if ns.RepositionIconsNativeGridPet then pcall(ns.RepositionIconsNativeGridPet) end
+
     -- Grille MANUELLE pour la destination dediee "Totems" (Core/Totems.lua) --
     -- pas d'AddAuraGroup possible (un totem n'est pas une vraie aura), meme
     -- disposition/reglages que "Free Bars" (icone+barre, cf. Defaults.lua).
@@ -412,6 +418,8 @@ function ns.BuildWhitelist()
 
     if ns.EnsureCircleBarsNativeGridTarget then pcall(ns.EnsureCircleBarsNativeGridTarget) end
     if ns.RepositionCircleBarsNativeGridTarget then pcall(ns.RepositionCircleBarsNativeGridTarget) end
+    if ns.EnsureCircleBarsNativeGridPet then pcall(ns.EnsureCircleBarsNativeGridPet) end
+    if ns.RepositionCircleBarsNativeGridPet then pcall(ns.RepositionCircleBarsNativeGridPet) end
 
     -- Grille native pour la destination GUI "Free Bars" (Cooldowns.lua, cle
     -- interne circlebars) : meme methodologie. Icone+cooldown+stacks+glow+
@@ -421,6 +429,8 @@ function ns.BuildWhitelist()
 
     if ns.EnsureFreeBarsNativeGridTarget then pcall(ns.EnsureFreeBarsNativeGridTarget) end
     if ns.RepositionFreeBarsNativeGridTarget then pcall(ns.RepositionFreeBarsNativeGridTarget) end
+    if ns.EnsureFreeBarsNativeGridPet then pcall(ns.EnsureFreeBarsNativeGridPet) end
+    if ns.RepositionFreeBarsNativeGridPet then pcall(ns.RepositionFreeBarsNativeGridPet) end
 
     -- Grille native pour la destination GUI "Liste d'icones" (Debuffs.lua,
     -- cle interne iconlist) : meme methodologie. Icone+cooldown+stacks+glow+
@@ -430,5 +440,7 @@ function ns.BuildWhitelist()
 
     if ns.EnsureIconListNativeGridTarget then pcall(ns.EnsureIconListNativeGridTarget) end
     if ns.RepositionIconListNativeGridTarget then pcall(ns.RepositionIconListNativeGridTarget) end
+    if ns.EnsureIconListNativeGridPet then pcall(ns.EnsureIconListNativeGridPet) end
+    if ns.RepositionIconListNativeGridPet then pcall(ns.RepositionIconListNativeGridPet) end
 end
 

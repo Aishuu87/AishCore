@@ -633,6 +633,15 @@ function AFKMode.SetPreview(status)
   end
 end
 
+-- UnitIsAFK renvoie un booleen SECRET en PvP (BG/arene) : le tester plante l'addon.
+-- On sonde issecretvalue() avant tout test booleen et on considere le joueur non-AFK
+-- quand l'info est masquee, plutot que de lever une erreur a chaque PLAYER_FLAGS_CHANGED.
+local function IsPlayerAFK()
+  local ok, afk = pcall(UnitIsAFK, "player")
+  if not ok or afk == nil or ns.IsSecret(afk) then return false end
+  return afk and true or false
+end
+
 -- Garde d'activation — 100% API Blizzard native
 local function OnAFKEvent(event, arg1)
   if event == "PLAYER_REGEN_ENABLED" then
@@ -665,7 +674,7 @@ local function OnAFKEvent(event, arg1)
   end
 
   local inPetBattle = C_PetBattles and C_PetBattles.IsInBattle and C_PetBattles.IsInBattle()
-  AFKMode:SetAFKState(UnitIsAFK("player") and not inPetBattle)
+  AFKMode:SetAFKState(IsPlayerAFK() and not inPetBattle)
 end
 
 local function OnKeyDown(_, key)

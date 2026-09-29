@@ -83,7 +83,7 @@ SlashCmdList["AISHCORE"] = function(msg)
     local names = { "ResourceCircle","HealthCircle","OutOfCombatResourceCircle",
       "SpellEffects","RotationHelper","PriorityBar","XPBar","UnitBars",
       "CastBar","TargetCastBar","TopTargetBar","TargetAuras","Colors","Skyriding",
-      "AFKMode" }
+      "AFKMode", "Location" }
     print("  Modules enregistrés :")
     for _, n in ipairs(names) do
       local m = ns.Modules[n]
@@ -522,7 +522,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
       for _, name in ipairs({ "ResourceCircle","HealthCircle","OutOfCombatResourceCircle",
         "SpellEffects","RotationHelper","PriorityBar","XPBar","UnitBars",
         "CastBar","TargetCastBar","TopTargetBar","TargetAuras","Colors","Skyriding",
-        "AFKMode" }) do
+        "AFKMode", "Location" }) do
         if ns.Modules[name] then table.insert(present, name)
         else table.insert(missing, name) end
       end
@@ -549,6 +549,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     SafeCall("Skyriding",                 "Create")
     SafeCall("CharacterArmory",           "Create")
     SafeCall("AFKMode",                   "Create", UIParent)
+    SafeCall("Location",                  "Create", UIParent)
 
     -- Appliquer les settings (recalcule tailles/positions proportionnellement)
     SafeCall("ResourceCircle",            "ApplySettings")
@@ -566,6 +567,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     SafeCall("Visibility",                "ApplySettings")
     SafeCall("CharacterArmory",           "ApplySettings")
     SafeCall("AFKMode",                   "ApplySettings")
+    SafeCall("Location",                  "ApplySettings")
 
     -- Bouton minimap
     if ns.MinimapButton then

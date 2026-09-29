@@ -590,18 +590,25 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
     -- Forward-declare : permet aux controles GLOW PAR DEFAUT de rafraichir les badges apres RollDefaultGlow().
     local Build
 
+    -- Titre de section : la page n'en avait aucun et n'a, elle, pas d'en-tete repliable.
+    -- TOP decale tout le haut de page pour lui laisser sa place.
+    local TOP = -30
+    local title = SW.MakeSectionTitle(
+        SW.CreateSectionHeader(p, L["SETTINGS_CAT_AURAS_TRACKED"], cw-20))
+    title:SetPoint("TOPLEFT", 10, 0)
+
     -- ● TOGGLE CDM NATIF (unique point de contrôle pour tous les renders)
     local cbCDM = SW.CreateCheckbox(p, L["AURASMENU_TACTICS_USE_NATIVE_CDM"], cw-20)
-    cbCDM:SetPoint("TOPLEFT", 10, 0)
+    cbCDM:SetPoint("TOPLEFT", 10, TOP)
     cbCDM:SetChecked(ns.db and ns.db.useNativeCDM == true)
     local cdmSep = p:CreateTexture(nil, "ARTWORK"); cdmSep:SetSize(cw-20, 1)
-    cdmSep:SetPoint("TOPLEFT", 10, -30); cdmSep:SetColorTexture(0.25, 0.25, 0.28, 0.8)
+    cdmSep:SetPoint("TOPLEFT", 10, TOP-30); cdmSep:SetColorTexture(0.25, 0.25, 0.28, 0.8)
 
     -- ● TOOLTIP DES AURAS EN COMBAT SEULEMENT AVEC ALT (indépendant de l'équivalent
     -- Priority Bar) — grisé avec le reste par l'overlay CDM natif ci-dessous, puisque
     -- sans rendu custom ce réglage n'a de toute façon aucun effet.
     local cbTooltipAlt = SW.CreateCheckbox(p, L["AURASMENU_TACTICS_TOOLTIP_ALT_COMBAT"], cw-20)
-    cbTooltipAlt:SetPoint("TOPLEFT", 10, -40)
+    cbTooltipAlt:SetPoint("TOPLEFT", 10, TOP-40)
     cbTooltipAlt:SetChecked(ns.db and ns.db.tooltipAltCombatOnly == true)
     cbTooltipAlt.onChanged = function(v)
         if ns.db then ns.db.tooltipAltCombatOnly = v end
@@ -609,7 +616,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
 
     -- Overlay de grisage : couvre tout le contenu sous le toggle CDM natif
     local overlay = CreateFrame("Frame", nil, p)
-    overlay:SetPoint("TOPLEFT", p, "TOPLEFT", 0, -40)
+    overlay:SetPoint("TOPLEFT", p, "TOPLEFT", 0, TOP-40)
     overlay:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, 0)
     overlay:SetFrameLevel(p:GetFrameLevel() + 50)
     overlay:EnableMouse(true)
@@ -641,7 +648,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
 
     -- GLOW PAR DEFAUT : s'applique aux auras cochees sans glow personnalise. Grisee avec le reste
     -- par l'overlay CDM natif (ne concerne que le rendu custom).
-    local dgY = -66
+    local dgY = TOP-66
     local dgH=SW.CreateSectionHeader(p,L["AURASMENU_TACTICS_DEFAULT_GLOW_HEADER"],cw-20); dgH:SetPoint("TOPLEFT",10,dgY); dgY=dgY-22
     local dgInfo=p:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(dgInfo,FONT,9)
     dgInfo:SetPoint("TOPLEFT",10,dgY); dgInfo:SetPoint("TOPRIGHT",-10,dgY)

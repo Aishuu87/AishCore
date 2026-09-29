@@ -726,6 +726,7 @@ ns.ProfileTemplate = {
     },
   },
   xpBar = {
+    alwaysVisible = false,
     levelOutlineStyle = "OUTLINE",
     levelBg = {
       y = -6.5,
@@ -782,6 +783,9 @@ ns.ProfileTemplate = {
     chargeFontSize = 16,
     chargeOffsetY = 0,
     desaturateOnCooldown = true,
+    outOfRangeTint = false,
+    outOfRangeColor = { 0.9, 0.25, 0.25, 1 },
+    outOfRangeUseTheme = false,
     borderColor = {0,0,0,0.8999999761581421},
     loopGlowIndex = 2,
     visibilityMode = "always",

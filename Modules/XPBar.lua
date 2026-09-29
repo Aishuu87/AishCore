@@ -856,10 +856,18 @@ local function ShowXPBar()
   end)
 end
 
+--- Barre gardee affichee en permanence ? Les details (total au centre, tooltip) restent lies au
+--- survol quoi qu'il arrive : seule la barre elle-meme devient permanente.
+local function IsAlwaysVisible()
+  local cfg = ns.GetCfg("xpBar")
+  return cfg and cfg.alwaysVisible == true
+end
+
 local function HideXPBar()
   if not container then return end
   if not container:IsVisible() then return end
   if isHovered then return end
+  if IsAlwaysVisible() then return end
   if showAnim and showAnim:IsPlaying() then showAnim:Stop() end
   if hideAnim and not hideAnim:IsPlaying() then
     hideAnim:Play()
@@ -1759,6 +1767,11 @@ function XPBar.UpdateVisibility()
     if hoverFrame then hoverFrame:Show() end
     UpdateRestingIndicator()
   end
+  -- Option "toujours visible" : afficher la barre tout de suite, sans attendre un gain d'XP.
+  -- ShowXPBar ne relance rien si elle est deja affichee (il se contente de rafraichir le
+  -- remplissage), l'appel est donc sans effet de bord a chaque rafraichissement.
+  if IsAlwaysVisible() and not ns.IsInBlockedState() then ShowXPBar() end
+
 end
 
 -- Masquer les barres Blizzard XP/Rép : hook UpdateBarsShown pour réappliquer alpha 0 à chaque événement
