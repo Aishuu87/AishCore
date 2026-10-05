@@ -19,6 +19,36 @@ local function CharKey()
   return name .. "-" .. realm
 end
 
+-- Polices fournies par un addon absent mais aussi livrées par un autre : un profil créé sous ElvUI
+-- pointe vers la copie de WindTools, absente chez qui utilise Ellesmere. On redirige seulement si le
+-- dossier d'origine manque (un addon désactivé garde ses fichiers lisibles) et que la cible existe.
+local FONT_ALIASES = {
+  { from = "Interface\\AddOns\\ElvUI_WindTools\\Media\\Fonts\\Montserrat.ttf", fromAddon = "ElvUI_WindTools",
+    to   = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\Montserrat-Bold.ttf", toAddon   = "SharedMedia_MyMedia" },
+}
+
+function ns.RemapFontAliases(tbl)
+  if type(tbl) ~= "table" or not (C_AddOns and C_AddOns.DoesAddOnExist) then return end
+  local map
+  for _, a in ipairs(FONT_ALIASES) do
+    if not C_AddOns.DoesAddOnExist(a.fromAddon) and C_AddOns.DoesAddOnExist(a.toAddon) then
+      map = map or {}
+      map[a.from:lower()] = a.to
+    end
+  end
+  if not map then return end
+  local seen = {}
+  local function Walk(t)
+    if seen[t] then return end
+    seen[t] = true
+    for k, v in pairs(t) do
+      if type(v) == "table" then Walk(v)
+      elseif type(v) == "string" and map[v:lower()] then t[k] = map[v:lower()] end
+    end
+  end
+  Walk(tbl)
+end
+
 local function SafeApply(mod, label)
   if mod and mod.ApplySettings then
     local ok, err = pcall(mod.ApplySettings)
@@ -233,8 +263,13 @@ function P.InitDB()
   -- ne doit pas ressusciter le probleme.
   if ns.SanitizeFontPaths then
     for _, prof in pairs(root._profiles) do
+      ns.RemapFontAliases(prof)
       ns.SanitizeFontPaths(prof)
     end
+  end
+  -- Ancienne feature "CDM par spé" (remplacée par l'intégration CDM Loader, Modules/AishUISetup.lua)
+  for _, prof in pairs(root._profiles) do
+    prof.cdmBySpec, prof.cdmAutoApply = nil, nil
   end
 
   -- Purge retroactive des entrees VIDES de spellEffects.auraCombos (ancien bug de creation
@@ -331,6 +366,17 @@ end
 
 --- Crée un nouveau profil.
 ---   copyFrom : nom du profil source (nil = copie des Defaults)
+-- Profil neuf : le Cooldown Manager de Blizzard, lui, ne se reinitialise pas tout seul -- il garde
+-- la derniere disposition appliquee sur le personnage (souvent celle du pack AishUI). Ce drapeau
+-- fait partir chaque spe du build "Defaut" (cf. Modules/CDMLayout.lua), pour que l'addon propose de
+-- remettre le CDM tel que Blizzard le livre au lieu d'heriter d'une config sans rapport.
+local function MarkCDMDefault(prof)
+  if type(prof) ~= "table" then return end
+  prof.cdmLayout = prof.cdmLayout or {}
+  prof.cdmLayout.specs = {}
+  prof.cdmLayout.defaultBuild = true
+end
+
 function P.Create(name, copyFrom)
   if type(name) ~= "string" then return false, L["PROFILE_NAME_INVALID"] end
   name = name:match("^%s*(.-)%s*$")
@@ -347,6 +393,7 @@ function P.Create(name, copyFrom)
     -- Partir du template de référence, combler les clés absentes avec ns.Defaults
     local base = ns.ProfileTemplate and ns.DeepCopy(ns.ProfileTemplate) or {}
     root._profiles[name] = ns.MergeDefaults(base, ns.Defaults)
+    MarkCDMDefault(root._profiles[name])
     local AP = AurasProfiles()
     if AP then AP:Reset(name) end
   end
@@ -420,6 +467,7 @@ function P.Reset(name)
 
   local base = ns.ProfileTemplate and ns.DeepCopy(ns.ProfileTemplate) or {}
   root._profiles[name] = ns.MergeDefaults(base, ns.Defaults)
+  MarkCDMDefault(root._profiles[name])
   local AP = AurasProfiles()
   if AP then AP:Reset(name) end
   if name == (ns._activeProfileName or "Default") then
@@ -432,37 +480,370 @@ function P.Reset(name)
   return true
 end
 
---- Exporte un profil en chaîne texte (prefix + Lua table literal).
-function P.Export(name)
-  local root = AishaddonDB
-  local data = root._profiles[name]
-  if not data then return nil, L["PROFILE_NOT_FOUND"] end
-  -- Réglages Auras du profil (liste d'auras, Missing Buffs...) embarqués sous _auras
-  local AP = AurasProfiles()
-  local auras = AP and AP:GetProfileData(name)
-  if auras then
-    local out = {}
-    for k, v in pairs(data) do out[k] = v end
-    out._auras = auras
-    data = out
+-- Export / import par éléments (arbre : Config/ProfileModules.lua). Chaîne = préfixe + LibSerialize +
+-- LibDeflate + EncodeForPrint. Charge utile :
+--   { v = 3, addon, date, items = { [idNœud] = true }, core = {...}, auras = {...} }
+-- core / auras ne contiennent que les chemins des éléments exportés. Les formats V1 (texte Lua brut)
+-- et V2 (par modules) restent lisibles à l'import, convertis en V3.
+local EXPORT_PREFIX_V3 = "AISHCORE_PROFILE_V3:"
+local EXPORT_PREFIX_V2 = "AISHCORE_PROFILE_V2:"
+-- Niveau 9 : ~4x plus lent que 5 pour ~3 % de gain, sensible à chaque régénération de la fenêtre
+local DEFLATE_LEVEL = 5
+
+local function GetCodec()
+  if not LibStub then return nil end
+  local LS = LibStub("LibSerialize", true)
+  local LD = LibStub("LibDeflate", true)
+  if LS and LD then return LS, LD end
+end
+
+-- Chemins "a.b.c"
+local function PathGet(t, path)
+  for key in path:gmatch("[^.]+") do
+    if type(t) ~= "table" then return nil end
+    t = t[key]
   end
-  return EXPORT_PREFIX .. Serialize(data)
+  return t
+end
+
+local function PathSet(t, path, value)
+  local parent, last = t, nil
+  for key in path:gmatch("[^.]+") do
+    if last then
+      if type(parent[last]) ~= "table" then
+        if value == nil then return end
+        parent[last] = {}
+      end
+      parent = parent[last]
+    end
+    last = key
+  end
+  parent[last] = value
+end
+
+local function EntryPath(e) return type(e) == "table" and e.path or e end
+
+-- Copie une entrée de src vers dst. replace : dst perd d'abord ce que l'entrée couvre (import) ;
+-- sans replace, simple ajout (construction de la charge utile, plusieurs nœuds se partagent unitBars).
+local function CopyEntry(src, dst, e, replace)
+  local path = EntryPath(e)
+  local v = PathGet(src, path)
+  if type(e) ~= "table" or not e.except then
+    if v ~= nil or replace then PathSet(dst, path, ns.DeepCopy(v)) end
+    return
+  end
+  local skip = {}
+  for _, k in ipairs(e.except) do skip[k] = true end
+  local d = PathGet(dst, path)
+  if type(d) ~= "table" then
+    if v == nil and not replace then return end
+    d = {}
+    PathSet(dst, path, d)
+  end
+  if replace then
+    for k in pairs(d) do if not skip[k] then d[k] = nil end end
+  end
+  if type(v) == "table" then
+    for k, x in pairs(v) do if not skip[k] then d[k] = ns.DeepCopy(x) end end
+  end
+end
+
+-- Entrées d'un nœud pour un magasin ("core" / "auras"). misc : clés non déclarées présentes dans
+-- au moins une des tables fournies.
+local function NodeEntries(node, store, ...)
+  if not node.misc then return node[store] or {} end
+  local list, seen = {}, {}
+  for i = 1, select("#", ...) do
+    local t = select(i, ...)
+    if type(t) == "table" then
+      for k in pairs(t) do
+        if not seen[k] and ns.IsProfileMiscKey(store, k) then seen[k] = true; list[#list + 1] = k end
+      end
+    end
+  end
+  return list
+end
+
+local function SelectedDataNodes(ids)
+  local idx, out = ns.GetProfileTreeIndex(), {}
+  for _, id in ipairs(ids) do
+    local n = idx.byId[id]
+    if n and ns.IsProfileDataNode(n) then out[#out + 1] = n end
+  end
+  return out
+end
+
+-- Tous les nœuds porteurs de données, dans l'ordre de l'arbre
+function P.AllItemIds()
+  local ids = {}
+  for _, n in ipairs(ns.GetProfileTreeIndex().order) do
+    if ns.IsProfileDataNode(n) then ids[#ids + 1] = n.id end
+  end
+  return ids
+end
+
+-- Table brute du profil Auras (complétée si actif) ; nil si le module Auras est absent
+local function AurasTable(name)
+  local AP = AurasProfiles()
+  return AP and AP.GetProfileTable and AP:GetProfileTable(name)
+end
+
+-- [id] = true pour chaque élément dont le profil contient au moins une donnée (les autres sont grisés
+-- dans les fenêtres d'export / copie, ex. "Autres réglages" quand toutes les clés sont déclarées).
+function P.ProfileItemAvailability(name)
+  local core = AishaddonDB._profiles[name]
+  local avail = {}
+  if not core then return avail end
+  local auras = AurasTable(name)
+  for _, n in ipairs(ns.GetProfileTreeIndex().order) do
+    if ns.IsProfileDataNode(n) then
+      for _, e in ipairs(NodeEntries(n, "core", core)) do
+        if PathGet(core, EntryPath(e)) ~= nil then avail[n.id] = true end
+      end
+      if auras and not avail[n.id] then
+        for _, e in ipairs(NodeEntries(n, "auras", auras)) do
+          if PathGet(auras, EntryPath(e)) ~= nil then avail[n.id] = true end
+        end
+      end
+    end
+  end
+  return avail
+end
+
+-- ids : nœuds à exporter (nil = tous). Retourne la charge utile V3.
+function P.BuildItemsPayload(name, ids)
+  local core = AishaddonDB._profiles[name]
+  if not core then return nil, L["PROFILE_NOT_FOUND"] end
+  local auras = AurasTable(name)
+  local payload = { v = 3, items = {}, core = {}, auras = {} }
+  for _, n in ipairs(SelectedDataNodes(ids or P.AllItemIds())) do
+    payload.items[n.id] = true
+    for _, e in ipairs(NodeEntries(n, "core", core)) do CopyEntry(core, payload.core, e) end
+    if auras then
+      for _, e in ipairs(NodeEntries(n, "auras", auras)) do CopyEntry(auras, payload.auras, e) end
+    end
+  end
+  -- Sorts Auras : seuls les sorts personnalisés voyagent (cf. ns.Auras.IsSpellCustomized),
+  -- l'importeur recrée les autres depuis ses propres découvertes.
+  if payload.auras.discoveredSpells and ns.Auras and ns.Auras.DropUncustomizedSpells then
+    ns.Auras.DropUncustomizedSpells(payload.auras.discoveredSpells)
+  end
+  payload.addon = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(addonName, "Version")
+  payload.date = date("%Y-%m-%d")
+  return payload
+end
+
+function P.EncodePayload(payload)
+  local LS, LD = GetCodec()
+  if not LS then return nil, "LibSerialize / LibDeflate" end
+  local ok, out = pcall(function()
+    return EXPORT_PREFIX_V3 .. LD:EncodeForPrint(LD:CompressDeflate(LS:Serialize(payload), { level = DEFLATE_LEVEL }))
+  end)
+  if not ok then return nil, tostring(out) end
+  return out
+end
+
+function P.ExportItems(name, ids)
+  local payload, err = P.BuildItemsPayload(name, ids)
+  if not payload then return nil, err end
+  return P.EncodePayload(payload)
+end
+
+--- Exporte un profil complet.
+function P.Export(name)
+  return P.ExportItems(name)
+end
+
+-- Ancien format → V3 : tous les nœuds dont une donnée est présente
+local function ToV3(core, auras)
+  local payload = { v = 3, items = {}, core = type(core) == "table" and core or {},
+                    auras = type(auras) == "table" and auras or {} }
+  for _, n in ipairs(ns.GetProfileTreeIndex().order) do
+    if ns.IsProfileDataNode(n) then
+      for _, store in ipairs({ "core", "auras" }) do
+        for _, e in ipairs(NodeEntries(n, store, payload[store])) do
+          if PathGet(payload[store], EntryPath(e)) ~= nil then payload.items[n.id] = true end
+        end
+      end
+    end
+  end
+  return payload
+end
+
+--- Décode une chaîne d'export (V3, ou V1 / V2 convertis). Retourne payload | nil, err.
+function P.DecodeExport(str)
+  if type(str) ~= "string" then return nil, L["PROFILE_STRING_INVALID"] end
+  -- Tolérance aux espaces/retours à la ligne en début/fin
+  str = str:match("^%s*(.-)%s*$")
+
+  local body = str:match("^" .. EXPORT_PREFIX_V3 .. "(.+)$")
+  local isV2 = false
+  if not body then
+    body = str:match("^" .. EXPORT_PREFIX_V2 .. "(.+)$")
+    isV2 = body ~= nil
+  end
+  if body then
+    local LS, LD = GetCodec()
+    if not LS then return nil, string.format(L["PROFILE_IMPORT_READ_ERROR"], "LibSerialize / LibDeflate") end
+    local decoded = LD:DecodeForPrint(body)
+    local raw = decoded and LD:DecompressDeflate(decoded)
+    if not raw then return nil, string.format(L["PROFILE_IMPORT_READ_ERROR"], "LibDeflate") end
+    local ok, payload = LS:Deserialize(raw)
+    if not ok or type(payload) ~= "table" then
+      return nil, string.format(L["PROFILE_IMPORT_FORMAT_UNRECOGNIZED"], EXPORT_PREFIX_V3)
+    end
+    if isV2 then
+      if type(payload.modules) ~= "table" then
+        return nil, string.format(L["PROFILE_IMPORT_FORMAT_UNRECOGNIZED"], EXPORT_PREFIX_V3)
+      end
+      local core = {}
+      for id, mod in pairs(payload.modules) do
+        if id ~= "auras" and type(mod) == "table" then
+          for k, v in pairs(mod) do core[k] = v end
+        end
+      end
+      local v3 = ToV3(core, payload.modules.auras)
+      v3.addon, v3.date = payload.addon, payload.date
+      return v3
+    end
+    if payload.v ~= 3 or type(payload.items) ~= "table" then
+      return nil, string.format(L["PROFILE_IMPORT_FORMAT_UNRECOGNIZED"], EXPORT_PREFIX_V3)
+    end
+    payload.core = type(payload.core) == "table" and payload.core or {}
+    payload.auras = type(payload.auras) == "table" and payload.auras or {}
+    return payload
+  end
+
+  local v1 = str:match("^" .. EXPORT_PREFIX .. "(.+)$")
+    or str:match("^" .. LEGACY_EXPORT_PREFIX .. "(.+)$")
+  if not v1 then
+    return nil, string.format(L["PROFILE_IMPORT_FORMAT_UNRECOGNIZED"], EXPORT_PREFIX_V3)
+  end
+  local data, err = Deserialize(v1)
+  if not data then return nil, string.format(L["PROFILE_IMPORT_READ_ERROR"], tostring(err)) end
+  local auras = data._auras
+  data._auras = nil
+  return ToV3(data, auras)
+end
+
+-- Version "a.b.c" -> comparable ; true si la chaîne vient d'une version plus récente que l'addon.
+local function VersionParts(v)
+  local t = {}
+  for n in tostring(v or ""):gmatch("%d+") do t[#t + 1] = tonumber(n) end
+  return t
+end
+function P.IsPayloadNewer(payload)
+  local mine = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(addonName, "Version")
+  if not (payload and payload.addon and mine) then return false end
+  local a, b = VersionParts(payload.addon), VersionParts(mine)
+  for i = 1, math.max(#a, #b) do
+    local x, y = a[i] or 0, b[i] or 0
+    if x ~= y then return x > y end
+  end
+  return false
+end
+
+-- Ids des éléments présents dans une charge utile, dans l'ordre de l'arbre.
+function P.PayloadItemIds(payload)
+  local ids = {}
+  local items = payload and payload.items or {}
+  for _, n in ipairs(ns.GetProfileTreeIndex().order) do
+    if items[n.id] then ids[#ids + 1] = n.id end
+  end
+  return ids
+end
+
+-- Valeurs de référence d'un profil neuf (template puis défauts), pour la réinitialisation
+local function ReferenceCore()
+  local base = ns.ProfileTemplate and ns.DeepCopy(ns.ProfileTemplate) or {}
+  return ns.MergeDefaults(base, ns.Defaults)
+end
+local function ReferenceAuras()
+  local A = ns.Auras
+  if not A then return {} end
+  local base = A.ProfileTemplate and ns.DeepCopy(A.ProfileTemplate) or {}
+  return A.MergeDefaults and A.MergeDefaults(base, A.Defaults) or base
+end
+
+--- Écrit des éléments dans un profil existant. Chaque chemin d'un élément est remplacé entièrement
+--- (pas de fusion champ par champ) ; un élément absent de la charge utile repart des valeurs de
+--- référence (template puis défauts) : c'est aussi la réinitialisation.
+---   ids : éléments à appliquer (nil = tous ceux de la charge utile)
+function P.ApplyItems(payload, target, ids)
+  local root = AishaddonDB
+  local prof = root._profiles[target]
+  if not prof then return false, L["PROFILE_NOT_FOUND"] end
+  payload = payload or { items = {}, core = {}, auras = {} }
+  local items = payload.items or {}
+  local nodes = SelectedDataNodes(ids or P.PayloadItemIds(payload))
+  local AP = AurasProfiles()
+  local idx = ns.GetProfileTreeIndex()
+  local refCore, refAuras, newAuras
+  local applyMods, panels = {}, {}
+
+  for _, n in ipairs(nodes) do
+    local fromPayload = items[n.id] == true
+    local srcCore = fromPayload and payload.core or nil
+    if not srcCore then refCore = refCore or ReferenceCore(); srcCore = refCore end
+    for _, e in ipairs(NodeEntries(n, "core", srcCore, prof)) do CopyEntry(srcCore, prof, e, true) end
+
+    if AP and (n.auras or n.misc) then
+      if not newAuras then
+        local cur = AurasTable(target)
+        newAuras = cur and ns.DeepCopy(cur) or {}
+      end
+      local srcAuras = fromPayload and payload.auras or nil
+      if not srcAuras then refAuras = refAuras or ReferenceAuras(); srcAuras = refAuras end
+      for _, e in ipairs(NodeEntries(n, "auras", srcAuras, newAuras)) do CopyEntry(srcAuras, newAuras, e, true) end
+    end
+
+    for _, m in ipairs(n.apply or {}) do applyMods[m] = true end
+    local section = idx.section[n.id]
+    if section and section.panel then panels[section.panel] = true end
+  end
+
+  -- Le statut actif/inactif voyage avec l'élément : une catégorie coupée en bloc sur la page
+  -- "Modules" ne doit pas laisser l'élément importé masqué.
+  local mp = prof.modulesPanel
+  if mp and mp.categoryOff then
+    for panel in pairs(panels) do mp.categoryOff[panel] = nil end
+  end
+
+  ns.MergeDefaults(prof, ns.Defaults)
+  -- Réglages venus d'un autre setup : polices éventuellement absentes ici. Cf. InitDB.
+  ns.RemapFontAliases(prof)
+  if ns.SanitizeFontPaths then ns.SanitizeFontPaths(prof) end
+  if newAuras then AP:SetProfileData(target, newAuras) end
+
+  if target == P.GetActive() then
+    ns.DB = prof
+    if newAuras then AP:SetActive(target) end
+    for m in pairs(applyMods) do SafeApply(ns.Modules[m], m) end
+    ns.CallbackRegistry:Trigger("PROFILE_CHANGED", target)
+  end
+  return true
+end
+
+--- Copie des éléments d'un profil vers un autre (sans sérialisation).
+function P.CopyItems(srcName, dstName, ids)
+  if srcName == dstName then return false, L["PROFILE_SOURCE_DEST_IDENTICAL"] end
+  local payload, err = P.BuildItemsPayload(srcName, ids)
+  if not payload then return false, err end
+  return P.ApplyItems(payload, dstName, ids)
+end
+
+--- Remet des éléments d'un profil à leurs valeurs de référence.
+function P.ResetItems(name, ids)
+  return P.ApplyItems(nil, name, ids)
 end
 
 --- Importe un profil depuis une chaîne texte exportée.
 ---   str     : chaîne issue de Export()
 ---   newName : nom à donner au nouveau profil
-function P.Import(str, newName)
-  if type(str) ~= "string" then return false, L["PROFILE_STRING_INVALID"] end
-
-  -- Tolérance aux espaces/retours à la ligne en début/fin
-  str = str:match("^%s*(.-)%s*$")
-
-  local payload = str:match("^" .. EXPORT_PREFIX .. "(.+)$")
-    or str:match("^" .. LEGACY_EXPORT_PREFIX .. "(.+)$")
-  if not payload then
-    return false, string.format(L["PROFILE_IMPORT_FORMAT_UNRECOGNIZED"], EXPORT_PREFIX)
-  end
+---   ids     : éléments à importer (nil = tous ceux de la chaîne) ; les autres partent du template
+function P.Import(str, newName, ids)
+  local payload, decodeErr = P.DecodeExport(str)
+  if not payload then return false, decodeErr end
 
   if type(newName) ~= "string" then return false, L["PROFILE_DEST_NAME_INVALID"] end
   newName = newName:match("^%s*(.-)%s*$")
@@ -473,25 +854,9 @@ function P.Import(str, newName)
     return false, string.format(L["PROFILE_ALREADY_EXISTS_NAMED"], newName)
   end
 
-  local data, err = Deserialize(payload)
-  if not data then return false, string.format(L["PROFILE_IMPORT_READ_ERROR"], tostring(err)) end
-
-  -- Réglages Auras embarqués (absents des exports antérieurs : le profil Auras sera créé par défaut)
-  local auras = data._auras
-  data._auras = nil
-  local AP = AurasProfiles()
-  if AP then
-    if type(auras) == "table" then AP:SetProfileData(newName, auras) else AP:Reset(newName) end
-  end
-
-  -- Merge defaults pour combler les clés manquantes
-  root._profiles[newName] = ns.MergeDefaults(data, ns.Defaults)
-  -- Un profil importé vient d'un autre setup : ses polices peuvent pointer vers une
-  -- media pack qu'on n'a pas. Cf. InitDB.
-  if ns.SanitizeFontPaths then ns.SanitizeFontPaths(root._profiles[newName]) end
-
-  ns.CallbackRegistry:Trigger("PROFILE_LIST_CHANGED")
-  return true
+  local ok, err = P.Create(newName)
+  if not ok then return false, err end
+  return P.ApplyItems(payload, newName, ids)
 end
 
 -- CopyFrom — écrase le profil actif avec une copie du profil source
@@ -548,113 +913,20 @@ local function ApplySpecProfile()
 end
 P.ApplySpecProfile = ApplySpecProfile
 
--- Cooldown Manager par spécialisation, stocké DANS le profil actif (ns.DB.cdmBySpec[specID])
--- pour transiter automatiquement par l'export/import de profil existant. Utilise l'API
--- publique C_CooldownViewer.GetLayoutData()/SetLayoutData() (blob opaque).
-function P.GetCDMAutoApplyEnabled()
-  if ns.DB.cdmAutoApply == nil then return true end  -- actif par defaut : un profil importe doit "juste marcher"
-  return ns.DB.cdmAutoApply == true
-end
-
-function P.SetCDMAutoApplyEnabled(val)
-  ns.DB.cdmAutoApply = val and true or false
-end
-
---- Sauvegarde l'etat CDM actuel (tel que configure en jeu, cf. Edit Mode /
---- ns.Auras.SyncCDMPins) comme profil CDM de specID dans le profil AishCore
---- ACTIF. Ecrase silencieusement une precedente sauvegarde pour ce specID.
-function P.SaveCDMForSpec(specID)
-  if not specID then return false, "specID manquant" end
-  if not (C_CooldownViewer and C_CooldownViewer.GetLayoutData) then
-    return false, "API C_CooldownViewer indisponible"
-  end
-  local ok, data = pcall(C_CooldownViewer.GetLayoutData)
-  if not ok or not data or data == "" then
-    return false, "aucune donnee CDM a sauvegarder (configure le Cooldown Manager d'abord)"
-  end
-  ns.DB.cdmBySpec = ns.DB.cdmBySpec or {}
-  ns.DB.cdmBySpec[specID] = { data = data, savedAt = time() }
-  return true
-end
-
---- Renvoie l'entree CDM sauvegardee pour specID dans le profil ACTIF (ou nil).
-function P.GetCDMForSpec(specID)
-  return ns.DB.cdmBySpec and ns.DB.cdmBySpec[specID]
-end
-
---- Liste les specID pour lesquels le profil ACTIF a une sauvegarde CDM.
-function P.ListCDMSpecs()
-  local ids = {}
-  if ns.DB.cdmBySpec then
-    for specID in pairs(ns.DB.cdmBySpec) do ids[#ids + 1] = specID end
-    table.sort(ids)
-  end
-  return ids
-end
-
-local pendingCDMSpecApply
---- Applique le profil CDM sauvegarde pour specID (si auto-apply actif + sauvegarde existante).
--- DESACTIVE : SetLayoutData/SyncCDMPins taintent l'execution et font planter le CooldownViewer
--- natif Blizzard ("secret boolean value" sur allowAvailableAlert). Ne pas retirer ce garde
--- sans comprendre la cause exacte du taint.
-function P.ApplyCDMForSpec(specID)
-  do return end
-  if not specID then return end
-  if not P.GetCDMAutoApplyEnabled() then return end
-  local entry = P.GetCDMForSpec(specID)
-  if not entry or not entry.data or entry.data == "" then return end
-  if not (C_CooldownViewer and C_CooldownViewer.SetLayoutData and C_CooldownViewer.GetLayoutData) then return end
-  if InCombatLockdown and InCombatLockdown() then
-    pendingCDMSpecApply = specID
-    return
-  end
-  -- Déjà appliqué cette version du snapshot (entry._appliedData persisté) : ne pas
-  -- réappliquer, sinon SyncCDMPins qui épingle un sort absent du snapshot déclenche
-  -- une boucle infinie de reload (le vieux snapshot écrase le pin à chaque connexion).
-  if entry._appliedData == entry.data then return end
-  -- Skip si deja applique (meme blob) : evite un reload inutile a chaque connexion
-  local okCur, curData = pcall(C_CooldownViewer.GetLayoutData)
-  if okCur and curData == entry.data then
-    entry._appliedData = entry.data
-    return
-  end
-  local ok = pcall(C_CooldownViewer.SetLayoutData, entry.data)
-  if ok then
-    entry._appliedData = entry.data
-    if ns.Auras and ns.Auras.MarkCDMReloadPending then
-      ns.Auras.MarkCDMReloadPending(1)
-    end
-    -- Rattrape tout sort de la whitelist active absent de ce snapshot (ex: import
-    -- d'un profil partagé où la whitelist a évolué depuis la sauvegarde)
-    if ns.Auras and ns.Auras.SyncCDMPins then
-      pcall(ns.Auras.SyncCDMPins)
-    end
-  end
-end
-
 local specEventFrame = CreateFrame("Frame")
 specEventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 specEventFrame:RegisterEvent("PLAYER_LOGIN")
-specEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-specEventFrame:SetScript("OnEvent", function(_, event)
-  if event == "PLAYER_REGEN_ENABLED" then
-    if pendingCDMSpecApply then
-      local specID = pendingCDMSpecApply
-      pendingCDMSpecApply = nil
-      P.ApplyCDMForSpec(specID)
-    end
-    return
-  end
+-- Forever : la "spe" est la branche de talents la plus investie (cf. Core.lua), elle change
+-- donc a chaque point depense. Pas en Retail : TRAIT_CONFIG_UPDATED y suit chaque retouche de
+-- talents et relancerait le changement de spe a tort.
+if ns.IsForever then
+  specEventFrame:RegisterEvent("CHARACTER_POINTS_CHANGED")
+  specEventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+  specEventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
+end
+specEventFrame:SetScript("OnEvent", function()
+  -- Spe deduite mise en cache : la purger d'abord, sinon on relirait la valeur d'avant le point.
+  if ns.InvalidateSpecCache then ns.InvalidateSpecCache() end
   ApplySpecProfile()
-  local specIndex = GetSpecialization()
-  local specID = specIndex and GetSpecializationInfo(specIndex)
-  if specID then
-    if event == "PLAYER_LOGIN" then
-      -- Le Cooldown Manager natif n'est pas forcement pret au tout premier login
-      C_Timer.After(3, function() P.ApplyCDMForSpec(specID) end)
-    else
-      P.ApplyCDMForSpec(specID)
-    end
-  end
   ns.CallbackRegistry:Trigger("SPEC_CHANGED")
 end)

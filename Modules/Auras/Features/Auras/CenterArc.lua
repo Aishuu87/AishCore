@@ -316,7 +316,8 @@ function ns.AutoConfigCenterArc()
     local spells = ns.GetSpecSpells and ns.GetSpecSpells()
     if not spells then return end
     for _, info in pairs(spells) do
-        if info.destinations then info.destinations.centerArc = false end
+        local dest = rawget(info, "destinations")  -- rawget : ne pas creer destinations sur chaque sort (ns.SPELL_MT)
+        if dest then dest.centerArc = false end
     end
     if not activeInfo or not IsEnabled() or activeInfo.isTotem then return end
     local si = spells[activeInfo.spellID]
@@ -341,7 +342,8 @@ function ns.AutoConfigSecResDurBar()
     local spells = ns.GetSpecSpells and ns.GetSpecSpells()
     if not spells then return end
     for _, info in pairs(spells) do
-        if info.destinations then info.destinations.secResDurBar = false end
+        local dest = rawget(info, "destinations")  -- rawget : ne pas creer destinations sur chaque sort (ns.SPELL_MT)
+        if dest then dest.secResDurBar = false end
     end
     local getID = _addon and _addon.GetSecResDurBarSpellID
     local sid = getID and getID()

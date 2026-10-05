@@ -906,3 +906,58 @@ function DumpBuffCooldownViewer()
 end
 
 
+
+-- /aish mem : bilan mémoire Lua d'AishCore après GC complet, poids estimé des grosses tables et coût
+-- de construction de chaque page du GUI (mesuré par GetOrBuildContainer, déchets inclus).
+local _buildMem = {}
+function ns.RecordBuildMemory(catId, kb)
+    _buildMem[catId] = (_buildMem[catId] or 0) + kb
+end
+
+-- Estimation Lua 5.1 64 bits : table 56 o + 16 o par case de tableau + 40 o par nœud de hachage,
+-- chaîne 25 o + longueur (comptée une fois).
+local function SizeOf(v, seen)
+    local t = type(v)
+    if t == "string" then
+        if seen[v] then return 0 end
+        seen[v] = true
+        return 25 + #v
+    elseif t ~= "table" or seen[v] then
+        return 0
+    end
+    seen[v] = true
+    local n, size = 0, 56
+    for k, x in pairs(v) do
+        n = n + 1
+        size = size + SizeOf(k, seen) + SizeOf(x, seen)
+    end
+    local slots = 1
+    while slots < n do slots = slots * 2 end
+    return size + slots * 40
+end
+
+function ns.PrintMemoryReport()
+    collectgarbage("collect")
+    UpdateAddOnMemoryUsage()
+    local P = "|cff00ccff[AishCore]|r "
+    print(P .. string.format("Mémoire après GC : %.1f Mo", GetAddOnMemoryUsage(ns.addonName or "AishCore") / 1024))
+    local A = ns.Auras or {}
+    local targets = {
+        { "AishaddonDB (profils)", AishaddonDB },
+        { "AishUIAuraDB (auras)", AishUIAuraDB },
+        { "SpellSchools", ns.SpellSchools },
+        { "SpellGradients", ns.SpellGradients },
+        { "Locales (active)", ns.L },
+        { "Auras : whitelist/scan", A.auraData },
+    }
+    for _, e in ipairs(targets) do
+        if e[2] then print(string.format("  %-26s %7.2f Mo", e[1], SizeOf(e[2], {}) / 1048576)) end
+    end
+    local pages = {}
+    for id, kb in pairs(_buildMem) do pages[#pages + 1] = { id, kb } end
+    table.sort(pages, function(a, b) return a[2] > b[2] end)
+    if #pages > 0 then print(P .. "Pages du GUI construites (Mo alloués) :") end
+    for i = 1, math.min(#pages, 15) do
+        print(string.format("  %-26s %7.2f Mo", pages[i][1], pages[i][2] / 1024))
+    end
+end

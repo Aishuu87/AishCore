@@ -1,0 +1,64 @@
+<Bindings>
+  <!-- Raccourcis des Extra Barres (Modules/ExtraBars.lua) : CLICK sur les boutons AishCoreExtraBar<i>Button<j>.
+       Noms affichés : BINDING_HEADER_AISHCOREEXTRABARS / BINDING_NAME_* posés par ExtraBars.lua. -->
+  <Binding name="CLICK AishCoreExtraBar1Button1:LeftButton" header="AISHCOREEXTRABARS" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar1Button2:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar1Button3:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar1Button4:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar1Button5:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar1Button6:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar1Button7:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar1Button8:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar1Button9:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar1Button10:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar1Button11:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar1Button12:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button1:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button2:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button3:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button4:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button5:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button6:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button7:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button8:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button9:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button10:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button11:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar2Button12:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button1:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button2:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button3:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button4:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button5:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button6:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button7:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button8:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button9:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button10:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button11:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar3Button12:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button1:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button2:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button3:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button4:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button5:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button6:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button7:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button8:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button9:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button10:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button11:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar4Button12:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button1:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button2:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button3:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button4:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button5:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button6:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button7:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button8:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button9:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button10:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button11:LeftButton" category="ADDONS"/>
+  <Binding name="CLICK AishCoreExtraBar5Button12:LeftButton" category="ADDONS"/>
+</Bindings>

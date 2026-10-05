@@ -501,25 +501,6 @@ end
 -- Réutilisée entre appels : évite d'allouer une table à chaque SetAuraInstanceInfo.
 local _wgNamesScratch = {}
 
--- Retourne une couleur tirée au hasard parmi les couleurs thématiques de la spé
--- courante (Colors.ELEMENT_KEYS). Chaque nouvelle aura découverte reçoit ainsi
--- une couleur distincte plutôt que la même couleur de classe pour toutes.
--- Fallback sur ns.barColor si le module Colors n'est pas disponible.
---- Retourne la couleur ET la cle d'element de theme tiree au sort (2e retour, nil si repli).
---- Le RGB seul ne suffit pas : fige en base, il ne suivrait plus jamais les Themed colors. La cle,
---- elle, se reresout a chaque rendu (cf. SpellBarColorRGB), donc un profil sans couleurs thematiques
---- retombe naturellement sur la couleur de classe via Colors.Get/useClassDefaults.
-local function GetRandomSpecColor()
-    local Colors = _addon and _addon.Modules and _addon.Modules.Colors
-    if Colors and Colors.ELEMENT_KEYS and #Colors.ELEMENT_KEYS > 0 and Colors.Get then
-        local key = Colors.ELEMENT_KEYS[math.random(#Colors.ELEMENT_KEYS)]
-        local c = Colors.Get(key)
-        if c and c[1] then return { c[1], c[2], c[3] }, key end
-    end
-    local bc = ns.barColor
-    return { bc[1], bc[2], bc[3] }, nil
-end
-
 -- Auto-decouverte hoistee : appelee par chaque SetAuraInstanceInfo pour un sort inconnu (skip si deja
 -- dans spells ou deja War Gear). Hoist pour eviter la closure pcall a chaque hit CDM.
 -- linkedSpellIDs (optionnel) : sid est toujours normalise a linkedSpellIDs[1] avant l'appel (ex: Precurseur
@@ -556,14 +537,11 @@ local function AutoDiscoverSpell(spellID, name, unit, frame, linkedSpellIDs)
     -- Fallback : unit == "target" → "debuff", sinon "buff".
     local src = frameSource[frame]
                or ((unit == "target") and "debuff" or "buff")
-    local defaults = ns.DeepCopy(ns.SpellDefaults)
+    local defaults = ns.NewSpellEntry()
     defaults.name = name
-    -- colorKey : source de verite vivante. color reste ecrit pour les lecteurs qui ne connaissent
-    -- pas encore colorKey, et sert de repli si le module Couleurs est indisponible.
-    local autoColor, autoKey = GetRandomSpecColor()
-    defaults.color = autoColor
-    defaults.colorKey = autoKey
-    defaults._colorDefault = false  -- couleur thématique appliquée, ne plus retoucher
+    -- colorKey : source de verite vivante, tiree du nom de profil + spellID (cf. ns.AutoColorKey). color
+    -- reste ecrit pour les lecteurs qui ne connaissent pas encore colorKey, et sert de repli.
+    ns.ApplyAutoColor(defaults, AishUIAuraDB and AishUIAuraDB.activeProfile, spellID)
     defaults.priority = spellID
     defaults.source = src
     if hasLinks then defaults.linkedSpellIDs = linkedSpellIDs end
@@ -581,7 +559,8 @@ function ns.RollDefaultSpecColors()
     local bc = ns.barColor
     if not bc then return end
 
-    for _, info in pairs(spells) do
+    local profileName = AishUIAuraDB and AishUIAuraDB.activeProfile
+    for sid, info in pairs(spells) do
         local cd = info._colorDefault
         local isDefault = false
 
@@ -600,10 +579,7 @@ function ns.RollDefaultSpecColors()
         -- cd == false → jamais retoucher (roulé ou défini manuellement)
 
         if isDefault then
-            local rolledColor, rolledKey = GetRandomSpecColor()
-            info.color = rolledColor
-            info.colorKey = rolledKey
-            info._colorDefault = false  -- verrouillé : plus jamais retoucher
+            ns.ApplyAutoColor(info, profileName, sid) -- verrouille aussi _colorDefault
         end
     end
 end

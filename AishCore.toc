@@ -1,11 +1,16 @@
-## Interface: 120100
+## Interface: 120100, 16001
 ## Title: AishCore
 ## Notes: Custom UI overlay - resource & health circles, spell effects, auras & procs
 ## Author: Aishuu
-## Version: 4.0.9
+## Version: 4.2
 ## X-Curse-Project-ID: 1689788
 ## SavedVariables: AishaddonDB AishUIAuraDB
-## SavedVariablesPerCharacter: AishUILearnDB
+## SavedVariablesPerCharacter: AishUILearnDB, AishUISetupCharDB
+
+# Libs
+Libs\LibStub\LibStub.lua
+Libs\LibDeflate\LibDeflate.lua
+Libs\LibSerialize\LibSerialize.lua
 
 # Core
 Core.lua
@@ -13,15 +18,16 @@ Debug.lua
 Config\Defaults.lua
 Config\ProfileTemplate.lua
 Config\ResourceMap.lua
+Config\ProfileModules.lua
 Config\Profiles.lua
 
 # Locales
 Locales\enUS.lua
 Locales\frFR.lua
-Locales\Debug.lua
 
 # Data
 Data\ModelPaths.lua
+Data\SearchIndex.lua
 
 # Engine
 CircularProgress.lua
@@ -34,10 +40,14 @@ Modules\SpellEffects.lua
 Modules\RotationHelper.lua
 Modules\PriorityBar.lua
 Modules\CooldownManagerEnhanced.lua
+Modules\CDMLayout.lua
 Modules\XPBar.lua
 Modules\UnitBars.lua
+Modules\BlizzardUnitFrames.lua
+Modules\AddonFonts.lua
 Modules\GroupNumber.lua
 Modules\Location.lua
+Modules\ExtraBars.lua
 Libs\SpellSchools.lua
 Modules\CastBar.lua
 Modules\TargetCastBar.lua
@@ -49,6 +59,7 @@ Modules\Visibility.lua
 Modules\CharacterArmory.lua
 Modules\AFKMode.lua
 Modules\BigCursor.lua
+Modules\AishUISetup.lua
 
 # Auras & Procs — Core
 Modules\Auras\Core\Config.lua
@@ -99,6 +110,9 @@ Modules\Auras\UI\CategoryDispatcher.lua
 UI\SharedWidgets.lua
 UI\MinimapButton.lua
 UI\SettingsPanel.lua
+UI\ProfileModulesUI.lua
+UI\CDMLayoutPage.lua
+UI\ExtraBarsPage.lua
 UI\ModuleHoverOverlay.lua
 
 # Init

@@ -125,12 +125,37 @@ do
   end)
 end
 
-local function PowerChangedRecently(token)
+-- Delai propre a la mana. La regeneration reste bloquee environ cinq secondes apres une
+-- incantation : pendant ce blocage aucun changement n'est signale, et le delai commun de 2,5 s
+-- faisait conclure a tort que la mana etait pleine -- le cercle disparaissait, puis revenait des
+-- la reprise de la regeneration. Cette fenetre couvre le blocage.
+local MANA_TIMEOUT     = 6.5
+
+local function PowerChangedRecently(token, timeout)
   local t = powerLastChanged[token]
-  return t ~= nil and (GetTime() - t) < POWER_TIMEOUT
+  return t ~= nil and (GetTime() - t) < (timeout or POWER_TIMEOUT)
 end
 
--- Specs de soin + Mage Arcane (pour la logique mana)
+--- La ressource est-elle au maximum ? true / false / nil quand la lecture est impossible.
+--- UnitPower peut renvoyer un nombre secret : la comparaison est donc faite dans un pcall, et
+--- l'echec se traduit par nil -- "je ne sais pas" -- plutot que par une reponse inventee.
+-- Fonction pre-allouee pour pcall : la comparaison doit rester protegee (valeurs secretes),
+-- mais une closure ecrite sur place etait allouee a CHAQUE appel -- et cette fonction tourne
+-- a chaque passage du ticker de visibilite. On passe donc les valeurs en arguments.
+local function _CompareFull(cur, max)
+  return max > 0 and cur >= max
+end
+
+local function IsPowerFull(powerType)
+  local okC, cur = pcall(UnitPower, "player", powerType)
+  local okM, max = pcall(UnitPowerMax, "player", powerType)
+  if not (okC and okM) or cur == nil or max == nil then return nil end
+  local okCmp, full = pcall(_CompareFull, cur, max)
+  if not okCmp then return nil end
+  return full and true or false
+end
+
+-- Specs de soin + Mage Arcane (logique mana en Retail ; Forever affiche la mana pour tous)
 local ARCANE_MAGE_SPEC = 62
 local HEAL_SPECS = {
   [65]   = true,  -- Paladin Holy
@@ -189,11 +214,25 @@ function OutOfCombatResourceCircle.ShouldShow()
     return PowerChangedRecently("FOCUS")
   end
 
-  -- Mana : uniquement heal / Arcane Mage
+  -- Mana. Retail : uniquement soigneurs / mage Arcane, les autres specs n'en dependent pas.
+  -- Forever : affichee pour TOUTES les specs, la mana y est la ressource principale de presque
+  -- toutes les classes (seuls voleur, guerrier et druide selon sa forme y echappent) ; la
+  -- restriction Retail y laissait le cercle vide pour la quasi-totalite des personnages.
   if resource == Enum.PowerType.Mana then
-    local specID = GetSpecID()
-    if not specID or not (HEAL_SPECS[specID] or specID == ARCANE_MAGE_SPEC) then return false end
-    return PowerChangedRecently("MANA")
+    if not ns.IsForever then
+      local specID = GetSpecID()
+      if not specID or not (HEAL_SPECS[specID] or specID == ARCANE_MAGE_SPEC) then return false end
+      return PowerChangedRecently("MANA")
+    end
+    -- Forever : trois cas, du plus sur au moins sur.
+    local full = IsPowerFull(Enum.PowerType.Mana)
+    -- 1. Lecture possible et mana pleine : plus rien a surveiller, on masque tout de suite.
+    if full == true then return false end
+    -- 2. Lecture possible et mana incomplete : on affiche, sans attendre un changement de valeur.
+    if full == false then return true end
+    -- 3. Valeur illisible (nombre secret) : on retombe sur le signal de changement, avec la
+    -- fenetre allongee qui couvre le blocage de regeneration.
+    return PowerChangedRecently("MANA", MANA_TIMEOUT)
   end
 
   -- Maelstrom (Elemental) : decroit OOC => event tourne tant que > 0

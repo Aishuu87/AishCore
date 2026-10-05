@@ -341,19 +341,27 @@ local function HealerMissingBuff(entry)
 end
 
 -- Groupe mutuellement exclusif (stances/auras/attunements/poisons/pets)
+-- Seules les options apprises comptent : un perso bas niveau sans posture/aura/poison
+-- ne doit pas recevoir d'alerte (et l'option proposee doit etre lancable).
 local function PickDefaultOption(list, overrideSpellId)
-    if overrideSpellId then
-        for _, opt in ipairs(list) do if opt.spellId == overrideSpellId then return opt end end
+    local first, default
+    for _, opt in ipairs(list) do
+        if IsEntryLearned(opt) then
+            if overrideSpellId and opt.spellId == overrideSpellId then return opt end
+            first = first or opt
+            if opt.default then default = default or opt end
+        end
     end
-    for _, opt in ipairs(list) do if opt.default then return opt end end
-    return list[1]
+    return default or first
 end
 
 local function ExclusiveGroupMissing(list, overrideSpellId)
     for _, opt in ipairs(list) do
         if GetSelfAura(opt.spellId) then return false end
     end
-    return true, PickDefaultOption(list, overrideSpellId)
+    local opt = PickDefaultOption(list, overrideSpellId)
+    if not opt then return false end
+    return true, opt
 end
 
 local function CheckRoguePoisons()
@@ -401,7 +409,9 @@ local function CheckPetMissing(class)
     end
     local list = (class == "HUNTER") and ns.MISSING_HUNTER_ALL_PETS or ns.MISSING_WARLOCK_ALL_PETS
     local overrideId = (class == "HUNTER") and cfg.overrideHunterPet or cfg.overrideWarlockPet
-    return true, PickDefaultOption(list, overrideId), "SUMMON_PET"
+    local opt = PickDefaultOption(list, overrideId)
+    if not opt then return false end -- aucun familier invocable (bas niveau)
+    return true, opt, "SUMMON_PET"
 end
 
 -- Applicabilite d'une entree (spe / combat / ignoree par l'utilisateur)

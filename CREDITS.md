@@ -25,3 +25,11 @@ utilisées à des fins d'affichage dans l'écran AFK personnalisé.
 Données issues du projet **ZigiAuras** par Zigi.
 
 - Projet d'origine : https://github.com/ZagiXD/ZigiAuras
+
+## Bibliothèques embarquées (Libs/)
+
+- **LibStub** : domaine public.
+- **LibDeflate** par Haoqian He : licence zlib (`Libs/LibDeflate/LICENSE.txt`).
+  https://github.com/SafeteeWoW/LibDeflate
+- **LibSerialize** par Ross Nichols : licence MIT (texte en tête du fichier).
+  https://github.com/rossnichols/LibSerialize

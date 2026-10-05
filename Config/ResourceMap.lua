@@ -39,6 +39,26 @@ local classPrimaryResource = {
   },
 }
 
+-- Forever : les ressources modernes n'existent pas (puissance runique, furie, focus, maelstrom,
+-- pouvoir sacre, fragments d'ame, essence). Tout le monde carbure a la mana, sauf le voleur
+-- (energie) et le guerrier (rage). Le druide suit sa forme (cf. BuildDruidTable).
+if ns.IsForever then
+  classPrimaryResource = {
+    DEATHKNIGHT = Enum.PowerType.Mana,
+    DEMONHUNTER = Enum.PowerType.Mana,
+    EVOKER      = Enum.PowerType.Mana,
+    HUNTER      = Enum.PowerType.Mana,
+    MAGE        = Enum.PowerType.Mana,
+    MONK        = Enum.PowerType.Mana,
+    PALADIN     = Enum.PowerType.Mana,
+    PRIEST      = Enum.PowerType.Mana,
+    SHAMAN      = Enum.PowerType.Mana,
+    WARLOCK     = Enum.PowerType.Mana,
+    ROGUE       = Enum.PowerType.Energy,
+    WARRIOR     = Enum.PowerType.Rage,
+  }
+end
+
 -- Druide : la ressource depend de la forme (GetShapeshiftFormID), construit au 1er appel
 local druidFormResources
 
@@ -63,12 +83,22 @@ local function BuildDruidTable()
   if DRUID_MOONKIN_FORM_2  then druidFormResources[DRUID_MOONKIN_FORM_2] = Enum.PowerType.LunarPower end
   -- Treant Form (Tome of the Wilds, pas de constante Blizzard)
   druidFormResources[36] = Enum.PowerType.Mana
+
+  -- Forever : pas d'equilibre lunaire, le caster et le selenien restent a la mana.
+  if ns.IsForever then
+    druidFormResources[0][102] = Enum.PowerType.Mana
+    if DRUID_MOONKIN_FORM_1 then druidFormResources[DRUID_MOONKIN_FORM_1] = Enum.PowerType.Mana end
+    if DRUID_MOONKIN_FORM_2 then druidFormResources[DRUID_MOONKIN_FORM_2] = Enum.PowerType.Mana end
+  end
 end
 
 -- Utilitaire : recup le specID courant
 local function GetCurrentSpecID()
-  local getSpec = (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) or GetSpecialization
-  local getInfo = (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo) or GetSpecializationInfo
+  -- Globals d'abord : sur Forever, ce sont eux qui portent la spe deduite des branches de talents
+  -- (cf. Core.lua) ; C_SpecializationInfo y renvoie une specialisation factice. En Retail les
+  -- deux sont equivalents.
+  local getSpec = GetSpecialization or (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization)
+  local getInfo = GetSpecializationInfo or (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo)
   if not getSpec then return nil end
   local spec = getSpec()
   if not spec or not getInfo then return nil end
@@ -387,3 +417,8 @@ ns.SecondaryResourceDefs = {
   -- Warlock Démonologie (266) : stacks de Cœur Démoniaque (264173, buff joueur stackable)
   [266] = { spellID = 264173, useStacks = true, color = { 0.53, 0.53, 0.93, 1 } },
 }
+
+-- Forever : aucune ressource secondaire moderne n'existe (Bouclier d'os, fragments d'ame, Dur au
+-- mal, Fer-poil, The de mana, Coeur demoniaque...). Les points de combo ne sont pas concernes :
+-- ils sont lus via UnitPowerMax (cf. ResourceCircle.lua) et apparaissent d'eux-memes.
+if ns.IsForever then ns.SecondaryResourceDefs = {} end

@@ -227,7 +227,9 @@ eventFrame:SetScript("OnEvent", function()
 end)
 
 -- Filet de secours : GetMinimapZoneText change parfois sans evenement (meme approche que
--- LocationPlus). Comparaison de chaine d'abord, donc aucun SetText inutile.
-C_Timer.NewTicker(1, function()
+-- LocationPlus). Les changements de zone passent de toute facon par les evenements ci-dessus,
+-- ce ticker ne rattrape que les cas muets : 2 s suffisent largement.
+-- Comparaison de chaine d'abord, donc aucun SetText inutile.
+C_Timer.NewTicker(2, function()
     if frame and frame:IsShown() then Location.Update() end
 end)

@@ -142,6 +142,25 @@ function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width)
   container.label:SetTextColor(unpack(Theme.textNormal))
   container.label:SetText(label or "")
 
+  -- Tooltip optionnel (`container.tooltipText`, renseigne par l'appelant), pose sur le
+  -- LABEL uniquement : le survol du track et de l'EditBox reste libre pour le reglage.
+  local labelHit = CreateFrame("Frame", nil, container)
+  labelHit:SetPoint("TOP", container, "TOP", 0, 0)
+  labelHit:SetSize(width, LABEL_H)
+  labelHit:EnableMouse(true)
+  labelHit:SetScript("OnEnter", function(self)
+    if not container.tooltipText then return end
+    container.label:SetTextColor(1, 1, 1)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText(label or "", 1, 1, 1)
+    GameTooltip:AddLine(container.tooltipText, unpack(Theme.textNormal))
+    GameTooltip:Show()
+  end)
+  labelHit:SetScript("OnLeave", function()
+    container.label:SetTextColor(unpack(Theme.textNormal))
+    GameTooltip:Hide()
+  end)
+
   -- Slider frame (PAS de template Blizzard â€” look epure ElvUI)
   local slider = CreateFrame("Slider", nil, container)
   slider:SetSize(width, THUMB_H)
@@ -1489,7 +1508,7 @@ function SharedWidgets.ShowContextMenu(items)
     -- Texture de glow doux etiree au-dela des bords, en BACKGROUND pour rester sous le fond opaque
     -- du menu -- seul le halo deborde.
     local glow = f:CreateTexture(nil, "BACKGROUND", nil, -8)
-    glow:SetTexture("Interface\Cooldown\star4")
+    glow:SetTexture("Interface\\Cooldown\\star4")
     glow:SetBlendMode("ADD")
     glow:SetPoint("TOPLEFT", f, "TOPLEFT", -26, 26)
     glow:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 26, -26)
@@ -1584,4 +1603,55 @@ end
 
 function SharedWidgets.HideContextMenu()
   if contextMenuFrame then contextMenuFrame:Hide() end
+end
+
+-- Page du GUI abandonnée (invalidée puis reconstruite) : WoW ne libère jamais une frame, mais on
+-- rend au GC les closures de ses scripts et de ses callbacks internes, et on coupe ses événements.
+-- Sans ça, chaque reconstruction de page gardait l'ancienne en mémoire jusqu'au /reload.
+local RELEASE_SCRIPTS = {
+  "OnClick", "OnDoubleClick", "OnEnter", "OnLeave", "OnShow", "OnHide", "OnUpdate", "OnEvent",
+  "OnMouseDown", "OnMouseUp", "OnMouseWheel", "OnValueChanged", "OnTextChanged", "OnChar",
+  "OnEditFocusGained", "OnEditFocusLost", "OnEnterPressed", "OnEscapePressed", "OnTabPressed",
+  "OnKeyDown", "OnKeyUp", "OnSizeChanged", "OnDragStart", "OnDragStop", "OnReceiveDrag",
+  "OnVerticalScroll", "OnScrollRangeChanged", "OnCursorChanged",
+}
+
+local function ReleaseTree(f)
+  for _, s in ipairs(RELEASE_SCRIPTS) do
+    if f:HasScript(s) and f:GetScript(s) then pcall(f.SetScript, f, s, nil) end
+  end
+  if f.UnregisterAllEvents then pcall(f.UnregisterAllEvents, f) end
+  for _, child in ipairs({ f:GetChildren() }) do ReleaseTree(child) end
+end
+
+local function NoOp() end
+
+-- entry = { frame, callbacks } d'un categoryContainer (cf. GetOrBuildContainer)
+function SharedWidgets.ReleasePage(entry)
+  if not entry then return end
+  if entry.frame then
+    entry.frame:Hide()
+    pcall(ReleaseTree, entry.frame)
+  end
+  -- Neutralisés sur place (pas retirés) : la liste peut être en cours de parcours par Trigger
+  for _, cb in ipairs(entry.callbacks or {}) do
+    cb.func, cb.owner = NoOp, nil
+  end
+  entry.callbacks = nil
+end
+
+-- Exécute fn(...) en relevant les callbacks enregistrés pendant l'appel. Retourne la liste des
+-- entrées de ns.CallbackRegistry créées, puis les retours de fn (pcall).
+function SharedWidgets.TrackCallbacks(fn, ...)
+  local CR = ns.CallbackRegistry
+  local orig = CR.Register
+  local created = {}
+  CR.Register = function(self, event, func, owner)
+    orig(self, event, func, owner)
+    local list = self.events[event]
+    created[#created + 1] = list[#list]
+  end
+  local res = { pcall(fn, ...) }
+  CR.Register = orig
+  return created, unpack(res)
 end

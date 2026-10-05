@@ -61,11 +61,9 @@ end
 local function RegisterTotemSpell(spellID, name)
     local spells = ns.GetSpecSpells and ns.GetSpecSpells()
     if not spells or spells[spellID] then return end
-    local defaults = ns.DeepCopy(ns.SpellDefaults)
+    local defaults = ns.NewSpellEntry()
     defaults.name = name or SafeSpellName(spellID) or tostring(spellID)
-    local bc = ns.barColor or {1, 1, 1}
-    defaults.color = { bc[1], bc[2], bc[3] }
-    defaults._colorDefault = false
+    ns.ApplyAutoColor(defaults, AishUIAuraDB and AishUIAuraDB.activeProfile, spellID)
     defaults.priority = spellID
     defaults.source = "totem"
     defaults.destinations = { iconlist = false, circlebars = false, icons = false, freebars = false, totems = false }

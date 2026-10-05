@@ -3,6 +3,8 @@ local addonName, ns = ...
 
 local Skyriding = {}
 ns.Modules = ns.Modules or {}
+-- Client sans Skyriding (Forever) : le module ne s'enregistre pas du tout (cf. ns.IsModuleAvailable)
+if not ns.IsModuleAvailable("skyriding") then return end
 ns.Modules.Skyriding = Skyriding
 
 -- Constantes

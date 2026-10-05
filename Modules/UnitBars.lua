@@ -180,6 +180,7 @@ local pendingSettingsApply  = false  -- re-appliquer les settings apres combat
 local ubFadeTickers         = {}     -- key → ticker de fade par barre
 local ubPosPending          = {}     -- key → frame dont le snap de position finale a ete saute (combat lockdown)
 local ubLastVisState        = {}     -- key → dernier état de visibilité (true/false)
+local ubHovered             = {}     -- key → true si le curseur est dans la zone tolérante
 local ubHiddenForSkyriding  = false  -- masquées pour le skyriding
 local ubHiddenForGui        = false  -- onglet Animations 3D : tout masqué
 local ubPreviewMode         = false  -- panneau settings ouvert → forcer affichage
@@ -190,6 +191,134 @@ local inPetBattle           = false
 local function Cfg(key)
     local db = ns.GetCfg("unitBars")
     return db and db.bars and db.bars[key] or {}
+end
+
+-- Tolerance de survol : la zone deborde la frame de `tol` px de chaque cote. Test maison
+-- plutot que MouseIsOver(), pour couvrir exactement le meme rectangle que le pad de clic
+-- (cf. ApplyHitPad) et garder des offsets symetriques quelle que soit la version du client.
+-- La frame reste Shown a alpha 0 (cf. AnimateBar), donc le survol d'une barre masquee marche.
+local function IsBarHovered(frame, tol)
+    if not frame:IsVisible() then return false end
+    local left, bottom, w, h = frame:GetRect()
+    if not left then return false end
+    local scale = frame:GetEffectiveScale()
+    if not scale or scale <= 0 then return false end
+    local cx, cy = GetCursorPosition()
+    cx, cy = cx / scale, cy / scale
+    return cx >= left - tol and cx <= left + w + tol
+       and cy >= bottom - tol and cy <= bottom + h + tol
+end
+
+-- Tolerance telle que configuree : nulle si "Au survol" est decoche, le slider n'etant
+-- qu'un reglage de cette option. Ne dit rien du combat -- c'est le pad de clic ci-dessous
+-- qui s'en charge, par un mecanisme que le lockdown ne peut pas bloquer.
+local function ConfiguredHoverTol()
+    local db = ns.GetCfg("unitBars")
+    if not (db and db.hoverReveal) then return 0 end
+    return db.hoverTolerance or 0
+end
+
+--- Tolerance applicable a cet instant : nulle en combat, ou le pad est retire. La detection
+--- du survol et l'apercu doivent suivre exactement la zone reellement cliquable.
+local function EffectiveHoverTol()
+    if InCombatLockdown() then return 0 end
+    return ConfiguredHoverTol()
+end
+
+-- Zone de clic elargie : un bouton securise dedie, pas la barre elle-meme.
+-- SetHitRectInsets sur la barre est refuse une fois le combat engage (frame protegee), donc
+-- impossible d'y retirer la tolerance au moment ou elle gene. RegisterStateDriver, lui,
+-- masque une frame protegee en plein combat -- c'est son role. Le pad porte la tolerance,
+-- le driver le retire du combat, et la barre garde sa hitbox d'origine en permanence.
+local function ApplyHitPad(frame, tol)
+    local pad = frame._hitPad
+    if not pad or InCombatLockdown() then return end
+    pad:ClearAllPoints()
+    if tol <= 0 then
+        UnregisterStateDriver(pad, "visibility")
+        pad:Hide()
+        return
+    end
+    pad:SetPoint("TOPLEFT",     frame, "TOPLEFT",     -tol,  tol)
+    pad:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT",  tol, -tol)
+    RegisterStateDriver(pad, "visibility", "[combat] hide; show")
+end
+
+-- ------------------------------------------------------------------
+-- Apercu de la hitbox (cadre bleute pendant le reglage de la tolerance)
+-- ------------------------------------------------------------------
+local HITBOX_HOLD  = 3.0            -- s a pleine opacite apres la derniere retouche
+local HITBOX_FADE  = 0.6            -- s de fondu
+local HITBOX_COLOR = { 0.35, 0.68, 1, 0.9 }
+local hitboxTimer, hitboxTicker
+
+-- Parent UIParent et non la barre : une barre masquee est a alpha 0, et l'alpha d'un parent
+-- multiplie celui de ses enfants -- le cadre serait donc invisible la ou il sert le plus.
+local function EnsureHitboxFrame(frame)
+    if frame._hitPreview then return frame._hitPreview end
+    local f = CreateFrame("Frame", nil, UIParent)
+    f:SetFrameStrata("HIGH")
+    f:Hide()
+    local edges = {}
+    for i = 1, 4 do
+        local t = f:CreateTexture(nil, "OVERLAY")
+        t:SetColorTexture(unpack(HITBOX_COLOR))
+        edges[i] = t
+    end
+    edges[1]:SetPoint("TOPLEFT");     edges[1]:SetPoint("TOPRIGHT");    edges[1]:SetHeight(1)
+    edges[2]:SetPoint("BOTTOMLEFT");  edges[2]:SetPoint("BOTTOMRIGHT"); edges[2]:SetHeight(1)
+    edges[3]:SetPoint("TOPLEFT");     edges[3]:SetPoint("BOTTOMLEFT");  edges[3]:SetWidth(1)
+    edges[4]:SetPoint("TOPRIGHT");    edges[4]:SetPoint("BOTTOMRIGHT"); edges[4]:SetWidth(1)
+    frame._hitPreview = f
+    return f
+end
+
+--- Montre le cadre de la zone cliquable sur chaque barre active, puis le fait disparaitre
+--- en fondu apres HITBOX_HOLD. Rappele a chaque cran du slider : le compte a rebours
+--- repart de zero tant qu'on y touche. Le cadre epouse la tolerance REELLE, donc il colle
+--- a la barre quand "Au survol" est decoche -- ce qui montre que le slider n'agit pas.
+function UnitBars.FlashHitbox()
+    local tol = EffectiveHoverTol()
+    local shown = {}
+    for key, f in pairs(bars) do
+        -- Repartir propre : une barre decochee entre deux passages garderait son cadre
+        -- allume, le ticker precedent ayant ete annule avant de pouvoir le masquer.
+        if f._hitPreview then f._hitPreview:Hide() end
+        if Cfg(key).enabled ~= false then
+            local p = EnsureHitboxFrame(f)
+            p:ClearAllPoints()
+            p:SetPoint("TOPLEFT",     f, "TOPLEFT",     -tol,  tol)
+            p:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT",  tol, -tol)
+            p:SetAlpha(1)
+            p:Show()
+            shown[#shown + 1] = p
+        end
+    end
+    if #shown == 0 then return end
+
+    if hitboxTimer  then hitboxTimer:Cancel();  hitboxTimer  = nil end
+    if hitboxTicker then hitboxTicker:Cancel(); hitboxTicker = nil end
+    hitboxTimer = C_Timer.NewTimer(HITBOX_HOLD, function()
+        hitboxTimer = nil
+        local t0 = GetTime()
+        hitboxTicker = C_Timer.NewTicker(0.03, function()
+            local a = 1 - math.min((GetTime() - t0) / HITBOX_FADE, 1)
+            for _, fr in ipairs(shown) do fr:SetAlpha(a) end
+            if a <= 0 then
+                for _, fr in ipairs(shown) do fr:Hide() end
+                if hitboxTicker then hitboxTicker:Cancel(); hitboxTicker = nil end
+            end
+        end)
+    end)
+end
+
+--- Eteint l'apercu tout de suite (fermeture du panneau, changement de page).
+function UnitBars.HideHitbox()
+    if hitboxTimer  then hitboxTimer:Cancel();  hitboxTimer  = nil end
+    if hitboxTicker then hitboxTicker:Cancel(); hitboxTicker = nil end
+    for _, f in pairs(bars) do
+        if f._hitPreview then f._hitPreview:Hide() end
+    end
 end
 
 -- Calcule si une barre doit être visible selon l'état du jeu (pure Lua, pas de StateDriver)
@@ -208,6 +337,10 @@ local function ShouldShowBar(frame)
     if inVehicle                then return false end
     if inPetBattle              then return false end
     local unit  = frame._def.unit
+    -- "Au survol" : le curseur sur la barre (tolerance comprise) la fait sortir quel que soit
+    -- le mode de visibilite. Vient apres les masquages durs (skyriding, vehicule, pet battle) :
+    -- ceux-la ne se laissent pas rouvrir a la souris.
+    if db and db.hoverReveal and ubHovered[frame._def.key] and UnitExists(unit) then return true end
     -- "Toujours actif en instance" : ignore les transitions combat en donjon/raid, mais le unit doit exister
     if db and db.alwaysInInstance and ns.inInstance then return UnitExists(unit) end
     local vMode = (db and db.visibilityMode)
@@ -297,6 +430,28 @@ local function CreateUnitBar(def)
     frame:SetAttribute("*type1", "target")      -- clic gauche = cibler l'unité
     frame:SetAttribute("*type2", "togglemenu")  -- clic droit  = menu contextuel
     frame:SetClampedToScreen(true)
+
+    -- Pad de clic (cf. ApplyHitPad) : memes attributs que la barre, pose derriere elle pour
+    -- qu'elle garde la priorite sur sa propre surface. Sans texture, donc invisible ; il suit
+    -- l'alpha de la barre comme n'importe quel enfant.
+    local pad = CreateFrame("Button", "$parentHitPad", frame, "SecureUnitButtonTemplate")
+    pad:SetFrameLevel(math.max(0, frame:GetFrameLevel() - 1))
+    pad:RegisterForClicks("AnyUp")
+    pad:RegisterForDrag("LeftButton")
+    pad:SetAttribute("unit", def.unit)
+    pad:SetAttribute("*type1", "target")
+    pad:SetAttribute("*type2", "togglemenu")
+    -- Le deplacement depuis la couronne doit saisir la barre, sinon on croit l'avoir
+    -- attrapee et rien ne bouge.
+    pad:SetScript("OnDragStart", function()
+        local h = frame:GetScript("OnDragStart"); if h then h(frame) end
+    end)
+    pad:SetScript("OnDragStop", function()
+        local h = frame:GetScript("OnDragStop"); if h then h(frame) end
+    end)
+    pad:Hide()
+    frame._hitPad = pad
+    ApplyHitPad(frame, ConfiguredHoverTol())
     -- Show() une seule fois à la création ; visibilité gérée ensuite via SetAlpha() (jamais protégé en combat)
     frame:Show()
     frame:SetAlpha(0)
@@ -582,9 +737,11 @@ local function CreateUnitBar(def)
 end
 
 -- Helper : mise à jour du texte HP selon le mode (pct ou value)
-local function SetHPText(hpTextWidget, unit)
+local function SetHPText(hpTextWidget, unit, barKey)
     local db   = ns.GetCfg("unitBars")
     local mode = (db and db.hpDisplayMode) or "pct"
+    -- "Valeur au survol" : la barre sous le curseur passe en valeur brute, quel que soit le mode.
+    if barKey and db and db.hpHoverValue and ubHovered[barKey] then mode = "value" end
     if mode == "value" then
         -- AbbreviateNumbers est C-side, accepte les secret numbers
         local ok, txt = pcall(function()
@@ -627,7 +784,7 @@ local function UpdateBarHealth(frame)
     -- Absorb via UpdateAbsorb (appelé séparément par le ticker pour toutes les barres)
 
     if frame.hpText then
-        SetHPText(frame.hpText, unit)
+        SetHPText(frame.hpText, unit, frame._def.key)
     end
 end
 
@@ -815,6 +972,11 @@ local function ApplyBarSettings(frame)
     local totalW   = w + dotsW   -- dotGap ne modifie pas la barre
     local frameH   = math.max(dotsW > 0 and dotSizes[3] or 0, h) + 4
     frame:SetSize(totalW, frameH)
+
+    -- Tolerance de survol : le pad de clic deborde la barre de `tol` px sur les quatre cotes,
+    -- sans toucher a sa geometrie visible. Nos barres font quelques pixels de haut : sans ca
+    -- elles sont penibles a viser.
+    ApplyHitPad(frame, ConfiguredHoverTol())
 
     -- Repositionner la barre dans le frame
     local barOffX = (not def.noDots and def.dotsLeft) and dotsW or 0  -- pas de dotGap ici
@@ -1314,6 +1476,7 @@ function UnitBars.Create(parent)
             panel:HookScript("OnHide", function()
                 -- Fin de preview : nettoyer les données de test puis recalculer
                 ubPreviewMode = false
+                UnitBars.HideHitbox()   -- l'apercu de hitbox n'a plus lieu d'etre
                 for _, f in pairs(bars) do
                     UpdateBarName(f)
                     if not UnitExists(f._def.unit) then
@@ -1597,6 +1760,47 @@ C_Timer.NewTicker(0.1, function()
 end)
 
 
+-- Ticker de survol (0.05 s) : detecte l'entree/sortie du curseur dans la zone tolerante de
+-- chaque barre, puis reevalue la visibilite et/ou le texte HP. Ne coute rien quand les deux
+-- options sont eteintes -- c'est le cas par defaut.
+C_Timer.NewTicker(0.05, function()
+    if not next(bars) then return end
+    local db = ns.GetCfg("unitBars")
+    if not db then return end
+    local reveal   = db.hoverReveal == true
+    local hoverVal = db.hpHoverValue == true
+
+    if not (reveal or hoverVal) then
+        -- Option coupee alors qu'une barre etait survolee : effacer l'etat et rendre la main
+        -- aux reglages normaux (visibilite ET texte), sinon la derniere barre survolee reste figee.
+        if next(ubHovered) then
+            wipe(ubHovered)
+            for _, f in pairs(bars) do
+                if f.hpText and UnitExists(f._def.unit) then
+                    SetHPText(f.hpText, f._def.unit, f._def.key)
+                end
+            end
+            UnitBars.UpdateAllVisibility()
+        end
+        return
+    end
+
+    local tol = EffectiveHoverTol()
+    local changed = false
+    for key, f in pairs(bars) do
+        local hovered = IsBarHovered(f, tol)
+        if hovered ~= (ubHovered[key] or false) then
+            ubHovered[key] = hovered or nil
+            changed = true
+            if f.hpText and UnitExists(f._def.unit) then
+                SetHPText(f.hpText, f._def.unit, key)
+            end
+        end
+    end
+    if changed and reveal then UnitBars.UpdateAllVisibility() end
+end)
+
+
 -- Ticker 0.5s : targettarget + texte HP% target + masquage si unité disparue
 C_Timer.NewTicker(0.5, function()
     if not next(bars) then return end
@@ -1605,7 +1809,7 @@ C_Timer.NewTicker(0.5, function()
     if tg then
         if UnitExists("target") then
             if tg.hpText then
-                SetHPText(tg.hpText, "target")
+                SetHPText(tg.hpText, "target", "target")
             end
         end
         -- Pas de Hide() ici : visibilité gérée exclusivement par SetAlpha() via AnimateBar.

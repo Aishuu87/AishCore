@@ -63,11 +63,12 @@ local function PushDiscovery(raw, profile, keepExisting)
     end
 end
 
--- Registre compte -> profil : cree les auras manquantes (reglages par defaut), impose le classement et
--- retire celles oubliees du registre (purge War Gear, "Vider sorts decouverts"). Sans risque de perte :
--- le profil actif est toujours pousse (PushActive) avant qu'un autre profil soit tire.
+-- Registre compte -> profil : cree les auras manquantes (reglages par defaut, seulement si createMissing :
+-- profil actif), impose le classement et retire celles oubliees du registre (purge War Gear, "Vider sorts
+-- decouverts"). Sans risque de perte : le profil actif est toujours pousse (PushActive) avant qu'un autre
+-- profil soit tire. Un profil inactif ne garde que ses sorts personnalises (ns.DropUncustomizedSpells).
 local TOTEM_CLEARED_DESTINATIONS = { "iconlist", "circlebars", "freebars", "icons" }
-local function PullDiscovery(raw, profile)
+local function PullDiscovery(raw, profile, profileName, createMissing)
     if type(profile.discoveredSpells) ~= "table" then profile.discoveredSpells = {} end
     if type(raw.discovery) ~= "table" then return end
     local lists = profile.discoveredSpells
@@ -85,23 +86,25 @@ local function PullDiscovery(raw, profile)
     for specKey, reg in pairs(raw.discovery) do
         if type(reg) == "table" then
             local spells = lists[specKey]
-            if type(spells) ~= "table" then spells = {}; lists[specKey] = spells end
-            for sid, d in pairs(reg) do
+            if type(spells) ~= "table" and createMissing then spells = {}; lists[specKey] = spells end
+            for sid, d in pairs(type(spells) == "table" and reg or {}) do
                 local info = spells[sid]
                 if type(info) ~= "table" then
-                    info = ns.DeepCopy(ns.SpellDefaults)
-                    info.priority = sid
-                    local bc = ns.barColor or { 1, 1, 1 }
-                    info.color = { bc[1], bc[2], bc[3] }
-                    info._colorDefault = true -- recoloree par ns.RollDefaultSpecColors, comme une vraie decouverte
-                    spells[sid] = info
+                    if createMissing then
+                        info = ns.NewSpellEntry()
+                        info.priority = sid
+                        ns.ApplyAutoColor(info, profileName, sid)
+                        spells[sid] = info
+                    end
                 elseif d.source == "totem" and info.source ~= "totem" and type(info.destinations) == "table" then
                     -- Meme nettoyage que Totems.lua a la reclassification (sinon barres fantomes)
                     for _, k in ipairs(TOTEM_CLEARED_DESTINATIONS) do info.destinations[k] = false end
                 end
-                info.source = d.source or info.source
-                if d.name then info.name = d.name end
-                if type(d.linkedSpellIDs) == "table" then info.linkedSpellIDs = ns.DeepCopy(d.linkedSpellIDs) end
+                if type(info) == "table" then
+                    info.source = d.source or info.source
+                    if d.name then info.name = d.name end
+                    if type(d.linkedSpellIDs) == "table" then info.linkedSpellIDs = ns.DeepCopy(d.linkedSpellIDs) end
+                end
             end
         end
     end
@@ -121,7 +124,10 @@ local function EnsureProfile(raw, name)
     -- toute cle absente du template.
     if type(p) ~= "table" then p = ns.DeepCopy(ns.ProfileTemplate or ns.Defaults); raw.profiles[name] = p end
     ns.MergeDefaults(p, ns.Defaults)
-    PullDiscovery(raw, p)
+    local active = (name == raw.activeProfile)
+    PullDiscovery(raw, p, name, active)
+    if not active then ns.DropUncustomizedSpells(p.discoveredSpells) end
+    ns.HydrateSpellLists(p.discoveredSpells, true)
     return p
 end
 
@@ -154,7 +160,22 @@ end
 
 local logoutFrame = CreateFrame("Frame")
 logoutFrame:RegisterEvent("PLAYER_LOGOUT")
-logoutFrame:SetScript("OnEvent", function() pcall(PushActive, AishUIAuraDB) end)
+-- Deconnexion : on n'ecrit sur disque que les sorts personnalises, et seulement leurs ecarts aux
+-- defauts (cf. ns.DropUncustomizedSpells, ns.HydrateSpellLists). Le profil actif est recomplete
+-- depuis le registre au prochain chargement (EnsureProfile).
+local function CompactAllProfiles(raw)
+    if not raw or type(raw.profiles) ~= "table" then return end
+    for _, prof in pairs(raw.profiles) do
+        if type(prof) == "table" then
+            ns.HydrateSpellLists(prof.discoveredSpells, true, true)
+            ns.DropUncustomizedSpells(prof.discoveredSpells)
+        end
+    end
+end
+logoutFrame:SetScript("OnEvent", function()
+    pcall(PushActive, AishUIAuraDB)
+    pcall(CompactAllProfiles, AishUIAuraDB)
+end)
 
 -- Migration one-shot vers les profils lies : chaque profil Auras existant recoit sa propre copie de
 -- l'ancienne liste partagee, et chaque profil AishCore sans equivalent Auras herite d'une copie du
@@ -193,6 +214,12 @@ function Prof:InitDB()
     if ns.SanitizeFontPaths and type(raw.profiles) == "table" then
         for _, prof in pairs(raw.profiles) do ns.SanitizeFontPaths(prof) end
     end
+    -- Profils inactifs : seuls leurs sorts personnalises restent en memoire (cf. PullDiscovery)
+    if type(raw.profiles) == "table" then
+        for name, prof in pairs(raw.profiles) do
+            if name ~= raw.activeProfile and type(prof) == "table" then ns.DropUncustomizedSpells(prof.discoveredSpells) end
+        end
+    end
     return EnsureProfile(raw, raw.activeProfile)
 end
 
@@ -209,8 +236,11 @@ function Prof:GetActive() return AishUIAuraDB and AishUIAuraDB.activeProfile or 
 function Prof:SetActive(name)
     local db = AishUIAuraDB; if not db or not name then return false end
     PushActive(db)
+    -- L'ancien profil devient inactif : il ne garde que ses sorts personnalises
+    local old = db.profiles and db.profiles[db.activeProfile]
     db.activeProfile = name
     ns.db = EnsureProfile(db, name)
+    if type(old) == "table" and old ~= ns.db then ns.DropUncustomizedSpells(old.discoveredSpells) end
     ns._whitelistBuilt = false
     -- Les Init() des renders ne nettoient leur ancien conteneur que s'ils sont actives dans le NOUVEAU
     -- profil : un render desactive (ou useNativeCDM / enabled=false) gardait l'affichage de l'ancien.
@@ -283,6 +313,15 @@ function Prof:GetProfileData(name)
     if not (db and db.profiles and type(db.profiles[name]) == "table") then return nil end
     PushActive(db)
     return ns.DeepCopy(EnsureProfile(db, name))
+end
+
+-- Table brute (sans copie) du profil : complete s'il est actif, elague sinon (cf. EnsureProfile).
+-- Lecture seule pour l'appelant (export par elements, Config/Profiles.lua).
+function Prof:GetProfileTable(name)
+    local db = AishUIAuraDB
+    if not (db and db.profiles and type(db.profiles[name]) == "table") then return nil end
+    PushActive(db)
+    return EnsureProfile(db, name)
 end
 
 function Prof:SetProfileData(name, data)

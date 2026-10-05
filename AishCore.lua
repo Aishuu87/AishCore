@@ -35,6 +35,8 @@ ns.DPrint = DPrint
 
 -- Appelle mod.method(...) en pcall pour qu'une erreur d'un module ne bloque pas les autres
 local function SafeCall(modName, methodName, ...)
+  -- Module indisponible sur ce client : absence normale, pas une erreur de chargement
+  if not ns.IsModuleAvailable(modName) then return false end
   local mod = ns.Modules[modName]
   if not mod then
     ns._diagInit[modName .. "." .. methodName] = "MISSING MODULE"
@@ -67,6 +69,7 @@ SLASH_AISHCORE1 = "/aish"
 SLASH_AISHCORE2 = "/aishcore"
 SlashCmdList["AISHCORE"] = function(msg)
   msg = strtrim((msg or ""):lower())
+  if msg == "mem" then ns.PrintMemoryReport(); return end
   -- /aish diag — dump l'état d'init
   if msg == "diag" or msg == "diag on" or msg == "diag off" then
     if msg == "diag on"  then ns._diag = true ; print("|cff00ccff[AishCore]|r diag |cff00ff00ON|r  — /reload pour rejouer l'init avec logs") ; return end
@@ -410,13 +413,6 @@ SlashCmdList["AISHCORE"] = function(msg)
     else
       print("|cffff4444[AishCore]|r ResourceCircle introuvable")
     end
-  elseif msg:find("^locale") then
-    local arg = msg:match("^locale%s*(.*)")
-    if ns.SetLocale and ns.SetLocale(arg) then
-      print("|cff00ccff[AishCore]|r Locale -> " .. tostring(ns.GetActiveLocaleCode()))
-    else
-      print("|cffff4444[AishCore]|r Usage : /aish locale enUS|frFR|reset")
-    end
   elseif ns.SettingsPanel then
     ns.SettingsPanel:Toggle()
   end
@@ -607,45 +603,6 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
       local CLR = ns.Modules and ns.Modules.Colors
       if CLR and CLR.Broadcast then CLR.Broadcast() end
     end)
-
-    -- Compacte AishCoreModelPaths en tableau plat (ns._modelFlat) puis libère la mémoire
-    if AishCoreModelPaths then
-      ns._modelFlat = {}
-      for _, cat in pairs(AishCoreModelPaths) do
-        if type(cat) == "table" and cat.children then
-          for _, entry in ipairs(cat.children) do
-            if entry.fileId then
-              local fid = tonumber(entry.fileId) or 0
-              local txt = entry.text or entry.value or tostring(entry.fileId)
-              ns._modelFlat[#ns._modelFlat + 1] = { fileId = fid, text = txt }
-            end
-          end
-        end
-      end
-      AishCoreModelPaths = nil
-      collectgarbage("collect")
-    end
-
-    -- Force la font des timers Platynator, avec hook pour résister à un changement de design
-    if PlatynatorNameplateCooldownFont then
-      local PLAT_FONT_PATH  = ns.FONT_FALLBACK  -- police du jeu (2002), aucune media pack requise
-      local PLAT_FONT_SIZE  = 11
-      local PLAT_FONT_FLAGS = "OUTLINE"
-      PlatynatorNameplateCooldownFont:SetFont(PLAT_FONT_PATH, PLAT_FONT_SIZE, PLAT_FONT_FLAGS)
-      PlatynatorNameplateCooldownFont:SetShadowOffset(0, 0)
-      if not self._platynatorFontHooked then
-        self._platynatorFontHooked = true
-        local overriding = false
-        hooksecurefunc(PlatynatorNameplateCooldownFont, "SetFont", function(file)
-          if not overriding and file ~= PLAT_FONT_PATH then
-            overriding = true
-            PlatynatorNameplateCooldownFont:SetFont(PLAT_FONT_PATH, PLAT_FONT_SIZE, PLAT_FONT_FLAGS)
-            PlatynatorNameplateCooldownFont:SetShadowOffset(0, 0)
-            overriding = false
-          end
-        end)
-      end
-    end
 
   elseif event == "UNIT_AURA" and arg1 == "player" then
     local updateInfo = ...

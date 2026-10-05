@@ -1,6 +1,7 @@
 -- Modules/GroupNumber.lua : numero de sous-groupe de raid en overlay (raid uniquement).
--- Mode ElvUI (conteneurs ElvUF_Raid<N>Group<M>) : une vignette par sous-groupe affiche.
--- Sinon : repli sur une vignette flottante unique pour le sous-groupe du joueur.
+-- Cadres de raid ElvUI (conteneurs ElvUF_Raid<N>Group<M>) ou EllesmereUI (ERFGroupHeader<M> en groupes
+-- separes, sinon premier membre affiche de chaque sous-groupe sous ERFFlatHeader) : une vignette par
+-- sous-groupe affiche. Sinon : repli sur une vignette flottante unique pour le sous-groupe du joueur.
 -- Module autonome, s'auto-enregistre au chargement (pas d'Init central, cf. Visibility.lua).
 local addonName, ns = ...
 
@@ -39,19 +40,50 @@ local function ContainerHasVisibleMember(containerFrame)
     return false
 end
 
--- Scanne _G pour les conteneurs ElvUF_Raid<N>Group<M> affiches et reellement peuples
-local function ScanElvUIGroupContainers()
+-- IsVisible() (pas IsShown()) : verifie toute la chaine de parents, ignore les conteneurs fantomes
+-- (presets ElvUI non utilises, mode EllesmereUI inactif)
+local function AddContainer(groups, name, subgroup)
+    local frame = _G[name]
+    if frame and frame.IsVisible and frame:IsVisible() and ContainerHasVisibleMember(frame) then
+        groups[#groups + 1] = { name = name, frame = frame, subgroup = subgroup }
+    end
+end
+
+-- Sous-groupe d'un bouton de membre (attribut "unit" = "raidN")
+local function ButtonSubgroup(button)
+    local unit = button.GetAttribute and button:GetAttribute("unit")
+    local idx = type(unit) == "string" and tonumber(unit:match("^raid(%d+)$"))
+    if not idx then return nil end
+    local _, _, subgroup = GetRaidRosterInfo(idx)
+    return subgroup
+end
+
+-- Conteneurs de sous-groupes affiches et reellement peuples. Acces directs par nom (pas de parcours
+-- de _G, des dizaines de milliers d'entrees, a chaque changement de composition).
+local MAX_GROUPS = 8
+local function ScanGroupContainers()
     local groups = {}
     if not IsInRaid() then return groups end -- jamais de vignette hors raid
-    for name in pairs(_G) do
-        if type(name) == "string" then
-            local subgroup = name:match("^ElvUF_Raid%d+Group(%d+)$")
-            if subgroup then
-                local frame = _G[name]
-                -- IsVisible() (pas IsShown()) : verifie toute la chaine de parents,
-                -- ignore les conteneurs fantomes des presets ElvUI non utilises
-                if frame and frame.IsVisible and frame:IsVisible() and ContainerHasVisibleMember(frame) then
-                    groups[#groups + 1] = { name = name, frame = frame, subgroup = tonumber(subgroup) }
+    -- ElvUI : 3 dispositions de raid (Raid1..Raid3), un conteneur par sous-groupe
+    for layout = 1, 3 do
+        for g = 1, MAX_GROUPS do AddContainer(groups, "ElvUF_Raid" .. layout .. "Group" .. g, g) end
+    end
+    -- EllesmereUI, groupes separes : un conteneur par sous-groupe
+    for g = 1, MAX_GROUPS do AddContainer(groups, "ERFGroupHeader" .. g, g) end
+    -- EllesmereUI, groupes fusionnes : un seul conteneur, la vignette va sur le premier membre affiche
+    -- de chaque sous-groupe (boutons nommes dans l'ordre d'affichage par SecureGroupHeaderTemplate)
+    local flat = _G.ERFFlatHeader
+    if flat and flat.IsVisible and flat:IsVisible() then
+        local seen = {}
+        for i = 1, 40 do
+            local name = "ERFFlatHeaderUnitButton" .. i
+            local button = _G[name]
+            if not button then break end
+            if button:IsVisible() then
+                local subgroup = ButtonSubgroup(button)
+                if subgroup and not seen[subgroup] then
+                    seen[subgroup] = true
+                    groups[#groups + 1] = { name = name, frame = button, subgroup = subgroup }
                 end
             end
         end
@@ -62,8 +94,8 @@ end
 -- Debug : /aishgroupdebug liste tous les conteneurs detectes (nom, sous-groupe, rect)
 SLASH_AISHGROUPDEBUG1 = "/aishgroupdebug"
 SlashCmdList["AISHGROUPDEBUG"] = function()
-    local groups = ScanElvUIGroupContainers()
-    print(string.format("|cff00ff00[AishCore]|r %d conteneur(s) ElvUF_Raid*Group* detecte(s) :", #groups))
+    local groups = ScanGroupContainers()
+    print(string.format("|cff00ff00[AishCore]|r %d conteneur(s) de sous-groupe detecte(s) (ElvUI / EllesmereUI) :", #groups))
     for _, g in ipairs(groups) do
         local f = g.frame
         local left, top = f:GetLeft(), f:GetTop()
@@ -118,10 +150,10 @@ function GroupNumber.Refresh()
         return
     end
 
-    local groups = ScanElvUIGroupContainers()
+    local groups = ScanGroupContainers()
 
     if #groups > 0 then
-        -- Mode ElvUI : une vignette par sous-groupe detecte, plus de badge solo.
+        -- Cadres de raid ElvUI / EllesmereUI : une vignette par sous-groupe detecte, plus de badge solo.
         if soloBadge then soloBadge:Hide() end
 
         local seen = {}
@@ -143,7 +175,7 @@ function GroupNumber.Refresh()
             if not seen[containerName] then entry.badge:Hide() end
         end
     else
-        -- Repli : aucun conteneur ElvUI detecte -> comportement d'origine
+        -- Repli : aucun conteneur ElvUI / EllesmereUI detecte -> comportement d'origine
         -- (mon sous-groupe, position ecran fixe).
         for _, entry in pairs(groupBadges) do entry.badge:Hide() end
 
@@ -171,7 +203,7 @@ eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:SetScript("OnEvent", function(_, event)
     GroupNumber.Refresh()
     if event == "GROUP_ROSTER_UPDATE" then
-        -- Les conteneurs ElvUI peuvent se recalculer/afficher avec un leger
+        -- Les conteneurs ElvUI / EllesmereUI peuvent se recalculer/afficher avec un leger
         -- delai apres un changement de composition -- un seul re-scan differe
         -- suffit (pas besoin d'un ticker permanent).
         C_Timer.After(0.2, GroupNumber.Refresh)

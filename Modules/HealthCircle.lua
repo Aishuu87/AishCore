@@ -139,9 +139,35 @@ healthTrackFrame:RegisterEvent("PLAYER_UNGHOST")
 healthTrackFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 healthTrackFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 local _hcInCombat = false
+local hcClickPending = false   -- EnableMouse sur la zone de clic reporte a la sortie de combat
+local hcClickWanted  = false   -- valeur demandee pendant le combat, rejouee telle quelle ensuite
+local hcDragArmed    = false   -- panneau de reglages ouvert : le drag prime sur la zone de clic
+
+-- La zone de clic suit le cercle hors combat seulement : en combat elle reste cachee (Show/Hide
+-- d'un bouton securise y sont interdits), le cercle lui-meme restant libre de s'afficher/se cacher.
+-- Aucun ancrage au cercle (un frame securise ancre dessus pourrait le rendre protege) : le bouton
+-- est cale sur UIParent aux coordonnees ecran du cercle, recopiees a chaque synchro.
+local function SyncClickVisibility()
+  local click = bar and bar.clickOverlay
+  if not click or InCombatLockdown() then return end
+  local show = bar:IsShown() and not _hcInCombat
+  if show then
+    local cx, cy = bar:GetCenter()
+    if not cx then show = false else
+      local k = bar:GetEffectiveScale() / UIParent:GetEffectiveScale()
+      click:ClearAllPoints()
+      click:SetPoint("CENTER", UIParent, "BOTTOMLEFT", cx * k, cy * k)
+      click:SetSize(bar:GetWidth() * k, bar:GetHeight() * k)
+    end
+  end
+  click:SetShown(show)
+end
+
 healthTrackFrame:SetScript("OnEvent", function(self, event)
   if event == "PLAYER_REGEN_DISABLED" then
     _hcInCombat = true
+    -- Event recu juste AVANT le verrouillage de combat : dernier moment pour cacher le bouton securise
+    SyncClickVisibility()
     -- En entrant en combat, marquer comme blessé mais ne pas toucher au timer :
     -- le timer démarrera proprement à la fin du combat.
     playerIsDamaged = true
@@ -150,6 +176,10 @@ healthTrackFrame:SetScript("OnEvent", function(self, event)
     -- Démarrer le compte à rebours hideDelay à partir de maintenant,
     -- quelle que soit l'activité UNIT_HEALTH pendant le combat.
     lastHealthChangeTime = GetTime()
+    -- Rejouer la demande TELLE QUELLE : relire la config ici ré-armerait le clic alors que
+    -- le panneau de reglages, ouvert pendant le combat, l'avait desarme pour le drag.
+    if hcClickPending then HealthCircle.ApplyClickable(hcClickWanted) end
+    SyncClickVisibility()
   elseif event == "PLAYER_ENTERING_WORLD" then
     playerIsDamaged = true
     lastHealthChangeTime = GetTime()
@@ -273,6 +303,9 @@ function HealthCircle.ApplySettings()
   if ns.GetCfg("healthCircle").heartbeatPulse == false then
     StopPulse()
   end
+  -- Le panneau ouvert arme le drag, qui exige que la zone de clic lache la souris.
+  if hcDragArmed then HealthCircle.ApplyClickable(false) else HealthCircle.ApplyClickable() end
+
   if previewMode then
     HealthCircle.SetPreview(true)
   else
@@ -414,6 +447,26 @@ function HealthCircle.Create(parent)
 
   bar:Hide()
 
+  -- Zone de clic : bouton securise pose sur le cercle, jamais le cercle lui-meme. Seul un
+  -- SecureUnitButton peut cibler et ouvrir le menu d'unite.
+  -- PAS enfant de `bar` : un enfant securise rendrait le cercle protege, et ses Show/Hide
+  -- seraient bloques en combat (ADDON_ACTION_BLOCKED). Calque sur UIParent, cale sur le
+  -- cercle, dont la visibilite est recopiee hors combat (cf. SyncClickVisibility).
+  local click = CreateFrame("Button", "AishCoreHealthRingClick", UIParent, "SecureUnitButtonTemplate")
+  click:Hide()
+  bar:HookScript("OnShow", SyncClickVisibility)
+  bar:HookScript("OnHide", SyncClickVisibility)
+  -- Le cercle vit en strata LOW : un bouton laisse a ce niveau se ferait voler ses clics
+  -- par a peu pres n'importe quel element d'interface pose au-dessus.
+  click:SetFrameStrata("MEDIUM")
+  click:SetFrameLevel(bar:GetFrameLevel() + 8)
+  click:RegisterForClicks("AnyUp")
+  click:SetAttribute("unit", "player")
+  click:SetAttribute("*type1", "target")      -- clic gauche = se cibler
+  click:SetAttribute("*type2", "togglemenu")  -- clic droit  = menu contextuel du joueur
+  click:EnableMouse(false)                    -- arme seulement si l'option est cochee
+  bar.clickOverlay = click
+
   -- Pré-allouer la table d'éléments pour AnimateVisibility (5 slots fixes).
   -- Les frame-refs (bar.arc, etc.) sont stables après Create() : on ne les recrée jamais.
   do
@@ -526,9 +579,33 @@ function HealthCircle.SetPreview(on)
   end
 end
 
+--- Arme ou desarme la zone de clic. EnableMouse est protege sur un frame securise : en
+--- combat on note la demande et PLAYER_REGEN_ENABLED la rejoue.
+--- `force` = false desarme quoi qu'en dise la config (mode deplacement : sinon le calque
+--- mange le drag du cercle).
+function HealthCircle.ApplyClickable(force)
+  if not (bar and bar.clickOverlay) then return end
+  local want = force
+  if want == nil then
+    local cfg = ns.GetCfg("healthCircle")
+    want = (cfg and cfg.clickable == true) or false
+  end
+  if InCombatLockdown() then
+    hcClickPending = true
+    hcClickWanted  = want
+    return
+  end
+  hcClickPending = false
+  bar.clickOverlay:EnableMouse(want and true or false)
+  SyncClickVisibility()  -- recale le bouton (position/taille changees par ApplySettings ou un drag)
+end
+
 -- Rend le cercle deplacable par drag (pour le mode settings)
 function HealthCircle.SetDraggable(on)
   if not bar then return end
+  hcDragArmed = (on == true)
+  -- Le calque de clic capterait le glisser : on le desarme tant que le panneau est ouvert.
+  if hcDragArmed then HealthCircle.ApplyClickable(false) else HealthCircle.ApplyClickable() end
   if on then
     bar:SetMovable(true)
     bar:EnableMouse(true)

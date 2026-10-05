@@ -11,6 +11,13 @@ ns.Modules.PriorityBar = PriorityBar
 -- GetMacroSpell suit potentiellement le même sort côté macros.
 local GetMacroSpellID = (C_Macro and C_Macro.GetMacroSpell) or GetMacroSpell
 
+-- SetFont leve une erreur sur un chemin mort (police d'un addon absent) : sans repli,
+-- toute l'init de la barre s'arrete en plein milieu.
+local function SetFontSafe(fs, path, size, flags)
+  local ok, ret = pcall(fs.SetFont, fs, path or ns.Media.font, size, flags)
+  if not ok or ret == false then fs:SetFont(ns.FONT_FALLBACK, size, flags) end
+end
+
 -- Noms des boutons d'action Blizzard + ElvUI (meme template, on scanne les deux jeux de noms)
 local BUTTON_PREFIXES = {
   "ActionButton",
@@ -1463,7 +1470,7 @@ local function CreateSlotFrame(index, parent)
   local cx = cfg.chargeOffsetX or 0
   local cy = cfg.chargeOffsetY or 0
   frame.chargeText:SetPoint(chargePos, inner, chargePos, cx, cy)
-  frame.chargeText:SetFont(cfg.chargeFont or ns.Media.font, cfg.chargeFontSize or 12, "OUTLINE")
+  SetFontSafe(frame.chargeText, cfg.chargeFont, cfg.chargeFontSize or 12, "OUTLINE")
   local cc = cfg.chargeColor or { 1, 1, 1, 1 }
   frame.chargeText:SetTextColor(cc[1], cc[2], cc[3], cc[4] or 1)
   frame.chargeText:Hide()
@@ -1666,6 +1673,61 @@ local function LayoutSlots()
                  col0 * (size + spacing), -row0 * (size + spacing))
       if not f._hidden then f:Show() end
     end
+  end
+end
+
+-- SLOTS VIDES : ICONE PLACEHOLDER (UNIQUEMENT PANNEAU DE REGLAGES OUVERT)
+-- Un slot sans sort est masque : une barre a moitie (ou entierement) vide ne montre alors plus sa
+-- vraie forme, impossible de la placer ou de la dimensionner. Tant que le panneau de reglages est
+-- ouvert, ces slots affichent donc une icone neutre, desaturee et attenuee. Panneau ferme, le slot
+-- redevient invisible : rien n'est jamais ecrit dans la configuration, c'est un pur habillage.
+local PLACEHOLDER_ICON = 134400  -- INV_Misc_QuestionMark
+
+local function PanelOpen()
+  local panel = ns.SettingsPanel
+  return (panel and panel.IsShown and panel:IsShown()) and true or false
+end
+
+-- Nombre de slots reellement utilises par la disposition courante : au-dela, rien a montrer.
+local function LayoutSlotCount()
+  local def = GetCurrentLayoutDef()
+  return def and (#def.leftNames + #def.rightNames) or 0
+end
+
+-- Rend son aspect normal a l'icone : le placeholder la desature et l'attenue, et l'alpha n'est
+-- repose nulle part ailleurs.
+local function ClearPlaceholder(slot)
+  if not slot._placeholder then return end
+  slot._placeholder = nil
+  slot.icon:SetDesaturated(false)
+  slot.icon:SetAlpha(1)
+end
+
+--- Aspect d'un slot sans sort : placeholder si `withPlaceholder`, sinon masque (comportement normal).
+local function ApplyEmptySlot(slot, index, withPlaceholder)
+  if withPlaceholder and index <= LayoutSlotCount() then
+    slot._placeholder = true
+    slot.icon:SetTexture(PLACEHOLDER_ICON)
+    slot.icon:SetDesaturated(true)
+    slot.icon:SetAlpha(0.55)
+    slot._hidden = false
+    slot:Show()
+  else
+    ClearPlaceholder(slot)
+    slot.icon:SetTexture(nil)
+    slot._hidden = true
+    slot:Hide()
+  end
+end
+
+--- Allume / eteint les placeholders de tous les slots vides (ouverture et fermeture du panneau).
+function PriorityBar.SetPlaceholders(on)
+  if InCombatLockdown() then return end
+  for i = 1, MAX_SLOTS do
+    local slot = slotFrames[i]
+    -- Un slot qui a des sorts configures n'est jamais concerne, meme si aucun n'est appris ici :
+    -- ce cas-la garde le comportement normal (slot masque).
+    if slot and #(slot.spellIDs or {}) == 0 then ApplyEmptySlot(slot, i, on) end
   end
 end
 
@@ -2613,6 +2675,40 @@ local function PBShouldShow()
   return UnitAffectingCombat("player") and true or false
 end
 
+-- Remonte un spellID configure vers le rang le plus eleve actuellement appris. La configuration
+-- garde le choix d'origine ; seule la resolution au moment de l'usage change. Sans cela, un sort
+-- place dans un slot resterait bloque sur le rang connu le jour ou il a ete choisi -- et la macro
+-- du bouton lancerait ce vieux rang, avec son cout et ses degats d'alors.
+-- Appelee uniquement hors combat depuis ConfigureSlots, comme le reste de la configuration.
+local function ResolveSlotSpellIDs(ids)
+  -- Rangs de sorts : Forever uniquement. En Retail deux sorts distincts peuvent partager nom et
+  -- icone, on ne touche donc pas a la configuration.
+  if not ns.IsForever then return ids end
+  if type(ids) ~= "table" or #ids == 0 then return ids end
+  if not (ns.SpellIdentityKey and PriorityBar.GetSpecSpells) then return ids end
+
+  -- GetSpecSpells est deja regroupe par sort et conserve le rang le plus eleve : il fait office
+  -- d'index "identite -> meilleur rang connu".
+  local best = {}
+  for _, e in ipairs(PriorityBar.GetSpecSpells()) do
+    local key = e.id and ns.SpellIdentityKey(e.id)
+    if key then
+      local cur = best[key]
+      if not cur or e.id > cur then best[key] = e.id end
+    end
+  end
+
+  local out, changed = {}, false
+  for i, id in ipairs(ids) do
+    local key = ns.SpellIdentityKey(id)
+    local up = key and best[key]
+    out[i] = up or id
+    if up and up ~= id then changed = true end
+  end
+  if changed then Debug("Slots : rangs remontes vers les sorts les plus recents") end
+  return out
+end
+
 local function AnimatePB(shouldShow)
   if pbFadeTicker then pbFadeTicker:Cancel(); pbFadeTicker = nil end
   SetSlotsMouseEnabled(shouldShow)
@@ -2683,7 +2779,8 @@ function PriorityBar.ConfigureSlots(slotConfigs)
   for i = 1, MAX_SLOTS do
     local slotCfg = slotConfigs and slotConfigs[i]
     if i <= totalSlots and slotCfg and slotFrames[i] then
-      slotFrames[i].spellIDs = slotCfg.spellIDs or {}
+      local resolvedIDs = ResolveSlotSpellIDs(slotCfg.spellIDs or {})
+      slotFrames[i].spellIDs = resolvedIDs
       slotFrames[i].slotName = slotCfg.name or ("Slot " .. i)
       -- Reset glow
       slotFrames[i].isHighlighted = true
@@ -2692,7 +2789,7 @@ function PriorityBar.ConfigureSlots(slotConfigs)
       -- Configurer le SecureActionButton (hors combat seulement)
       -- Macro /cast Spell1 \n /cast Spell2 ... pour multi-sorts
       local macroLines = {}
-      for _, sid in ipairs(slotCfg.spellIDs or {}) do
+      for _, sid in ipairs(resolvedIDs) do
         local name = GetSpellName(sid)
         if name and name ~= ("Spell#" .. tostring(sid)) then
           macroLines[#macroLines + 1] = "/cast " .. name
@@ -2710,6 +2807,7 @@ function PriorityBar.ConfigureSlots(slotConfigs)
           local ok, ov = pcall(C_Spell.GetOverrideSpell, defaultID)
           if ok and ov and ov ~= defaultID and ov > 0 then defaultID = ov end
         end
+        ClearPlaceholder(slotFrames[i])
         local tex = GetSpellIcon(defaultID)
         if tex then
           slotFrames[i].icon:SetTexture(tex)
@@ -2719,12 +2817,10 @@ function PriorityBar.ConfigureSlots(slotConfigs)
         slotFrames[i]._hidden = false
         slotFrames[i]:Show()
       else
-        -- Slot vide dans le profil courant : vider et cacher la frame entière
-        slotFrames[i].icon:SetTexture(nil)
+        -- Slot sans sort : masque, ou icone neutre si le panneau de reglages est ouvert
         ClearSlotCDMSubscription(slotFrames[i])
         slotFrames[i].currentSpellID = nil
-        slotFrames[i]._hidden = true
-        slotFrames[i]:Hide()
+        ApplyEmptySlot(slotFrames[i], i, PanelOpen())
       end
       Debug("Slot " .. i .. " configured: " .. (slotCfg.name or "?") .. " (" .. #(slotCfg.spellIDs or {}) .. " spells)")
     elseif slotFrames[i] then
@@ -2738,8 +2834,7 @@ function PriorityBar.ConfigureSlots(slotConfigs)
       StopSlotGlow(slotFrames[i])
       slotFrames[i]:SetAttribute("type",      nil)
       slotFrames[i]:SetAttribute("macrotext", "")
-      slotFrames[i]._hidden = true
-      slotFrames[i]:Hide()
+      ApplyEmptySlot(slotFrames[i], i, PanelOpen())
     end
   end
   -- Les spellIDs sont maintenant à jour : reconstruire le cache des sorts appris
@@ -4032,7 +4127,7 @@ function PriorityBar.ApplySettings()
           local cdColor = cfg.cooldownTextColor or { 1, 1, 1, 1 }
           for _, region in pairs({slot.cooldown:GetRegions()}) do
             if region:IsObjectType("FontString") then
-              region:SetFont(cfg.cooldownFont or ns.Media.font, cdFontSize, "OUTLINE")
+              SetFontSafe(region, cfg.cooldownFont, cdFontSize, "OUTLINE")
               region:SetTextColor(cdColor[1], cdColor[2], cdColor[3], cdColor[4] or 1)
             end
           end
@@ -4046,7 +4141,7 @@ function PriorityBar.ApplySettings()
         local cy  = cfg.chargeOffsetY or 0
         slot.chargeText:ClearAllPoints()
         slot.chargeText:SetPoint(pos, slot.innerFrame or slot, pos, cx, cy)
-        slot.chargeText:SetFont(cfg.chargeFont or ns.Media.font, cfg.chargeFontSize or 12, "OUTLINE")
+        SetFontSafe(slot.chargeText, cfg.chargeFont, cfg.chargeFontSize or 12, "OUTLINE")
         local cc = cfg.chargeColor or { 1, 1, 1, 1 }
         slot.chargeText:SetTextColor(cc[1], cc[2], cc[3], cc[4] or 1)
         if not cfg.showCharges then slot.chargeText:Hide() end
@@ -4278,11 +4373,13 @@ function PriorityBar.SetPreview(on)
     end
     -- Forcer l'affichage pour la preview (plus de StateDriver à suspendre)
     SafeShowContainers()
+    PriorityBar.SetPlaceholders(true)
     -- Enregistrer l'etat force : sans ca, couper la barre ensuite laissait
     -- UpdateVisibility croire qu'elle etait deja cachee (pbLastVisState=false)
     -- et les conteneurs restaient a alpha 1 a l'ecran.
     pbLastVisState = true
   else
+    PriorityBar.SetPlaceholders(false)
     for i = 1, MAX_SLOTS do
       if slotFrames[i] then
         slotFrames[i].isHighlighted = true
@@ -4468,6 +4565,7 @@ function PriorityBar.SetSlotSpells(slotIndex, newSpellIDs)
       local ok, ov = pcall(C_Spell.GetOverrideSpell, defaultID)
       if ok and ov and ov ~= defaultID and ov > 0 then defaultID = ov end
     end
+    ClearPlaceholder(slot)
     local tex = GetSpellIcon(defaultID)
     if tex then
       slot.icon:SetTexture(tex)
@@ -4476,11 +4574,9 @@ function PriorityBar.SetSlotSpells(slotIndex, newSpellIDs)
     slot._hidden = false
     slot:Show()
   else
-    slot.icon:SetTexture(nil)
     ClearSlotCDMSubscription(slot)
     slot.currentSpellID = nil
-    slot._hidden = true
-    slot:Hide()
+    ApplyEmptySlot(slot, slotIndex, PanelOpen())
   end
   -- Forcer la mise à jour de visibilité des conteneurs (utile en mode "always")
   pbLastVisState = nil
@@ -4598,5 +4694,10 @@ function PriorityBar.GetSpecSpells()
   -- ns.FoldAccentsLower (Core.lua) : cf. Tactics.lua -- strcmputf8i seul ne
   -- suffisait pas pour ce client (toujours classé après Z).
   table.sort(spells, function(a, b) return ns.FoldAccentsLower(a.name) < ns.FoldAccentsLower(b.name) end)
+  -- Un seul choix par sort : sans cela, chaque rang appris ajoute une ligne identique a la liste.
+  if ns.IsForever and ns.DedupeSpellRanks then
+    spells = ns.DedupeSpellRanks(spells, function(v) return v.id end, function(v, id) v.id = id end)
+  end
+
   return spells
 end

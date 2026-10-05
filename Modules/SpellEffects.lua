@@ -24,6 +24,137 @@ local DEFAULT_DUR  = 0.8       -- durée par défaut (sec)
 local DEFAULT_FADE = 0.25      -- durée de fadeout (sec)
 local RING_FRAME   = "AishCoreRingBar"
 
+-- ============================================================
+-- ECLAIRAGE DES MODELES D'EFFET (correctif Forever ; Retail garde le rendu du client par defaut)
+-- Sur Forever, certains modeles "spectraux" (loup fantome, voiles translucides) sortent
+-- gris-vert et ternes la ou retail les rend blancs et lumineux. D'autres modeles du meme
+-- dossier rendent correctement : c'est donc le materiau, pas le frame.
+--
+-- La cause exacte n'est pas etablie. Ce bloc expose donc plusieurs eclairages nommes,
+--   none  : ne jamais appeler SetLight -- le client applique son defaut, comme sur retail
+--   off   : SetLight(false) -- ombrage coupe ; c'est ce que font les previews du panneau
+--           (cf. Modules/Auras/UI/Menus/Effects.lua), qui rendent correctement
+--   flat  : ambiante blanche a fond, diffuse nulle -- surexpose, d'ou les flashs
+--   soft  : ambiante forte mais pas saturee, diffuse residuelle
+local LIGHT_MODES = { "none", "off", "flat", "soft" }
+local LIGHT_PARAMS = {
+  flat = { ambient = 1.00, diffuse = 0.00 },
+  soft = { ambient = 0.80, diffuse = 0.20 },
+}
+-- Defaut selon le client : Retail rend correctement, on n'y touche pas.
+local DEFAULT_LIGHT_MODE = ns.IsForever and "off" or "none"
+
+-- La signature en table n'existe que si CreateVector3D/CreateColor sont exposes. Sans eux,
+-- pcall reussirait sur une table incomplete SANS que l'eclairage demande soit applique :
+-- on teste donc la disponibilite plutot que de se fier au pcall.
+local LIGHT_TABLE_API = (CreateVector3D ~= nil) and (CreateColor ~= nil)
+
+-- Registre faible des frames eclaires, pour reappliquer un changement de mode en direct.
+local litFrames = setmetatable({}, { __mode = "k" })
+
+local function CurrentLightMode()
+  local cfg = ns.GetCfg("spellEffects")
+  local mode = cfg and cfg.modelLight
+  for _, m in ipairs(LIGHT_MODES) do
+    if m == mode then return mode end
+  end
+  return DEFAULT_LIGHT_MODE
+end
+
+local function ApplyModelLighting(f, mode)
+  if not (f and f.SetLight) then return end
+  litFrames[f] = true
+  mode = mode or CurrentLightMode()
+
+  if mode == "none" then return end   -- on laisse le client decider
+  if mode == "off" then
+    pcall(function() f:SetLight(false, false) end)
+    return
+  end
+
+  local p = LIGHT_PARAMS[mode] or LIGHT_PARAMS.soft
+  if LIGHT_TABLE_API then
+    local ok = pcall(function()
+      f:SetLight(true, {
+        omnidirectional  = false,
+        point            = CreateVector3D(0, 0, 0),
+        ambientIntensity = p.ambient,
+        ambientColor     = CreateColor(1, 1, 1),
+        diffuseIntensity = p.diffuse,
+        diffuseColor     = CreateColor(1, 1, 1),
+      })
+    end)
+    if ok then return end
+  end
+  -- Ancienne signature : enabled, omni, dirX, dirY, dirZ, ambIntensity, ambR, ambG, ambB,
+  -- dirIntensity, dirR, dirG, dirB
+  pcall(function()
+    f:SetLight(true, false, 0, 0, 0, p.ambient, 1, 1, 1, p.diffuse, 1, 1, 1)
+  end)
+end
+
+--- Bascule l'eclairage et le reapplique aux modeles deja charges (comparaison a chaud).
+-- Sans argument : renvoie l'etat courant sans rien changer.
+
+--- Leviers de rendu. nil = on n'y touche pas, ce qui
+--- est le defaut : rien ne change tant qu'un levier n'est pas regle explicitement.
+---   glow  : emission propre du modele, independante de l'eclairage du frame
+---   alpha : opacite du MODELE. Le code de fade n'agit que sur l'alpha du FRAME
+---           (f:SetAlpha) ; les previews du panneau, qui rendent correctement, n'y
+---           touchent pas du tout. SetModelAlpha est donc le second suspect.
+local RENDER_KNOBS = {
+  glow  = { method = "SetGlow",       key = "modelGlow"  },
+  alpha = { method = "SetModelAlpha", key = "modelAlpha" },
+}
+
+local function ApplyModelKnobs(f)
+  if not f then return end
+  local cfg = ns.GetCfg("spellEffects") or {}
+  for _, k in pairs(RENDER_KNOBS) do
+    local v = cfg[k.key]
+    if v ~= nil and f[k.method] then
+      pcall(function() f[k.method](f, v) end)
+    end
+  end
+end
+
+--- Lumiere + leviers de rendu, appliques ensemble apres chaque SetModel.
+local function ApplyModelRender(f)
+  if not f then return end
+  litFrames[f] = true
+  ApplyModelLighting(f)
+  ApplyModelKnobs(f)
+end
+
+
+local FOG_MODES = { "far0", "clear", "none" }
+local DEFAULT_FOG_MODE = ns.IsForever and "far0" or "none"
+
+local function CurrentFogMode()
+  local cfg = ns.GetCfg("spellEffects")
+  local mode = cfg and cfg.modelFog
+  for _, m in ipairs(FOG_MODES) do
+    if m == mode then return mode end
+  end
+  return DEFAULT_FOG_MODE
+end
+
+local function ApplyModelFog(f, mode)
+  if not f then return end
+  mode = mode or CurrentFogMode()
+  if mode == "none" then return end
+  if mode == "clear" then
+    if f.ClearFog then pcall(function() f:ClearFog() end) end
+    return
+  end
+  -- far0 : reproduit le reglage des previews
+  pcall(function()
+    if f.SetFogColor then f:SetFogColor(0, 0, 0) end
+    if f.SetFogNear then f:SetFogNear(0) end
+    if f.SetFogFar then f:SetFogFar(0) end
+  end)
+end
+
 -- Pool de PlayerModel frames
 local pool       = {}   -- { frame, inUse, timer }
 local poolSize   = 0
@@ -233,6 +364,9 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor, skipModel)
   if not skipModel then
     f:ClearModel()
     okModel, errModel = pcall(function() f:SetModel(tonumber(anim.modelID)) end)
+    -- Apres SetModel : charger un modele reinitialise son eclairage et son brouillard.
+    ApplyModelRender(f)
+    ApplyModelFog(f)
   end
   if SpellEffects._debugAll and not skipModel then
     local P = "|cff00ffff[SE-DEBUG]|r "
@@ -311,17 +445,35 @@ local function ResolveComboSpellID(spellID, combos)
   end
   -- 2) Match direct
   if combos[spellID] then return spellID end
-  -- 3) Fallback par nom, seulement si variante/override du sort configuré (évite les faux positifs)
+  -- 3) Fallback par nom. Le nom SEUL ne suffit pas : des sorts sans aucun rapport partagent parfois
+  -- un libelle generique, et ils heriteraient alors d'animations qui ne les concernent pas. On exige
+  -- donc une preuve supplementaire, sous l'une ou l'autre forme.
   local name = GetSpellName(spellID)
   if not name then return nil end
+
+  -- Meme icone = meme sort. Les rangs successifs d'un sort (clients ou les sorts se montent en
+  -- rang) partagent nom ET icone, seuls leurs chiffres changent -- degats, cooldown, temps
+  -- d'incantation. Deux homonymes sans rapport, eux, n'ont pratiquement jamais la meme icone.
+  local function SameIcon(a, b)
+    if not (C_Spell and C_Spell.GetSpellTexture) then return false end
+    local okA, texA = pcall(C_Spell.GetSpellTexture, a)
+    local okB, texB = pcall(C_Spell.GetSpellTexture, b)
+    return okA and okB and texA ~= nil and texA == texB
+  end
+
   for configID in pairs(combos) do
     if configID ~= spellID and GetSpellName(configID) == name then
-      -- Vérifier que c'est un override réel (talent qui remplace le sort)
+      -- a) Override reel : un talent remplace le sort configure.
       if C_Spell and C_Spell.GetOverrideSpell then
         local ok, override = pcall(C_Spell.GetOverrideSpell, configID)
         if ok and override == spellID then
           return configID
         end
+      end
+      -- b) Autre rang du meme sort : meme nom, meme icone. Sans ce cas, chaque rang appris aurait
+      -- fallu reconfigurer ses animations, puisque chacun porte son propre spellID.
+      if ns.IsForever and SameIcon(configID, spellID) then
+        return configID
       end
     end
   end
@@ -486,7 +638,7 @@ end
 --- Joue les animations "onhit" configurées pour un spellID.
 function SpellEffects.Play(spellID)
   local cfg = ns.GetCfg("spellEffects")
-  if not cfg or not cfg.enabled then return end
+  if not cfg or not cfg.enabled or cfg.spellsEnabled == false then return end
   if AnimationsBlockedByGroupState() then return end
 
   -- Nouveau format : combos (filtre per-anim trigger)
@@ -607,7 +759,7 @@ local function PlayCasting(spellID, castDuration, isChannel)
   castingGen = castingGen + 1
 
   local cfg = ns.GetCfg("spellEffects")
-  if not cfg or not cfg.enabled then
+  if not cfg or not cfg.enabled or cfg.spellsEnabled == false then
     for _, entry in ipairs(oldEntries) do ReleaseModel(entry) end
     return
   end
@@ -740,7 +892,7 @@ local sustainedEntries = {}  -- [spellID] = { entry, ... }
 --- Démarre une animation soutenue pour spellID (reste visible jusqu'à StopSustained).
 function SpellEffects.StartSustained(spellID)
   local cfg = ns.GetCfg("spellEffects")
-  if not cfg or not cfg.enabled then return end
+  if not cfg or not cfg.enabled or cfg.spellsEnabled == false then return end
   if AnimationsBlockedByGroupState() then return end
   local combos = cfg.combos
   local resolvedID = ResolveComboSpellID(spellID, combos)
@@ -795,7 +947,7 @@ end
 --- Démarre l'animation soutenue associée à l'apparition d'une aura.
 function SpellEffects.StartAuraSustained(auraID)
   local cfg = ns.GetCfg("spellEffects")
-  if not cfg or not cfg.enabled then return end
+  if not cfg or not cfg.enabled or cfg.aurasEnabled == false then return end
   if AnimationsBlockedByGroupState() then return end
   local combo = cfg.auraCombos and cfg.auraCombos[auraID]
   if not combo then return end
@@ -888,7 +1040,7 @@ end
 --- module "Buffs manquants".
 function SpellEffects.StartMissingBuffSustained(spellID)
   local cfg = ns.GetCfg("spellEffects")
-  if not cfg or not cfg.enabled then return end
+  if not cfg or not cfg.enabled or cfg.missingBuffsEnabled == false then return end
   if AnimationsBlockedByGroupState() then return end
   local combo = cfg.missingBuffsCombos and cfg.missingBuffsCombos[spellID]
   if not combo then return end
@@ -946,7 +1098,7 @@ end
 -- Ruée Ardente : comme StartMissingBuffSustained mais parenté sur UIParent (jamais caché), AishCoreMissingBuffFrame sert juste de repère de position
 function SpellEffects.StartBurningRushSustained(spellID)
   local cfg = ns.GetCfg("spellEffects")
-  if not cfg or not cfg.enabled then return end
+  if not cfg or not cfg.enabled or cfg.missingBuffsEnabled == false then return end
   if AnimationsBlockedByGroupState() then return end
   local combo = cfg.missingBuffsCombos and cfg.missingBuffsCombos[spellID]
   if not combo then return end
@@ -1055,6 +1207,8 @@ function SpellEffects.PreviewLoop(anim, overrideAnchors)
       if modelChanged then
         ef:ClearModel()
         pcall(function() ef:SetModel(mid) end)
+        ApplyModelRender(ef)
+        ApplyModelFog(ef)
       end
 
       -- Position / Rotation
@@ -1121,6 +1275,8 @@ function SpellEffects.PreviewLoop(anim, overrideAnchors)
       for _, le in ipairs(loopEntries) do
         le.entry.frame:ClearModel()
         pcall(function() le.entry.frame:SetModel(mid) end)
+        ApplyModelRender(le.entry.frame)
+        ApplyModelFog(le.entry.frame)
       end
     end
   end)
@@ -1458,7 +1614,7 @@ end
 --- Résout le combo OOC à utiliser : spé courante puis fallback "global" (par classe).
 local function ResolveOocCombo()
   local cfg = ns.GetCfg("spellEffects")
-  if not cfg or not cfg.enabled then return nil end
+  if not cfg or not cfg.enabled or cfg.oocEnabled == false then return nil end
   local oocCombos = cfg.oocCombos
   if not oocCombos then return nil end
   local _, cls = UnitClass("player")
@@ -1501,7 +1657,7 @@ end
 --- Meme regle que le cercle OOC : la spe surcharge le global.
 local function ResolveLogoCombo()
   local cfg = ns.GetCfg("spellEffects")
-  if not cfg or not cfg.enabled then return nil end
+  if not cfg or not cfg.enabled or cfg.logosEnabled == false then return nil end
   local logoCombos = cfg.logoCombos
   if not logoCombos then return nil end
   local _, cls = UnitClass("player")
@@ -2023,6 +2179,8 @@ function SpellEffects.StartDecoPreview(combo, overrideAnchors)
         de.lastModelID = mid
         ef:ClearModel()
         pcall(function() ef:SetModel(mid) end)
+        ApplyModelRender(ef)
+        ApplyModelFog(ef)
       end
 
       -- Position / Rotation
@@ -2280,7 +2438,7 @@ SpellEffects.IsAuraActiveViaCDM = IsAuraActiveViaCDM
 --- animations soutenues sur transition de présence (apparition/disparition).
 local function ScanAuraCombos()
   local cfg = ns.GetCfg("spellEffects")
-  local auraCombos = cfg and cfg.enabled and cfg.auraCombos
+  local auraCombos = cfg and cfg.enabled and cfg.aurasEnabled ~= false and cfg.auraCombos
   if not auraCombos then
     for auraID in pairs(_auraPresence) do
       _auraPresence[auraID] = nil
@@ -2333,7 +2491,7 @@ end
 --- Scanne les combos "Buffs manquants" : présence lue directement depuis MissingBuffs, pas de scan d'aura.
 local function ScanMissingBuffCombos()
   local cfg = ns.GetCfg("spellEffects")
-  local missingBuffsCombos = cfg and cfg.enabled and cfg.missingBuffsCombos
+  local missingBuffsCombos = cfg and cfg.enabled and cfg.missingBuffsEnabled ~= false and cfg.missingBuffsCombos
   -- Ruee Ardente : cas spécial piloté par IsBurningRushActive (jamais d'icône d'alerte pour ce spellID).
   local burningRushID = ns.Auras and ns.Auras.MISSING_WARLOCK_BURNING_RUSH
   if not missingBuffsCombos then

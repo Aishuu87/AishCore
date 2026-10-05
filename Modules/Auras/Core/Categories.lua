@@ -129,6 +129,11 @@ ns.CATEGORIES = {
     },
 }
 
+-- Sections d'un module indisponible sur ce client (cf. _addon.IsModuleAvailable)
+for _, cat in ipairs(ns.CATEGORIES) do
+    if cat.sections then _addon.PruneUnavailable(cat.sections) end
+end
+
 -- Helper : retourne la catégorie par son id
 function ns.GetCategory(id)
     for _, cat in ipairs(ns.CATEGORIES) do

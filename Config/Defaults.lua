@@ -1,6 +1,37 @@
 ﻿-- Config/Defaults.lua : Valeurs par défaut et thèmes par spécialisation
 local addonName, ns = ...
 
+-- Extra Barres (Modules/ExtraBars.lua) : réglages par défaut d'une barre. tags[tag] = true/false
+-- (false explicite, sinon MergeDefaults réactiverait un tag décoché).
+local function ExtraBarDefaults(enabled, y, tags)
+  local t = {}
+  for _, tag in ipairs(tags) do t[tag] = true end
+  return {
+    enabled = enabled, tags = t,
+    -- Objets exclus de cette barre : [itemID] = true
+    blacklist = {},
+    -- Disposition (largeur / hauteur indépendantes : l'icône est rognée, jamais déformée)
+    x = 0, y = y, buttonWidth = 32, buttonHeight = 32, spacing = 4, buttonsPerRow = 12, maxButtons = 12,
+    vertical = false, startCorner = "TOPLEFT",
+    -- Visibilité : "always" | "combat" | "nocombat" ; survol = opacité réduite hors survol
+    visibility = "always", alpha = 1, mouseover = false, mouseoverAlpha = 0,
+    -- Icônes
+    iconZoom = true, showBorder = true, borderColor = { 0, 0, 0, 1 },
+    -- Piles (police 2002 : embarquée dans le client)
+    showCount = true, countFont = "Fonts\\2002.TTF", countSize = 12, countOutline = "OUTLINE",
+    countPoint = "BOTTOMRIGHT", countOffsetX = 0, countOffsetY = 0, countColor = { 1, 1, 1, 1 },
+    -- Temps de recharge
+    showCooldownNumbers = true, cooldownFont = "Fonts\\2002.TTF", cooldownSize = 12,
+    cooldownOutline = "OUTLINE", cooldownColor = { 1, 1, 1, 1 }, swipeAlpha = 0.7,
+    -- Raccourcis clavier
+    showKeybind = true, keybindFont = "Fonts\\2002.TTF", keybindSize = 10, keybindOutline = "OUTLINE",
+    keybindPoint = "TOPRIGHT", keybindOffsetX = 0, keybindOffsetY = 0, keybindColor = { 0.9, 0.9, 0.9, 1 },
+    -- Arrière-plan : marges autour des boutons, bords adoucis (px), contour net optionnel
+    bgEnabled = false, bgTexture = "soft", bgColor = { 0, 0, 0, 0.6 }, bgPadX = 6, bgPadY = 6,
+    bgEdge = 16, bgBorderSize = 0, bgBorderColor = { 0, 0, 0, 1 },
+  }
+end
+
 ns.Defaults = {
   -- Cercle de ressource (mana)
   resourceCircle = {
@@ -142,6 +173,9 @@ ns.Defaults = {
     overlayRatio = 0.75, -- taille de l'overlay par rapport a l'arc (0.0 - 0.99)
     -- Mode de visibilite : "always" | "important" (default)
     visibilityMode = "important",
+    -- Zone de clic securisee posee sur le cercle : clic gauche pour se cibler, clic droit
+    -- pour le menu d'unite, comme sur une barre de vie (cf. HealthCircle.ApplyClickable).
+    clickable = false,
     -- Pouls battement de coeur OOC
     heartbeatPulse = true,
   },
@@ -289,6 +323,8 @@ ns.Defaults = {
 
   -- Effets 3D de spells (Animations)
   spellEffects = {
+    -- Eclairage des modeles 3D : none | off | flat | soft. Absent = defaut du client
+    -- (Retail : none, Forever : off), cf. Modules/SpellEffects.lua.
     enabled = true,
     -- Décorations "Orbes" (globes autour du cercle de ressource selon l'état
     -- de la ressource de classe : combo points, runes, essence...) : flag
@@ -296,6 +332,12 @@ ns.Defaults = {
     -- d'impact de sort) pour permettre de couper l'un sans l'autre depuis la
     -- page "Modules". Lu par GetValidOrbKeys() dans SpellEffects.lua.
     orbsEnabled = true,
+    -- Un interrupteur par type d'animation (page "Modules", section Animations 3D), sous `enabled`
+    oocEnabled          = true,  -- cercle de vie hors combat (oocCombos)
+    spellsEnabled       = true,  -- sorts (combos)
+    aurasEnabled        = true,  -- auras (auraCombos)
+    missingBuffsEnabled = true,  -- buffs manquants (missingBuffsCombos)
+    logosEnabled        = true,  -- logos (logoCombos)
     modelSize = 200,
     -- Ancien format compat (sera ignoré si combos existe)
     spells = {},  -- vide par défaut ; les anciens IDs (8004, 17364) ont été retirés
@@ -419,6 +461,8 @@ ns.Defaults = {
     hideWhenInactive = 1,    -- 1=jamais masquer / 2=sauf aura / 3=sauf CD/aura/charges
     strideOverride = 0,      -- 0=stride natif Blizzard / N=force N icones par ligne (evite le retour a la ligne)
     useItemSize = false, itemSize = 40,
+    -- Espacement entre les icônes ; désactivé = valeur du Mode Édition de Blizzard
+    useIconSpacing = false, iconSpacing = 4,
     -- Position liee a la barre de vie du joueur (UnitBars) : suit sa largeur/position au lieu de la position Edit Mode.
     -- linkSide = cote de la barre ("RIGHT"/"LEFT"/"TOP"/"BOTTOM"), linkGap = ecart depuis ce bord, linkOffset = decalage perpendiculaire
     linkToPlayerBar = false, linkSide = "RIGHT", linkGap = 4, linkOffset = 0,
@@ -463,6 +507,13 @@ ns.Defaults = {
     useFading = false, fadeAlpha = 0.35,
     fadeInCombat = false, fadeOnTarget = false, fadeOnCasting = false, fadeOnHover = true,
   },
+  -- Gestionnaire de temps de recharge (Modules/CDMLayout.lua) : rangement du Cooldown Manager par spé
+  -- specs[specID] = { cats = { [cooldownID] = 1 Essentiel | 2 Utilitaire }, order = { cooldownID... } }
+  cdmLayout = {
+    enabled = true,
+    specs = {},
+  },
+
   cdmUtility = {
     enabled = false,
     growUp = true, growRight = false,
@@ -470,6 +521,8 @@ ns.Defaults = {
     hideWhenInactive = 1,
     strideOverride = 0,
     useItemSize = false, itemSize = 40,
+    -- Espacement entre les icônes ; désactivé = valeur du Mode Édition de Blizzard
+    useIconSpacing = false, iconSpacing = 4,
     useNormalColor = false, normalColor = { 1, 1, 1, 1 },             normalDesaturate = false,
     useCdColor     = false, cdColor     = { 0.6, 0.6, 0.6, 1 },       cdDesaturate     = true,
     useGcdColor    = false, gcdColor    = { 0.8, 0.8, 0.8, 1 },       gcdDesaturate    = false,
@@ -503,13 +556,21 @@ ns.Defaults = {
     fadeInCombat = false, fadeOnTarget = false, fadeOnCasting = false, fadeOnHover = true,
   },
 
-  -- Visibilite : opacite d'elements tiers (ElvUI...) ajustee via SetAlpha (pas de lockdown combat)
+  -- Visibilite : opacite de la zone de buffs de l'UI hote, ajustee via SetAlpha (pas de lockdown combat)
   visibility = {
-    -- Zone de buffs ElvUI (ElvuiPlayerBuffs)
+    -- Zone de buffs de l'UI hote : ElvUI (ElvuiPlayerBuffs) ou EllesmereUI
+    -- (EllesmereUIPlayerAuraBars_Buffs). Le prefixe `elvui` des cles est historique.
     elvuiBuffsEnabled       = true,
     elvuiBuffsOocAlpha      = 0.2,  -- opacite hors combat
     elvuiBuffsCombatAlpha   = 1.0,  -- opacite en combat
     elvuiBuffsHoverReveal   = true, -- survol = 100% temporairement
+  },
+
+  -- Polices forcees sur des textes d'addons tiers (Modules/AddonFonts.lua). Decoche = visuel d'origine.
+  addonFonts = {
+    platAuraEnabled  = false, platAuraFont  = "Fonts\\2002.TTF", platAuraSize  = 11, platAuraOutline  = "OUTLINE",
+    platLevelEnabled = false, platLevelFont = "Fonts\\2002.TTF", platLevelSize = 11, platLevelOutline = "OUTLINE",
+    bagItemEnabled   = false, bagItemFont   = "Fonts\\2002.TTF", bagItemSize   = 13, bagItemOutline   = "OUTLINE",
   },
 
   -- Barre de cast joueur
@@ -579,6 +640,12 @@ ns.Defaults = {
     hideOutOfCombat  = false,  -- legacy, remplace par visibilityMode
     -- Mode de visibilite : "always" | "target" | "combat" (default)
     visibilityMode   = "combat",
+    -- "Au survol" : s'ajoute au mode ci-dessus, il ne le remplace pas. Le curseur sur une
+    -- barre la fait sortir, meme masquee par le mode courant.
+    hoverReveal      = false,
+    -- Debordement de la zone de survol ET de la zone cliquable, en pixels sur chaque cote.
+    -- Nos barres font quelques pixels de haut : ca les rend visables.
+    hoverTolerance   = 0,
     -- Soins previsionnels : segment ajoute au bord droit du fill HP, avant l'absorb
     showHealPrediction = true,
     healPredColor      = { 0.15, 0.85, 0.35, 1 },    -- vert opaque
@@ -597,11 +664,15 @@ ns.Defaults = {
     font             = "Fonts\\2002.TTF",
     hpOutlineStyle   = "OUTLINE",
     hpDisplayMode    = "pct",  -- "pct" = pourcentage 0-100, "value" = valeur abreviee
+    hpHoverValue     = false,  -- survolee, la barre passe en valeur quel que soit hpDisplayMode
     nameSize         = 14,
     nameFont         = "Fonts\\2002.TTF",
     nameOutlineStyle = "OUTLINE",
     useTankHeight    = false,
     tankHeight       = 8,
+    -- Masquer les cadres d'unites Blizzard (Modules/BlizzardUnitFrames.lua)
+    hideBlizzPlayer = false, hideBlizzTarget = false, hideBlizzFocus = false,
+    hideBlizzPet = false, hideBlizzTargetTarget = false,
     bgColor = { 0.0549, 0.0549, 0.0549, 1 },  -- #0e0e0e
     bars = {
       player = {
@@ -652,6 +723,18 @@ ns.Defaults = {
   },
 
   -- Nom de zone / sous-zone, cf. Modules/Location.lua
+  -- Extra Barres : 5 barres d'objets remplies par tags (Modules/ExtraBars.lua)
+  extraBars = {
+    enabled = true,
+    bars = {
+      ExtraBarDefaults(true,  -260, { "potion", "healthstone", "flask" }),
+      ExtraBarDefaults(false, -300, { "food", "conjured" }),
+      ExtraBarDefaults(false, -340, { "openable", "quest" }),
+      ExtraBarDefaults(false, -380, { "vantus", "enhancement", "explosive", "bandage" }),
+      ExtraBarDefaults(false, -420, { "trinket" }),
+    },
+  },
+
   location = {
     enabled = true,
     -- Position (ancre TOP de UIParent par defaut, sous le bord haut de l'ecran)

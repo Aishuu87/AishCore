@@ -18,6 +18,19 @@ local function GetCfgFor(frameName)
   return key and ns.GetCfg(key)
 end
 
+-- ETAT PAR CADRE, STOCKE A COTE -- jamais sur le cadre lui-meme.
+-- Ecrire le moindre champ sur un viewer du Cooldown Manager (ou sur une de ses icones) le marque
+-- comme modifie par l'addon : le code de Blizzard qui tourne ensuite sur ce cadre herite du taint
+-- et ne peut plus lire ses propres tables protegees -- d'ou le flot d'erreurs
+-- "attempted to index a table that cannot be accessed while tainted" dans
+-- CheckAuraAddedAlertTriggers (UNIT_AURA). Cles faibles : rien ne retient un cadre detruit.
+local frameState = setmetatable({}, { __mode = "k" })
+local function ST(f)
+  local st = frameState[f]
+  if not st then st = {}; frameState[f] = st end
+  return st
+end
+
 -- Masques d'icone : uniquement des atlas Blizzard natifs (aucun asset tiers)
 local ICON_MASK_OPTIONS = {
   { value = 1, text = L["SETTINGS_CDM_MASK_DEFAULT"], atlas = "common-iconmask" },
@@ -67,8 +80,8 @@ end
 -- pour que les rafraichissements ulterieurs (qui ne le repassent pas) gardent la meme
 -- cible. Par defaut le parent, comme avant.
 local function SetBorderEdgeSize(frame, borderSize, anchorTo)
-  anchorTo = anchorTo or frame.__borderAnchor or frame:GetParent()
-  frame.__borderAnchor = anchorTo
+  anchorTo = anchorTo or ST(frame).borderAnchor or frame:GetParent()
+  ST(frame).borderAnchor = anchorTo
   frame:ClearAllPoints()
   frame:SetPoint("TOPLEFT", anchorTo, "TOPLEFT", 0, 0)
   frame:SetPoint("BOTTOMRIGHT", anchorTo, "BOTTOMRIGHT", 0, 0)
@@ -76,30 +89,30 @@ local function SetBorderEdgeSize(frame, borderSize, anchorTo)
   local s = (borderSize and borderSize > 0) and borderSize or 1
   -- Bords horizontaux pleine largeur, bords verticaux en retrait de l'epaisseur : les
   -- coins ne se superposent pas, donc pas de double alpha sur une couleur translucide.
-  frame.__top:ClearAllPoints()
-  frame.__top:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
-  frame.__top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
-  frame.__top:SetHeight(s)
+  ST(frame).top:ClearAllPoints()
+  ST(frame).top:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+  ST(frame).top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+  ST(frame).top:SetHeight(s)
 
-  frame.__bottom:ClearAllPoints()
-  frame.__bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
-  frame.__bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
-  frame.__bottom:SetHeight(s)
+  ST(frame).bottom:ClearAllPoints()
+  ST(frame).bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+  ST(frame).bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+  ST(frame).bottom:SetHeight(s)
 
-  frame.__left:ClearAllPoints()
-  frame.__left:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -s)
-  frame.__left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, s)
-  frame.__left:SetWidth(s)
+  ST(frame).left:ClearAllPoints()
+  ST(frame).left:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -s)
+  ST(frame).left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, s)
+  ST(frame).left:SetWidth(s)
 
-  frame.__right:ClearAllPoints()
-  frame.__right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, -s)
-  frame.__right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, s)
-  frame.__right:SetWidth(s)
+  ST(frame).right:ClearAllPoints()
+  ST(frame).right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, -s)
+  ST(frame).right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, s)
+  ST(frame).right:SetWidth(s)
 end
 
 local function SetBorderEdgeColor(frame, r, g, b, a)
-  if not frame or not frame.__edges then return end
-  for _, tex in ipairs(frame.__edges) do
+  if not frame or not ST(frame).edges then return end
+  for _, tex in ipairs(ST(frame).edges) do
     tex:SetColorTexture(r, g, b, a or 1)
   end
 end
@@ -115,11 +128,11 @@ local function CreateBorder(frame, frameName, cfg)
   end
   local edgeSize = (cfg.backdropSize and cfg.backdropSize > 0) and cfg.backdropSize or 1
   local border = CreateFrame("Frame", nil, frame)
-  border.__top    = border:CreateTexture(nil, "OVERLAY")
-  border.__bottom = border:CreateTexture(nil, "OVERLAY")
-  border.__left   = border:CreateTexture(nil, "OVERLAY")
-  border.__right  = border:CreateTexture(nil, "OVERLAY")
-  border.__edges  = { border.__top, border.__bottom, border.__left, border.__right }
+  ST(border).top    = border:CreateTexture(nil, "OVERLAY")
+  ST(border).bottom = border:CreateTexture(nil, "OVERLAY")
+  ST(border).left   = border:CreateTexture(nil, "OVERLAY")
+  ST(border).right  = border:CreateTexture(nil, "OVERLAY")
+  ST(border).edges  = { ST(border).top, ST(border).bottom, ST(border).left, ST(border).right }
   SetBorderEdgeSize(border, edgeSize, anchorTo)
   local c = cfg.backdropColor or { 0, 0, 0, 1 }
   SetBorderEdgeColor(border, c[1], c[2], c[3], c[4] or 1)
@@ -129,8 +142,8 @@ end
 
 local function SetBorderColor(button, color)
   if not button or not color then return end
-  if button.__iconBorder then
-    SetBorderEdgeColor(button.__iconBorder, color[1], color[2], color[3], color[4] or 1)
+  if ST(button).iconBorder then
+    SetBorderEdgeColor(ST(button).iconBorder, color[1], color[2], color[3], color[4] or 1)
   end
 end
 
@@ -139,8 +152,8 @@ local function HideInactiveChildren(layoutChildren, keepEmpty)
   if #layoutChildren == 0 then return end
   local visible = {}
   for _, frame in ipairs(layoutChildren) do
-    if frame.__isActive ~= nil then
-      if frame.__isActive or frame.__isEditing or EditModeManagerFrame:IsEditModeActive() or CooldownViewerSettings:IsVisible() then
+    if ST(frame).isActive ~= nil then
+      if ST(frame).isActive or ST(frame).isEditing or EditModeManagerFrame:IsEditModeActive() or CooldownViewerSettings:IsVisible() then
         frame:Show()
         table.insert(visible, frame)
       elseif keepEmpty then
@@ -151,7 +164,7 @@ local function HideInactiveChildren(layoutChildren, keepEmpty)
       end
     else
       -- __isActive == nil : mode "ne jamais masquer" (hideWhenInactive = 1).
-      if (frame:IsVisible() or frame.__shouldBeVisible) or frame.__isEditing or EditModeManagerFrame:IsEditModeActive() or CooldownViewerSettings:IsVisible() then
+      if (frame:IsVisible() or ST(frame).shouldBeVisible) or ST(frame).isEditing or EditModeManagerFrame:IsEditModeActive() or CooldownViewerSettings:IsVisible() then
         if not frame:IsVisible() then frame:Show() end
         table.insert(visible, frame)
       else
@@ -173,7 +186,7 @@ end
 -- la frame nouvellement visible restait sur l'ancre de son passage precedent -- deux icones superposees,
 -- et un trou la ou l'une des deux aurait du etre. On memorise donc l'ensemble, pas son cardinal.
 local function SameVisibleSet(self, visibleChildren)
-  local prev = self.__wasVisibleChildren
+  local prev = ST(self).wasVisibleChildren
   if type(prev) == "table" and #prev == #visibleChildren then
     local same = true
     for i = 1, #visibleChildren do
@@ -183,18 +196,18 @@ local function SameVisibleSet(self, visibleChildren)
   end
   local snapshot = {}
   for i = 1, #visibleChildren do snapshot[i] = visibleChildren[i] end
-  self.__wasVisibleChildren = snapshot
+  ST(self).wasVisibleChildren = snapshot
   return false
 end
 
 local function ApplyStandardGridLayout(self, layoutChildren, stride, padding)
   if not self or not layoutChildren or #layoutChildren == 0 then return end
 
-  local visibleChildren = HideInactiveChildren(layoutChildren, self.keepEmpty)
+  local visibleChildren = HideInactiveChildren(layoutChildren, ST(self).keepEmpty)
   if SameVisibleSet(self, visibleChildren) then return end
 
-  local goingRight = self.__layoutFramesGoingRight
-  local goingUp    = self.__layoutFramesGoingUp
+  local goingRight = ST(self).layoutFramesGoingRight
+  local goingUp    = ST(self).layoutFramesGoingUp
   local xMultiplier = goingRight and 1 or -1
   local yMultiplier = goingUp and 1 or -1
 
@@ -228,8 +241,8 @@ local function ApplyCenteredGridLayout(self, layoutChildren, stride, padding)
 
   local spacing = padding
   local isHorizontal = self.isHorizontal
-  local goingRight = self.__layoutFramesGoingRight
-  local goingUp    = self.__layoutFramesGoingUp
+  local goingRight = ST(self).layoutFramesGoingRight
+  local goingUp    = ST(self).layoutFramesGoingUp
 
   local anchorPoint
   if isHorizontal then
@@ -290,7 +303,7 @@ local function ResizeLayoutGrid(frame, visibleChildren, strideOverride)
 
   local numActive = #layoutChildren
   local isHorizontal = frame.isHorizontal
-  local padding = frame.__padding
+  local padding = ST(frame).padding
   local stride = math.min(strideOverride or frame.stride, numActive)
   local numRows = math.ceil(numActive / stride)
 
@@ -307,23 +320,23 @@ local NATIVE_OOM   = { 0.5, 0.5, 1.0 }
 local NATIVE_NOUSE = { 0.4, 0.4, 0.4 }
 
 local function RefreshDesaturation(self)
-  if not self or self.__desaturated == nil then return end
-  self:GetIconTexture():SetDesaturated(self.__desaturated)
+  if not self or ST(self).desaturated == nil then return end
+  self:GetIconTexture():SetDesaturated(ST(self).desaturated)
 end
 
 local function RefreshDesaturationOnCooldownOnly(self, cfg)
   if self.spellOutOfRange == true then return end
-  if self.__isOnActualCooldown and cfg.useCdColor then
-    self.__desaturated = cfg.cdDesaturate
-  elseif self.__isOnGCD and cfg.useGcdColor then
-    self.__desaturated = cfg.gcdDesaturate
+  if ST(self).isOnActualCooldown and cfg.useCdColor then
+    ST(self).desaturated = cfg.cdDesaturate
+  elseif ST(self).isOnGCD and cfg.useGcdColor then
+    ST(self).desaturated = cfg.gcdDesaturate
   else
-    if not self.__removeAura and self.__isOnAura and cfg.useAuraColor then
-      self.__desaturated = cfg.auraDesaturate
+    if not ST(self).removeAura and ST(self).isOnAura and cfg.useAuraColor then
+      ST(self).desaturated = cfg.auraDesaturate
     elseif cfg.useNormalColor then
-      self.__desaturated = cfg.normalDesaturate
+      ST(self).desaturated = cfg.normalDesaturate
     else
-      self.__desaturated = false
+      ST(self).desaturated = false
     end
   end
   RefreshDesaturation(self)
@@ -352,29 +365,29 @@ local function OnButtonRefreshIconColor(self)
   if cfg.useOorColor and oorMatch then
     color = cfg.oorColor
     if outOfRangeTexture then outOfRangeTexture:SetShown(false) end
-    self.__desaturated = cfg.oorDesaturate
-  elseif self.__isOnActualCooldown and cfg.useCdColor then
+    ST(self).desaturated = cfg.oorDesaturate
+  elseif ST(self).isOnActualCooldown and cfg.useCdColor then
     color = cfg.cdColor
-    self.__desaturated = cfg.cdDesaturate
-  elseif self.__isOnGCD and cfg.useGcdColor then
+    ST(self).desaturated = cfg.cdDesaturate
+  elseif ST(self).isOnGCD and cfg.useGcdColor then
     color = cfg.gcdColor
-    self.__desaturated = cfg.gcdDesaturate
+    ST(self).desaturated = cfg.gcdDesaturate
   else
     if cfg.useNouseColor and nouseMatch then
       color = cfg.nouseColor
-      self.__desaturated = cfg.nouseDesaturate
+      ST(self).desaturated = cfg.nouseDesaturate
     elseif cfg.useOomColor and oomMatch then
       color = cfg.oomColor
-      self.__desaturated = cfg.oomDesaturate
+      ST(self).desaturated = cfg.oomDesaturate
     else
-      if not self.__removeAura and self.__isOnAura and cfg.useAuraColor then
+      if not ST(self).removeAura and ST(self).isOnAura and cfg.useAuraColor then
         color = cfg.auraColor
-        self.__desaturated = cfg.auraDesaturate
+        ST(self).desaturated = cfg.auraDesaturate
       elseif cfg.useNormalColor then
         color = cfg.normalColor
-        self.__desaturated = cfg.normalDesaturate
+        ST(self).desaturated = cfg.normalDesaturate
       else
-        self.__desaturated = false
+        ST(self).desaturated = false
       end
     end
   end
@@ -397,31 +410,32 @@ local function RefreshItemVisibility(button)
   if not CheckItemVisibility or not button then return end
   CheckItemVisibility(button)
   local bar = button:GetParent()
-  if bar and bar.RefreshLayoutGrid then bar:RefreshLayoutGrid() end
+  local refresh = bar and ST(bar).refreshLayoutGrid
+  if refresh then refresh(bar) end
 end
 
 -- Etat de cooldown (CD / GCD / aura / pandemie)
 local function CheckCooldownState(button)
-  if not button.cooldownUseAuraDisplayTime or button.__removeAura then
+  if not button.cooldownUseAuraDisplayTime or ST(button).removeAura then
     if button.isOnGCD and not button.isOnActualCooldown then
-      button.__isOnGCD = true
+      ST(button).isOnGCD = true
     else
-      button.__isOnActualCooldown = not button.wasSetFromCharges
+      ST(button).isOnActualCooldown = not button.wasSetFromCharges
     end
   end
 end
 
 local function Hook_OnCooldownDone(self)
   local button = self:GetParent()
-  if not button.__cooldownSet then return end
+  if not ST(button).cooldownSet then return end
   local bar = button:GetParent()
   local cfg = GetCfgFor(bar:GetName())
   if not cfg then return end
 
-  button.__cooldownSet = nil
-  button.__isOnGCD = false
-  button.__isOnActualCooldown = false
-  button.__isOnAura = false
+  ST(button).cooldownSet = nil
+  ST(button).isOnGCD = false
+  ST(button).isOnActualCooldown = false
+  ST(button).isOnAura = false
 
   RefreshDesaturationOnCooldownOnly(button, cfg)
   if cfg.useBackdrop then SetBorderColor(button, cfg.backdropColor) end
@@ -429,15 +443,15 @@ local function Hook_OnCooldownDone(self)
 end
 
 local function OnCooldownClear(cooldownFrame, button)
-  if not cooldownFrame or not button or not button.__cooldownSet then return end
+  if not cooldownFrame or not button or not ST(button).cooldownSet then return end
   local bar = button:GetParent()
   local cfg = GetCfgFor(bar and bar:GetName())
   if not cfg then return end
 
-  button.__cooldownSet = nil
-  button.__isOnGCD = false
-  button.__isOnActualCooldown = false
-  button.__isOnAura = false
+  ST(button).cooldownSet = nil
+  ST(button).isOnGCD = false
+  ST(button).isOnActualCooldown = false
+  ST(button).isOnAura = false
 
   if cfg.useBackdrop then SetBorderColor(button, cfg.backdropColor) end
   RefreshItemVisibility(button)
@@ -450,20 +464,20 @@ local function OnCooldownSet(cooldownFrame, button)
   local cfg = GetCfgFor(barName)
   if not cfg or not cfg.enabled then return end
 
-  button.__cooldownSet = true
-  button.__isOnActualCooldown = false
-  if not button.__cooldownDoneHooked then
+  ST(button).cooldownSet = true
+  ST(button).isOnActualCooldown = false
+  if not ST(button).cooldownDoneHooked then
     cooldownFrame:HookScript("OnCooldownDone", Hook_OnCooldownDone)
-    button.__cooldownDoneHooked = true
+    ST(button).cooldownDoneHooked = true
   end
 
-  button.__removeAura = cfg.auraRemoveSwipe
+  ST(button).removeAura = cfg.auraRemoveSwipe
 
   if button.cooldownUseAuraDisplayTime or button.pandemicAlertTriggerTime then
-    button.__isOnAura = not button.__removeAura
+    ST(button).isOnAura = not ST(button).removeAura
     cooldownFrame:SetHideCountdownNumbers(false)
 
-    if button.__removeAura then
+    if ST(button).removeAura then
       local duration = C_Spell.GetSpellChargeDuration(button:GetSpellID()) or C_Spell.GetSpellCooldownDuration(button:GetSpellID())
       cooldownFrame:SetUseAuraDisplayTime(false)
       cooldownFrame:Clear()
@@ -472,14 +486,14 @@ local function OnCooldownSet(cooldownFrame, button)
       CheckCooldownState(button)
     end
 
-    if not button.__removeAura and cfg.useCooldownAuraColor then
+    if not ST(button).removeAura and cfg.useCooldownAuraColor then
       cooldownFrame:SetSwipeColor(unpack(cfg.cooldownAuraColor))
     end
-    if not button.__removeAura and cfg.useBackdropAuraColor and not button.__isInPandemic then
+    if not ST(button).removeAura and cfg.useBackdropAuraColor and not ST(button).isInPandemic then
       SetBorderColor(button, cfg.backdropAuraColor)
     end
   else
-    button.__isOnAura = false
+    ST(button).isOnAura = false
     if cfg.useCooldownColor then cooldownFrame:SetSwipeColor(unpack(cfg.cooldownColor)) end
     if cfg.useBackdrop then SetBorderColor(button, cfg.backdropColor) end
 
@@ -511,10 +525,10 @@ local function OnRefreshCooldownInfo(button)
   local cooldownFrame = button:GetCooldownFrame()
   if not cooldownFrame then return end
 
-  if not button.__isOnAura and cfg.useCooldownAuraColor then
+  if not ST(button).isOnAura and cfg.useCooldownAuraColor then
     cooldownFrame:SetSwipeColor(unpack(cfg.cooldownAuraColor))
   end
-  if not button.__isOnAura and cfg.useCooldownColor then
+  if not ST(button).isOnAura and cfg.useCooldownColor then
     cooldownFrame:SetSwipeColor(unpack(cfg.cooldownColor))
   end
 end
@@ -533,17 +547,17 @@ local function Hook_SetupPandemic(self, frame)
   local cfg = GetCfgFor(button:GetParent():GetName())
   if not cfg or not cfg.enabled then return end
 
-  if not button.__isInPandemic then
-    if cfg.removePandemic and not frame.__pandemicRemoved then
+  if not ST(button).isInPandemic then
+    if cfg.removePandemic and not ST(frame).pandemicRemoved then
       frame.Border.Border:SetTexture("")
       IterateAllAnimationGroups(frame, function(g) if g then g:RemoveAnimations() end end)
       frame.FX:Hide()
-      frame.__pandemicRemoved = true
+      ST(frame).pandemicRemoved = true
     end
     if cfg.useBackdropPandemicColor then
       SetBorderColor(button, cfg.backdropPandemicColor)
     end
-    button.__isInPandemic = true
+    ST(button).isInPandemic = true
   end
 end
 
@@ -552,14 +566,14 @@ local function Hook_HidePandemic(self, frame)
   local cfg = GetCfgFor(button:GetParent():GetName())
   if not cfg or not cfg.enabled then return end
 
-  if button.__isInPandemic then
-    if not button.__hidePandemicScheduled then
-      button.__hidePandemicScheduled = true
+  if ST(button).isInPandemic then
+    if not ST(button).hidePandemicScheduled then
+      ST(button).hidePandemicScheduled = true
       C_Timer.After(0, function()
-        button.__hidePandemicScheduled = false
+        ST(button).hidePandemicScheduled = false
         if button.PandemicIcon and button.PandemicIcon:IsVisible() then return end
         if cfg.useBackdrop then SetBorderColor(button, cfg.backdropColor) end
-        button.__isInPandemic = nil
+        ST(button).isInPandemic = nil
       end)
     end
   end
@@ -569,9 +583,9 @@ end
 function CDME.RefreshItemSize(child, cfg)
   local size = cfg.itemSize
   child:SetSize(size, size)
-  if not child.__scaleHooked and child.SetScale then
+  if not ST(child).scaleHooked and child.SetScale then
     hooksecurefunc(child, "SetScale", function(f, scale) if scale ~= 1 then f:SetScale(1) end end)
-    child.__scaleHooked = true
+    ST(child).scaleHooked = true
     child:SetScale(1)
   end
 end
@@ -611,7 +625,7 @@ end
 function CDME.RefreshCooldownFrame(child, frameName, cfg)
   local cooldownFrame = child.Cooldown
   if not cooldownFrame then return end
-  if not child.__removeAura and child.__isOnAura then
+  if not ST(child).removeAura and ST(child).isOnAura then
     cooldownFrame:SetReverse(cfg.auraReverseSwipe)
   else
     cooldownFrame:SetReverse(cfg.reverseSwipe)
@@ -718,7 +732,7 @@ local function FadingOnUpdate(_, elapsed)
 end
 
 local function FrameFade(frame)
-  local fade = frame.__fade
+  local fade = ST(frame).fade
   frame:SetAlpha(fade.fromAlpha)
   Fader.Frames[frame] = fade
   if not Fader:GetScript("OnUpdate") then
@@ -727,18 +741,18 @@ local function FrameFade(frame)
 end
 
 local function FrameFadeIn(frame, duration, fromAlpha, toAlpha)
-  frame.__fade = frame.__fade or {}
-  frame.__fade.mode, frame.__fade.duration = "IN", duration
-  frame.__fade.fromAlpha, frame.__fade.toAlpha = fromAlpha, toAlpha
-  frame.__fade.diffAlpha, frame.__fade.fadeTimer = toAlpha - fromAlpha, nil
+  ST(frame).fade = ST(frame).fade or {}
+  ST(frame).fade.mode, ST(frame).fade.duration = "IN", duration
+  ST(frame).fade.fromAlpha, ST(frame).fade.toAlpha = fromAlpha, toAlpha
+  ST(frame).fade.diffAlpha, ST(frame).fade.fadeTimer = toAlpha - fromAlpha, nil
   FrameFade(frame)
 end
 
 local function FrameFadeOut(frame, duration, fromAlpha, toAlpha)
-  frame.__fade = frame.__fade or {}
-  frame.__fade.mode, frame.__fade.duration = "OUT", duration
-  frame.__fade.fromAlpha, frame.__fade.toAlpha = fromAlpha, toAlpha
-  frame.__fade.diffAlpha, frame.__fade.fadeTimer = fromAlpha - toAlpha, nil
+  ST(frame).fade = ST(frame).fade or {}
+  ST(frame).fade.mode, ST(frame).fade.duration = "OUT", duration
+  ST(frame).fade.fromAlpha, ST(frame).fade.toAlpha = fromAlpha, toAlpha
+  ST(frame).fade.diffAlpha, ST(frame).fade.fadeTimer = fromAlpha - toAlpha, nil
   FrameFade(frame)
 end
 
@@ -824,31 +838,49 @@ fadeEventFrame:SetScript("OnEvent", RefreshFadeAll)
 local _forced = nil
 
 function CheckItemVisibility(child)
-  if child.__hideType == 3 then
-    child.__isActive = (child.__isOnActualCooldown or child.__isOnAura or child.wasSetFromCharges) and true or false
-  elseif child.__hideType == 2 then
-    child.__isActive = child.__isOnAura and true or false
-  elseif child.__hideType == 1 then
-    child.__isActive = nil
+  if ST(child).hideType == 3 then
+    ST(child).isActive = (ST(child).isOnActualCooldown or ST(child).isOnAura or child.wasSetFromCharges) and true or false
+  elseif ST(child).hideType == 2 then
+    ST(child).isActive = ST(child).isOnAura and true or false
+  elseif ST(child).hideType == 1 then
+    ST(child).isActive = nil
   end
 end
 
+local Hook_LayoutBody
+-- Une erreur au milieu de la passe laissait __locked à true : plus aucune mise en forme jusqu'au
+-- /reload (ex. icône de trinket / potion rangée dans un viewer). Le verrou est toujours libéré et
+-- l'erreur signalée une fois dans le chat.
+local _layoutErrorShown = false
 local function Hook_Layout(self)
-  if self.__locked then return end
-  self.__locked = true
+  if ST(self).locked then return end
+  ST(self).locked = true
+  local ok, err = pcall(Hook_LayoutBody, self)
+  ST(self).locked = false
+  if not ok then
+    _forced = nil
+    if not _layoutErrorShown then
+      _layoutErrorShown = true
+      print("|cffff4444[AishCore]|r CooldownManagerEnhanced : " .. tostring(err))
+    end
+  end
+end
+
+Hook_LayoutBody = function(self)
 
   local frameName = self:GetName()
   local cfg = GetCfgFor(frameName)
-  if not cfg or not cfg.enabled then self.__locked = false; return end
+  if not cfg or not cfg.enabled then ST(self).locked = false; return end
 
   local forceUpdate = _forced == frameName
 
   -- Toujours resynchronise depuis cfg (2 booleens, cout negligeable) --
   -- pas besoin de cache "premiere lecture seulement" ici.
-  self.__layoutFramesGoingUp    = cfg.growUp
-  self.__layoutFramesGoingRight = cfg.growRight
-  self.__padding = self.childXPadding or self.childYPadding
-  self.gridLayoutType = cfg.gridLayoutType
+  ST(self).layoutFramesGoingUp    = cfg.growUp
+  ST(self).layoutFramesGoingRight = cfg.growRight
+  -- Espacement : réglage AishCore s'il est forcé, sinon celui du Mode Édition de Blizzard
+  ST(self).padding = (cfg.useIconSpacing and cfg.iconSpacing) or self.childXPadding or self.childYPadding
+  ST(self).gridLayoutType = cfg.gridLayoutType
 
   -- Blizzard remet l'alpha du viewer a 1 lors de ses propres mises a jour (relayout,
   -- changement de sort/aura...). Sans cette reapplication, le fondu etait perdu et la
@@ -856,7 +888,7 @@ local function Hook_Layout(self)
   RefreshFade(frameName)
 
   local layoutChildren = self:GetLayoutChildren()
-  if not self:ShouldUpdateLayout(layoutChildren) then self.__locked = false; return end
+  if not self:ShouldUpdateLayout(layoutChildren) then ST(self).locked = false; return end
 
   -- PRE-PASSE de visibilite, separee de la customisation ci-dessous, et volontairement AVANT elle.
   -- Deux raisons :
@@ -871,20 +903,21 @@ local function Hook_Layout(self)
   -- Les drapeaux de cooldown sont nil a ce stade, donc on part masque et on se devoile des qu'un
   -- cooldown demarre (cf. RefreshItemVisibility dans OnCooldownSet).
   for _, child in ipairs(layoutChildren) do
-    child.__hideType = cfg.hideWhenInactive
+    ST(child).hideType = cfg.hideWhenInactive
     CheckItemVisibility(child)
   end
 
   for _, child in ipairs(layoutChildren) do
-    if child:HasEditModeData() then self.__locked = false; return end
+    if child:HasEditModeData() then ST(self).locked = false; return end
 
-    if not child.__hooked then
+    if not ST(child).hooked then
       if child.RefreshData then hooksecurefunc(child, "RefreshData", function(c)
         local parent = c:GetParent()
         local pcfg = GetCfgFor(parent:GetName())
         if not pcfg or not pcfg.enabled then return end
         CheckItemVisibility(c)
-        if parent.RefreshLayoutGrid then parent:RefreshLayoutGrid() end
+        local pr = ST(parent).refreshLayoutGrid
+        if pr then pr(parent) end
       end) end
       if child.Cooldown and child.Cooldown.SetCooldown then
         hooksecurefunc(child.Cooldown, "SetCooldown", function(cd) OnCooldownSet(cd, child) end)
@@ -902,17 +935,17 @@ local function Hook_Layout(self)
       -- "ne jamais masquer" __isActive vaut nil et ce hook ne fait rien. Memes echappatoires Edit Mode
       -- que HideInactiveChildren. Hide() ne declenche pas OnShow, donc pas de boucle.
       child:HookScript("OnShow", function(c)
-        if c.__isActive == false
-           and not c.__isEditing
+        if ST(c).isActive == false
+           and not ST(c).isEditing
            and not EditModeManagerFrame:IsEditModeActive()
            and not CooldownViewerSettings:IsVisible() then
           c:Hide()
         end
       end)
-      child.__hooked = true
+      ST(child).hooked = true
     end
 
-    if not child.__fadeHooked then
+    if not ST(child).fadeHooked then
       child:HookScript("OnEnter", function()
         _isHovered[frameName] = true
         RefreshFade(frameName)
@@ -921,76 +954,76 @@ local function Hook_Layout(self)
         _isHovered[frameName] = nil
         RefreshFade(frameName)
       end)
-      child.__fadeHooked = true
+      ST(child).fadeHooked = true
     end
 
-    if not child.__refreshIconHook then
+    if not ST(child).refreshIconHook then
       if child.RefreshIconColor then hooksecurefunc(child, "RefreshIconColor", OnButtonRefreshIconColor) end
       if child.RefreshIconDesaturation then hooksecurefunc(child, "RefreshIconDesaturation", RefreshDesaturation) end
-      child.__refreshIconHook = true
+      ST(child).refreshIconHook = true
     end
 
     if cfg.useBackdrop then
-      if child.Icon and not child.__iconBorder then
-        child.__iconBorder = CreateBorder(child.Icon, frameName, cfg)
-        child.__iconBorder:Show()
-      elseif child.Icon and child.__iconBorder then
+      if child.Icon and not ST(child).iconBorder then
+        ST(child).iconBorder = CreateBorder(child.Icon, frameName, cfg)
+        ST(child).iconBorder:Show()
+      elseif child.Icon and ST(child).iconBorder then
         if forceUpdate then
-          SetBorderEdgeSize(child.__iconBorder, cfg.backdropSize)
+          SetBorderEdgeSize(ST(child).iconBorder, cfg.backdropSize)
           local bc = cfg.backdropColor
-          SetBorderEdgeColor(child.__iconBorder, bc[1], bc[2], bc[3], bc[4] or 1)
+          SetBorderEdgeColor(ST(child).iconBorder, bc[1], bc[2], bc[3], bc[4] or 1)
         end
-        child.__iconBorder:Show()
+        ST(child).iconBorder:Show()
       end
-    elseif child.__iconBorder then
-      child.__iconBorder:Hide()
-      child.__iconBorder = nil
+    elseif ST(child).iconBorder then
+      ST(child).iconBorder:Hide()
+      ST(child).iconBorder = nil
     end
 
-    if child.Cooldown and (not child.__cooldownFontSet or forceUpdate) then
+    if child.Cooldown and (not ST(child).cooldownFontSet or forceUpdate) then
       CDME.RefreshCooldownFont(child, cfg)
-      child.__cooldownFontSet = true
+      ST(child).cooldownFontSet = true
     end
 
-    if child.Applications and child.Applications.Applications and (not child.__stacksFontSet or forceUpdate) then
+    if child.Applications and child.Applications.Applications and (not ST(child).stacksFontSet or forceUpdate) then
       CDME.RefreshStacksFont(child, cfg)
-      child.__stacksFontSet = true
+      ST(child).stacksFontSet = true
     end
 
-    if child.ChargeCount and child.ChargeCount.Current and (not child.__chargesFontSet or forceUpdate) then
+    if child.ChargeCount and child.ChargeCount.Current and (not ST(child).chargesFontSet or forceUpdate) then
       CDME.RefreshChargesFont(child, cfg)
-      child.__chargesFontSet = true
+      ST(child).chargesFontSet = true
     end
 
-    if cfg.useItemSize and (not child.__sizeHooked or forceUpdate) then
+    if cfg.useItemSize and (not ST(child).sizeHooked or forceUpdate) then
       CDME.RefreshItemSize(child, cfg)
-      child.__sizeHooked = true
+      ST(child).sizeHooked = true
     end
 
     -- Reapplique a CHAQUE passage (pas de cache) : Blizzard remet l'alpha de sa texture
     -- a 1 lors de ses propres rafraichissements.
     CDME.RefreshIconOverlay(child)
 
-    if cfg.iconMaskIndex and cfg.iconMaskIndex > 1 and (not child.__iconMaskSet or forceUpdate) then
+    if cfg.iconMaskIndex and cfg.iconMaskIndex > 1 and (not ST(child).iconMaskSet or forceUpdate) then
       CDME.RefreshIconMask(child, cfg)
-      child.__iconMaskSet = true
+      ST(child).iconMaskSet = true
     end
   end
 
-  if #layoutChildren == 0 then _forced = nil; self.__locked = false; return end
+  if #layoutChildren == 0 then _forced = nil; ST(self).locked = false; return end
 
-  self.keepEmpty = self.gridLayoutType == 3
-  self.__wasVisibleChildren = nil
+  ST(self).keepEmpty = ST(self).gridLayoutType == 3
+  ST(self).wasVisibleChildren = nil
 
-  if not self.RefreshLayoutGrid then
-    self.RefreshLayoutGrid = function(frame)
+  if not ST(self).refreshLayoutGrid then
+    ST(self).refreshLayoutGrid = function(frame)
       local children = frame:GetLayoutChildren()
       -- Ne jamais ecrire sur frame.stride (champ natif) : ca taint le frame et casse CheckAuraAddedAlertTriggers
       local fcfg = GetCfgFor(frame:GetName())
       local strideOverride = fcfg and fcfg.strideOverride and fcfg.strideOverride > 0 and fcfg.strideOverride or nil
       local stride = strideOverride or frame.stride
-      local padding = frame.__padding
-      if frame.gridLayoutType == 1 then
+      local padding = ST(frame).padding
+      if ST(frame).gridLayoutType == 1 then
         ApplyCenteredGridLayout(frame, children, stride, padding)
       else
         ApplyStandardGridLayout(frame, children, stride, padding)
@@ -1000,8 +1033,8 @@ local function Hook_Layout(self)
     end
   end
 
-  self:RefreshLayoutGrid()
-  self.__locked = false
+  ST(self).refreshLayoutGrid(self)
+  ST(self).locked = false
   _forced = nil
 end
 
@@ -1199,7 +1232,7 @@ SlashCmdList["CDMDBG"] = function()
       print(P .. "  frame introuvable (addon Blizzard pas encore charge ?)")
     else
       print(string.format("%s  enabled=%s  IsShown=%s  GetAlpha=%.2f  locked=%s",
-        P, tostring(cfg and cfg.enabled), tostring(frame:IsShown()), frame:GetAlpha(), tostring(frame.__locked)))
+        P, tostring(cfg and cfg.enabled), tostring(frame:IsShown()), frame:GetAlpha(), tostring(ST(frame).locked)))
       print(string.format("%s  useFading=%s  fadeAlpha=%s  fadeInCombat=%s  fadeOnTarget=%s  fadeOnCasting=%s  fadeOnHover=%s  isHovered=%s",
         P, tostring(cfg and cfg.useFading), tostring(cfg and cfg.fadeAlpha),
         tostring(cfg and cfg.fadeInCombat), tostring(cfg and cfg.fadeOnTarget),
@@ -1228,8 +1261,8 @@ SlashCmdList["CDMDBG"] = function()
           local okE, hasEdit = pcall(child.HasEditModeData, child)
           print(string.format("%s   [%d] spell=%s  IsShown=%s  IsVisible=%s  __isActive=%s  __hideType=%s  cd=%s  aura=%s  charges=%s  editData=%s",
             P, i, tostring(okS and spellID), tostring(child:IsShown()), tostring(child:IsVisible()),
-            tostring(child.__isActive), tostring(child.__hideType),
-            tostring(child.__isOnActualCooldown), tostring(child.__isOnAura),
+            tostring(ST(child).isActive), tostring(ST(child).hideType),
+            tostring(ST(child).isOnActualCooldown), tostring(ST(child).isOnAura),
             tostring(child.wasSetFromCharges), tostring(okE and hasEdit)))
         end
       end

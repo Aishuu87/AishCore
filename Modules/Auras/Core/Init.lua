@@ -53,82 +53,6 @@ function ns.Try(tag, fn, ...)
     return ok, err
 end
 
--- Lazy load de la bibliothèque de modèles 3D (~19 Mo, ~122 000 entrées) : packagée dans le
--- sous-addon AishUIAuraModels (LoadOnDemand), chargée seulement à la première ouverture du
--- ModelPicker. Partage avec AishCore via la globale pont _G.AishSharedModelFlat pour éviter le
--- doublon RAM (~5-10 Mo) ; dégrade proprement (flatten local) si absent. Retourne true si
--- ns._modelFlat est prêt à l'usage.
-function ns.EnsureModelPaths()
-    -- Déjà chargée et aplatie : rien à faire
-    if ns._modelFlat and #ns._modelFlat > 0 then return true end
-
-    -- PARTAGE 1 : une table aplatie existe déjà en globale pont (AishCore
-    -- à jour, ou autre addon partenaire). On la référence directement, 0 copie.
-    if _G.AishSharedModelFlat and #_G.AishSharedModelFlat > 0 then
-        ns._modelFlat = _G.AishSharedModelFlat
-        return true
-    end
-
-    -- Tente le chargement du sous-addon
-    pcall(function()
-        local loader = (C_AddOns and C_AddOns.LoadAddOn) or LoadAddOn
-        if loader then loader("AishUIAuraModels") end
-    end)
-
-    -- Fallback : si AishUIAuraModelPaths existe déjà (ex : injection manuelle
-    -- ou présence d'un addon partenaire avec AishCoreModelPaths), on l'utilise directement
-    local rawPaths = AishUIAuraModelPaths or AishCoreModelPaths
-    if not rawPaths then
-        return false
-    end
-
-    -- Aplatit l'arbre en tableau compact (pattern historique)
-    ns._modelFlat = {}
-    local function Flatten(node)
-        if type(node) ~= "table" then return end
-        if node.fileId then
-            local fid = tonumber(node.fileId) or 0
-            local txt = node.text or node.value or tostring(node.fileId)
-            ns._modelFlat[#ns._modelFlat + 1] = { fileId = fid, text = txt }
-        end
-        if node.children then
-            for _, child in ipairs(node.children) do Flatten(child) end
-        end
-    end
-    for _, cat in pairs(rawPaths) do Flatten(cat) end
-
-    -- Expose notre table aplatie via globale pont, pour partage inverse
-    -- (si AishCore ouvre son ModelPicker après le nôtre)
-    _G.AishSharedModelFlat = ns._modelFlat
-
-    -- Libère l'arbre original : on ne garde que la version aplatie
-    AishUIAuraModelPaths = nil
-    AishCoreModelPaths = nil
-    collectgarbage("collect")
-
-    return true
-end
-
--- Libère la bibliothèque de modèles 3D (appelée à la fermeture du ModelPicker, ~25-30 Mo
--- récupérés). Si notre table est en fait la globale pont partagée avec AishCore, on ne la
--- libère pas (juste notre référence) : AishCore la libérera de son côté. Ré-ouverture :
--- EnsureModelPaths recharge (~0.3-0.5s) via le sous-addon LoadOnDemand.
-function ns.ReleaseModelPaths()
-    if not ns._modelFlat then return false end
-    local wasShared = (ns._modelFlat == _G.AishSharedModelFlat)
-    ns._modelFlat = nil
-    -- Si c'était la table partagée, on ne libère PAS la globale pont :
-    -- AishCore (ou un autre addon partenaire) pourrait encore en avoir besoin.
-    if not wasShared then
-        _G.AishSharedModelFlat = nil
-    end
-    -- Au cas où : nettoie aussi les globales qui pourraient avoir été ré-exposées
-    AishUIAuraModelPaths = nil
-    AishCoreModelPaths = nil
-    collectgarbage("collect")
-    return true
-end
-
 -- Helpers de spécialisation. Clé = "CLASSE_SPE" uniquement (pas de nom/royaume) : la liste vit dans
 -- le profil, partagé entre personnages, donc une liste "Auras à tracker" configurée sur un personnage
 -- doit être retrouvée par tout autre personnage de la même classe/spé utilisant ce profil. Ancien format (nom-realm
@@ -136,8 +60,11 @@ end
 function ns.GetSpecKey()
     local key
     pcall(function()
-        local gS = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization or GetSpecialization
-        local gI = C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo or GetSpecializationInfo
+        -- Globals d'abord : ils portent la spe deduite des branches de talents sur un client sans
+        -- vraies specialisations (cf. Core.lua). Dans l'autre ordre, la cle de spe restait nulle
+        -- et les listes d'auras par spec ne se chargeaient jamais.
+        local gS = GetSpecialization or (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization)
+        local gI = GetSpecializationInfo or (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo)
         if not gS or not gI then return end
         local specID = gI(gS())
         if not specID then return end
@@ -248,6 +175,10 @@ function ns.GetSpecSpells()
     if not _namesSyncedForKey[key] then
         _namesSyncedForKey[key] = true
         ns.RefreshSpellNames(spells)
+        -- Entrées ajoutées hors ns.NewSpellEntry (import, copie) : repose ns.SPELL_MT
+        for _, info in pairs(spells) do
+            if type(info) == "table" and getmetatable(info) ~= ns.SPELL_MT then setmetatable(info, ns.SPELL_MT) end
+        end
     end
     return spells, key
 end
@@ -302,7 +233,7 @@ local function MigrateRenderKeys(raw)
     if raw.discoveredSpells then
         for _, specSpells in pairs(raw.discoveredSpells) do
             for _, info in pairs(specSpells) do
-                local dest = info.destinations
+                local dest = rawget(info, "destinations") -- rawget : cf. ns.SPELL_MT
                 if dest then
                     for old, new in pairs(_RENDER_KEY_MAP) do
                         if dest[old] ~= nil then
@@ -444,6 +375,29 @@ local function BulkSetDefaultProcGlow(raw)
     end
 end
 
+-- Racine d'AishUIAuraDB : on ne garde que les données de compte, tout le reste vit dans profiles[*].
+local _ROOT_KEEP = { profiles = true, activeProfile = true, discovery = true, adminOverrides = true,
+                     discoveredSpells = true }
+-- Anciens noms de renders restés dans les profils (MigrateRenderKeys ne passait que sur la racine)
+local _LEGACY_PROFILE_KEYS = {
+    "flow", "flowEnabled", "instinct", "instinctEnabled", "sense", "senseEnabled",
+    "wargear", "wargearEnabled", "wargearSlots",
+}
+local function PurgeRootSettings(raw)
+    for k in pairs(raw) do
+        if not _ROOT_KEEP[k] and not (type(k) == "string" and k:sub(1, 1) == "_") then
+            raw[k] = nil
+        end
+    end
+    if type(raw.profiles) ~= "table" then return end
+    for _, prof in pairs(raw.profiles) do
+        if type(prof) == "table" then
+            MigrateRenderKeys(prof)
+            for _, k in ipairs(_LEGACY_PROFILE_KEYS) do prof[k] = nil end
+        end
+    end
+end
+
 function ns.InitDB()
     -- Le profil Auras actif suit le profil AishCore (cf. Core/Profiles.lua) : ce handler ADDON_LOADED
     -- passe AVANT celui d'AishCore.lua (ordre du .toc), on resout donc le profil AishCore ici.
@@ -480,29 +434,22 @@ function ns.InitDB()
         MigrateOrphanedTotemDestinations(raw)
         raw._orphanedTotemDestinationsV1 = true
     end
-    ns.MergeDefaults(raw, ns.Defaults)
-    for _, key in ipairs({"iconlist","freebars","circlebars","icons","equipment","totems"}) do
-        if not raw[key] or type(raw[key]) ~= "table" then
-            raw[key] = ns.DeepCopy(ns.Defaults[key])
-        else
-            ns.MergeDefaults(raw[key], ns.Defaults[key])
-        end
+    local db = ns.Profiles and ns.Profiles:InitDB() or ns.MergeDefaults(raw, ns.Defaults)
+    -- Réglages à la racine : reliquat d'avant les profils, plus jamais lus (ns.db = profil actif).
+    -- Après Profiles:InitDB, dont les migrations lisent encore raw.discoveredSpells.
+    if db ~= raw and not raw._rootPurgeV1 then
+        PurgeRootSettings(raw)
+        raw._rootPurgeV1 = true
     end
-    local db = ns.Profiles and ns.Profiles:InitDB() or raw
     db.addonVersion = ns.ADDON_VERSION
     if not db.discoveredSpells then db.discoveredSpells = {} end
+    -- Les champs absents (destinations, glow, glowIdx...) sont fournis par ns.SPELL_MT (cf. Defaults.lua).
     for _, specSpells in pairs(db.discoveredSpells) do
         for _, info in pairs(specSpells) do
-            if not info.destinations then info.destinations = ns.DeepCopy(ns.SpellDefaults.destinations) end
-            if info.glow == nil then info.glow = false end
-            if not info.glowIdx then info.glowIdx = 2 end
-            if not info.glowAlpha then info.glowAlpha = 0.7 end
-            if info.desat == nil then info.desat = false end
-            if not info.procGlowIdx then info.procGlowIdx = 1 end
-            if not info.procGlowScale then info.procGlowScale = 1.0 end
             -- Migration _glowCustom (feature glow par défaut) : verrouille (true) tout sort qui avait
             -- déjà un glow actif pour ne jamais écraser un réglage utilisateur ; sinon suit le défaut.
-            if info._glowCustom == nil then info._glowCustom = (info.glow == true) end
+            -- rawget : jamais retiré par la compaction, absent = sort antérieur à la feature.
+            if rawget(info, "_glowCustom") == nil then info._glowCustom = (info.glow == true) end
         end
     end
     ns.db = db

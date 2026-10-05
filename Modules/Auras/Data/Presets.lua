@@ -11,8 +11,9 @@ function ns.GetAvailablePresets()
     local list = {}
     local specKey = nil
     pcall(function()
-        local gS = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization or GetSpecialization
-        local gI = C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo or GetSpecializationInfo
+        -- Globals d'abord, meme raison que dans Init.lua : ils portent la spe deduite des talents.
+        local gS = GetSpecialization or (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization)
+        local gI = GetSpecializationInfo or (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo)
         if gS and gI then
             local specID = gI(gS())
             local m = specID and ns.SPEC_MAP and ns.SPEC_MAP[specID]

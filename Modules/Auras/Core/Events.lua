@@ -88,11 +88,6 @@ ef:SetScript("OnEvent", function(_, event, arg1)
         pcall(function() ns.InitAllRenders() end)
         pcall(function() if ns.MissingBuffs then ns.MissingBuffs.Init() end end)
 
-        -- Note : l'aplatissement de la bibliothèque de modèles 3D (~19 MB) a été
-        -- déplacé en lazy-load. Il est désormais déclenché par ns.EnsureModelPaths()
-        -- à la première ouverture du ModelPicker. Économie : ~25 MB de RAM au démarrage
-        -- si l'utilisateur n'ouvre jamais le picker dans sa session.
-
         C_Timer.After(0.5, function()
             ns.Try("InitCDMHooks@0.5s", ns.InitCDMHooks)
             ns.Try("ScanCDMViewers@0.5s", ns.ScanCDMViewers)

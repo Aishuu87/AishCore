@@ -63,6 +63,18 @@ local STATIC_ENTRIES = {
     end },
 }
 
+-- Extra Barres : une entree par barre ; onGo selectionne cette barre dans la page avant d'y sauter
+for i = 1, 5 do
+  STATIC_ENTRIES[#STATIC_ENTRIES + 1] = {
+    category = "extraBars",
+    getFrame = function()
+      local EB = ns.Modules and ns.Modules.ExtraBars
+      return EB and EB.GetBarFrame and EB.GetBarFrame(i)
+    end,
+    onGo = function() ns._extraBarsSelected = i end,
+  }
+end
+
 -- Auras render frames (4 mises en page distinctes) : registre live cote
 -- Modules/Auras (ns.Auras.renderFrames, alimente par ns.RegisterRender dans
 -- chaque fichier de render -- cf. Modules/Auras/Core/Init.lua).
@@ -106,7 +118,7 @@ end
 
 -- WIDGETS : un seul highlight + une seule roue crantee, repositionnes sur la frame survolee.
 local highlight, gearBtn
-local hoveredFrame, hoveredCategory
+local hoveredFrame, hoveredCategory, hoveredEntry
 local HL_PAD   = 6
 local ICON_TC  = 0.08
 
@@ -119,11 +131,15 @@ local GEAR_ANCHORS = {
 -- Saut vers la section de reglages du module survole, utilise par la roue et le clic droit.
 local function GoToSettings()
   if not hoveredCategory then return end
+  -- Pre-selection propre a l'entree (ex. quelle Extra Barre), avant d'ouvrir la page
+  if hoveredEntry and hoveredEntry.onGo then hoveredEntry.onGo() end
   local panel = ns.SettingsPanel
   if panel and panel.SelectCategory then
     if not panel:IsShown() then panel:ShowUI() end
     panel:SelectCategory(hoveredCategory)
   end
+  -- Page deja affichee : elle ne repasse pas par OnShow, rafraichissement explicite
+  if hoveredCategory == "extraBars" and ns.ExtraBarsPageRefresh then ns.ExtraBarsPageRefresh() end
 end
 
 local function EnsureWidgets()
@@ -253,6 +269,7 @@ local function Tick()
 
   if best then
     if hoveredFrame ~= best then
+      hoveredEntry = bestE
       ShowHighlight(best, bestE.category, bestE.gearAnchor)
     end
   else

@@ -353,10 +353,7 @@ function ns.BuildWhitelist()
     -- plus aucune ne depend de ns.cdmData/du pin CDM pour la presence, la
     -- duree ou les stacks. Ce force-pin (SyncCDMPins) ne servait plus qu'a
     -- forcer un reload inutile a chaque fermeture du GUI (popup "X aura(s)
-    -- epinglee(s)") sans aucun benefice visuel restant. NOTE : ns.SyncCDMPins() reste utilisee
-    -- ailleurs (Config/Profiles.lua ApplyCDMForSpec, pour rattraper la
-    -- whitelist apres restauration d'un snapshot CDM de spec) -- feature
-    -- separee et deliberee, volontairement non touchee ici. Consequence
+    -- epinglee(s)") sans aucun benefice visuel restant. Consequence
     -- acceptee : un spellID JAMAIS observe en jeu (jamais auto-decouvert
     -- par CDMHooks.lua, qui necessite une frame CDM live pour ce sort) ne
     -- peut plus etre auto-decouvert seulement par ce chemin -- reste

@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 .claude/
 generate_model_paths.py
+generate_search_index.py
+generate_profile_template.py
 
 # Genere par le packager (BigWigsMods) a chaque release, livre dans le zip
 CHANGELOG.md

@@ -270,3 +270,129 @@ ns.SpellDefaults = {
     sparkModelID=0, sparkModelA=0.7, sparkModelRot=0,
     sparkModelX=0, sparkModelY=0, sparkModelZ=0, sparkModelS=0.5, sparkModelL="front",
 }
+
+-- Sorts "creux" : une entree de discoveredSpells ne stocke que ses ecarts a ns.SpellDefaults, la
+-- metatable fournit le reste a la lecture (info.barModelX marche sans rien changer cote lecteurs).
+-- Les sous-tables par defaut (destinations) sont copiees dans l'entree au premier acces : jamais
+-- renvoyer celle du modele, une ecriture info.destinations.x = true la modifierait pour tous.
+-- Les metatables ne sont pas sauvegardees : ns.HydrateSpellLists les repose a chaque chargement.
+local SpellDefaults = ns.SpellDefaults
+local SPELL_MT = {
+    __index = function(t, k)
+        local d = SpellDefaults[k]
+        if type(d) == "table" then
+            local copy = {}
+            for dk, dv in pairs(d) do copy[dk] = dv end
+            rawset(t, k, copy)
+            return copy
+        end
+        return d
+    end,
+}
+ns.SPELL_MT = SPELL_MT
+
+-- Champs jamais retires meme egaux au defaut : nil y a un sens ("ancien sort", cf. migration
+-- _glowCustom dans ns.InitDB).
+local KEEP_RAW = { _glowCustom = true }
+
+function ns.NewSpellEntry()
+    return setmetatable({ _glowCustom = false }, SPELL_MT)
+end
+
+-- Retire de l'entree les champs egaux au defaut. withTables : retire aussi destinations quand tout
+-- est a false -- seulement a la deconnexion, un menu ouvert peut tenir une reference vers la table.
+local function CompactEntry(info, withTables)
+    for k, d in pairs(SpellDefaults) do
+        local v = rawget(info, k)
+        if v ~= nil and not KEEP_RAW[k] then
+            if type(d) ~= "table" then
+                if v == d then info[k] = nil end
+            elseif withTables and type(v) == "table" then
+                local any = false
+                for _, dv in pairs(v) do if dv then any = true; break end end
+                if not any then info[k] = nil end
+            end
+        end
+    end
+end
+
+-- Couleur automatique d'un sort : clé d'élément du thème (Themed Colors) tirée d'un hash du nom de
+-- profil et du spellID. Aléatoire d'aspect, différente d'un profil à l'autre, stable d'une session à
+-- l'autre, et sans stockage : un sort non personnalisé n'a pas besoin d'être sauvegardé dans le
+-- profil (cf. ns.DropUncustomizedSpells). La couleur affichée reste résolue en direct sur le thème du
+-- profil actif (si.colorKey, cf. AuraTrackerContainer.lua).
+function ns.AutoColorKey(profileName, spellID)
+    local Colors = _addon.Modules and _addon.Modules.Colors
+    local keys = Colors and Colors.ELEMENT_KEYS
+    if not keys or #keys == 0 then return nil end
+    local s = tostring(profileName or "") .. "#" .. tostring(spellID)
+    local h = 5381
+    for i = 1, #s do h = (h * 33 + s:byte(i)) % 2147483647 end
+    return keys[h % #keys + 1]
+end
+
+function ns.ApplyAutoColor(info, profileName, spellID)
+    local key = ns.AutoColorKey(profileName, spellID)
+    local Colors = _addon.Modules and _addon.Modules.Colors
+    local c = key and Colors and Colors.Get and Colors.Get(key)
+    if not (c and c[1]) then c = ns.barColor or { 1, 1, 1 } end
+    info.colorKey = key
+    info.color = { c[1], c[2], c[3] }
+    info._colorDefault = false -- ne plus retoucher (cf. ns.RollDefaultSpecColors)
+end
+
+-- Sort "personnalisé" = à conserver dans le profil (sauvegarde, export). Le reste est recréé depuis
+-- le registre du compte (AishUIAuraDB.discovery) à l'activation du profil. Champs d'identité (posés à
+-- la découverte ou recalculés) et miroir du glow par défaut (recopié tant que _glowCustom ~= true)
+-- ne comptent pas. Limite : une couleur choisie à la main sur un sort jamais activé n'est pas gardée.
+local SPELL_IDENTITY = {
+    name = true, source = true, priority = true, color = true, colorKey = true, _colorDefault = true,
+    linkedSpellIDs = true, _adminDeleted = true, _glowCustom = true, _invalid = true,
+    spellIDs = true, styleAnchorID = true,
+}
+local SPELL_GLOW_MIRROR = {
+    glow = true, glowIdx = true, glowAlpha = true, glowScale = true, glowColor = true,
+    procGlowIdx = true, procGlowScale = true,
+}
+function ns.IsSpellCustomized(info)
+    if rawget(info, "enabled") or rawget(info, "_glowCustom") == true then return true end
+    for k, v in pairs(info) do
+        if k == "destinations" then
+            if type(v) == "table" then
+                for _, on in pairs(v) do if on then return true end end
+            end
+        elseif not SPELL_IDENTITY[k] and not SPELL_GLOW_MIRROR[k] then
+            local d = SpellDefaults[k]
+            if d == nil or type(d) == "table" or v ~= d then return true end
+        end
+    end
+    return false
+end
+
+-- Retire d'un profil les sorts non personnalisés (profil inactif, sauvegarde, export).
+function ns.DropUncustomizedSpells(lists)
+    if type(lists) ~= "table" then return end
+    for specKey, spells in pairs(lists) do
+        if type(spells) == "table" then
+            for sid, info in pairs(spells) do
+                if type(info) ~= "table" or not ns.IsSpellCustomized(info) then spells[sid] = nil end
+            end
+            if next(spells) == nil then lists[specKey] = nil end
+        end
+    end
+end
+
+-- lists = profile.discoveredSpells ({ [specKey] = { [spellID] = info } })
+function ns.HydrateSpellLists(lists, compact, withTables)
+    if type(lists) ~= "table" then return end
+    for _, spells in pairs(lists) do
+        if type(spells) == "table" then
+            for _, info in pairs(spells) do
+                if type(info) == "table" then
+                    if compact then CompactEntry(info, withTables) end
+                    if getmetatable(info) ~= SPELL_MT then setmetatable(info, SPELL_MT) end
+                end
+            end
+        end
+    end
+end

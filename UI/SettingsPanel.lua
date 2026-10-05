@@ -521,10 +521,13 @@ local function GetModKey(dbKey)
     targetCastBar              = "TargetCastBar",
     cdmEssential               = "CooldownManagerEnhanced",
     cdmUtility                 = "CooldownManagerEnhanced",
+    cdmLayout                  = "CDMLayout",
     characterArmory            = "CharacterArmory",
     afkMode                    = "AFKMode",
     bigCursor                  = "BigCursor",
     location                   = "Location",
+    extraBars                  = "ExtraBars",
+    addonFonts                 = "AddonFonts",
   }
   return map[dbKey]
 end
@@ -560,6 +563,13 @@ local DBKEY_TO_CATEGORY = {
 }
 
 -- Invalide la page dediee d'un module -- utilise UNIQUEMENT par la page "Modules" (jamais par LiveApply, qui tournerait sur la page en cours d'edition et casserait le focus des sliders).
+-- Exposee pour les bascules qui vivent hors du panneau (/aishadmin) : sans reconstruction, la
+-- liste des sorts garde l'etat qu'elle avait a sa derniere construction, et les entrees reservees
+-- au mode admin n'apparaissent jamais -- fermer la fenetre ne suffit pas, la page est conservee.
+function ns.InvalidateSettingsPage(catId)
+  if _invalidateCategory and catId then _invalidateCategory(catId) end
+end
+
 local function InvalidateOwnPage(dbKey)
   if not _invalidateCategory then return end
   local catId = DBKEY_TO_CATEGORY[dbKey] or dbKey
@@ -679,7 +689,9 @@ local function GetActiveDotType()
   local cls    = ns._playerClass or ""
   if cls == "DEATHKNIGHT" then return "RUNES" end
   if cls == "ROGUE"       then return "COMBO_ROGUE" end
-  if cls == "DRUID"       then return specID == 103 and "COMBO_DRUID" or nil end
+  -- Forever : 104 accepte en plus de 103, l'arbre "Combat farouche" y est rattache a Gardien
+  -- (cf. Core.lua) mais le jeu en felin garde ses points de combo.
+  if cls == "DRUID"       then return (specID == 103 or (ns.IsForever and specID == 104)) and "COMBO_DRUID" or nil end
   if cls == "MONK"        then return specID == 269 and "CHI"         or nil end
   if cls == "PALADIN" then
     if specID == 65 then return "HOLY_POWER" end
@@ -1238,6 +1250,14 @@ function Build.OutOfCombat(container)
   }, "important")
   MakeAlwaysInInstanceToggle(container, ctx, W, "healthCircle")
 
+  -- Zone de clic securisee : cf. HealthCircle.ApplyClickable (desarmee tant que ce
+  -- panneau est ouvert, sinon elle mangerait le glisser-deposer du cercle).
+  ctx:Spacer(4)
+  local cbHCClick = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_HC_CLICKABLE"],
+    L["SETTINGS_HC_CLICKABLE_TT"], W))
+  BindCheckbox(cbHCClick, "healthCircle", "clickable")
+
   -- Heartbeat pulse toggle
   ctx:Spacer(4)
   local cbHCPulse = ctx:Add(SW.CreateCheckbox(container,
@@ -1646,6 +1666,29 @@ function Build.UnitBars(container)
   }, "combat")
   MakeAlwaysInInstanceToggle(container, ctx, W, "unitBars")
 
+  -- "Au survol" : s'AJOUTE aux trois modes ci-dessus (ce n'est pas un 4e mode, d'ou une
+  -- case et non un radio de MakeModeRadio). La tolerance juste en dessous sert aux deux :
+  -- elle elargit la detection du survol et la zone cliquable de la barre.
+  local cbUBHover = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_UB_VIS_HOVER"], L["SETTINGS_UB_VIS_HOVER_TT"], W))
+  BindCheckbox(cbUBHover, "unitBars", "hoverReveal")
+  local slUBHoverTol = ctx:Add(SW.CreateSlider(container,
+    L["SETTINGS_UB_HOVER_TOLERANCE"], 0, 60, 1, math.min(260, W)))
+  BindSlider(slUBHoverTol, "unitBars", "hoverTolerance")
+  slUBHoverTol.tooltipText = L["SETTINGS_UB_HOVER_TOLERANCE_TT"]
+
+  -- Les deux reglages dessinent la zone cliquable a l'ecran : la case parce qu'elle seule
+  -- rend la tolerance active, le slider parce que c'est lui qu'on regle a l'aveugle.
+  local function UBFlashHitbox()
+    local UB = ns.Modules and ns.Modules.UnitBars
+    if UB and UB.FlashHitbox then UB.FlashHitbox() end
+  end
+  do
+    local origCb, origSl = cbUBHover.onChanged, slUBHoverTol.onChanged
+    cbUBHover.onChanged     = function(v) if origCb then origCb(v) end UBFlashHitbox() end
+    slUBHoverTol.onChanged  = function(v) if origSl then origSl(v) end UBFlashHitbox() end
+  end
+
   local function UBGlobal(prop)
     local v = ns.DB and ns.DB.unitBars and ns.DB.unitBars[prop]
     if v ~= nil then return v end
@@ -1715,6 +1758,11 @@ function Build.UnitBars(container)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
   end)
 
+  -- Hors du couple radio ci-dessus : c'est une surcharge temporaire du mode, pas un 3e mode.
+  local cbHPHover = ctx:Add(SW.CreateCheckbox(container,
+    L["SETTINGS_UB_HP_HOVER_VALUE"], L["SETTINGS_UB_HP_HOVER_VALUE_TT"], W))
+  BindCheckbox(cbHPHover, "unitBars", "hpHoverValue")
+
   -- Sous-titre texte simple, sans decoration (pas de point/hairline comme SW.CreateSectionHeader) : distingue "reglages de la barre" de "reglages du nom".
   local function MakeUBPlainSubtitle(parent, text, width)
     local f = CreateFrame("Frame", nil, parent)
@@ -1768,6 +1816,25 @@ function Build.UnitBars(container)
     barCBs[i] = cbBar
   end
   ctx:AddRow(8, unpack(barCBs))
+
+  -- Cadres d'unites Blizzard (cf. Modules/BlizzardUnitFrames.lua) : masquage reversible, sans /reload
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_HIDE_BLIZZARD_FRAMES"], W))
+  local HIDE_KEYS = { player = "hideBlizzPlayer", target = "hideBlizzTarget", focus = "hideBlizzFocus",
+                      pet = "hideBlizzPet", targettarget = "hideBlizzTargetTarget" }
+  local hideCBs = {}
+  for i, entry in ipairs(BAR_LABELS) do
+    local subKey = HIDE_KEYS[entry.key]
+    local cbHide = SW.CreateCheckbox(container, entry.label, L["SETTINGS_HIDE_BLIZZARD_FRAME_TT"], entry.cbW or 120)
+    cbHide:SetChecked(DBGet("unitBars", subKey) == true)
+    cbHide.onChanged = function(val)
+      DBSet("unitBars", subKey, val)
+      local M = ns.Modules and ns.Modules.BlizzardUnitFrames
+      if M then M.ApplySettings() end
+    end
+    hideCBs[i] = cbHide
+  end
+  ctx:AddRow(8, unpack(hideCBs))
 
   -- Sous-section par barre, indentee, avec en-tete repliable "+ / -" -- meme
   -- principe que les elements de Build.AFKMode. Une barre decochee garde son
@@ -2928,34 +2995,15 @@ local RefreshSpellList, RefreshAnimList, RefreshAnimEditor, RefreshAliasRow
 local RefreshOrbList, RefreshOocList, RefreshAuraList, RefreshMissingBuffsList, RelayoutSections
 local RefreshLogoList
 
--- Lookup : FileID ? nom de modèle via AishCoreModelPaths (Data\ModelPaths.lua)
-local seModelNameCache = {}  -- fileID(number) ? "name.m2"
-
-local function GetModelPathsData()
-  return AishCoreModelPaths
-end
-
-local function StripM2(name)
-  if not name then return name end
-  return name:gsub("%.m2$", ""):gsub("%.M2$", "")
-end
+-- Lookup : FileID -> nom de modèle via ns.GetModelName (Data\ModelPaths.lua)
+local seModelNameCache = {}  -- fileID(number) -> "name"
 
 local function GetModelNameByFileID(fileID)
   if not fileID or fileID == 0 then return nil end
   if seModelNameCache[fileID] then return seModelNameCache[fileID] end
-  -- Utilise ns._modelFlat (table compacte créée au login depuis AishCoreModelPaths)
-  local flat = ns._modelFlat
-  if flat then
-    for i = 1, #flat do
-      local entry = flat[i]
-      if entry.fileId == fileID then
-        local name = StripM2(entry.text)
-        seModelNameCache[fileID] = name
-        return name
-      end
-    end
-  end
-  return nil
+  local name = ns.GetModelName and ns.GetModelName(fileID)
+  if name then seModelNameCache[fileID] = name end
+  return name
 end
 
 -- Model Picker Frame (singleton)
@@ -4191,7 +4239,7 @@ local function EnsureModelPicker()
     kwInput:SetFocus()
   end
 
-  f._allModels      = {}   -- { fileId=number, text="name.m2" }
+  f._allModels      = nil  -- { fileId=number, text="name" }, cf. f:Open / OnHide
   f._filteredModels = {}   -- sous-ensemble aprEs filtrage
   f._selectedModelId = nil
 
@@ -4357,7 +4405,7 @@ local function EnsureModelPicker()
       end
     end
     local filtered = {}
-    for _, m in ipairs(self._allModels) do
+    for _, m in ipairs(self._allModels or {}) do
       local match = false
       local mLower = strlower(m.text)
       local mId    = tostring(m.fileId)
@@ -4401,27 +4449,9 @@ local function EnsureModelPicker()
     -- Reconstruction de la sidebar pour refléter le profil courant (user-defined tags)
     self:RebuildTagSidebar()
     for _, b in ipairs(self._tagButtons) do b._bg:SetColorTexture(0, 0, 0, 0) end
-    -- Construire self._allModels depuis ns._modelFlat (déjà libéré de AishCoreModelPaths au login)
+    -- Liste décodée à chaque ouverture (déjà triée par nom), libérée à la fermeture (OnHide)
     if not self._allModels or #self._allModels == 0 then
-      local flat = ns._modelFlat
-      local models = {}
-      if flat then
-        for i = 1, #flat do
-          local entry = flat[i]
-          models[#models + 1] = {
-            fileId = entry.fileId,
-            text   = StripM2(entry.text),
-          }
-        end
-      end
-      -- ns.FoldAccentsLower (Core.lua), cf. commentaire sur `filtered` plus
-      -- bas -- strcmputf8i seul ne suffisait pas pour ce client.
-      table.sort(models, function(a, b) return ns.FoldAccentsLower(a.text) < ns.FoldAccentsLower(b.text) end)
-      self._allModels = models
-      -- PrE-remplir le cache de noms
-      for _, m in ipairs(models) do
-        seModelNameCache[m.fileId] = m.text
-      end
+      self._allModels = ns.BuildModelList and ns.BuildModelList() or {}
     end
     self:FilterModels("")
     self:RefreshTagDimming()
@@ -4463,6 +4493,9 @@ local function EnsureModelPicker()
 
   f:SetScript("OnHide", function(self)
     self._previewModel:ClearModel()
+    -- ~9 500 entrées : rendues au GC, redécodées à la prochaine ouverture
+    self._allModels = nil
+    self._filteredModels = {}
     self._selectedRow = nil
     self._activeTag = nil
     self._activeTagKeywords = nil
@@ -4626,8 +4659,22 @@ local function BuildSpellListRow(parent, spellID, width, onClick, combosDB)
   row.countText:SetTextColor(unpack(Theme.textDim))
 
   local name, icon = GetSpellInfo3D(spellID)
-  row.icon:SetTexture(icon)
-  row.label:SetText(name)
+  -- Icone de repli : un sort absent de ce client n'en a aucune, la ligne resterait vide.
+  row.icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+  -- Sort absent de ce client (configuration venue d'ailleurs) : libelle en orange et prefixe, pour
+  -- ne pas le confondre avec un sort reellement disponible ici. Son nom n'etant pas lisible, on
+  -- affiche son identifiant, seul repere exploitable.
+  local isForeign = (name == nil) or (ns.SpellIdentityKey and ns.SpellIdentityKey(spellID) == nil)
+  if isForeign then
+    -- Nom memorise sur le client d'origine (cf. /setag) : sans lui il ne resterait qu'un
+    -- identifiant nu, impossible a rattacher a un sort.
+    local meta = ns.DB and ns.DB.spellEffects and ns.DB.spellEffects.combosMeta
+    local remembered = meta and meta[spellID]
+    row.label:SetText("|cffff9040[ext]|r " .. (name or remembered or ("ID " .. tostring(spellID))))
+  else
+    row.label:SetText(name)
+  end
+  row._isForeign = isForeign
   row.spellID = spellID
 
   local combos = combosDB or GetCombosDB()
@@ -5906,8 +5953,37 @@ function Build.SpellEffects(container)
     -- 48778 = Destrier de la Mort d'Achérus (DK uniquement)
     manualSpells[48778] = manualSpells[48778] or (combos[48778] and "DEATHKNIGHT") or nil
 
+    -- Mode admin (/aishadmin) : on montre AUSSI les combos dont le sort n'existe pas sur ce
+    -- client -- typiquement une configuration importee d'un autre client, ou les identifiants ne
+    -- correspondent pas. Sans cela ils sont invisibles et leur contenu inatteignable, alors qu'il
+    -- suffit de faire un clic droit dessus pour copier leurs animations vers un sort d'ici.
+    local adminMode = (ns.Auras and ns.Auras._adminMode) == true
+
+    local function IsOrphanCombo(sid)
+      -- Orphelin = configure, mais absent du grimoire ET sans nom lisible sur ce client.
+      if fromSpellbook[sid] then return false end
+      if not combos[sid] then return false end
+      return (ns.SpellIdentityKey and ns.SpellIdentityKey(sid)) == nil
+    end
+
     local function IsCurrentClassSpell(sid)
       if fromSpellbook[sid] then return true end
+      -- Mode admin : on remonte les combos orphelins, mais SEULEMENT ceux marques pour la classe
+      -- jouee. Sans ce filtre la liste deverserait la configuration de toutes les classes, ce qui
+      -- la rend inutilisable -- l'interet est justement de retrouver ses propres sorts.
+      if adminMode and combos[sid] then
+        local tag = manualSpells[sid]
+        if tag and tag ~= true then
+          local _, clsA = UnitClass("player")
+          return tag == clsA
+        end
+        -- Pas de tag de classe : on accepte quand meme l'entree si son nom a ete memorise sur le
+        -- client d'origine. Elle reste identifiable et donc copiable, ce qui est tout l'objectif --
+        -- la masquer reviendrait a perdre definitivement ce travail de configuration.
+        local metaC = ns.DB and ns.DB.spellEffects and ns.DB.spellEffects.combosMeta
+        if metaC and metaC[sid] then return true end
+        return false
+      end
       local ps = PSEUDO_SPELLS_3D[sid]
       if ps then
         -- Pseudo-sort : afficher seulement pour la spEc correspondante
@@ -5934,12 +6010,41 @@ function Build.SpellEffects(container)
     for _, sid in ipairs(sorted) do
       if IsCurrentClassSpell(sid) then filtered[#filtered + 1] = sid end
     end
+    -- Une entree par sort, pas une par rang. La preference est capitale : on garde en priorite
+    -- l'identifiant qui porte DEJA un combo, et seulement a defaut le rang le plus eleve.
+    -- Sans cela, un sort configure sous un autre identifiant (animation importee d'un autre
+    -- client) disparaissait de la liste au profit de l'entree du grimoire, vide : les animations
+    -- semblaient perdues alors qu'elles etaient seulement devenues inaccessibles.
+    if ns.IsForever and ns.SpellIdentityKey then
+      local out, slotOf = {}, {}
+      for _, sid in ipairs(filtered) do
+        local key = ns.SpellIdentityKey(sid)
+        if not key then
+          out[#out + 1] = sid
+        else
+          local at = slotOf[key]
+          if not at then
+            slotOf[key] = #out + 1
+            out[#out + 1] = sid
+          else
+            local kept    = out[at]
+            local keptHas = combos[kept] ~= nil
+            local curHas  = combos[sid] ~= nil
+            if (curHas and not keptHas) or (curHas == keptHas and sid > kept) then
+              out[at] = sid
+            end
+          end
+        end
+      end
+      filtered = out
+    end
     -- Trier par ordre alphabétique du nom -- ns.FoldAccentsLower (Core.lua)
     -- classe les noms accentués (Â/É...) avec leur lettre, pas après tout
     -- l'alphabet. strcmputf8i seul ne suffisait pas pour ce client.
+    local metaSort = ns.DB and ns.DB.spellEffects and ns.DB.spellEffects.combosMeta
     table.sort(filtered, function(a, b)
-      local nameA = GetSpellInfo3D(a) or ""
-      local nameB = GetSpellInfo3D(b) or ""
+      local nameA = GetSpellInfo3D(a) or (metaSort and metaSort[a]) or ""
+      local nameB = GetSpellInfo3D(b) or (metaSort and metaSort[b]) or ""
       return ns.FoldAccentsLower(nameA) < ns.FoldAccentsLower(nameB)
     end)
     sorted = filtered
@@ -9783,12 +9888,16 @@ function Build.Skyriding(container)
   return ctx.widgets
 end
 
--- BUILD : Visibilité (Global) – transparence d'éléments tiers (ElvUI...)
+-- BUILD : Visibilité (Global) – transparence de la zone de buffs de l'UI hôte (ElvUI ou
+-- EllesmereUI). Les clés DB gardent leur préfixe `elvuiBuffs` d'origine : elles servent aux
+-- deux UI, les renommer casserait les profils existants sans rien apporter.
 function Build.Visibility(container)
   local ctx = NewLayout(container)
   local W   = CONTENT_W
   local SL_W2 = math.floor((W - 8) / 2)
 
+  -- Premier en-tete = titre de page ; les suivants sont des sections repliables.
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_VISIBILITY"], W))
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_VISIBILITY_ELVUI_BUFFS"], W))
 
   local cbEnable = ctx:Add(SW.CreateCheckbox(container,
@@ -9806,6 +9915,43 @@ function Build.Visibility(container)
     L["SETTINGS_VIS_ELVUI_BUFFS_HOVER"],
     L["SETTINGS_VIS_ELVUI_BUFFS_HOVER_TT"], W))
   BindCheckbox(cbHover, "visibility", "elvuiBuffsHoverReveal")
+
+  -- Polices forcées sur Platynator / Baganator (Modules/AddonFonts.lua)
+  local SL_W3 = math.floor((W - 16) / 3)
+  local OUTLINES = {
+    { value = "NONE",         text = L["ADDONFONTS_OUTLINE_NONE"] },
+    { value = "OUTLINE",      text = L["TEXT_OUTLINE_THIN"] },
+    { value = "THICKOUTLINE", text = L["TEXT_OUTLINE_THICK"] },
+  }
+  -- SLUG seulement pour Baganator (cf. Modules/AddonFonts.lua)
+  local OUTLINES_SLUG = { OUTLINES[1], OUTLINES[2], OUTLINES[3], { value = "SLUG", text = L["TEXT_OUTLINE_SLUG"] } }
+  local function FontBlock(prefix, label, tooltip, maxSize, outlines)
+    local cb = ctx:Add(SW.CreateCheckbox(container, label, tooltip, W))
+    BindCheckbox(cb, "addonFonts", prefix .. "Enabled")
+    local ddFont = SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), SL_W3)
+    BindDropdown(ddFont, "addonFonts", prefix .. "Font")
+    local ddOutline = SW.CreateDropdown(container, L["SETTINGS_TEXT_OUTLINE"], outlines or OUTLINES, SL_W3)
+    BindDropdown(ddOutline, "addonFonts", prefix .. "Outline")
+    local slSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 6, maxSize, 1, SL_W3)
+    BindSlider(slSize, "addonFonts", prefix .. "Size")
+    ctx:AddRow(8, ddFont, ddOutline, slSize)
+    ctx:Spacer(4)
+  end
+  local function AddonHeader(title, addon, conflict)
+    local loaded = C_AddOns.IsAddOnLoaded(addon)
+    local note = not loaded and L["ADDONFONTS_NOT_LOADED"]
+      or conflict and string.format(L["ADDONFONTS_SKIN_CONFLICT"], conflict)
+    ctx:Spacer(6)
+    ctx:Add(SW.CreateSectionHeader(container, note and (title .. " |cff888888(" .. note .. ")|r") or title, W))
+  end
+
+  AddonHeader(L["ADDONFONTS_SEC_PLATYNATOR"], "Platynator")
+  FontBlock("platAura", L["ADDONFONTS_PLAT_AURA"], L["ADDONFONTS_PLAT_AURA_TT"], 30)
+  FontBlock("platLevel", L["ADDONFONTS_PLAT_LEVEL"], L["ADDONFONTS_PLAT_LEVEL_TT"], 30)
+
+  local AF = ns.Modules and ns.Modules.AddonFonts
+  AddonHeader(L["ADDONFONTS_SEC_BAGANATOR"], "Baganator", AF and AF.BagSkinConflict and AF.BagSkinConflict())
+  FontBlock("bagItem", L["ADDONFONTS_BAG_ITEM"], L["ADDONFONTS_BAG_ITEM_TT"], 30, OUTLINES_SLUG)
 
   ctx:Spacer()
   ctx:Finalize()
@@ -9987,78 +10133,6 @@ end
 
 -- BUILD : Profils  –  helpers popup
 
--- Popup export : grand bloc de texte scrollable
-local _exportPopup
-local function ShowExportPopup(text)
-  if not _exportPopup then
-    local f = CreateFrame("Frame", "AishCoreExportPopup", UIParent, "BackdropTemplate")
-    f:SetSize(640, 440)
-    f:SetPoint("CENTER")
-    f:SetFrameStrata("FULLSCREEN_DIALOG")
-    f:SetFrameLevel(200)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop",  f.StopMovingOrSizing)
-    -- Fond solide opaque pour éviter que les éléments arrière-plan ne transparaissent
-    local solidBg = f:CreateTexture(nil, "BACKGROUND", nil, -8)
-    solidBg:SetAllPoints()
-    solidBg:SetColorTexture(0, 0, 0, 1)
-    f:SetBackdrop({
-      bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-      edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-      tile = true, tileSize = 32, edgeSize = 32,
-      insets   = { left=11, right=12, top=12, bottom=11 },
-    })
-    f:SetBackdropColor(0.08, 0.08, 0.10, 0.98)
-
-    local titleLbl = f:CreateFontString(nil, "OVERLAY")
-    titleLbl:SetFont(ns.Media.fontGui, 13)
-    titleLbl:SetTextColor(1, 0.88, 0.3)
-    titleLbl:SetText(L["SETTINGS_EXPORT_PROFILE_TITLE"])
-    titleLbl:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -16)
-
-    local hint = f:CreateFontString(nil, "OVERLAY")
-    hint:SetFont(ns.Media.fontGui, 9)
-    hint:SetTextColor(0.5, 0.5, 0.5)
-    hint:SetText(L["SETTINGS_SELECT_COPY_HINT"])
-    hint:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -36)
-
-    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
-    closeBtn:SetScript("OnClick", function() f:Hide() end)
-
-    local sf = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT",     f, "TOPLEFT",     14, -58)
-    sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -32, 46)
-
-    local eb = CreateFrame("EditBox", nil, sf)
-    eb:SetMultiLine(true)
-    eb:SetAutoFocus(false)
-    eb:SetMaxLetters(0)
-    eb:SetFont(ns.Media.fontGui, 9, "")
-    eb:SetTextInsets(4, 4, 4, 4)
-    eb:SetScript("OnEscapePressed", function() f:Hide() end)
-    eb:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-    sf:SetScrollChild(eb)
-    eb:SetWidth(sf:GetWidth())
-    f._eb = eb
-
-    local doneBtn = CreateFrame("Button", nil, f, "GameMenuButtonTemplate")
-    doneBtn:SetSize(130, 26)
-    doneBtn:SetPoint("BOTTOM", f, "BOTTOM", 0, 12)
-    doneBtn:SetText(L["SETTINGS_CLOSE"])
-    doneBtn:SetScript("OnClick", function() f:Hide() end)
-
-    _exportPopup = f
-  end
-  _exportPopup._eb:SetText(text)
-  _exportPopup._eb:HighlightText()
-  _exportPopup:Show()
-  _exportPopup._eb:SetFocus()
-end
-
 -- Popup saisie de nom (créer profil, etc.)
 local _namePopup
 local function ShowNamePopup(title, onConfirm)
@@ -10124,133 +10198,6 @@ local function ShowNamePopup(title, onConfirm)
   _namePopup._eb:SetFocus()
 end
 
--- Popup import : champ nom + grande zone de collage
-local _importPopup
-local function ShowImportPopup(onConfirm)
-  if not _importPopup then
-    local PW, PH = 640, 480
-    local f = CreateFrame("Frame", "AishCoreImportPopup", UIParent, "BackdropTemplate")
-    f:SetSize(PW, PH)
-    f:SetPoint("CENTER")
-    f:SetFrameStrata("DIALOG")
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop",  f.StopMovingOrSizing)
-    f:SetBackdrop({
-      bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-      edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-      tile = true, tileSize = 32, edgeSize = 32,
-      insets   = { left=11, right=12, top=12, bottom=11 },
-    })
-    f:SetBackdropColor(0.08, 0.08, 0.10, 0.98)
-
-    local titleLbl = f:CreateFontString(nil, "OVERLAY")
-    titleLbl:SetFont(ns.Media.fontGui, 13)
-    titleLbl:SetTextColor(0.5, 0.8, 1)
-    titleLbl:SetText(L["SETTINGS_IMPORT_PROFILE_TITLE"])
-    titleLbl:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -16)
-
-    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
-    closeBtn:SetScript("OnClick", function() f:Hide() end)
-
-    -- Champ nom
-    local nameLbl = f:CreateFontString(nil, "OVERLAY")
-    nameLbl:SetFont(ns.Media.fontGui, 10)
-    nameLbl:SetTextColor(0.7, 0.7, 0.7)
-    nameLbl:SetText(L["SETTINGS_NEW_PROFILE_NAME"])
-    nameLbl:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -42)
-
-    local nameEB = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    SW.StyleEditBox(nameEB)
-    nameEB:SetSize(300, 24)
-    nameEB:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -62)
-    nameEB:SetAutoFocus(false)
-    nameEB:SetMaxLetters(48)
-    nameEB:SetFont(ns.Media.fontGui, 11, "")
-    nameEB:SetScript("OnEscapePressed", function() f:Hide() end)
-    f._nameEB = nameEB
-
-    -- Zone de collage
-    local pasteLbl = f:CreateFontString(nil, "OVERLAY")
-    pasteLbl:SetFont(ns.Media.fontGui, 10)
-    pasteLbl:SetTextColor(0.7, 0.7, 0.7)
-    pasteLbl:SetText(L["SETTINGS_PASTE_PROFILE_STRING"])
-    pasteLbl:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -96)
-
-    -- Fond noir visible derrière la zone de collage
-    local pasteArea = CreateFrame("Frame", nil, f, "BackdropTemplate")
-    pasteArea:SetPoint("TOPLEFT",     f, "TOPLEFT",      14, -114)
-    pasteArea:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14,  52)
-    pasteArea:SetBackdrop({
-      bgFile  = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      edgeSize = 10,
-      insets   = { left=3, right=3, top=3, bottom=3 },
-    })
-    pasteArea:SetBackdropColor(0.03, 0.03, 0.03, 1)
-    pasteArea:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
-
-    -- ScrollFrame + EditBox à l'intérieur du fond
-    local sf = CreateFrame("ScrollFrame", nil, pasteArea, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT",     pasteArea, "TOPLEFT",      4,  -4)
-    sf:SetPoint("BOTTOMRIGHT", pasteArea, "BOTTOMRIGHT", -22,  4)
-
-    -- Largeur fixe calculée : PW - marges gauche/droite - scrollbar
-    local ebW = PW - 14 - 14 - 22 - 8  -- ˜ 582
-
-    local eb = CreateFrame("EditBox", nil, sf)
-    eb:SetSize(ebW, 400)   -- hauteur généreuse pour le contenu
-    eb:SetMultiLine(true)
-    eb:SetAutoFocus(false)
-    eb:SetMaxLetters(0)
-    eb:SetFont(ns.Media.fontGui, 9, "")
-    eb:SetTextInsets(4, 4, 4, 4)
-    eb:SetTextColor(0.9, 0.9, 0.9)
-    eb:EnableMouse(true)
-    eb:SetScript("OnEscapePressed", function() f:Hide() end)
-    sf:SetScrollChild(eb)
-    f._eb = eb
-
-    -- Clic sur la zone de fond ? focus l'EditBox
-    pasteArea:EnableMouse(true)
-    pasteArea:SetScript("OnMouseDown", function() eb:SetFocus() end)
-    sf:SetScript("OnMouseDown", function() eb:SetFocus() end)
-    eb:SetScript("OnMouseDown", function(self) self:SetFocus() end)
-
-    local importBtn = CreateFrame("Button", nil, f, "GameMenuButtonTemplate")
-    importBtn:SetSize(160, 26)
-    importBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 14)
-    importBtn:SetText(L["SETTINGS_IMPORT"])
-    importBtn:SetScript("OnClick", function()
-      local name = f._nameEB:GetText() or ""
-      local str  = f._eb:GetText() or ""
-      print("|cff00b0ff[AishCore Import DBG]|r nom='" .. name .. "' strLen=" .. #str)
-      if not f._onConfirm then
-        print("|cffff4444[AishCore Import DBG] _onConfirm est nil !|r")
-        f:Hide(); return
-      end
-      f:Hide()
-      f._onConfirm(name, str)
-    end)
-
-    local cancelBtn = CreateFrame("Button", nil, f, "GameMenuButtonTemplate")
-    cancelBtn:SetSize(130, 26)
-    cancelBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
-    cancelBtn:SetText(L["SETTINGS_CANCEL"])
-    cancelBtn:SetScript("OnClick", function() f:Hide() end)
-
-    _importPopup = f
-  end
-  _importPopup._nameEB:SetText("")
-  _importPopup._eb:SetText("")
-  _importPopup._onConfirm = onConfirm
-  _importPopup:Show()
-  _importPopup._nameEB:SetFocus()
-end
-
 -- Forward-déclarations : doivent être visibles par Build.Profiles ET par les
 -- SetScripts définis plus bas (SelectCategory, OnSizeChanged, etc.).
 local categoryContainers = {}
@@ -10258,7 +10205,7 @@ local activeCategory     = nil
 -- Définition de _invalidateCategory (forward-déclarée plus haut pour Build.ResourceCircle etc.)
 _invalidateCategory = function(catId)
   if not categoryContainers or not categoryContainers[catId] then return end
-  categoryContainers[catId].frame:Hide()
+  SW.ReleasePage(categoryContainers[catId])
   categoryContainers[catId] = nil
   if activeCategory == catId then
     local prev = catId
@@ -10606,101 +10553,6 @@ function Build.Profiles(container)
     if val then P.ApplySpecProfile() end
   end
 
-  -- -- Cooldown Manager par spécialisation --------------------------------
-  -- Section masquee : feature plus utilisee (cf. aussi P.ApplyCDMForSpec,
-  -- deja en "do return end" depuis le standby taint CDM). Code garde intact
-  -- pour reactivation eventuelle -- juste enveloppe dans if false.
-  if false then
-  ctx:Spacer(10)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_CDM_PROFILES"], W))
-
-  local cdmDesc = container:CreateFontString(nil, "OVERLAY")
-  cdmDesc:SetFont(ns.Media.fontGui, 10)
-  cdmDesc:SetTextColor(unpack(ns.Theme.textDim))
-  cdmDesc:SetJustifyH("LEFT")
-  cdmDesc:SetWordWrap(true)
-  cdmDesc:SetWidth(W)
-  cdmDesc:SetHeight(48)
-  cdmDesc:SetText(L["SETTINGS_CDM_PROFILES_DESC"])
-  ctx:Add(cdmDesc)
-
-  local cdmCB = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_CDM_AUTOAPPLY"],
-    L["SETTINGS_CDM_AUTOAPPLY_TT"],
-    W))
-  cdmCB:SetChecked(P.GetCDMAutoApplyEnabled())
-  cdmCB.onChanged = function(val) P.SetCDMAutoApplyEnabled(val) end
-
-  ctx:Spacer(6)
-
-  local cdmSaveBtn = CreateFrame("Button", nil, container)
-  cdmSaveBtn:SetSize(180, 22)
-  do
-    local bg = cdmSaveBtn:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints(); bg:SetColorTexture(0.06, 0.22, 0.06, 0.95)
-    local lbl = cdmSaveBtn:CreateFontString(nil, "OVERLAY")
-    lbl:SetFont(ns.Media.fontGui, 10); lbl:SetPoint("CENTER")
-    lbl:SetTextColor(0.4, 1, 0.4)
-    cdmSaveBtn._lbl = lbl
-  end
-  ctx:Add(cdmSaveBtn)
-
-  local cdmStatus = container:CreateFontString(nil, "OVERLAY")
-  cdmStatus:SetFont(ns.Media.fontGui, 10)
-  cdmStatus:SetTextColor(unpack(ns.Theme.textDim))
-  cdmStatus:SetJustifyH("LEFT")
-  cdmStatus:SetWordWrap(true)
-  cdmStatus:SetWidth(W)
-  cdmStatus:SetHeight(28)
-  ctx:Add(cdmStatus)
-
-  local function GetActiveSpecIDAndName()
-    if not GetSpecialization then return nil end
-    local idx = GetSpecialization()
-    if not idx then return nil end
-    return GetSpecializationInfo(idx)
-  end
-
-  local function RefreshCDMSection()
-    local specID, specName = GetActiveSpecIDAndName()
-    if specID then
-      cdmSaveBtn._lbl:SetText(string.format(L["SETTINGS_CDM_SAVE_BTN"], specName or ("#" .. specID)))
-      cdmSaveBtn:Enable()
-    else
-      cdmSaveBtn._lbl:SetText(L["SETTINGS_CDM_SAVE_BTN_NOSPEC"])
-      cdmSaveBtn:Disable()
-    end
-    local ids = P.ListCDMSpecs()
-    if #ids == 0 then
-      cdmStatus:SetText(L["SETTINGS_CDM_NONE_SAVED"])
-    else
-      local names = {}
-      for _, sid in ipairs(ids) do
-        local _, n = GetSpecializationInfoByID(sid)
-        names[#names + 1] = n or ("#" .. sid)
-      end
-      cdmStatus:SetText(string.format(L["SETTINGS_CDM_SAVED_LIST"], table.concat(names, ", ")))
-    end
-  end
-  RefreshCDMSection()
-
-  cdmSaveBtn:SetScript("OnClick", function()
-    local specID, specName = GetActiveSpecIDAndName()
-    if not specID then return end
-    local ok, err = P.SaveCDMForSpec(specID)
-    if ok then
-      print(string.format(L["SETTINGS_CDM_SAVED_MSG"], "|cffffd700" .. (specName or ("#" .. specID)) .. "|r", "|cffffd700" .. P.GetActive() .. "|r"))
-    else
-      print(string.format(L["SETTINGS_CDM_SAVE_ERROR"], tostring(err)))
-    end
-    RefreshCDMSection()
-    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-  end)
-
-  ns.CallbackRegistry:Register("SPEC_CHANGED", RefreshCDMSection)
-  ns.CallbackRegistry:Register("PROFILE_CHANGED", RefreshCDMSection)
-  end -- if false (section CDM par spe masquee)
-
   -- -- Copier à partir de -----------------------------------------------
   ctx:Spacer(10)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_COPY_FROM"], W))
@@ -10828,13 +10680,9 @@ function Build.Profiles(container)
     lbl:SetTextColor(0.4, 1, 0.4)
     exportBtn:SetSize(lbl:GetStringWidth() + 24, 22)
   end
+  -- Export / import par module (UI/ProfileModulesUI.lua) : tout coché par défaut = profil complet
   exportBtn:SetScript("OnClick", function()
-    local str, err = P.Export(P.GetActive())
-    if not str then
-      print(string.format(L["SETTINGS_PROFILE_ERROR_MSG_LABELED"], tostring(err)))
-    else
-      ShowExportPopup(str)
-    end
+    ns.ShowModuleExportPopup(P.GetActive())
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
   end)
 
@@ -10849,18 +10697,25 @@ function Build.Profiles(container)
     importBtn:SetSize(lbl:GetStringWidth() + 24, 22)
   end
   importBtn:SetScript("OnClick", function()
-    ShowImportPopup(function(name, str)
-      local ok, err = P.Import(str, name)
-      if not ok then
-        print(string.format(L["SETTINGS_PROFILE_ERROR_MSG_LABELED"], tostring(err)))
-      else
-        print(string.format(L["SETTINGS_PROFILE_IMPORTED_MSG"], "|cffffd700" .. name .. "|r"))
-        P.SetActive(name)
-      end
-      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-    end)
+    ns.ShowModuleImportPopup()
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
   end)
-  ctx:AddRow(4, exportBtn, importBtn)
+
+  local copyModBtn = CreateFrame("Button", nil, container)
+  do
+    local bg = copyModBtn:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints(); bg:SetColorTexture(0.16, 0.13, 0.05, 0.95)
+    local lbl = copyModBtn:CreateFontString(nil, "OVERLAY")
+    lbl:SetFont(ns.Media.fontGui, 10); lbl:SetPoint("CENTER")
+    lbl:SetText(L["SETTINGS_COPY_MODULES_BTN"])
+    lbl:SetTextColor(1, 0.85, 0.4)
+    copyModBtn:SetSize(lbl:GetStringWidth() + 24, 22)
+  end
+  copyModBtn:SetScript("OnClick", function()
+    ns.ShowModuleCopyPopup()
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+  end)
+  ctx:AddRow(4, exportBtn, importBtn, copyModBtn)
 
   ctx:Spacer()
 
@@ -10934,7 +10789,7 @@ function Build.Profiles(container)
       end
     end
     for _, catId in ipairs(toInvalidate) do
-      categoryContainers[catId].frame:Hide()
+      SW.ReleasePage(categoryContainers[catId])
       categoryContainers[catId] = nil
     end
     if activeCategory and activeCategory ~= "profiles" then
@@ -10948,6 +10803,14 @@ function Build.Profiles(container)
 end
 
 -- Wrappers vers les menus Auras & Procs (ns.Auras, anciennement AishUIAura)
+-- Extra Barres : page dans UI/ExtraBarsPage.lua (hors du chunk principal), qui reprend NewLayout
+function Build.ExtraBars(container)
+  if ns.BuildExtraBarsPage then ns.BuildExtraBarsPage(container, CONTENT_W, NewLayout) end
+end
+-- Gestionnaire de temps de recharge : page dans UI/CDMLayoutPage.lua (hors du chunk principal)
+function Build.CDMLayout(container)
+  if ns.BuildCDMLayoutPage then ns.BuildCDMLayoutPage(container, CONTENT_W) end
+end
 function Build.AurasRender(container, renderKey)
   if ns.Auras and ns.Auras.SettingsPanel and ns.Auras.SettingsPanel.BuildRenderMenu then
     ns.Auras.SettingsPanel.BuildRenderMenu(container, CONTENT_W, renderKey)
@@ -11052,10 +10915,10 @@ local MODULE_CATEGORIES = {
     key = "combat", label = L["SETTINGS_GROUP_COMBAT"],
     modules = {
       ModEntry("resourceCircle", L["SETTINGS_SEC_RESOURCE_CIRCLE"],  "resourceCircle", "enabled"),
-      ModEntry("orbs",           L["SETTINGS_MOD_ORBS"],             "spellEffects",   "orbsEnabled", L["SETTINGS_MOD_ORBS_TT"]),
       ModEntry("priorityBar",    L["SETTINGS_SEC_PRIORITY_BAR"],     "priorityBar",    "enabled"),
       ModEntry("cdmEssential",   L["SETTINGS_CAT_CDM_ESSENTIAL"],    "cdmEssential",   "enabled"),
       ModEntry("cdmUtility",     L["SETTINGS_CAT_CDM_UTILITY"],      "cdmUtility",     "enabled"),
+      ModEntry("cdmLayout",      L["SETTINGS_CAT_CDM_LAYOUT"],       "cdmLayout",      "enabled", L["SETTINGS_CAT_CDM_LAYOUT_TT"]),
       ModEntry("bigCursor",      L["SETTINGS_MOD_BIG_CURSOR"],       "bigCursor",      "enabled", L["SETTINGS_MOD_BIG_CURSOR_TT"]),
       ModEntry("rotationHelper", L["SETTINGS_CAT_ROTATION_HELPER"],  "rotationHelper", "enabled"),
     },
@@ -11097,15 +10960,27 @@ local MODULE_CATEGORIES = {
       ModEntry("xpBar",     L["SETTINGS_CAT_XP_BAR"],    "xpBar",     "enabled"),
       ModEntry("skyriding", L["SETTINGS_CAT_SKYRIDING"], "skyriding", "enabled"),
       ModEntry("location",  L["SETTINGS_CAT_LOCATION"],  "location",  "enabled", L["SETTINGS_LOC_ENABLE_TT"]),
+      ModEntry("extraBars", L["SETTINGS_CAT_EXTRA_BARS"], "extraBars", "enabled", L["SETTINGS_CAT_EXTRA_BARS_TT"]),
       ModEntry("afkMode",   L["SETTINGS_CAT_AFK_MODE"],  "afkMode",   "enabled"),
       ModEntry("characterArmory", L["SETTINGS_CAT_CHARACTER_ARMORY"], "characterArmory", "enabled"),
       ModEntry("visibility", L["SETTINGS_MOD_ELVUI_BUFFS"], "visibility", "elvuiBuffsEnabled", L["SETTINGS_MOD_ELVUI_BUFFS_TT"]),
     },
   },
   {
+    -- Un interrupteur par type d'animation (spellEffects.<type>Enabled, cf. Modules/SpellEffects.lua)
+    key = "animations", label = L["SETTINGS_GROUP_ANIMATIONS"],
+    modules = {
+      ModEntry("animOoc",     L["PROFILE_ITEM_ANIM_OOC"],     "spellEffects", "oocEnabled"),
+      ModEntry("animSpells",  L["PROFILE_ITEM_ANIM_SPELLS"],  "spellEffects", "spellsEnabled"),
+      ModEntry("animAuras",   L["PROFILE_ITEM_ANIM_AURAS"],   "spellEffects", "aurasEnabled"),
+      ModEntry("animMissing", L["PROFILE_ITEM_ANIM_MISSING"], "spellEffects", "missingBuffsEnabled"),
+      ModEntry("animLogos",   L["PROFILE_ITEM_ANIM_LOGOS"],   "spellEffects", "logosEnabled"),
+      ModEntry("orbs",        L["PROFILE_ITEM_ANIM_ORBS"],    "spellEffects", "orbsEnabled", L["SETTINGS_MOD_ORBS_TT"]),
+    },
+  },
+  {
     key = "auras", label = L["SETTINGS_GROUP_AURAS_PROCS"],
     modules = {
-      ModEntry("spellEffects", L["SETTINGS_SEC_3D_ANIMATIONS"], "spellEffects", "enabled"),
       ModAurasTrackingEntry(),
       ModAuraEntry("aurasTrinkets",   L["SETTINGS_CAT_TRINKETS"],    "equipmentEnabled"),
       {
@@ -11126,6 +11001,8 @@ local MODULE_CATEGORIES = {
     },
   },
 }
+-- Modules indisponibles sur ce client (cf. ns.IsModuleAvailable) : absents de la page Modules
+for _, c in ipairs(MODULE_CATEGORIES) do ns.PruneUnavailable(c.modules) end
 
 -- ns.DB.modulesPanel.categoryOff[catKey] : true si la catégorie a été coupée
 -- en bloc depuis cette page (persistant, cf. Config/Defaults.lua).
@@ -11322,10 +11199,10 @@ function Build.CategoryColumn(container, catKeys, x, colW, yOffset)
   return y
 end
 
--- 3 colonnes : Cadres d'unités / Combat / le reste (Monde, Auras & Procs, Divers).
+-- 3 colonnes : Cadres d'unités / Combat + Animations 3D / le reste (Monde, Auras & Procs, Divers).
 local MOD_COLUMNS = {
   { "unitFrames" },
-  { "combat" },
+  { "combat", "animations" },
   { "world", "auras", "misc" },
 }
 
@@ -11472,6 +11349,12 @@ function Build.CDM(container, dbKey)
   local slItemSize = SW.CreateSlider(container, L["SETTINGS_CDM_ITEM_SIZE"], 16, 80, 1, SL_W2)
   BindSlider(slItemSize, dbKey, "itemSize")
   ctx:AddRowCentered(8, cbItemSize, slItemSize)
+
+  local cbSpacing = SW.CreateCheckbox(container, L["SETTINGS_CDM_USE_ICON_SPACING"], L["SETTINGS_CDM_USE_ICON_SPACING_TT"], SL_W2)
+  BindCheckbox(cbSpacing, dbKey, "useIconSpacing")
+  local slSpacing = SW.CreateSlider(container, L["SETTINGS_CDM_ICON_SPACING"], -4, 40, 1, SL_W2)
+  BindSlider(slSpacing, dbKey, "iconSpacing")
+  ctx:AddRowCentered(8, cbSpacing, slSpacing)
 
   -- Position liee a la barre de vie du joueur (Essentiels uniquement)
   if dbKey == "cdmEssential" then
@@ -12406,6 +12289,12 @@ local CATEGORIES = {
     build = Build.Location,
   },
   {
+    id    = "extraBars",
+    label = L["SETTINGS_CAT_EXTRA_BARS"],
+    icon  = "Interface\\Icons\\INV_Potion_54",
+    build = Build.ExtraBars,
+  },
+  {
     id    = "afkMode",
     label = L["SETTINGS_CAT_AFK_MODE"],
     icon  = "Interface\\Icons\\INV_Misc_PocketWatch_01",
@@ -12440,6 +12329,12 @@ local CATEGORIES = {
     label = L["SETTINGS_CAT_CDM_UTILITY"],
     icon  = "Interface\\Icons\\INV_Misc_PocketWatch_02",
     build = function(c) Build.CDM(c, "cdmUtility") end,
+  },
+  {
+    id    = "cdmLayout",
+    label = L["SETTINGS_CAT_CDM_LAYOUT"],
+    icon  = "Interface\\Icons\\Spell_Holy_BorrowedTime",
+    build = Build.CDMLayout,
   },
   {
     -- Page dediee minimaliste : un seul reglage (enabled).
@@ -12506,65 +12401,42 @@ local CATEGORIES = {
   },
   --]]
 }
+ns.PruneUnavailable(CATEGORIES)
 
 -- Groupes de la sidebar (style AishUI : headers parchemin + sections cliquables)
 local SIDEBAR_GROUPS = {
   { label = L["SETTINGS_GROUP_GLOBAL"],      ids = { "modulesOverview", "colors", "profiles", "heroicSupport" } },
   { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "castBar", "targetCastBar", "topTargetBar", "targetAuras", "groupNumber" } },
-  { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "cdmEssential", "cdmUtility", "bigCursor", "rotationHelper" } },
-  { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "xpBar", "skyriding", "location", "afkMode", "visibility", "characterArmory" } },
+  { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "cdmEssential", "cdmUtility", "cdmLayout", "bigCursor", "rotationHelper" } },
+  { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "xpBar", "skyriding", "location", "extraBars", "afkMode", "visibility", "characterArmory" } },
   { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasTrinkets", "aurasMissingBuffs", "spellEffects" } },
 }
+for _, grp in ipairs(SIDEBAR_GROUPS) do ns.PruneUnavailable(grp.ids) end
 
 -- Table catId → bouton (remplace l'ancien tableau indexé)
 local categoryButtons = {}
 local _sbSearchFilter = ""
 
--- Recherche "plein texte" dans le contenu de chaque section (pas seulement
--- son nom) : demande utilisateur -- taper "cd" doit remonter toute section
--- contenant un reglage lie aux CDs quelque part, pas seulement les sections
--- dont le NOM contient "cd". GetOrBuildContainer (defini plus bas, d'ou
--- l'avant-declaration) construit deja paresseusement chaque page au premier
--- besoin et la met en cache pour toute la session (categoryContainers) --
--- on reutilise EXACTEMENT ce meme mecanisme pour l'indexation : aucun
--- risque nouveau, juste declenche plus tot (des la 1ere recherche au lieu
--- d'attendre la navigation manuelle). Le texte extrait (tous les
--- FontString du sous-arbre, checkboxes/sliders/dropdowns/headers inclus)
--- est mis en cache par section, calcule une seule fois par session.
+-- Recherche "plein texte" dans le contenu de chaque section (pas seulement son nom) : taper "cd"
+-- doit remonter toute section contenant un reglage lie aux CDs. Cf. GetCategorySearchText.
 local GetOrBuildContainer -- avant-declaration, assignee plus bas (ligne ~10837)
 local _categorySearchIndex = {}
 
-local function CollectFrameText(f, buf)
-  local ok = pcall(function()
-    for _, region in ipairs({ f:GetRegions() }) do
-      if region.GetObjectType and region:GetObjectType() == "FontString" then
-        local txt = region:GetText()
-        if txt and txt ~= "" then buf[#buf + 1] = txt end
-      end
-    end
-    for _, child in ipairs({ f:GetChildren() }) do
-      CollectFrameText(child, buf)
-    end
-  end)
-  if not ok then return end
-end
-
+-- Texte cherchable d'une page : libellés de ses clés de locale (Data/SearchIndex.lua, généré par
+-- generate_search_index.py). Ne construit aucune page : construire les 33 pages pour lire leur
+-- texte les gardait toutes en mémoire jusqu'au /reload.
 local function GetCategorySearchText(catId)
   local cached = _categorySearchIndex[catId]
   if cached ~= nil then return cached end
-  if not GetOrBuildContainer then _categorySearchIndex[catId] = ""; return "" end
-
-  local text = ""
-  local ok = pcall(function()
-    local entry = GetOrBuildContainer(catId)
-    if entry and entry.frame then
-      local buf = {}
-      CollectFrameText(entry.frame, buf)
-      text = table.concat(buf, " "):lower()
+  local buf = {}
+  local keys = ns.SEARCH_INDEX and ns.SEARCH_INDEX[catId]
+  if keys then
+    for key in keys:gmatch("%S+") do
+      local txt = rawget(L, key)
+      if txt then buf[#buf + 1] = txt end
     end
-  end)
-  if not ok then text = "" end
-
+  end
+  local text = table.concat(buf, " "):lower()
   _categorySearchIndex[catId] = text
   return text
 end
@@ -12947,11 +12819,14 @@ GetOrBuildContainer = function(catId)
   -- de la page -- le seul a promouvoir un titre et a decouper en sections.
   _buildingCatId = catId
   _buildingFrame = frame
-  local ok, widgets = pcall(cat.build, frame)
+  local memBefore = collectgarbage("count")
+  -- Callbacks enregistrés par la page : neutralisés si elle est invalidée (cf. SW.ReleasePage)
+  local callbacks, ok, widgets = SW.TrackCallbacks(cat.build, frame)
+  if ns.RecordBuildMemory then ns.RecordBuildMemory(catId, collectgarbage("count") - memBefore) end
   _buildingCatId = nil
   _buildingFrame = nil
   if not ok then error(widgets, 0) end
-  categoryContainers[catId] = { frame = frame, widgets = widgets }
+  categoryContainers[catId] = { frame = frame, widgets = widgets, callbacks = callbacks }
   return categoryContainers[catId]
 end
 

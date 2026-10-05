@@ -1807,6 +1807,22 @@ end
 local ApplyStacksToText
 
 -- Met a jour la valeur et le texte selon la ressource primaire detectee
+-- Le texte n'est repose que s'il a CHANGE : le ticker tourne a 5 Hz et reecrivait la meme
+-- valeur en boucle, or ce FontString porte un anneau SLUG et chaque SetText est propage a
+-- 8 autres FontStrings. La comparaison est protegee : string.format sur une valeur secrete
+-- rend une SECRET STRING, que l'on ne peut pas comparer.
+local _rcLastText
+local function SetResourceText(txt)
+  local okCmp, same = pcall(function() return txt == _rcLastText end)
+  if okCmp then
+    if same then return end
+    _rcLastText = txt
+  else
+    _rcLastText = nil
+  end
+  pcall(bar.text.SetText, bar.text, txt)
+end
+
 function ResourceCircle.Update()
   if not bar or not bar.text then return end
   if previewMode then return end
@@ -1889,7 +1905,7 @@ function ResourceCircle.Update()
     local txt = ns.AuraText and ns.AuraText.ICICLES
     pcall(bar.text.SetText, bar.text, txt or "0")
   else
-    pcall(bar.text.SetText, bar.text, displayText)
+    SetResourceText(displayText)
   end
 end
 

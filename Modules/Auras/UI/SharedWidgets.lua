@@ -470,6 +470,24 @@ function SW.CreateSectionStack(parent, sections, cw, startY, stackId)
     -- option conditionnelle) decale tout ce qui la suit : on redispose sur son OnSizeChanged.
     for _, entry in ipairs(entries) do
         entry.sub:SetScript("OnSizeChanged", function() Relayout() end)
+        -- Sections construites repliees (cachees) : le client ne resout pas toujours le rect
+        -- du premier widget pose dedans, qui reste invisible jusqu'a un redimensionnement du
+        -- panneau. A chaque affichage, on reapplique les ancrages des enfants a la frame
+        -- suivante, ce qui force le recalcul comme le ferait un redimensionnement.
+        entry.sub:HookScript("OnShow", function(self)
+            C_Timer.After(0, function()
+                if not self:IsShown() then return end
+                for _, ch in ipairs({ self:GetChildren() }) do
+                    local n = ch:GetNumPoints()
+                    if n > 0 then
+                        local pts = {}
+                        for i = 1, n do pts[i] = { ch:GetPoint(i) } end
+                        ch:ClearAllPoints()
+                        for i = 1, n do ch:SetPoint(unpack(pts[i])) end
+                    end
+                end
+            end)
+        end)
     end
 
     Relayout()
