@@ -1,1 +1,4 @@
 package-as: AishCore
+ignore:
+  - CLAUDE.md
+  - docs
