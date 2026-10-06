@@ -678,16 +678,27 @@ local ACTION_BUTTON_BINDINGS = {
   MultiBar7Button           = "MULTIACTIONBAR7BUTTON",
 }
 
---- SpellID porte par un bouton d'action (slot d'action, sinon methode GetSpellID des boutons TWW).
+-- GetMacroSpell suit le sort d'une macro mono-sort (healers) -- GetActionInfo seul ne le resout pas.
+local GetMacroSpellID = (C_Macro and C_Macro.GetMacroSpell) or GetMacroSpell
+
+--- SpellID porte par un bouton d'action (slot d'action, sinon methode GetSpellID des boutons TWW,
+--- sinon macro mono-sort).
 function ns.GetActionButtonSpellID(button)
   if not button then return nil end
-  if button.action and type(button.action) == "number" then
-    local ok, aType, id = pcall(GetActionInfo, button.action)
-    if ok and aType == "spell" and id and id > 0 then return id end
+  local action = button.action
+  local aType, aId
+  if action and type(action) == "number" then
+    local ok
+    ok, aType, aId = pcall(GetActionInfo, action)
+    if ok and aType == "spell" and aId and aId > 0 then return aId end
   end
   if button.GetSpellID then
     local ok, sid = pcall(button.GetSpellID, button)
     if ok and sid and type(sid) == "number" and sid > 0 then return sid end
+  end
+  if aType == "macro" and aId and GetMacroSpellID then
+    local ok, macroSid = pcall(GetMacroSpellID, aId)
+    if ok and macroSid and macroSid > 0 then return macroSid end
   end
   return nil
 end

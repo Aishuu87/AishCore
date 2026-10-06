@@ -45,8 +45,24 @@ local GOLD = { 0.78, 0.62, 0.30 }
 -- et le voile plein écran bloque les clics sur celles-ci tant que la nôtre est ouverte.
 -- buttons = { { text, primary, onClick }, ... } (1 à 3, centrés). Une popup par `name`, construite
 -- une seule fois.
+--
+-- Plusieurs popups peuvent être demandées au même login (setup AishUI + Gestionnaire de temps de
+-- recharge sur une spé jamais configurée) : les superposer rendrait les deux illisibles. Une seule
+-- est jamais affichée à la fois ; les suivantes attendent en file et s'affichent au fur et à mesure
+-- que les précédentes se ferment (reload, bouton ou Échap).
 local popups = {}
-local function ShowSetupPopup(name, titleText, msgText, buttons)
+local activeName
+local queue = {}
+local DisplaySetupPopup -- déclarée ici, définie plus bas (ProcessQueue la referme avant)
+
+local function ProcessQueue()
+  if activeName then return end
+  local item = table.remove(queue, 1)
+  if item then DisplaySetupPopup(item.name, item.title, item.msg, item.buttons) end
+end
+
+function DisplaySetupPopup(name, titleText, msgText, buttons)
+  activeName = name
   local popup = popups[name]
   -- Déjà construite : seul le texte peut changer (ex. nom du build dans la popup du CDM)
   if popup then popup.msg:SetText(msgText); popup:Show(); return popup end
@@ -67,6 +83,12 @@ local function ShowSetupPopup(name, titleText, msgText, buttons)
     local esc = key == "ESCAPE"
     if not InCombatLockdown() then self:SetPropagateKeyboardInput(not esc) end
     if esc then self:Hide() end
+  end)
+  -- Libère la place pour la prochaine popup en file, quelle que soit la façon dont celle-ci
+  -- se ferme (bouton, Échap, ou :Hide() direct).
+  popup:HookScript("OnHide", function()
+    if activeName == name then activeName = nil end
+    ProcessQueue()
   end)
 
   local W, H = 560, 260
@@ -144,16 +166,41 @@ local function ShowSetupPopup(name, titleText, msgText, buttons)
   for i, def in ipairs(buttons) do
     local b = MakeBtn(def[1], def[2], bw)
     b:SetPoint("BOTTOMLEFT", box, "BOTTOM", x0 + (i - 1) * (bw + gap), 24)
-    b:SetScript("OnClick", function() popup:Hide(); def[3]() end)
+    -- L'action D'ABORD, Hide() après : un clic sur "Recharger" doit appeler ReloadUI() en tout
+    -- premier, sans rien exécuter entre le clic et l'appel protégé. Hide() déclenche OnHide, qui
+    -- peut à son tour afficher la popup suivante de la file (ProcessQueue) -- toute la création de
+    -- frame que ça entraîne, intercalée avant ReloadUI(), suffit à faire échouer l'appel protégé
+    -- sur certains clients (Forever : ADDON_ACTION_BLOCKED sur Reload()).
+    b:SetScript("OnClick", function() def[3](); popup:Hide() end)
   end
 
   popup:Show()
   return popup
 end
 
+-- Point d'entrée public : affiche tout de suite si rien d'autre n'est à l'écran, sinon met en
+-- file (remplace une entrée en attente du même nom plutôt que d'en empiler deux).
+local function ShowSetupPopup(name, titleText, msgText, buttons)
+  if activeName and activeName ~= name then
+    for i, q in ipairs(queue) do
+      if q.name == name then
+        queue[i] = { name = name, title = titleText, msg = msgText, buttons = buttons }
+        return
+      end
+    end
+    queue[#queue + 1] = { name = name, title = titleText, msg = msgText, buttons = buttons }
+    return
+  end
+  return DisplaySetupPopup(name, titleText, msgText, buttons)
+end
+
 -- Réutilisée par le Gestionnaire de temps de recharge (Modules/CDMLayout.lua)
 ns.ShowSetupPopup = ShowSetupPopup
 
+-- ReloadUI() refusé une 1re fois (ADDON_ACTION_BLOCKED) à cause de l'ordre Hide()/action, corrigé
+-- plus bas (DisplaySetupPopup : l'action tourne avant Hide()). Après ce fix, plus aucune erreur de
+-- blocage constatée -- le souci suivant (modules pas désactivés) était un bug séparé côté
+-- SetupEllesmere, déjà réglé. Donc ReloadUI(), identique à Retail : à retester.
 local function ShowReloadPopup()
   ShowSetupPopup("AishCoreEllesmereSetup", L["ELLESMERE_SETUP_TITLE"], L["ELLESMERE_SETUP_PROMPT"], {
     { L["ELLESMERE_SETUP_RELOAD"], true, ReloadUI },
@@ -164,25 +211,42 @@ end
 -- Modules EllesmereUI (niveau compte). Renvoie true si un reload est nécessaire.
 local function SetupEllesmere()
   if not (C_AddOns.DoesAddOnExist and C_AddOns.DoesAddOnExist("EllesmereUI")) then return end
+  -- ElvUI chargé ce perso = l'utilisateur est sur ce flavor-là (choix de l'installeur ou manuel) :
+  -- ne jamais réactiver EllesmereUI par-dessus, même si EllesmereUI est resté sur le disque et que
+  -- _ellesmereSetup a été remis à zéro par une réinstallation (AishaddonDB réécrite avec le pack).
+  if C_AddOns.IsAddOnLoaded("ElvUI") then return end
   if not BNGetInfo then return end
   local _, battleTag = BNGetInfo()
   if not battleTag or battleTag == "" then return end  -- Battle.net hors ligne : retenté au prochain login
 
   local id = Hash(battleTag)
+  -- Une seule tentative pour toujours, jamais plus : passé ce premier login, l'utilisateur est
+  -- libre de réactiver/désactiver n'importe quel module EllesmereUI à la main sans qu'on revienne
+  -- le corriger derrière lui ni le relancer avec ce popup. (Le verrou doit donc se poser ici,
+  -- AVANT la correction, pas après : sinon une correction qui échoue retenterait indéfiniment --
+  -- bug vécu -- mais une fois tentée, qu'elle ait réussi ou non, on n'y retouche plus.)
   if AishaddonDB._ellesmereSetup == id then return end
+  AishaddonDB._ellesmereSetup = id
 
-  local needReload = false
+  local matched, needReload = 0, false
   for i = 1, C_AddOns.GetNumAddOns() do
     local name = C_AddOns.GetAddOnInfo(i)
     if name and name:find("^EllesmereUI") and not SKIP[name] then
+      matched = matched + 1
       local keep = KEEP[name] and true or false
-      -- Sans nom de perso : s'applique à tous les personnages du compte
-      if keep then C_AddOns.EnableAddOn(name) else C_AddOns.DisableAddOn(name) end
-      if keep ~= (C_AddOns.IsAddOnLoaded(name) and true or false) then needReload = true end
+      local loaded = C_AddOns.IsAddOnLoaded(name) and true or false
+      if keep ~= loaded then
+        needReload = true
+        -- Sans nom de perso : s'applique à tous les personnages du compte. pcall : un appel
+        -- refusé par ce client ne doit jamais interrompre la suite de Apply() (Platynator,
+        -- profil privé ElvUI) -- vécu avec une variante à deux arguments retirée depuis.
+        pcall(keep and C_AddOns.EnableAddOn or C_AddOns.DisableAddOn, name)
+      end
     end
   end
-
-  AishaddonDB._ellesmereSetup = id
+  if matched == 0 then
+    print("|cffff4444[AishCore]|r SetupEllesmere : aucun addon EllesmereUI* trouvé par GetAddOnInfo (rien à activer/désactiver).")
+  end
   return needReload
 end
 
@@ -307,9 +371,21 @@ local function Apply()
   AishUISetupCharDB = AishUISetupCharDB or {}
   local done = AishUISetupCharDB
 
-  local r1 = SetupEllesmere()
-  local r2 = SetupPlatynator(done)
-  local r3 = SetupElvUIPrivate(done)
+  -- Chaque étape dans son propre pcall : une erreur dans l'une (ex. SetupEllesmere sur un client
+  -- qui refuse un appel) ne doit plus jamais empêcher les suivantes de tourner -- vécu avec
+  -- Platynator et le profil privé ElvUI restés sans effet à cause d'une erreur plus haut.
+  local function Try(fn, ...)
+    local ok, result = pcall(fn, ...)
+    if not ok then
+      print("|cffff4444[AishCore]|r AishUISetup : " .. tostring(result))
+      return false
+    end
+    return result
+  end
+
+  local r1 = Try(SetupEllesmere)
+  local r2 = Try(SetupPlatynator, done)
+  local r3 = Try(SetupElvUIPrivate, done)
   if r1 or r2 or r3 then ShowReloadPopup() end
 end
 
@@ -347,3 +423,25 @@ f:SetScript("OnEvent", function(self, event)
     end
   end
 end)
+
+-- Commande slash dédiée : AishCore.lua charge APRÈS ce fichier (section "# Init" en fin de .toc)
+-- et écrase SlashCmdList["AISHCORE"] sans jamais chaîner vers un handler précédent -- un sous-
+-- commande "setup" greffée sur /aishcore serait donc silencieusement perdue. Commande à part,
+-- comme /aishspec ou /aishdebug ailleurs dans l'addon.
+-- Relance le setup auto (modules EllesmereUI, profils Platynator et ElvUI privé, mode Édition)
+-- sans attendre un nouveau login. Utile si le popup n'a pas été proposé la première fois, ou pour
+-- revalider manuellement l'état d'un compte. Le changement d'état des addons EllesmereUI ne prend
+-- effet qu'au reload/relog suivant, comme d'habitude -- cette commande relance seulement la
+-- détection + la correction, pas le reload.
+SLASH_AISHSETUP1 = "/aishsetup"
+SlashCmdList["AISHSETUP"] = function()
+  AishaddonDB = AishaddonDB or {}
+  AishaddonDB._ellesmereSetup = nil
+  AishUISetupCharDB = AishUISetupCharDB or {}
+  AishUISetupCharDB.platynator = nil
+  AishUISetupCharDB.elvuiPrivate = nil
+  AishUISetupCharDB.editMode = nil
+  print("|cff00ccff[AishCore]|r Setup relancé.")
+  SafeRun(Apply)
+  SafeRun(ApplyEditMode)
+end
