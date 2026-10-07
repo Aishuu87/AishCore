@@ -421,4 +421,8 @@ ns.SecondaryResourceDefs = {
 -- Forever : aucune ressource secondaire moderne n'existe (Bouclier d'os, fragments d'ame, Dur au
 -- mal, Fer-poil, The de mana, Coeur demoniaque...). Les points de combo ne sont pas concernes :
 -- ils sont lus via UnitPowerMax (cf. ResourceCircle.lua) et apparaissent d'eux-memes.
-if ns.IsForever then ns.SecondaryResourceDefs = {} end
+if ns.IsForever then
+  -- Seule exception : Demoniste (3 specs), fragments d'ame = objet 6265 dans les sacs (useItemCount)
+  local shards = { itemID = 6265, useItemCount = true, color = { 0.60, 0.35, 0.85, 1 } }
+  ns.SecondaryResourceDefs = { [265] = shards, [266] = shards, [267] = shards }
+end

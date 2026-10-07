@@ -486,6 +486,36 @@ end
 
 function ExtraBars.GetBarFrame(i) return bars[i] end
 
+-- Bandages : pas de cooldown d'objet, c'est le debuff "Bandage appliqué récemment" qui bloque la
+-- réutilisation. On affiche sa durée sur l'icône (option bandageCooldown de la barre).
+local RECENTLY_BANDAGED = 11196
+local BANDAGE_SUB = SUB.bandage
+
+local function IsBandage(b)
+  if b._bandageFor ~= b.itemID then
+    b._bandageFor = b.itemID
+    local _, _, _, _, _, classID, subClassID = C_Item.GetItemInfoInstant(b.itemID)
+    b._isBandage = (classID == CONSUMABLE and subClassID == BANDAGE_SUB) or false
+  end
+  return b._isBandage
+end
+
+-- true si le swipe du debuff a ete pose
+local function ShowBandageCooldown(b)
+  local bc = b.__bc
+  if bc and bc.bandageCooldown == false then return false end
+  local okA, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, RECENTLY_BANDAGED)
+  if not okA or not aura then return false end
+  -- Objet de duree natif (valeurs secretes en combat), sinon calcul depuis l'expiration
+  if C_UnitAuras.GetAuraDuration and aura.auraInstanceID then
+    local okD, dur = pcall(C_UnitAuras.GetAuraDuration, "player", aura.auraInstanceID)
+    if okD and dur and pcall(b.cooldown.SetCooldownFromDurationObject, b.cooldown, dur) then return true end
+  end
+  return pcall(function()
+    b.cooldown:SetCooldown(aura.expirationTime - aura.duration, aura.duration)
+  end)
+end
+
 -- Compteurs et cooldowns : non protégés, mis à jour aussi en combat
 local function RefreshButtonState(b)
   if not b.itemID then return end
@@ -497,6 +527,7 @@ local function RefreshButtonState(b)
     local count = C_Item.GetItemCount(b.itemID, false, true) or 0
     b.count:SetText(count > 1 and count or "")
     b.icon:SetDesaturated(count == 0)
+    if IsBandage(b) and ShowBandageCooldown(b) then return end
     local start, duration = C_Container.GetItemCooldown(b.itemID)
     pcall(b.cooldown.SetCooldown, b.cooldown, start or 0, duration or 0)
   end
@@ -535,11 +566,44 @@ function ExtraBars.GridCell(bc, idx, cols, rows, per)
   return col, row
 end
 
+-- Blesse : meme notion que le cercle de vie hors combat (HealthCircle.IsPlayerInjured). En combat
+-- la barre est affichee de toute facon, ce verdict ne sert qu'hors combat.
+local function PlayerInjured()
+  local HC = ns.Modules and ns.Modules.HealthCircle
+  return HC and HC.IsPlayerInjured and HC.IsPlayerInjured() or false
+end
+
 local function VisibilityDriver(bc)
   local base = "[petbattle][vehicleui] hide; "
+  if bc.visibility == "injured" then
+    return base .. "[combat] show; " .. (PlayerInjured() and "show" or "hide")
+  end
   if bc.visibility == "combat" then return base .. "[combat] show; hide" end
   if bc.visibility == "nocombat" then return base .. "[combat] hide; show" end
   return base .. "show"
+end
+
+-- Mode "blesse ou en combat" : reevalue hors combat quand la vie change (le pilote de visibilite
+-- ne sait pas tester la vie, il est reenregistre avec la valeur courante).
+local function RefreshInjuredVisibility()
+  if InCombatLockdown() or dragUnlocked then return end
+  for _, bar in pairs(bars) do
+    local bc = bar.__cfg
+    if bc and bc.visibility == "injured" then
+      local injured = PlayerInjured()
+      if bar._injured ~= injured then
+        bar._injured = injured
+        RegisterStateDriver(bar, "visibility", VisibilityDriver(bc))
+      end
+    end
+  end
+end
+
+-- Le verdict "blesse" expire sans evenement (delai sans variation de vie) : reverifier apres.
+local function CheckInjuredSoon()
+  RefreshInjuredVisibility()
+  local cfg = ns.GetCfg("healthCircle")
+  C_Timer.After(((cfg and cfg.hideDelay) or 1.5) + 0.2, RefreshInjuredVisibility)
 end
 
 -- Reconstruit une barre (hors combat uniquement)
@@ -566,6 +630,7 @@ local function LayoutBar(i)
     if j <= shown then
       if not b then b = CreateButton(bar, i, j); bar.buttons[j] = b end
       b.itemID, b.invSlot = e.itemID, e.invSlot
+      b.__bc = bc
       b:SetAttribute("type", "item")
       b:SetAttribute("item", e.invSlot and tostring(e.invSlot) or ("item:" .. e.itemID))
       b.icon:SetTexture(C_Item.GetItemIconByID(e.itemID) or PLACEHOLDER_ICON)
@@ -597,6 +662,7 @@ local function LayoutBar(i)
     UnregisterStateDriver(bar, "visibility")
     bar:Show()
   else
+    bar._injured = PlayerInjured()
     RegisterStateDriver(bar, "visibility", VisibilityDriver(bc))
   end
 end
@@ -674,16 +740,22 @@ ev:RegisterEvent("BAG_UPDATE_DELAYED")
 ev:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 ev:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 ev:RegisterEvent("BAG_UPDATE_COOLDOWN")
+ev:RegisterUnitEvent("UNIT_AURA", "player")
 ev:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("UPDATE_BINDINGS")
+ev:RegisterUnitEvent("UNIT_HEALTH", "player")
+ev:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
 ev:SetScript("OnEvent", function(_, event)
-  if event == "BAG_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_COOLDOWN" then
+  if event == "BAG_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_COOLDOWN" or event == "UNIT_AURA" then
     RefreshStates()
   elseif event == "UPDATE_BINDINGS" then
     RefreshKeybinds()
+  elseif event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
+    CheckInjuredSoon()
   elseif event == "PLAYER_REGEN_ENABLED" then
     if pendingLayout then ExtraBars.Layout() end
+    CheckInjuredSoon()
   elseif event == "PLAYER_ENTERING_WORLD" then
     ExtraBars.ApplySettings()
   else

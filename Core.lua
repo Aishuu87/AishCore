@@ -1259,8 +1259,10 @@ function ns.ApplyTextOutlineStyle(fontString, ring, fontPath, size, style, apply
     if style == "THICKOUTLINE" then flags = "THICKOUTLINE"
     elseif style == "SLUG" or style == "" then flags = "" end
     local safePath = fontPath or (ns.Media and ns.Media.font) or "Fonts\\FRIZQT__.TTF"
-    local ok = pcall(function() fontString:SetFont(safePath, size or 12, flags) end)
-    if not ok then fontString:SetFont("Fonts\\FRIZQT__.TTF", size or 12, flags) end
+    -- Hauteur <= 0 (ex. GetFont d'une police pas encore chargee) : SetFont leve une erreur
+    if type(size) ~= "number" or size <= 0 then size = 12 end
+    local ok = pcall(function() fontString:SetFont(safePath, size, flags) end)
+    if not ok then fontString:SetFont("Fonts\\FRIZQT__.TTF", size, flags) end
     if applyDefaultShadow then
         if style == "SLUG" then
             fontString:SetShadowOffset(0, 0)
@@ -1272,8 +1274,8 @@ function ns.ApplyTextOutlineStyle(fontString, ring, fontPath, size, style, apply
     if ring then
         local slugOn = (style == "SLUG")
         for _, fs in ipairs(ring) do
-            local rok = pcall(function() fs:SetFont(safePath, size or 12, "") end)
-            if not rok then fs:SetFont("Fonts\\FRIZQT__.TTF", size or 12, "") end
+            local rok = pcall(function() fs:SetFont(safePath, size, "") end)
+            if not rok then fs:SetFont("Fonts\\FRIZQT__.TTF", size, "") end
             fs:SetTextColor(0, 0, 0, 1)
             fs:SetShown(slugOn)
         end

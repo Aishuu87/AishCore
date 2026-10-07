@@ -1497,6 +1497,7 @@ eventFrame:RegisterUnitEvent("UNIT_ABSORB_AMOUNT_CHANGED",   "player", "target",
 eventFrame:RegisterUnitEvent("UNIT_HEAL_PREDICTION",         "player", "target", "focus", "pet", "targettarget")
 eventFrame:RegisterUnitEvent("UNIT_HEAL_ABSORB_AMOUNT_CHANGED", "player", "target", "focus", "pet", "targettarget")
 eventFrame:RegisterUnitEvent("UNIT_TARGET",                  "target")  -- target change de cible => mettre a jour targettarget
+eventFrame:RegisterUnitEvent("UNIT_NAME_UPDATE",              "target", "focus", "pet", "targettarget")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 eventFrame:RegisterEvent("PLAYER_FOCUS_CHANGED")
 eventFrame:RegisterEvent("UNIT_PET")
@@ -1698,6 +1699,14 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         local f = bars.pet
         if f then UpdateBarHealth(f); UpdateBarColor(f); UpdateBarName(f) end
         UnitBars.UpdateAllVisibility()   -- pet appear/disappear => réévaluer visibilité
+        return
+    end
+
+    -- Nom du pet/cible parfois "Unknown" à l'invocation : rafraîchir quand le nom est chargé
+    if event == "UNIT_NAME_UPDATE" then
+        local k = UNIT_KEY[arg1]
+        local f = k and bars[k]
+        if f then UpdateBarName(f) end
         return
     end
 

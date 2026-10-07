@@ -206,7 +206,8 @@ local function TDBG(s) print("|cff33aaff[TotemsFlow]|r " .. tostring(s)) end
 
 -- Reactive la propagation au prochain retour hors combat si SetPropagateMouseClicks(true) echoue en combat.
 local function TotemsSafeSetPropagateMouseClicks(f, allow)
-    local ok = pcall(f.SetPropagateMouseClicks, f, allow)
+    -- pcall n'empeche pas ADDON_ACTION_BLOCKED : ne pas appeler du tout en combat
+    local ok = not InCombatLockdown() and pcall(f.SetPropagateMouseClicks, f, allow)
     if ok or not allow then return end
     local retryFrame = CreateFrame("Frame")
     retryFrame:RegisterEvent("PLAYER_REGEN_ENABLED")

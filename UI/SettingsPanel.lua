@@ -525,6 +525,7 @@ local function GetModKey(dbKey)
     characterArmory            = "CharacterArmory",
     afkMode                    = "AFKMode",
     bigCursor                  = "BigCursor",
+    comfort                    = "Comfort",
     location                   = "Location",
     extraBars                  = "ExtraBars",
     addonFonts                 = "AddonFonts",
@@ -1008,6 +1009,9 @@ function Build.ResourceCircle(container)
     [73]   = L["SETTINGS_ARC_LABEL_IGNORE_PAIN"],
     [104]  = L["SETTINGS_ARC_LABEL_IRONFUR"],
     [270]  = L["SETTINGS_SEC_RES_LABEL_MANA_TEA"],
+    [265]  = ns.IsForever and L["SETTINGS_SEC_RES_LABEL_SOUL_SHARDS"] or nil,
+    [266]  = ns.IsForever and L["SETTINGS_SEC_RES_LABEL_SOUL_SHARDS"] or nil,
+    [267]  = ns.IsForever and L["SETTINGS_SEC_RES_LABEL_SOUL_SHARDS"] or nil,
   }
   local secResLabel = SEC_RES_LABELS[ns._specID]
   local secResHeaderText = secResLabel
@@ -1615,7 +1619,7 @@ function Build.UnitBars(container)
       hitbox:SetFrameLevel(header:GetFrameLevel() + 1)
       hitbox:EnableMouse(true)
       hitbox:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
         GameTooltip:SetText(label, 1, 1, 1)
         GameTooltip:AddLine(L["SETTINGS_UB_BAR_DISABLED_TT"], unpack(Theme.textDim))
         GameTooltip:Show()
@@ -3744,7 +3748,7 @@ local function EnsureModelPicker()
         s._nm:SetTextColor(unpack(Theme.textHighlight))
       end
       -- Tooltip with FileID
-      GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+      GameTooltip:SetOwner(s, "ANCHOR_CURSOR_RIGHT")
       GameTooltip:SetText(s._modelName or "", 1, 1, 1)
       GameTooltip:AddLine(string.format(L["SETTINGS_TOOLTIP_FILEID"], tostring(s._fileID or "?")), 0.6, 0.6, 0.6)
       GameTooltip:Show()
@@ -4688,7 +4692,7 @@ local function BuildSpellListRow(parent, spellID, width, onClick, combosDB)
   iconZone:EnableMouse(true)
   iconZone:EnableMouseWheel(true)
   iconZone:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
     pcall(function() GameTooltip:SetSpellByID(spellID) end)
     GameTooltip:Show()
   end)
@@ -5021,7 +5025,7 @@ local function BuildTriggerRow(parent, triggerDef, width, sectionType, onClick)
     end)
 
     sw:SetScript("OnEnter", function()
-      GameTooltip:SetOwner(sw, "ANCHOR_RIGHT")
+      GameTooltip:SetOwner(sw, "ANCHOR_CURSOR_RIGHT")
       GameTooltip:SetText(L["SETTINGS_ORB_GLOBE_COLOR"], 1, 1, 1)
       GameTooltip:AddLine(L["SETTINGS_TT_RIGHT_CLICK_RESET"], 0.7, 0.7, 0.7)
       GameTooltip:Show()
@@ -7230,6 +7234,9 @@ function Build.PriorityBar(container)
   local cbPB = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_ENABLE"],
     L["SETTINGS_PB_ENABLE_TT"], W))
   BindCheckbox(cbPB, "priorityBar", "enabled")
+  local cbPBAssist = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_IGNORE_ASSIST"],
+    L["SETTINGS_PB_IGNORE_ASSIST_TT"], W))
+  BindCheckbox(cbPBAssist, "priorityBar", "ignoreAssistedHighlight")
 
   ctx:Spacer(8)
 
@@ -9024,7 +9031,7 @@ function Build.Colors(container)
 
           sw:SetScript("OnEnter", function(self)
             swBorder:SetColorTexture(1, 1, 1, 0.6)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
             GameTooltip:SetText(ELEM_LABELS[ek] or ek, 1, 1, 1)
             GameTooltip:AddLine(L["SETTINGS_TT_LEFT_CLICK_EDIT"], 0.8, 0.8, 0.8)
             GameTooltip:AddLine(L["SETTINGS_TT_RIGHT_CLICK_RESET_DEFAULT"], 0.8, 0.8, 0.8)
@@ -9922,9 +9929,13 @@ function Build.Visibility(container)
     { value = "NONE",         text = L["ADDONFONTS_OUTLINE_NONE"] },
     { value = "OUTLINE",      text = L["TEXT_OUTLINE_THIN"] },
     { value = "THICKOUTLINE", text = L["TEXT_OUTLINE_THICK"] },
+    { value = "SHADOW",         text = L["TEXT_OUTLINE_SHADOW"] },
+    { value = "OUTLINE_SHADOW", text = L["TEXT_OUTLINE_THIN_SHADOW"] },
+    { value = "THICK_SHADOW",   text = L["TEXT_OUTLINE_THICK_SHADOW"] },
   }
   -- SLUG seulement pour Baganator (cf. Modules/AddonFonts.lua)
-  local OUTLINES_SLUG = { OUTLINES[1], OUTLINES[2], OUTLINES[3], { value = "SLUG", text = L["TEXT_OUTLINE_SLUG"] } }
+  local OUTLINES_SLUG = { unpack(OUTLINES) }
+  OUTLINES_SLUG[#OUTLINES_SLUG + 1] = { value = "SLUG", text = L["TEXT_OUTLINE_SLUG"] }
   local function FontBlock(prefix, label, tooltip, maxSize, outlines)
     local cb = ctx:Add(SW.CreateCheckbox(container, label, tooltip, W))
     BindCheckbox(cb, "addonFonts", prefix .. "Enabled")
@@ -10359,7 +10370,7 @@ function Build.Profiles(container)
   existDD._btn:SetPoint("TOPLEFT", existDD, "TOPLEFT", 1, 4)
   existDD._btn:SetSize(100, 20)
   existDD._btn:HookScript("OnEnter", function()
-    GameTooltip:SetOwner(existDD._btn, "ANCHOR_RIGHT")
+    GameTooltip:SetOwner(existDD._btn, "ANCHOR_CURSOR_RIGHT")
     GameTooltip:SetText(L["SETTINGS_TT_SELECT_PROFILE_ACTIVATE"], 1, 1, 1, 1)
     GameTooltip:Show()
   end)
@@ -11861,6 +11872,39 @@ function Build.BigCursor(container)
   return ctx.widgets
 end
 
+function Build.ComfortRender(container)
+  local ctx = NewLayout(container)
+  local W = CONTENT_W
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_RENDER"], W))
+  for _, t in ipairs({
+    { "groundDensity", L["SETTINGS_COMFORT_DENSITY"], L["SETTINGS_COMFORT_DENSITY_TT"] },
+    { "groundFade",    L["SETTINGS_COMFORT_FADE"],    L["SETTINGS_COMFORT_FADE_TT"] },
+    { "groundDist",    L["SETTINGS_COMFORT_DIST"],    L["SETTINGS_COMFORT_DIST_TT"] },
+    { "sharpen",       L["SETTINGS_COMFORT_SHARPEN"], L["SETTINGS_COMFORT_SHARPEN_TT"] },
+  }) do
+    local cb = ctx:Add(SW.CreateCheckbox(container, t[2], t[3], W))
+    BindCheckbox(cb, "comfort", t[1])
+  end
+  ctx:Finalize()
+  return ctx.widgets
+end
+
+function Build.ComfortQoL(container)
+  local ctx = NewLayout(container)
+  local W = CONTENT_W
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_QOL"], W))
+  local cbSc = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_SHORTCUTS"], L["SETTINGS_COMFORT_SHORTCUTS_TT"], W))
+  BindCheckbox(cbSc, "comfort", "shortcuts")
+  local cbMer = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_MERCHANT"], L["SETTINGS_COMFORT_MERCHANT_TT"], W))
+  BindCheckbox(cbMer, "comfort", "merchantExtend")
+  local slMer = ctx:Add(SW.CreateSlider(container, L["SETTINGS_COMFORT_MERCHANT_PAGES"], 2, 4, 1, W))
+  BindSlider(slMer, "comfort", "merchantPages")
+  local cbHor = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_HORIZON"], L["SETTINGS_COMFORT_HORIZON_TT"], W))
+  BindCheckbox(cbHor, "comfort", "horizonOffWithRXP")
+  ctx:Finalize()
+  return ctx.widgets
+end
+
 -- Popup "copier le lien" -- variante compacte (1 ligne) de ShowExportPopup
 -- (meme habillage visuel, meme convention SetFocus+HighlightText pour que
 -- Ctrl+A/Ctrl+C marchent immediatement) : WoW n'expose aucune API pour
@@ -12128,7 +12172,7 @@ function Build.HeroicSupport(container)
     btn:SetScript("OnClick", function() ShowCopyLinkPopup(entry.label, entry.url) end)
     btn:SetScript("OnEnter", function(self)
       bar:Show()
-      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
       GameTooltip:SetText(entry.label, 1, 1, 1)
       GameTooltip:AddLine(entry.url, 0.6, 0.6, 0.6, true)
       GameTooltip:Show()
@@ -12343,6 +12387,18 @@ local CATEGORIES = {
     icon  = "Interface\\Icons\\INV_Misc_Spyglass_03",
     build = Build.BigCursor,
   },
+  {
+    id    = "comfortRender",
+    label = L["SETTINGS_COMFORT_SEC_RENDER"],
+    icon  = "Interface\\Icons\\INV_Misc_Gear_01",
+    build = Build.ComfortRender,
+  },
+  {
+    id    = "comfortQoL",
+    label = L["SETTINGS_COMFORT_SEC_QOL"],
+    icon  = "Interface\\Icons\\INV_Misc_Gear_01",
+    build = Build.ComfortQoL,
+  },
   -- Auras & Procs (fusionné depuis AishUIAura)
   {
     id    = "aurasTracked",
@@ -12408,8 +12464,11 @@ local SIDEBAR_GROUPS = {
   { label = L["SETTINGS_GROUP_GLOBAL"],      ids = { "modulesOverview", "colors", "profiles", "heroicSupport" } },
   { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "castBar", "targetCastBar", "topTargetBar", "targetAuras", "groupNumber" } },
   { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "cdmEssential", "cdmUtility", "cdmLayout", "bigCursor", "rotationHelper" } },
-  { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "xpBar", "skyriding", "location", "extraBars", "afkMode", "visibility", "characterArmory" } },
-  { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasTrinkets", "aurasMissingBuffs", "spellEffects" } },
+  { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "xpBar", "skyriding", "location", "extraBars", "afkMode", "characterArmory" } },
+  { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasTrinkets", "aurasMissingBuffs" } },
+  -- Groupes sans sous-section : le clic sur le header ouvre directement la page (single)
+  { label = L["SETTINGS_GROUP_ANIMATIONS"],  ids = { "spellEffects" }, single = true },
+  { label = L["SETTINGS_GROUP_COMFORT"],     ids = { "visibility", "comfortRender", "comfortQoL" } },
 }
 for _, grp in ipairs(SIDEBAR_GROUPS) do ns.PruneUnavailable(grp.ids) end
 
@@ -12509,7 +12568,10 @@ local function RefreshSidebar()
         local expanded = hasFilter or containsActive or (sidebar._groupCollapsed[grp.label] == false)
         entry.headerBtn:SetExpanded(expanded)
 
-        if expanded then
+        if grp.single then
+          -- Pas de sous-section : header seul, mis en avant quand sa page est ouverte
+          entry.headerBtn:SetSelected(containsActive)
+        elseif expanded then
           -- Items section
           for _, cid in ipairs(matchingSections) do
             local btn = entry.sectionBtns[cid]
@@ -12662,11 +12724,19 @@ local function BuildSidebar()
     -- activeCategory doit aussi mettre a jour le prefixe).
     function h:SetExpanded(expanded)
       self._expanded = expanded
+      if grp.single then htxt:SetText(grp.label) return end
       htxt:SetText((expanded and "- " or "+ ") .. grp.label)
+    end
+    function h:SetSelected(selected)
+      hBg:SetAlpha(selected and 1 or 0.6)
     end
     h:SetExpanded(sidebar._groupCollapsed[grp.label] == false)
     h:SetScript("OnClick", function()
-      sidebar._groupCollapsed[grp.label] = not sidebar._groupCollapsed[grp.label]
+      if grp.single then
+        MainFrame:SelectCategory(grp.ids[1])
+      else
+        sidebar._groupCollapsed[grp.label] = not sidebar._groupCollapsed[grp.label]
+      end
       RefreshSidebar()
       PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)

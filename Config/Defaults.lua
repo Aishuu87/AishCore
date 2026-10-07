@@ -21,7 +21,7 @@ local function ExtraBarDefaults(enabled, y, tags)
     showCount = true, countFont = "Fonts\\2002.TTF", countSize = 12, countOutline = "OUTLINE",
     countPoint = "BOTTOMRIGHT", countOffsetX = 0, countOffsetY = 0, countColor = { 1, 1, 1, 1 },
     -- Temps de recharge
-    showCooldownNumbers = true, cooldownFont = "Fonts\\2002.TTF", cooldownSize = 12,
+    bandageCooldown = true, showCooldownNumbers = true, cooldownFont = "Fonts\\2002.TTF", cooldownSize = 12,
     cooldownOutline = "OUTLINE", cooldownColor = { 1, 1, 1, 1 }, swipeAlpha = 0.7,
     -- Raccourcis clavier
     showKeybind = true, keybindFont = "Fonts\\2002.TTF", keybindSize = 10, keybindOutline = "OUTLINE",
@@ -385,6 +385,7 @@ ns.Defaults = {
   -- Priority Bar : 4 icones fixes (2 gauche + 2 droite du cercle de ressource)
   priorityBar = {
     enabled = true,
+    ignoreAssistedHighlight = false, -- ignore le sort suggere par l'Assistant de rotation Blizzard
     iconSize = 34,
     iconSpacing = 6,       -- espace entre les 2 icones d'un meme cote
     sideOffset = 170,      -- distance du bord externe de chaque cote depuis le centre de l'ecran
@@ -767,6 +768,18 @@ ns.Defaults = {
   bigCursor = {
     enabled = true,
     cursorSize = 2,
+  },
+
+  -- Confort de jeu, cf. Modules/Comfort.lua : CVars de rendu + raccourcis /rl /edit /cdm.
+  comfort = {
+    groundDensity = false,
+    groundFade    = false,
+    groundDist    = false,
+    sharpen       = false,
+    shortcuts     = false,
+    horizonOffWithRXP = false, -- coupe Horizon Suite tant que RestedXP est charge
+    merchantExtend = false,   -- fenetre marchand sur plusieurs pages a la fois
+    merchantPages  = 3,
   },
 
   -- Barre de cible détaillée (haut d'écran) + cible de la cible

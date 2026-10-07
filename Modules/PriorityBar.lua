@@ -1028,8 +1028,10 @@ local function RebuildLearnedCache()
 end
 
 -- Suit uniquement le highlight de l'Assistant de rotation Blizzard (pas les procs de sort, autre widget)
+local _ignoreAssisted = false -- option "ignorer l'Assistant de rotation", relue a chaque passe de scan
+
 local function ButtonHasGlow(button)
-  if not button then return false end
+  if not button or _ignoreAssisted then return false end
   if button.AssistedCombatHighlightFrame then
     local ok, shown = pcall(button.AssistedCombatHighlightFrame.IsShown, button.AssistedCombatHighlightFrame)
     if ok and shown then return true end
@@ -1041,7 +1043,7 @@ end
 local C_AC_GetNextCastSpell = C_AssistedCombat and C_AssistedCombat.GetNextCastSpell
 
 local function GetAssistedCombatHighlightSpell()
-  if not C_AC_GetNextCastSpell then return nil end
+  if not C_AC_GetNextCastSpell or _ignoreAssisted then return nil end
   local ok, sid = pcall(C_AC_GetNextCastSpell)
   if not ok or not sid or sid == 0 then return nil end
   -- Une valeur retournee depuis une pile taintee peut etre secrete
@@ -1095,6 +1097,8 @@ end
 
 local function CollectGlowedSpells()
   local glowed = _glowedSpells
+  local pbCfg = ns.GetCfg("priorityBar")
+  _ignoreAssisted = pbCfg and pbCfg.ignoreAssistedHighlight and true or false
   wipe(glowed)
   local foundAny = false
   local scannedButtons = {}
@@ -1963,6 +1967,20 @@ end
 -- Repli si le profil n'a pas encore de couleur "hors de portee" (profil anterieur a l'option).
 local OUT_OF_RANGE_COLOR_FALLBACK = { 0.9, 0.25, 0.25, 1 }
 
+-- Forever : isActive inclut le GCD (contrairement a Retail). On le retire via isOnGCD, ou a defaut
+-- via la duree (> 1.5 s = vrai cooldown). Retail : isActive tel quel, inchange.
+local function CDInfoIsRealCD(cd)
+  if not cd then return false end
+  if not ns.IsForever then return cd.isActive end
+  local ok, res = pcall(function()
+    if not cd.isActive then return false end
+    if cd.isOnGCD ~= nil then return not cd.isOnGCD end
+    local d = cd.duration
+    return type(d) == "number" and d > 1.5
+  end)
+  return ok and res or false
+end
+
 -- 61304 : le sort "Global Cooldown" de Blizzard, reference standard pour savoir si le GCD tourne.
 local GCD_SPELL_ID = 61304
 local _gcdActiveCache, _gcdActiveAt = false, -1
@@ -2058,6 +2076,8 @@ local function HasRealCDEvidence(sid)
 end
 
 local function ResolveNonGCD(sid, isActive)
+  -- Forever : isActive est deja purge du GCD par CDInfoIsRealCD
+  if ns.IsForever then return isActive and true or false end
   local inGCD = IsGCDActive()
 
   if not isActive then
@@ -2159,7 +2179,7 @@ local function UpdateSlotExtras(slot)
         if not spellCD and baseID and baseID ~= curID then
           spellCD = C_Spell.GetSpellCooldown(baseID)
         end
-        isRealCD = spellCD and spellCD.isActive
+        isRealCD = CDInfoIsRealCD(spellCD)
       end
 
       -- Auto-guérison _realCDEndTimes : si isRealCD dit "pas en CD" alors qu'une prédiction UNIT_SPELLCAST_SUCCEEDED est encore armée (proc qui reset le CD), on la nettoie immédiatement.
@@ -2275,8 +2295,7 @@ local function UpdateSlotExtras(slot)
                 -- lecture, faite ici. isActive se teste, contrairement a duration.
                 local okCD, cdI = pcall(C_Spell.GetSpellCooldown, chargeSid)
                 if okCD and cdI then
-                  local okAct, act = pcall(function() return cdI.isActive and true or false end)
-                  if okAct then zero = act end
+                  zero = CDInfoIsRealCD(cdI) and true or false
                 end
               end
               -- 1 est ici un simple "il reste des charges" : seul le test == 0 compte plus bas.
@@ -2585,7 +2604,7 @@ local function ScanLiveSwipeState()
       local okCD, cd     = pcall(C_Spell.GetSpellCooldown, sid)
       local okDur, durObj = pcall(C_Spell.GetSpellCooldownDuration, sid)
       _liveSwipeState[sid] = {
-        isActive = (okCD and cd and cd.isActive) or false,
+        isActive = (okCD and CDInfoIsRealCD(cd)) or false,
         durObj   = (okDur and durObj) or nil,
       }
     end

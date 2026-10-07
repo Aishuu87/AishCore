@@ -2,7 +2,7 @@
 ## Title: AishCore
 ## Notes: Custom UI overlay - resource & health circles, spell effects, auras & procs
 ## Author: Aishuu
-## Version: 4.2.2
+## Version: 4.2.3
 ## X-Curse-Project-ID: 1689788
 ## SavedVariables: AishaddonDB AishUIAuraDB
 ## SavedVariablesPerCharacter: AishUILearnDB, AishUISetupCharDB
@@ -59,6 +59,7 @@ Modules\Visibility.lua
 Modules\CharacterArmory.lua
 Modules\AFKMode.lua
 Modules\BigCursor.lua
+Modules\Comfort.lua
 Modules\AishUISetup.lua
 
 # Auras & Procs — Core

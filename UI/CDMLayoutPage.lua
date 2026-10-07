@@ -323,7 +323,7 @@ function ns.BuildCDMLayoutPage(p, cw)
     r:SetScript("OnEnter", function(self)
       hover:Show()
       local e = self.entry
-      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
       if e.equipSlot then GameTooltip:SetInventoryItem("player", e.equipSlot)
       elseif e.spellID then GameTooltip:SetSpellByID(e.spellID) end
       GameTooltip:Show()

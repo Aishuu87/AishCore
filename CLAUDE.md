@@ -63,6 +63,8 @@ Après **toute modification** de l'installeur (`AishUIInstaller`) ou du packager
 | `AishUIInstaller` | `INSTALLER AishUI.exe` |
 | `AishUIPackager` | `AishUIPackager.exe` |
 
+**Éléments de dev exclus des paquets** : le packager (et l'installeur à la copie) laisse de côté, à la racine d'`AishCore`, `.git`, `.github`, `.claude`, `docs`, `__pycache__`, `CLAUDE.md`, `.gitignore`, `.pkgmeta`, `.aishdev`, `*.py`, `*.pyc`, `*.bak` (`updates.txt` reste : il est généré par le packager). L'installeur nettoie aussi ces éléments chez le joueur, sauf si la destination est celle de l'auteur : fichier marqueur `.aishdev` présent, ou version du `.toc` de destination plus récente que le paquet, ou version illisible. Le marqueur `.aishdev` (vide, jamais versionné ni copié) doit rester dans le dossier Retail d'AishCore. Ces listes sont dupliquées dans `DevFiles` (`InstallService.cs` et `PackagingService.cs`) : les garder synchronisées.
+
 Systématique, sans rien demander. La copie précédente est renommée en `.bak` avant
 l'écrasement (convention déjà en place dans le dossier).
 
@@ -95,7 +97,7 @@ n'est jamais éditée à la main : après **toute modification** d'AishCore, la 
 sans rien demander :
 
 ```
-robocopy "H:\JEUX\World of Warcraft\_retail_\Interface\AddOns\AishCore" "H:\JEUX\World of Warcraft\_classic_beta_\Interface\AddOns\AishCore" /MIR /XD .git .github docs __pycache__ /XF *.py CLAUDE.md AishCore.toc.bak .gitignore
+robocopy "H:\JEUX\World of Warcraft\_retail_\Interface\AddOns\AishCore" "H:\JEUX\World of Warcraft\_classic_beta_\Interface\AddOns\AishCore" /MIR /XD .git .github docs __pycache__ /XF *.py CLAUDE.md AishCore.toc.bak .gitignore .aishdev
 ```
 
 Différences de client dans le code, jamais par fichiers séparés (cf. `docs/PLAN_MULTI_CLIENT.md`) :

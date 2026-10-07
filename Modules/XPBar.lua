@@ -1819,11 +1819,12 @@ function XPBar.ApplySettings()
   xpFontInfo  = cfg.fontInfo  or FONT_INFO
   if levelText then
     local _, sz = levelText:GetFont()
-    SetLevelTextFont(sz or 19)
+    -- GetFont peut rendre une hauteur <= 0 (police pas encore chargee) : SetFont plante alors
+    SetLevelTextFont((sz and sz > 0) and sz or 19)
   end
   if repNameLabel then
     local _, sz = repNameLabel:GetFont()
-    ns.ApplyTextOutlineStyle(repNameLabel, repNameLabel.slugRing, xpFontLevel, sz or 13, cfg.levelOutlineStyle, true)
+    ns.ApplyTextOutlineStyle(repNameLabel, repNameLabel.slugRing, xpFontLevel, (sz and sz > 0) and sz or 13, cfg.levelOutlineStyle, true)
   end
   -- Re-applique positions/tailles/rotations depuis DB
   ApplyLayoutCfg()

@@ -328,6 +328,7 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
     { value = "always",   text = L["EXTRABARS_VIS_ALWAYS"] },
     { value = "combat",   text = L["EXTRABARS_VIS_COMBAT"] },
     { value = "nocombat", text = L["EXTRABARS_VIS_NOCOMBAT"] },
+    { value = "injured",  text = L["EXTRABARS_VIS_INJURED"] },
   }, W2), "visibility", "string")
   local slAlpha = Bind(SW.CreateSlider(container, L["SETTINGS_OPACITY"], 0, 1, 0.05, W2), "alpha", "number")
   ctx:AddRow(8, ddVis, slAlpha)
@@ -411,6 +412,7 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
   local ddCdFont = Bind(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), W2), "cooldownFont", "string")
   local slCdSize = Bind(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 32, 1, W2), "cooldownSize", "number")
   ctx:AddRow(8, ddCdFont, slCdSize)
+  ctx:Add(Bind(SW.CreateCheckbox(container, L["EXTRABARS_BANDAGE_CD"], L["EXTRABARS_BANDAGE_CD_TT"], W), "bandageCooldown", "bool"))
   ctx:Add(Bind(SW.CreateColorButton(container, L["SETTINGS_TEXT_COLOR"], W2), "cooldownColor", "color"))
 
   TextSection(L["EXTRABARS_SEC_KEYBINDS"], "keybind", "showKeybind", L["EXTRABARS_SHOW_KEYBINDS"], 6, 20)

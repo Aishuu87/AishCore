@@ -2908,6 +2908,24 @@ function ResourceCircle.UpdateSecondaryResource()
       SetSecResShown(false)
     end
     return
+  elseif secResDef.useItemCount and secResDef.itemID then
+    -- Forever : ressource materialisee par un objet des sacs (fragments d'ame, 6265). Le compte
+    -- d'objets n'est jamais secret : texte pose directement, pop-in/out comme les autres.
+    local count = C_Item.GetItemCount(secResDef.itemID) or 0
+    local applied = count > 0
+    if applied then bar.secResText:SetText(count) end
+    if applied and not _secResWasApplied then
+      StartSecResPop()
+    elseif not applied and _secResWasApplied then
+      StartSecResPopOut()
+    end
+    _secResWasApplied = applied
+    if applied then
+      SetSecResShown(true)
+    elseif not _secResPopTicker then
+      SetSecResShown(false)
+    end
+    return
   elseif secResDef.useTargetDebuff and secResDef.spellID then
     -- Debuff de la cible (Mage Givre/specID 64, Config/ResourceMap.lua) -- même logique de pop-in/pop-out que useStacks, via ApplyTargetStacksToText.
     local applied = ApplyTargetStacksToText(bar.secResText, secResDef.spellID)

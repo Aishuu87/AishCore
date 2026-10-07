@@ -10,7 +10,10 @@ ns.Modules = ns.Modules or {}
 local AddonFonts = {}
 ns.Modules.AddonFonts = AddonFonts
 
-local FLAGS = { NONE = "", OUTLINE = "OUTLINE", THICKOUTLINE = "THICKOUTLINE", SLUG = "" }
+local FLAGS = { NONE = "", OUTLINE = "OUTLINE", THICKOUTLINE = "THICKOUTLINE", SLUG = "",
+                SHADOW = "", OUTLINE_SHADOW = "OUTLINE", THICK_SHADOW = "THICKOUTLINE" }
+-- Styles qui ajoutent une ombre noire native (compatible texte secret, contrairement a SLUG)
+local SHADOW_STYLES = { SHADOW = true, OUTLINE_SHADOW = true, THICK_SHADOW = true }
 local AURA_KINDS = { "buffs", "debuffs", "crowdControl" }
 
 local tracked    = setmetatable({}, { __mode = "k" }) -- [fontString] = cible ("platLevel" = dynamique)
@@ -22,7 +25,7 @@ local seenDisplays = setmetatable({}, { __mode = "k" }) -- [display Platynator] 
 local unitDisplay = {}                                -- [nameplateN] = display Platynator
 local rings      = setmetatable({}, { __mode = "k" }) -- [fontString] = anneau SLUG (8 copies noires)
 local slugOn     = setmetatable({}, { __mode = "k" }) -- [fontString] = true si l'anneau est actif
-local origShadow = setmetatable({}, { __mode = "k" }) -- [fontString] = { x, y } avant SLUG
+local origShadow = setmetatable({}, { __mode = "k" }) -- [fontString] = { x, y, r, g, b, a } avant SLUG / ombre
 local applying = false
 local bagActive, bagHooked = false, false
 
@@ -80,38 +83,68 @@ local function EnsureRing(fs)
   return ring
 end
 
+-- Taille "pixel perfect" : sur une nameplate, l'echelle effective du texte rend la taille en pixels
+-- fractionnaire (glyphes flous, chiffres irreguliers). On arrondit la taille rendue a l'entier
+-- de pixels le plus proche, puis on la reconvertit en unites d'interface.
+local function SnapSize(fs, size)
+  local ok, res = pcall(function()
+    local _, physH = GetPhysicalScreenSize()
+    local es = fs:GetEffectiveScale()
+    if not physH or physH <= 0 or not es or es <= 0 then return size end
+    local k = es * physH / 768 -- pixels physiques par unite de police
+    local snapped = math.floor(size * k + 0.5) / k
+    -- Garde-fou : si l'echelle est deja tres compensee (k minuscule), l'arrondi serait enorme.
+    -- Au-dela de ~12 % d'ecart on garde la taille demandee.
+    if snapped <= 0 or math.abs(snapped - size) > size * 0.12 then return size end
+    return snapped
+  end)
+  return ok and type(res) == "number" and res or size
+end
+
+local function RestoreShadow(fs)
+  local o = origShadow[fs]
+  fs:SetShadowOffset(o[1], o[2])
+  if o[3] then fs:SetShadowColor(o[3], o[4], o[5], o[6]) end
+  origShadow[fs] = nil
+end
+
 local function ApplyUnsafe(fs)
   local target = TargetOf(fs)
   applying = true
   if target and Get(target .. "Enabled") then
     local path = ns.SafeFontPath(Get(target .. "Font") or ns.FONT_FALLBACK)
     local size, style = Get(target .. "Size") or 12, Get(target .. "Outline")
+    if target ~= "bagItem" then size = SnapSize(fs, size) end
     -- SLUG réservé à Baganator : sur les nameplates, textes et opacités sont des valeurs
     -- secrètes en combat, l'anneau ne peut pas les suivre. Repli sur le contour fin.
     local slug = style == "SLUG" and target == "bagItem"
     if style == "SLUG" and not slug then style = "OUTLINE" end
-    if slug and not origShadow[fs] then origShadow[fs] = { fs:GetShadowOffset() } end
+    local shadow = SHADOW_STYLES[style]
+    if (slug or shadow) and not origShadow[fs] then
+      local x, y = fs:GetShadowOffset()
+      local r, g, b, a = fs:GetShadowColor()
+      origShadow[fs] = { x, y, r, g, b, a }
+    end
     local ring = (slug or rings[fs]) and EnsureRing(fs) or nil
     if ring then
-      ns.ApplyTextOutlineStyle(fs, ring, path, size, slug and "SLUG" or (style == "NONE" and "" or style), false)
+      ns.ApplyTextOutlineStyle(fs, ring, path, size, slug and "SLUG" or ((style == "NONE" or style == "SHADOW") and "" or FLAGS[style] or style), false)
     else
       pcall(fs.SetFont, fs, path, size, FLAGS[style] or "OUTLINE")
     end
     if slug then
       fs:SetShadowOffset(0, 0)
+    elseif shadow then
+      fs:SetShadowColor(0, 0, 0, 1)
+      fs:SetShadowOffset(1, -1)
     elseif origShadow[fs] then
-      fs:SetShadowOffset(origShadow[fs][1], origShadow[fs][2])
-      origShadow[fs] = nil
+      RestoreShadow(fs)
     end
     slugOn[fs] = slug or nil
     customized[fs] = true
   elseif customized[fs] then
     local o = origFont[fs]
     if o and o[1] then pcall(fs.SetFont, fs, o[1], o[2], o[3]) end
-    if origShadow[fs] then
-      fs:SetShadowOffset(origShadow[fs][1], origShadow[fs][2])
-      origShadow[fs] = nil
-    end
+    if origShadow[fs] then RestoreShadow(fs) end
     slugOn[fs] = nil
     customized[fs] = nil
   end
@@ -177,11 +210,17 @@ local function ScanPlatDisplay(display)
       local c = am[kind]
       local frames = c and c.frames
       if frames then
+        -- Toutes les frames à chaque passe (Track est idempotent) : si Platynator recrée un
+        -- texte sans changer le nombre de frames, le nouveau FontString est quand même repris.
         local seen = seenFrames[c] or 0
         if #frames > seen then lastDiscovery = GetTime() end
-        for i = seen + 1, #frames do
+        for i = 1, #frames do
           local tc = frames[i].TextsContainer
-          if tc and tc.Countdown then Track(tc.Countdown, "platAura") end
+          local cd = tc and tc.Countdown
+          if cd and not tracked[cd] then
+            Track(cd, "platAura")
+            lastDiscovery = GetTime()
+          end
         end
         seenFrames[c] = #frames
       end

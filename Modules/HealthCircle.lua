@@ -202,6 +202,17 @@ healthTrackFrame:SetScript("OnEvent", function(self, event)
   end
 end)
 
+-- Joueur "blessé" : sa vie a bougé il y a moins de hideDelay secondes (ou on sort de combat).
+-- Même notion que celle qui affiche le cercle ; réutilisée par les Extra Bars.
+function HealthCircle.IsPlayerInjured()
+  local cfg = ns.GetCfg("healthCircle")
+  local hideDelay = cfg and cfg.hideDelay or 1.5
+  if playerIsDamaged and (GetTime() - lastHealthChangeTime) > hideDelay then
+    playerIsDamaged = false
+  end
+  return playerIsDamaged and true or false
+end
+
 -- Vérifie si le cercle doit être visible (hors combat + blessé)
 function HealthCircle.ShouldShow()
   if ns.IsInBlockedState() then return false end
@@ -218,11 +229,7 @@ function HealthCircle.ShouldShow()
   local vMode = cfg.visibilityMode or "important"
   if vMode == "always" then return true end
   -- "important" (default) : visible seulement quand le joueur est blesse
-  local hideDelay = cfg and cfg.hideDelay or 1.5
-  if playerIsDamaged and (GetTime() - lastHealthChangeTime) > hideDelay then
-    playerIsDamaged = false
-  end
-  return playerIsDamaged
+  return HealthCircle.IsPlayerInjured()
 end
 
 -- Applique les settings en live (taille, police, etc.)
