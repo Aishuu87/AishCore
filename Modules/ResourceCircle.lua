@@ -656,7 +656,9 @@ function ResourceCircle.ApplySettings()
       if stagOvPx >= 2 then bar.staggerOverlay:SetSize(stagOvPx, stagOvPx) end
     end
   end
-  bar.text:SetFont(cfg.font or ns.Media.font, cfg.fontSize)
+  ns.ApplyFontReliable(bar.text, "RCText",
+    function() local c = ns.GetCfg("resourceCircle"); return c and c.font or ns.Media.font end,
+    function() local c = ns.GetCfg("resourceCircle"); return c and c.fontSize or cfg.fontSize end)
   -- Geometrie dependante de la spec : specID resolu fraichement ici (pas via ns._specID,
   -- pas encore rempli au login a ce stade) pour eviter d'ecraser la geometrie par-spec au login/reload.
   local specID = nil
@@ -1813,7 +1815,11 @@ local ApplyStacksToText
 -- rend une SECRET STRING, que l'on ne peut pas comparer.
 local _rcLastText
 local function SetResourceText(txt)
-  local okCmp, same = pcall(function() return txt == _rcLastText end)
+  -- Texte secret : aucune comparaison possible (elle serait bloquee et journalisee)
+  local okCmp, same = false, nil
+  if not (issecretvalue and issecretvalue(txt)) then
+    okCmp, same = pcall(function() return txt == _rcLastText end)
+  end
   if okCmp then
     if same then return end
     _rcLastText = txt
@@ -2052,7 +2058,13 @@ function ResourceCircle.DetectSecondaryDots()
   -- Couleurs
   ResourceCircle.UpdateSecDotColors()
   -- Ticker pour le fill + ciblage des animations
+  -- Cercle masque : 1 passe sur 15 suffit (les cibles d'animation retombent a 0 sans rafale a 60 Hz)
+  local secSkip = 0
   secUpdateTicker = C_Timer.NewTicker(0.016, function()
+    if lastVisibilityState ~= true then
+      secSkip = secSkip + 1
+      if secSkip % 15 ~= 0 then return end
+    end
     ResourceCircle.UpdateSecDots()
   end)
 end
@@ -2886,6 +2898,11 @@ function ResourceCircle.UpdateSecondaryResource()
     -- Repli compteur bouton d'action (ex: Thé de Mana 115294), uniquement si explicitement défini pour ce spec (cf. ApplyCastCountToText).
     if not applied and secResDef.castCountSpellID then
       applied = ApplyCastCountToText(bar.secResText, secResDef.castCountSpellID)
+    end
+    -- Repli Démonologie : l'aura 264173 est illisible en combat si le CDM ne la suit pas ; le glow de Démonbolt
+    -- (demonicCoreOverlayActive) prouve qu'au moins un Cœur Démoniaque est actif -> affiche "1" faute de mieux.
+    if not applied and secResDef.glowFallback and demonicCoreOverlayActive then
+      applied = pcall(bar.secResText.SetText, bar.secResText, 1)
     end
     -- Repli présence via IsCDMAuraSwipePresent (même signal que ApplyAbsorbToText) quand les 3 tiers de ApplyStacksToText échouent (ex Bouclier d'os/195181) ; le texte est déjà poussé par le clone-stack.
     local A = ns.Auras

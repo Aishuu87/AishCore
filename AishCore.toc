@@ -2,7 +2,7 @@
 ## Title: AishCore
 ## Notes: Custom UI overlay - resource & health circles, spell effects, auras & procs
 ## Author: Aishuu
-## Version: 4.2.3
+## Version: 4.3
 ## X-Curse-Project-ID: 1689788
 ## SavedVariables: AishaddonDB AishUIAuraDB
 ## SavedVariablesPerCharacter: AishUILearnDB, AishUISetupCharDB
@@ -20,6 +20,7 @@ Config\ProfileTemplate.lua
 Config\ResourceMap.lua
 Config\ProfileModules.lua
 Config\Profiles.lua
+Config\ForeverPrune.lua
 
 # Locales
 Locales\enUS.lua
@@ -60,6 +61,7 @@ Modules\CharacterArmory.lua
 Modules\AFKMode.lua
 Modules\BigCursor.lua
 Modules\Comfort.lua
+Modules\EllesmereRaidGrowth.lua
 Modules\AishUISetup.lua
 
 # Auras & Procs — Core
@@ -84,7 +86,6 @@ Modules\Auras\Core\AuraTrackerContainer.lua
 Modules\Auras\Core\Animation.lua
 Modules\Auras\Core\Events.lua
 Modules\Auras\Core\Scan.lua
-Modules\Auras\Features\Equipment\Providers.lua
 Modules\Auras\Core\Profiles.lua
 Modules\Auras\Features\Preview\AishUIPreview.lua
 Modules\Auras\Features\Auras\Debuffs.lua
@@ -100,7 +101,6 @@ Modules\Auras\UI\ScrollBar.lua
 Modules\Auras\UI\InfoPanel.lua
 Modules\Auras\UI\Menus\Profiles.lua
 Modules\Auras\UI\Menus\Preview.lua
-Modules\Auras\UI\Menus\Equipment.lua
 Modules\Auras\UI\Menus\Tactics.lua
 Modules\Auras\UI\Menus\MissingBuffs.lua
 Modules\Auras\UI\Menus\Render.lua

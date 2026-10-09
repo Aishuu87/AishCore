@@ -402,6 +402,7 @@ ns.RenderRegistry["centerArc"] = CenterArc
 local evtFrame = CreateFrame("Frame")
 evtFrame:RegisterEvent("UNIT_AURA")
 evtFrame:RegisterEvent("PLAYER_TOTEM_UPDATE")
+_addon.TrackSpecFrame(evtFrame)
 evtFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 evtFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 evtFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")

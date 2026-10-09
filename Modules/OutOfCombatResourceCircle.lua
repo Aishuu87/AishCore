@@ -336,7 +336,9 @@ function OutOfCombatResourceCircle.ApplySettings()
       pcall(ns.SmoothSetValue, frag, 72)
     end
   end
-  bar.text:SetFont(cfg.font or ns.Media.font, cfg.fontSize)
+  ns.ApplyFontReliable(bar.text, "OOCText",
+    function() local c = ns.GetCfg("outOfCombatResourceCircle"); return c and c.font or ns.Media.font end,
+    function() local c = ns.GetCfg("outOfCombatResourceCircle"); return c and c.fontSize or cfg.fontSize end)
 
   OutOfCombatResourceCircle.UpdateResourceColors()
   -- Re-detecter les secondary dots (option allSpecs, spec change)
@@ -642,7 +644,12 @@ function OutOfCombatResourceCircle.DetectSecondaryDots()
   OutOfCombatResourceCircle.LayoutSecDots()
   OutOfCombatResourceCircle.UpdateSecDotColors()
 
+  local secSkip = 0
   secUpdateTicker = C_Timer.NewTicker(0.016, function()
+    if lastVisibilityState ~= true then
+      secSkip = secSkip + 1
+      if secSkip % 15 ~= 0 then return end
+    end
     OutOfCombatResourceCircle.UpdateSecDots()
   end)
 end

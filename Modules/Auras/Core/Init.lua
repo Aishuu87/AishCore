@@ -59,6 +59,12 @@ end
 -- inclus) migré une fois vers ce format par MigrateSpecKeys (cf. ns.InitDB).
 function ns.GetSpecKey()
     local key
+    -- Forever : pas de vraies specialisations, la liste "Auras a tracker" est par CLASSE (cle "CLASSE_ALL"),
+    -- disponible des le niveau 1 -- sans attendre qu'une branche de talents soit choisie.
+    if _addon.IsForever then
+        local _, classFile = UnitClass("player")
+        return classFile and (classFile .. "_ALL") or nil
+    end
     pcall(function()
         -- Globals d'abord : ils portent la spe deduite des branches de talents sur un client sans
         -- vraies specialisations (cf. Core.lua). Dans l'autre ordre, la cle de spe restait nulle
@@ -165,10 +171,35 @@ function ns.InvalidateSpellNameCache()
     wipe(_namesSyncedForKey)
 end
 
+-- Forever : fusionne les anciennes listes par spe ("CLASSE_SPE") dans la liste de classe ("CLASSE_ALL"), une
+-- seule fois par classe et par profil. Un sort deja present dans la liste de classe n'est jamais ecrase.
+local function MergeSpecListsIntoClass(key)
+    local db = ns.db
+    if not (db and db.discoveredSpells) then return end
+    local class = key:match("^(.-)_ALL$")
+    if not class then return end
+    db._classListsMerged = db._classListsMerged or {}
+    if db._classListsMerged[class] then return end
+    db._classListsMerged[class] = true
+    local target = db.discoveredSpells[key] or {}
+    db.discoveredSpells[key] = target
+    local names = {}
+    for k in pairs(db.discoveredSpells) do
+        if k ~= key and type(k) == "string" and k:find("^" .. class .. "_") then names[#names + 1] = k end
+    end
+    table.sort(names)
+    for _, k in ipairs(names) do
+        for sid, info in pairs(db.discoveredSpells[k]) do
+            if target[sid] == nil and type(info) == "table" then target[sid] = ns.DeepCopy(info) end
+        end
+    end
+end
+
 function ns.GetSpecSpells()
     local key = ns.GetSpecKey()
     if not key or not ns.db then return nil end
     if not ns.db.discoveredSpells then ns.db.discoveredSpells = {} end
+    if _addon.IsForever then MergeSpecListsIntoClass(key) end
     if not ns.db.discoveredSpells[key] then ns.db.discoveredSpells[key] = {} end
     local spells = ns.db.discoveredSpells[key]
     ns.ApplyAdminOverrides(spells)

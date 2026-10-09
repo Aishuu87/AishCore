@@ -85,6 +85,14 @@ Colors.CLASSES = {
       specs = { {id=71,name=L["COLORSMOD_SPEC_ARMES"]}, {id=72,name=L["COLORSMOD_SPEC_FUREUR"]}, {id=73,name=L["COLORSMOD_SPEC_PROTECTION"]} } },
 }
 
+-- Forever : ces classes n'existent pas, on les retire de la liste (et donc du GUI)
+if ns.IsForever then
+    local ABSENT = { EVOKER = true, DEMONHUNTER = true, MONK = true, DEATHKNIGHT = true }
+    for i = #Colors.CLASSES, 1, -1 do
+        if ABSENT[Colors.CLASSES[i].file] then table.remove(Colors.CLASSES, i) end
+    end
+end
+
 -- Index rapides
 Colors._classFileMap = {}
 Colors._classKeyMap  = {}
@@ -116,7 +124,49 @@ function Colors.Get(element)
         local idx = GetSpecialization and GetSpecialization() or nil
         specID = idx and GetSpecializationInfo and select(1, GetSpecializationInfo(idx)) or nil
     end
+    -- Spe absente, ou inconnue de la table des couleurs (spe "initiale" d'un perso de bas niveau sur
+    -- Retail, dont l'ID n'est celui d'aucune vraie spe) : on la traite comme "aucune spe".
+    if specID and classKey then
+        local cd = Colors._classKeyMap[classKey]
+        local known = false
+        for _, sp in ipairs(cd and cd.specs or {}) do
+            if sp.id == specID then known = true; break end
+        end
+        if not known then specID = nil end
+    end
+    -- Aucune spe (perso sans spe, ou egalite entre arbres sur Forever) : spe par defaut choisie
+    if not specID then specID = Colors.GetDefaultSpec(classKey) end
     return Colors.GetForSpec(classKey, specID, element)
+end
+
+--- Spe par defaut d'une classe (clic droit sur son nom dans les couleurs thematiques), ou nil.
+--- Utilisee quand le joueur n'a aucune spe determinee.
+function Colors.GetDefaultSpec(classKey)
+    local d = ns.DB and ns.DB.colors and ns.DB.colors.defaultSpec
+    return d and classKey and d[classKey] or nil
+end
+
+--- Definit (ou retire, si deja la spe par defaut) la spe par defaut d'une classe. Renvoie le nouvel etat.
+function Colors.ToggleDefaultSpec(classKey, specID)
+    if not ns.DB then ns.DB = {} end
+    local col = ns.DB.colors
+    if not col then col = {}; ns.DB.colors = col end
+    col.defaultSpec = col.defaultSpec or {}
+    local nowDefault
+    if col.defaultSpec[classKey] == specID then
+        col.defaultSpec[classKey] = nil
+        nowDefault = false
+    else
+        col.defaultSpec[classKey] = specID
+        nowDefault = true
+    end
+    -- Forever : la spe deduite des talents en depend (cf. Core.lua) -> recalcul + rejeu du changement de spe
+    if ns.IsForever then
+        if ns.InvalidateSpecCache then ns.InvalidateSpecCache() end
+        if ns.FireSpecChanged then pcall(ns.FireSpecChanged) end
+    end
+    Colors.Broadcast()
+    return nowDefault
 end
 
 --- Couleur pour une spé/classe précise (utilisé par l'UI des options).
@@ -183,6 +233,7 @@ Colors.ApplySettings = Colors.Broadcast
 
 -- Réagir aux changements de spécialisation
 local _colEvt = CreateFrame("Frame")
+ns.TrackSpecFrame(_colEvt)
 _colEvt:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 _colEvt:RegisterEvent("PLAYER_LOGIN")
 _colEvt:SetScript("OnEvent", function(self, event)

@@ -485,6 +485,7 @@ frame:RegisterUnitEvent("UNIT_AURA", "player")            -- pour les ressources
 frame:RegisterEvent("PLAYER_REGEN_DISABLED")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("PLAYER_TARGET_CHANGED")
+ns.TrackSpecFrame(frame, true)
 frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")     -- changement de spe
 frame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")             -- forme druide
 frame:RegisterEvent("RUNE_POWER_UPDATE")                   -- DK runes

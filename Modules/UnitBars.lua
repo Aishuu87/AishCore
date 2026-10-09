@@ -212,9 +212,27 @@ end
 -- Tolerance telle que configuree : nulle si "Au survol" est decoche, le slider n'etant
 -- qu'un reglage de cette option. Ne dit rien du combat -- c'est le pad de clic ci-dessous
 -- qui s'en charge, par un mecanisme que le lockdown ne peut pas bloquer.
+-- Montures sans zone elargie : celles qui affichent le HUD de sieges (VehicleSeatIndicator) ou qui ont leurs
+-- PNJ / services (reparation...) : ID de monture (Journal des montures), cf. wowhead.com/mount/<ID>.
+local NO_TOL_MOUNTS = { 2237, 1039, 2982 }
+local noTolMount = false
+local function ComputeNoTolMount()
+    if _G.VehicleSeatIndicator and _G.VehicleSeatIndicator:IsShown() then return true end
+    if IsMounted() and C_MountJournal and C_MountJournal.GetMountInfoByID then
+        for _, id in ipairs(NO_TOL_MOUNTS) do
+            local ok, _, _, _, isActive = pcall(C_MountJournal.GetMountInfoByID, id)
+            if ok and isActive then return true end
+        end
+    end
+    return false
+end
+
 local function ConfiguredHoverTol()
     local db = ns.GetCfg("unitBars")
     if not (db and db.hoverReveal) then return 0 end
+    -- Monture a PNJ / a passagers : pas de zone elargie, elle masquait les PNJ de la monture.
+    -- Le pad est de toute facon retire en combat.
+    if noTolMount then return 0 end
     return db.hoverTolerance or 0
 end
 
@@ -1504,6 +1522,7 @@ eventFrame:RegisterEvent("UNIT_PET")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+ns.TrackSpecFrame(eventFrame)
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 -- ACTIVE_TALENT_GROUP_CHANGED se declenche aussi au login, quand le serveur confirme
 -- la spe active : c'est le signal fiable que GetSpecialization() devient exploitable,
@@ -1768,6 +1787,20 @@ C_Timer.NewTicker(0.1, function()
     end
 end)
 
+
+-- Suivi du HUD de monture : retire / remet la zone elargie des barres quand il apparait / disparait.
+-- Hors combat seulement (le pad est un frame protege) ; en combat il est deja retire, on rattrape a la sortie.
+local seatHudWas = false
+local function RefreshSeatHud()
+    local now = ComputeNoTolMount()
+    noTolMount = now   -- cache lu par ConfiguredHoverTol ; la zone de clic se met a jour hors combat
+    if now == seatHudWas or InCombatLockdown() then return end
+    seatHudWas = now
+    for _, f in pairs(bars) do ApplyHitPad(f, ConfiguredHoverTol()) end
+end
+C_Timer.NewTicker(0.5, function()
+    if next(bars) then RefreshSeatHud() end
+end)
 
 -- Ticker de survol (0.05 s) : detecte l'entree/sortie du curseur dans la zone tolerante de
 -- chaque barre, puis reevalue la visibilite et/ou le texte HP. Ne coute rien quand les deux

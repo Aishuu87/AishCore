@@ -306,7 +306,10 @@ local function HookCDMCooldownChild(cdFrame, parentFrame)
             -- tostring() si le filtre forwardSwipe (duration>1.5, plus bas) bloque un swipe attendu.
             ns._cdmLastDuration = ns._cdmLastDuration or {}
             ns._cdmLastDuration[spellID] = duration
-            local okDurLog, isLongLog = pcall(function() return type(duration) == "number" and duration > 1.5 end)
+            local okDurLog, isLongLog = false, nil
+            if not (issecretvalue and issecretvalue(duration)) then
+                okDurLog, isLongLog = pcall(function() return type(duration) == "number" and duration > 1.5 end)
+            end
             tinsert(cdmSetCooldownLog, 1, {
                 spellID = spellID,
                 wasSetFromCooldown = parentFrame.wasSetFromCooldown and true or false,
@@ -599,7 +602,10 @@ local function HookCDMBarChild(barFrame, parentFrame)
             -- Gater ce hi=0 derriere "a deja eu une plage positive" casserait le masquage de la majorite
             -- des auras en Barres (l'hypothese "hi>0 observe au moins une fois" est fausse en pratique) ;
             -- le fix pour les auras sans signal hi>0 fiable vit cote Scan.lua (ns._lastKnownAura).
-            local okZero, isZero = pcall(function() return hi == 0 end)
+            local okZero, isZero = false, nil
+            if not (issecretvalue and issecretvalue(hi)) then
+                okZero, isZero = pcall(function() return hi == 0 end)
+            end
             if okZero and isZero then
                 ns.cdmAuraBarPresence[spellID] = false
             else
@@ -1142,7 +1148,10 @@ function ns.ScanCDMViewers()
     if ns.PetAuraSpells then
         local specKey = ns.GetSpecKey and ns.GetSpecKey()
         for sid, def in pairs(ns.PetAuraSpells) do
-            if (not def.specKey) or (def.specKey == specKey) then
+            -- Forever : la cle de liste est "CLASSE_ALL" -> on compare la classe de la declaration
+            local specOk = (not def.specKey) or (def.specKey == specKey)
+                or (_addon.IsForever and specKey and def.specKey:match("^(.-)_") == specKey:match("^(.-)_"))
+            if specOk then
                 local name = GetSpellName and GetSpellName(sid)
                 if name then pcall(AutoDiscoverSpell, sid, name, "player", nil, nil) end
             end

@@ -63,7 +63,6 @@ ns.ProfileTree = {
         { id = "aurasCirclebars", label = "SETTINGS_CAT_FREE_BARS", auras = { "circlebars", "circlebarsEnabled" } },
         { id = "aurasTotems", label = "SETTINGS_CAT_TOTEMS", auras = { "totems", "totemsEnabled" } },
       } },
-    { id = "aurasTrinkets", label = "SETTINGS_CAT_TRINKETS", auras = { "equipment", "equipmentSlots", "equipmentEnabled" } },
     { id = "aurasMissingBuffs", label = "AURASDATA_SEC_MISSINGBUFFS_LABEL", auras = { "missingBuffs" } },
   } },
   -- Section porteuse de données : réglages communs de spellEffects (activation globale, taille des

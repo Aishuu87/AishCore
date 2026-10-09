@@ -47,8 +47,168 @@ local function Cfg()
 end
 MissingBuffs.Cfg = Cfg
 
+-- FOREVER : entrees resolues par NOM (cf. bloc Forever de MissingBuffsData.lua).
+-- Une entree portant "casts" n'est jamais liee a un spellID : le rang connu change le spellID, et
+-- ces IDs different de Retail. Aura reconnue par "names", sort lance choisi dans "casts".
+local function KnownSpellByName(name)
+    if C_Spell and C_Spell.GetSpellInfo then
+        local ok, info = pcall(C_Spell.GetSpellInfo, name)
+        if ok and type(info) == "table" and info.spellID then return info.spellID, info.name end
+    end
+    if GetSpellInfo then
+        local ok, n, _, _, _, _, _, id = pcall(GetSpellInfo, name)
+        if ok and n and id then return id, n end
+    end
+    return nil
+end
+
+-- Liste de noms/spellIDs -> liste de NOMS localises : un nombre est un spellID dont on lit le nom dans
+-- la langue du client, une chaine est gardee telle quelle. Mise en cache seulement si tout a resolu.
+local _expanded = setmetatable({}, { __mode = "k" })
+local function ExpandNames(list)
+    local cached = _expanded[list]
+    if cached then return cached end
+    local out, complete = {}, true
+    for _, v in ipairs(list) do
+        if type(v) == "number" then
+            local n
+            if C_Spell and C_Spell.GetSpellName then
+                local ok, r = pcall(C_Spell.GetSpellName, v)
+                if ok then n = r end
+            end
+            if not n and GetSpellInfo then
+                local ok, r = pcall(GetSpellInfo, v)
+                if ok then n = r end
+            end
+            if n then out[#out + 1] = n else complete = false end
+        else
+            out[#out + 1] = v
+        end
+    end
+    _expanded[list] = out -- la base de sorts est statique : un ID absent le restera
+    return out
+end
+
+-- Remplit entry.spellId / _castName avec le premier sort de "casts" reellement connu (tous rangs).
+local function ForeverResolve(entry)
+    for _, castName in ipairs(ExpandNames(entry.casts)) do
+        local id, n = KnownSpellByName(castName)
+        if id then
+            entry.spellId, entry._castName = id, n
+            return true
+        end
+    end
+    entry.spellId, entry._castName = nil, nil
+    return false
+end
+
+-- Premiere aura benefique de "unit" dont le nom est dans "names" (tous rangs). Renvoie une table
+-- { name, expirationTime, sourceUnit } ou nil. ownOnly : ne compte que nos propres instances.
+local _nameLookups = setmetatable({}, { __mode = "k" })
+local function FindAuraByNames(unit, names, ownOnly)
+    names = names and ExpandNames(names)
+    if not names or #names == 0 then return nil end
+    local lookup = _nameLookups[names]
+    if not lookup then
+        lookup = {}
+        for _, n in ipairs(names) do lookup[n] = true end
+        _nameLookups[names] = lookup
+    end
+    for i = 1, 60 do
+        local name, expiration, source
+        if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+            local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HELPFUL")
+            if not ok or not a then break end
+            name, expiration, source = a.name, a.expirationTime, a.sourceUnit
+        elseif UnitBuff then
+            local ok, n, _, _, _, _, exp, src = pcall(UnitBuff, unit, i)
+            if not ok or not n then break end
+            name, expiration, source = n, exp, src
+        else
+            break
+        end
+        if name and not IsSecret(name) and lookup[name] then
+            local mine = true
+            if ownOnly then
+                mine = source ~= nil and not IsSecret(source) and UnitIsUnit(source, "player")
+            end
+            if mine then return { name = name, expirationTime = expiration, sourceUnit = source } end
+        end
+    end
+    return nil
+end
+
+-- Entrees "kind" (Forever) : objet des sacs ("item") ou munitions equipees ("ammo") sous un seuil.
+-- Renvoie manquant, quantite restante.
+local function ItemEntryMissing(entry)
+    local cfg = Cfg()
+    local min = (entry.kind == "item" and cfg.shardsThreshold)
+        or (entry.kind == "ammo" and cfg.ammoThreshold) or entry.min or 1
+    if entry.kind == "item" then
+        local n = (C_Item and C_Item.GetItemCount and C_Item.GetItemCount(entry.item))
+            or (GetItemCount and GetItemCount(entry.item)) or 0
+        return n < min, n
+    elseif entry.kind == "ammo" then
+        local ok, slot = pcall(GetInventorySlotInfo, "AmmoSlot")
+        if not ok or type(slot) ~= "number" or not GetInventoryItemCount then return false, 0 end
+        -- pas d'arme a distance equipee : pas de rappel
+        if not GetInventoryItemLink("player", 18) then return false, 0 end
+        local n = GetInventoryItemCount("player", slot) or 0
+        return n < min, n
+    end
+    return false, 0
+end
+
+-- Une arme (pas un bouclier) est-elle equipee dans cet emplacement ?
+local function WeaponInSlot(slot)
+    local id = GetInventoryItemID and GetInventoryItemID("player", slot)
+    if not id then return false end
+    local classID
+    if C_Item and C_Item.GetItemInfoInstant then
+        classID = select(6, C_Item.GetItemInfoInstant(id))
+    end
+    if classID == nil then return true end -- inconnu : on suppose une arme
+    return classID == 2
+end
+
+-- Etat de l'enchantement temporaire d'une arme : renvoie has (true/false, nil = illisible) et le temps
+-- restant en ms (ou nil). Forever : GetWeaponEnchantInfo renvoie toujours false pour les imbues et poisons
+-- de ce client ; l'API C_Item.GetWeaponEnchantInfo (liste d'enchantements, les permanents exclus) les voit.
+-- Retail : comportement d'origine (GetWeaponEnchantInfo).
+local ENCHANT_PERMANENT = (Enum and Enum.ItemEnchantType and Enum.ItemEnchantType.Permanent) or 1
+local function WeaponEnchantState(hand)
+    if _addon.IsForever and C_Item and C_Item.GetWeaponEnchantInfo and Enum and Enum.WeaponSlot then
+        local ws = hand == "off" and Enum.WeaponSlot.OffHand or Enum.WeaponSlot.MainHand
+        local ok, list = pcall(C_Item.GetWeaponEnchantInfo, ws)
+        if ok and type(list) == "table" then
+            local has, exp = false, nil
+            for _, e in pairs(list) do
+                if type(e) == "table" then
+                    local h, kind = e.hasEnchant, e.enchantType
+                    if IsSecret(h) then return nil end
+                    if h and (IsSecret(kind) or kind ~= ENCHANT_PERMANENT) then
+                        has = true
+                        local t = e.timeLeft
+                        if type(t) == "number" and not IsSecret(t) and t > 0 then exp = math.max(exp or 0, t) end
+                    end
+                end
+            end
+            return has, exp
+        end
+    end
+    if not GetWeaponEnchantInfo then return nil end
+    local ok, hasMain, mainExp, _, _, hasOff, offExp = pcall(GetWeaponEnchantInfo)
+    if not ok then return nil end
+    local has, exp = hasMain, mainExp
+    if hand == "off" then has, exp = hasOff, offExp end
+    if IsSecret(has) then return nil end
+    if type(exp) ~= "number" or IsSecret(exp) then exp = nil end
+    return has == true, exp
+end
+
 -- Apprentissage
 local function IsEntryLearned(entry)
+    if entry.casts then return ForeverResolve(entry) end
     local checkId = entry.spellbookId or entry.spellId
     if not (C_SpellBook and C_SpellBook.IsSpellKnown) then
         return entry.learned == true
@@ -75,6 +235,7 @@ end
 MissingBuffs.GetSelfAura = GetSelfAura
 
 local function SelfHasBuff(entry)
+    if entry.names then return FindAuraByNames("player", entry.names) ~= nil end
     if GetSelfAura(entry.spellId) then return true end
     if entry.extraBuffSpellIds then
         for _, sid in ipairs(entry.extraBuffSpellIds) do
@@ -96,21 +257,19 @@ local function GetSelfBuffExpiringSoon(entry, threshold)
     if entry.ignoreDuration then return false end
     if type(threshold) ~= "number" or threshold <= 0 then return false end
     if entry.weaponEnchantSlot then
-        if not GetWeaponEnchantInfo then return false end
-        local ok, hasMain, mainExpireMS, _, hasOff, offExpireMS = pcall(GetWeaponEnchantInfo)
-        if not ok then return false end
-        local expireMS
-        if entry.weaponEnchantSlot == "main" then
-            if hasMain ~= true then return false end
-            expireMS = mainExpireMS
-        else
-            if hasOff ~= true then return false end
-            expireMS = offExpireMS
-        end
+        local has, expireMS = WeaponEnchantState(entry.weaponEnchantSlot)
+        if has ~= true then return false end
         if type(expireMS) ~= "number" or IsSecret(expireMS) then return false end
         return expireMS <= (threshold * 1000)
     end
     if AurasAreSecret() then return false end
+    if entry.names then
+        local aura = FindAuraByNames("player", entry.names)
+        local exp = aura and SafeAuraExpiration(aura)
+        if not exp then return false end
+        local remain = exp - GetTime()
+        return remain > 0 and remain <= threshold
+    end
     -- Meme ordre de priorite que SelfHasBuff : le premier spellId REELLEMENT
     -- present (nil = absent, on continue) determine la reponse.
     local function checkOne(spellId)
@@ -140,12 +299,12 @@ end
 MissingBuffs.GetSelfBuffExpiringSoon = GetSelfBuffExpiringSoon
 
 local function SelfHasWeaponEnchant(entry)
-    if not GetWeaponEnchantInfo then return true end
-    local ok, hasMain, _, _, _, hasOff = pcall(GetWeaponEnchantInfo)
-    if not ok then return true end
-    if entry.weaponEnchantSlot == "main" then return hasMain == true end
-    if entry.weaponEnchantSlot == "off" then return hasOff == true end
-    return true
+    -- Forever : rien a enchanter sans arme dans l'emplacement (main gauche vide ou bouclier)
+    if entry.needsWeaponSlot and not WeaponInSlot(entry.needsWeaponSlot) then return true end
+    if entry.weaponEnchantSlot ~= "main" and entry.weaponEnchantSlot ~= "off" then return true end
+    local has = WeaponEnchantState(entry.weaponEnchantSlot)
+    if has == nil then return true end -- illisible : on ne declenche pas une fausse alerte
+    return has
 end
 
 -- Lecture d'aura sur un ALLIE -- best-effort, cf. bandeau de tete de fichier. Repli "spell
@@ -164,6 +323,9 @@ local function UnitHasBuffRaw(unit, entry)
     -- alors jamais lire de spellId, donc on suppose le buff present plutot que de spammer un
     -- faux "manquant" (confirme en jeu : alerte "1/5" en boucle en M+ avec tout le groupe buffe).
     if AurasAreSecret() then return true end
+    if entry.names then
+        return FindAuraByNames(unit, entry.names, entry.requireOwnCast) ~= nil
+    end
     if not (AuraUtil and AuraUtil.ForEachAura) then return false end
     local lookup = { [entry.spellId] = true }
     if entry.extraBuffSpellIds then for _, id in ipairs(entry.extraBuffSpellIds) do lookup[id] = true end end
@@ -340,47 +502,112 @@ local function HealerMissingBuff(entry)
     return false
 end
 
--- Groupe mutuellement exclusif (stances/auras/attunements/poisons/pets)
--- Seules les options apprises comptent : un perso bas niveau sans posture/aura/poison
--- ne doit pas recevoir d'alerte (et l'option proposee doit etre lancable).
-local function PickDefaultOption(list, overrideSpellId)
-    local first, default
-    for _, opt in ipairs(list) do
-        if IsEntryLearned(opt) then
-            if overrideSpellId and opt.spellId == overrideSpellId then return opt end
-            first = first or opt
-            if opt.default then default = default or opt end
-        end
+-- ═══ Choix multiples : une icone cliquable par proposition ═══════════════════════════════
+-- Une "choice" = { key, spellId, spellName, useTarget, macro, icon }
+--   key      identifiant stable des combos Animations 3D : spellID Retail, ou spellID de rang 1 sur Forever
+--   spellId  spellID reel (icone, portee)
+--   spellName / useTarget / macro : ce que fait le clic
+local function SpellNameById(id)
+    if C_Spell and C_Spell.GetSpellName then
+        local ok, n = pcall(C_Spell.GetSpellName, id)
+        if ok and n then return n end
     end
-    return default or first
+    if GetSpellInfo then
+        local ok, n = pcall(GetSpellInfo, id)
+        if ok and n then return n end
+    end
+    return nil
 end
 
-local function ExclusiveGroupMissing(list, overrideSpellId)
-    for _, opt in ipairs(list) do
-        if GetSelfAura(opt.spellId) then return false end
+-- Propositions d'UNE entree : Forever = un choix par sort de "casts" reellement connu (doublons
+-- ID/nom fusionnes) ; Retail = un seul choix (le sort de l'entree).
+local function ChoicesFromEntry(entry, targetUnit)
+    local out = {}
+    if entry.kind then
+        out[1] = { icon = entry.icon }
+        return out
     end
-    local opt = PickDefaultOption(list, overrideSpellId)
-    if not opt then return false end
-    return true, opt
+    local useTarget = (entry.clickingUsesTarget and targetUnit and targetUnit ~= "player") and true or false
+    if entry.casts then
+        local seen = {}
+        for _, v in ipairs(entry.casts) do
+            local key, name
+            if type(v) == "number" then key = v; name = SpellNameById(v) else name = v end
+            if name then
+                local id, castName = KnownSpellByName(name)
+                if id and not seen[id] then
+                    seen[id] = true
+                    out[#out + 1] = { key = key or id, spellId = id, spellName = castName, useTarget = useTarget }
+                end
+            end
+        end
+    elseif entry.spellId then
+        out[1] = { key = entry.spellId, spellId = entry.spellId,
+                   spellName = SpellNameById(entry.clickableId or entry.spellId), useTarget = useTarget }
+    end
+    return out
+end
+
+-- Groupe de choix equivalents (stances, auras, accords, poisons, familiers, demons) : toutes les
+-- options apprises et non ignorees, dans l'ordre de la liste.
+local function GroupChoices(list)
+    local out = {}
+    for _, opt in ipairs(list) do
+        if not (opt.settingsId and MissingBuffs.IsIgnored(opt.settingsId)) and IsEntryLearned(opt) then
+            for _, c in ipairs(ChoicesFromEntry(opt, "player")) do out[#out + 1] = c end
+        end
+    end
+    return out
+end
+
+-- Groupe mutuellement exclusif : rien a alerter si UNE des options est deja active, sinon toutes
+-- les options lancables en propositions. nil = pas d'alerte.
+local function ExclusiveGroupAlert(list)
+    for _, opt in ipairs(list) do
+        if opt.names then
+            if FindAuraByNames("player", opt.names) then return nil end
+        elseif GetSelfAura(opt.spellId) then
+            return nil
+        end
+    end
+    local choices = GroupChoices(list)
+    if #choices == 0 then return nil end
+    return choices
+end
+
+-- Forever : poison = enchantement d'arme, un seul par arme (pas de groupe letal/non-letal).
+-- Renvoie (choix, cle de texte) ou nil.
+local function CheckRoguePoisonsForever()
+    local cfg = Cfg()
+    if cfg.ignoreLethalPoisons and cfg.ignoreNonlethalPoisons then return nil end
+    local choices = GroupChoices(ns.MISSING_ROGUE_POISONS.forever)
+    if #choices == 0 then return nil end -- aucun poison connu
+    if WeaponInSlot(16) and WeaponEnchantState("main") == false then return choices, "APPLY_LETHAL" end
+    if WeaponInSlot(17) and WeaponEnchantState("off") == false then return choices, "APPLY_LETHAL" end
+    return nil
 end
 
 local function CheckRoguePoisons()
+    if _addon.IsForever then return CheckRoguePoisonsForever() end
     local cfg = Cfg()
     if not cfg.ignoreNonlethalPoisons then
-        local missing, opt = ExclusiveGroupMissing(ns.MISSING_ROGUE_POISONS.nonlethal, cfg.overrideNonlethalPoison)
-        if missing then return true, opt, "APPLY_NONLETHAL" end
+        local choices = ExclusiveGroupAlert(ns.MISSING_ROGUE_POISONS.nonlethal)
+        if choices then return choices, "APPLY_NONLETHAL" end
     end
     if not cfg.ignoreLethalPoisons then
-        local missing, opt = ExclusiveGroupMissing(ns.MISSING_ROGUE_POISONS.lethal, cfg.overrideLethalPoison)
-        if missing then return true, opt, "APPLY_LETHAL" end
+        local choices = ExclusiveGroupAlert(ns.MISSING_ROGUE_POISONS.lethal)
+        if choices then return choices, "APPLY_LETHAL" end
     end
-    return false
+    return nil
 end
 
 -- Grimoire de sacrifice (108503, Demoniste) : sacrifie DELIBEREMENT le
 -- familier contre le buff 196099 --
 local GRIMOIRE_OF_SACRIFICE_BUFF = 196099
 local function HasSacrificedPetForGrimoire()
+    if ns.MISSING_WARLOCK_SACRIFICE_NAMES then
+        return FindAuraByNames("player", ns.MISSING_WARLOCK_SACRIFICE_NAMES) ~= nil
+    end
     return GetSelfAura(GRIMOIRE_OF_SACRIFICE_BUFF) ~= nil
 end
 
@@ -393,25 +620,27 @@ local function HasHunterLoneWolfTalent()
     return ok and known == true
 end
 
+-- Renvoie (choix, cle de texte) ou nil : familier a ressusciter, ou tous les familiers/demons invocables.
 local function CheckPetMissing(class)
-    local cfg = Cfg()
     if class == "HUNTER" and HasHunterLoneWolfTalent() then
-        return false
+        return nil
     end
     if UnitExists("pet") then
         if class == "HUNTER" and UnitIsDead("pet") then
-            return true, { spellId = ns.MISSING_HUNTER_PET_DEAD }, "REVIVE_PET"
+            local revive = ns.MISSING_HUNTER_REVIVE_ENTRY or { spellId = ns.MISSING_HUNTER_PET_DEAD }
+            if revive.casts and not IsEntryLearned(revive) then return nil end
+            local choices = ChoicesFromEntry(revive, "player")
+            if #choices > 0 then return choices, "REVIVE_PET" end
         end
-        return false
+        return nil
     end
     if class == "WARLOCK" and HasSacrificedPetForGrimoire() then
-        return false
+        return nil
     end
     local list = (class == "HUNTER") and ns.MISSING_HUNTER_ALL_PETS or ns.MISSING_WARLOCK_ALL_PETS
-    local overrideId = (class == "HUNTER") and cfg.overrideHunterPet or cfg.overrideWarlockPet
-    local opt = PickDefaultOption(list, overrideId)
-    if not opt then return false end -- aucun familier invocable (bas niveau)
-    return true, opt, "SUMMON_PET"
+    local choices = GroupChoices(list)
+    if #choices == 0 then return nil end -- aucun familier invocable (bas niveau)
+    return choices, "SUMMON_PET"
 end
 
 -- Applicabilite d'une entree (spe / combat / ignoree par l'utilisateur)
@@ -424,7 +653,7 @@ local function EntryApplies(entry)
         if not ok then return false end
     end
     local cfg = Cfg()
-    if entry.settingsId and cfg.ignoredSettingsIds and cfg.ignoredSettingsIds[entry.settingsId] then
+    if entry.settingsId and MissingBuffs.IsIgnored(entry.settingsId) then
         return false
     end
     if InCombatLockdown() then
@@ -449,6 +678,10 @@ local vanishAnimGroup -- glissement + fondu joue avant le Hide() reel, cf. Build
 local appearAnimGroup -- glissement + fondu joue au Show(), cf. BuildAppearAnimGroup
 local slugFS -- 8 FontStrings d'ombre "SLUG" en anneau derriere textFS, cf. BuildSlugShadow
 local currentAlertSpell
+local slots = {}              -- icones cliquables (une par proposition), enfants de `frame`
+local currentAlertKeys = {}   -- cle de combo -> icone affichee
+local activeSlotCount = 1
+local currentSig              -- signature des cles affichees (re-ancrage des combos)
 
 -- IMPORTANT : un AnimationGroup cree directement sur une region (FontString) n'anime que cette
 -- region -- ça ne se propage pas a une region juste ancree dessus via SetPoint (contrairement a
@@ -458,8 +691,8 @@ local currentAlertSpell
 
 local function BuildClickInfo(entry, targetUnit)
     local clickId = entry.clickableId or entry.spellId
-    local spellName
-    if C_Spell and C_Spell.GetSpellName then
+    local spellName = entry._castName
+    if not spellName and C_Spell and C_Spell.GetSpellName then
         local ok, n = pcall(C_Spell.GetSpellName, clickId)
         if ok then spellName = n end
     end
@@ -594,7 +827,7 @@ local function BuildVanishAnimGroup()
         -- frame:Hide() sur ce frame securise (SecureActionButtonTemplate) est protege en combat
         -- (ADDON_ACTION_BLOCKED). On saute Hide()/SetAlpha/reposition en combat : le frame reste
         -- affiche mais invisible (alpha deja a 0) -- le nettoyage differe au PLAYER_REGEN_ENABLED suivant.
-        if InCombatLockdown() then return end
+        if InCombatLockdown() then frame:SetAlpha(0); return end
         frame:Hide()
         frame:SetAlpha(1)
         ResetFramePosition()
@@ -633,6 +866,81 @@ local function BuildAppearAnimGroup()
     return group
 end
 
+--- Une icone de proposition : bouton securise (clic = son propre sort), enfant de `frame` qui reste le
+--- repere de position / glisser-deposer et le porteur des animations d'entree/sortie.
+local function EnsureSlot(i)
+    if slots[i] then return slots[i] end
+    local sl = CreateFrame("Button", "AishCoreMissingBuffSlot" .. i, frame, "SecureActionButtonTemplate")
+    sl:SetFrameLevel(frame:GetFrameLevel() + 2)
+    sl:EnableMouse(true)
+    sl:RegisterForClicks("AnyUp", "AnyDown")
+    sl:RegisterForDrag("LeftButton")
+    sl:SetScript("OnDragStart", function()
+        if not Cfg().locked then frame:StartMoving() end
+    end)
+    sl:SetScript("OnDragStop", function()
+        frame:StopMovingOrSizing()
+        local point, _, relPoint, x, y = frame:GetPoint()
+        local cfg = Cfg()
+        if cfg then cfg.framePoint = { point, relPoint, x, y } end
+    end)
+    sl.icon = sl:CreateTexture(nil, "ARTWORK")
+    sl.icon:SetAllPoints()
+    sl.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    sl.mask = sl:CreateMaskTexture(nil, "OVERLAY")
+    sl.mask:SetAllPoints(sl.icon)
+    sl.mask:SetTexture(NO_MASK_TEXTURE)
+    sl.icon:AddMaskTexture(sl.mask)
+    sl.border = sl:CreateTexture(nil, "BACKGROUND")
+    sl:SetScript("OnEnter", function(self)
+        if not self._spellId then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        pcall(GameTooltip.SetSpellByID, GameTooltip, self._spellId)
+        GameTooltip:Show()
+    end)
+    sl:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    slots[i] = sl
+    return sl
+end
+
+local function ApplySlotAppearance(sl, cfg)
+    local maskOpt = ns.MISSING_BUFF_ICON_MASKS[cfg.iconMaskIndex] or ns.MISSING_BUFF_ICON_MASKS[1]
+    pcall(function()
+        if maskOpt.atlas then
+            sl.mask:SetAtlas(maskOpt.atlas, false)
+        elseif maskOpt.texture then
+            sl.mask:SetTexture(maskOpt.texture)
+        else
+            sl.mask:SetTexture(NO_MASK_TEXTURE)
+        end
+    end)
+    local bt = cfg.borderThickness or 2
+    sl.border:ClearAllPoints()
+    sl.border:SetPoint("TOPLEFT", sl.icon, -bt, bt)
+    sl.border:SetPoint("BOTTOMRIGHT", sl.icon, bt, -bt)
+    sl.border:SetColorTexture(unpack(cfg.borderColor or { 1, 0.15, 0.15, 0.9 }))
+    sl.border:SetShown(cfg.borderEnabled ~= false)
+end
+
+--- Dispose n icones cote a cote, centrees sur `frame` (la 2e de 3 reste a la position d'une icone
+--- seule), legerement espacees pour eviter les faux clics. Hors combat uniquement (frames securises).
+local function LayoutSlots(n)
+    n = math.max(1, n or 1)
+    local cfg = Cfg()
+    local iSize = cfg.iconSize or ICON_SIZE
+    local gap = math.max(6, math.floor(iSize * 0.15))
+    frame:SetSize(n * iSize + (n - 1) * gap, iSize + 20)
+    for i = 1, n do
+        local sl = EnsureSlot(i)
+        sl:SetSize(iSize, iSize)
+        sl:ClearAllPoints()
+        sl:SetPoint("TOP", frame, "TOP", (i - (n + 1) / 2) * (iSize + gap), 0)
+        sl:Show()
+    end
+    for i = n + 1, #slots do slots[i]:Hide() end
+    activeSlotCount = n
+end
+
 --- Reapplique EN DIRECT tous les reglages d'apparence (taille icone, masque,
 --- bordure, police/taille/couleur/position du texte, animation du texte) --
 --- appelee une fois a la creation du frame, puis a chaque changement depuis
@@ -641,27 +949,14 @@ function MissingBuffs.RefreshAppearance()
     if not frame then return end
     local cfg = Cfg()
 
+    -- iconTex n'est plus qu'une ancre invisible (texte centre sous la rangee d'icones) ; les icones
+    -- visibles et cliquables sont les slots.
     local iSize = cfg.iconSize or ICON_SIZE
-    frame:SetSize(iSize, iSize + 20)
     iconTex:SetSize(iSize, iSize)
-
-    local maskOpt = ns.MISSING_BUFF_ICON_MASKS[cfg.iconMaskIndex] or ns.MISSING_BUFF_ICON_MASKS[1]
-    pcall(function()
-        if maskOpt.atlas then
-            maskTex:SetAtlas(maskOpt.atlas, false)
-        elseif maskOpt.texture then
-            maskTex:SetTexture(maskOpt.texture)
-        else
-            maskTex:SetTexture(NO_MASK_TEXTURE)
-        end
-    end)
-
-    local bt = cfg.borderThickness or 2
-    borderTex:ClearAllPoints()
-    borderTex:SetPoint("TOPLEFT", iconTex, -bt, bt)
-    borderTex:SetPoint("BOTTOMRIGHT", iconTex, bt, -bt)
-    borderTex:SetColorTexture(unpack(cfg.borderColor or { 1, 0.15, 0.15, 0.9 }))
-    borderTex:SetShown(cfg.borderEnabled ~= false)
+    iconTex:SetAlpha(0)
+    borderTex:Hide()
+    if not InCombatLockdown() then LayoutSlots(activeSlotCount) end
+    for _, sl in ipairs(slots) do ApplySlotAppearance(sl, cfg) end
 
     ns.ApplyTextOutlineStyle(textFS, slugFS, cfg.textFont or ns.Media.font, cfg.textSize or 12, cfg.textOutlineStyle)
     textFS:SetTextColor(unpack(cfg.textColor or { 1, 0.9, 0.3 }))
@@ -727,6 +1022,9 @@ local function EnsureFrame()
     textContainer = CreateFrame("Frame", nil, frame)
     textContainer:SetPoint("TOP", iconTex, "BOTTOM", 0, -2)
     textContainer:SetSize(1, 1)
+    -- Au-dessus des icones de proposition (slots, niveau frame+2) : sinon un decalage du texte vers
+    -- le haut passait derriere elles.
+    textContainer:SetFrameLevel(frame:GetFrameLevel() + 10)
 
     textFS = textContainer:CreateFontString(nil, "OVERLAY")
     ns.ApplyFont(textFS, ns.Media.font, 12, "OUTLINE")
@@ -870,20 +1168,22 @@ end
 function MissingBuffs.HideAlert()
     if not frame then return end
     currentAlertSpell = nil
+    wipe(currentAlertKeys)
+    currentSig = nil
     if not frame:IsShown() then NotifySpellEffects(); return end
 
     if InCombatLockdown() then
-        -- Coupure nette, sans animation. Si ShowAlert() vient de tourner juste avant le combat
-        -- (appearAnimGroup encore en cours), lancer vanishAnimGroup EN PLUS ferait tourner 2
-        -- AnimationGroups sur le meme frame (l'un pousse alpha vers 1, l'autre vers 0), et comme
-        -- le vrai Hide() est differe en combat, rien ne tranche : le frame reste coince visible
-        -- tout le combat. Stop les deux anims et force alpha=0 directement.
+        -- Sortie animee comme hors combat : seuls Hide()/SetPoint/attributs du frame securise sont
+        -- proteges, pas les animations. L'anim d'entree encore en cours est stoppee d'abord (sinon 2
+        -- AnimationGroups pousseraient l'alpha en sens inverse) ; le Hide() final est saute en combat
+        -- (cf. BuildVanishAnimGroup:OnFinished) et rattrape au PLAYER_REGEN_ENABLED.
         if appearAnimGroup and appearAnimGroup:IsPlaying() then appearAnimGroup:Stop() end
-        if vanishAnimGroup and vanishAnimGroup:IsPlaying() then vanishAnimGroup:Stop() end
         if textAnimGroups then
             for _, g in pairs(textAnimGroups) do g:Finish() end
         end
-        frame:SetAlpha(0)
+        if vanishAnimGroup and not vanishAnimGroup:IsPlaying() then
+            if frame:GetAlpha() > 0.01 then vanishAnimGroup:Play() else frame:SetAlpha(0) end
+        end
         NotifySpellEffects()
         return
     end
@@ -906,19 +1206,20 @@ end
 -- les gardefous en amont (CheckForMissings, RequestCheck, SetPreview) -- ne devrait jamais arriver.
 local warnedShowAlertInCombat = false
 
-function MissingBuffs.ShowAlert(spellId, text, clickInfo)
+function MissingBuffs.ShowAlertChoices(choices, text)
     -- Dernier rempart : aucun affichage reel en combat, quel que soit le chemin d'appel -- ferme
     -- la porte a tout appelant non repertorie qui court-circuiterait les gardefous en amont.
     if InCombatLockdown() then
         if not warnedShowAlertInCombat then
             warnedShowAlertInCombat = true
             print(string.format(
-                "|cffff4444[AishCore]|r ShowAlert() appele en combat (spellId=%s, text=%s) -- bloque. Signale ce message si tu le vois.",
-                tostring(spellId), tostring(text)))
+                "|cffff4444[AishCore]|r ShowAlert() appele en combat (text=%s) -- bloque. Signale ce message si tu le vois.",
+                tostring(text)))
         end
         MissingBuffs.HideAlert()
         return
     end
+    if not choices or #choices == 0 then MissingBuffs.HideAlert(); return end
     local cfg = Cfg()
     EnsureFrame()
     -- Ne joue le slide-in que pour une VRAIE reapparition (frame cache), pas a chaque simple
@@ -940,12 +1241,43 @@ function MissingBuffs.ShowAlert(spellId, text, clickInfo)
     end
     PositionFrameIfNeeded()
 
-    local tex
-    if C_Spell and C_Spell.GetSpellTexture then
-        local ok, t = pcall(C_Spell.GetSpellTexture, spellId)
-        if ok then tex = t end
+    -- Une icone par proposition, centrees ; texte unique dessous
+    local n = #choices
+    LayoutSlots(n)
+    wipe(currentAlertKeys)
+    local keys = {}
+    for i, c in ipairs(choices) do
+        local sl = slots[i]
+        local tex = c.icon
+        if not tex and c.spellId and C_Spell and C_Spell.GetSpellTexture then
+            local ok, t = pcall(C_Spell.GetSpellTexture, c.spellId)
+            if ok then tex = t end
+        end
+        sl.icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
+        sl._spellId = c.spellId
+        ApplySlotAppearance(sl, cfg)
+        -- Attributs securises (type/spell/macrotext) : hors combat seulement, garanti plus haut.
+        pcall(function()
+            if cfg.makeIconClickable and c.macro and c.macro ~= "" then
+                sl:SetAttribute("type", "macro")
+                sl:SetAttribute("macrotext", c.macro)
+            elseif cfg.makeIconClickable and c.spellName then
+                if c.useTarget then
+                    sl:SetAttribute("type", "macro")
+                    sl:SetAttribute("macrotext", "/cast [@target,help,nodead,exists][@player] " .. c.spellName)
+                else
+                    sl:SetAttribute("type", "spell")
+                    sl:SetAttribute("spell", c.spellName)
+                end
+            else
+                sl:SetAttribute("type", nil)
+            end
+        end)
+        if c.key then
+            currentAlertKeys[c.key] = sl
+            keys[#keys + 1] = tostring(c.key)
+        end
     end
-    iconTex:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
     textFS:SetShown(not cfg.hideText)
     textFS:SetText(text or "")
     if slugFS then
@@ -953,35 +1285,15 @@ function MissingBuffs.ShowAlert(spellId, text, clickInfo)
         for _, fs in ipairs(slugFS) do fs:SetShown(slugOn and not cfg.hideText) end
     end
 
-    -- Attributs securises (type/spell/macrotext) : modifiables seulement hors combat
-    -- (SetAttribute bloque en combat sur un SecureActionButtonTemplate) -- en combat on laisse
-    -- les attributs deja poses, le clic reste actif sur le dernier sort connu.
-    if not InCombatLockdown() then
-        if cfg.makeIconClickable and clickInfo and clickInfo.castMacro then
-            -- Macro combinee (une ligne /cast par buff de classe actuellement manquant) : la
-            -- plupart de ces sorts ne partagent pas le GCD, un seul clic les applique tous a la
-            -- suite ; ceux qui le partagent attendront simplement le prochain clic.
-            pcall(function()
-                frame:SetAttribute("type", "macro")
-                frame:SetAttribute("macrotext", clickInfo.castMacro)
-            end)
-        elseif cfg.makeIconClickable and clickInfo and clickInfo.spellName then
-            pcall(function()
-                if clickInfo.useTarget then
-                    frame:SetAttribute("type", "macro")
-                    frame:SetAttribute("macrotext",
-                        "/cast [@target,help,nodead,exists][@player] " .. clickInfo.spellName)
-                else
-                    frame:SetAttribute("type", "spell")
-                    frame:SetAttribute("spell", clickInfo.spellName)
-                end
-            end)
-        else
-            pcall(function() frame:SetAttribute("type", nil) end)
-        end
+    currentAlertSpell = choices[1].key
+    -- Les combos sont ancres sur l'icone de LEUR sort : si la rangee change (nombre ou ordre), on
+    -- les relance pour qu'ils suivent leur icone.
+    local sig = table.concat(keys, ",")
+    if sig ~= currentSig then
+        currentSig = sig
+        local SE = _addon.Modules and _addon.Modules.SpellEffects
+        if SE and SE.ResetMissingBuffCombos then pcall(SE.ResetMissingBuffCombos) end
     end
-
-    currentAlertSpell = spellId
     frame:Show()
     if wasHidden and appearAnimGroup then
         appearAnimGroup:Stop()
@@ -990,9 +1302,29 @@ function MissingBuffs.ShowAlert(spellId, text, clickInfo)
     NotifySpellEffects()
 end
 
+--- Compat : alerte a une seule icone (apercu des reglages, appels historiques).
+function MissingBuffs.ShowAlert(spellId, text, clickInfo)
+    local c = { key = spellId, spellId = spellId }
+    if clickInfo then
+        c.spellName, c.useTarget, c.macro, c.icon =
+            clickInfo.spellName, clickInfo.useTarget, clickInfo.castMacro, clickInfo.icon
+    end
+    MissingBuffs.ShowAlertChoices({ c }, text)
+end
+
 --- Retourne le spellId actuellement affiche par l'alerte (nil si masquee).
 function MissingBuffs.GetCurrentAlertSpell()
     return currentAlertSpell
+end
+
+--- Toutes les cles de combo actuellement affichees (une par icone) : table cle -> icone.
+function MissingBuffs.GetCurrentAlertSpells()
+    return currentAlertKeys
+end
+
+--- Icone qui affiche cette cle (ancre des combos Animations 3D), ou le frame global par defaut.
+function MissingBuffs.GetSlotForSpell(key)
+    return currentAlertKeys[key] or frame
 end
 
 -- Preview (menu de reglages) : force l'affichage d'un spell representatif de la classe, en
@@ -1012,10 +1344,16 @@ function MissingBuffs.SetPreview(on, spellId)
     if on then
         local entry
         local resolvedId = spellId
+        if resolvedId == ns.MISSING_PET_PASSIVE_KEY then
+            MissingBuffs.ShowAlertChoices({ { key = resolvedId, icon = ns.MISSING_PET_PASSIVE_ICON } },
+                ns.MISSING_TEXT.PET_PASSIVE)
+            return
+        end
         if not resolvedId then
             local class = _addon._playerClass or select(2, UnitClass("player"))
             local list = class and ns.MISSING_CLASS_BUFFS[class]
             entry = list and list[1]
+            if entry and entry.casts then IsEntryLearned(entry) end
             resolvedId = entry and entry.spellId
         end
         MissingBuffs.ShowAlert(resolvedId, ns.MISSING_TEXT.MISSING,
@@ -1026,6 +1364,286 @@ function MissingBuffs.SetPreview(on, spellId)
     end
 end
 
+-- Alerte familier EN COMBAT : le frame principal est un bouton securise (SetPoint/Show/attributs refuses en
+-- combat). Deux cas :
+--  * l'alerte du familier manquant etait DEJA affichee a l'entree en combat : on la laisse telle quelle (cliquable,
+--    animations 3D et texte inchanges) ;
+--  * elle apparait en plein combat (familier mort, renvoye, passif...) : copie purement visuelle (frame non
+--    securise, non cliquable) ancree au meme point, avec les memes animations d'entree / sortie.
+-- La detection n'utilise que UnitExists / UnitIsDead / GetPetActionInfo, aucune valeur secrete.
+local combatFrame, combatIcons, combatText, combatVanish, combatAppear
+local combatTextBox, combatTextAnims
+local combatSig
+
+-- Memes styles que le texte de l'alerte normale (pulse / rebond / clignotement), sur le conteneur du texte de la copie
+local function BuildCombatTextAnims(box)
+    local pulse = box:CreateAnimationGroup()
+    local po = pulse:CreateAnimation("Scale")
+    po:SetScale(1.3, 1.3); po:SetDuration(0.45); po:SetSmoothing("IN_OUT"); po:SetOrigin("CENTER", 0, 0); po:SetOrder(1)
+    local pb = pulse:CreateAnimation("Scale")
+    pb:SetScale(1 / 1.3, 1 / 1.3); pb:SetDuration(0.45); pb:SetSmoothing("IN_OUT"); pb:SetOrigin("CENTER", 0, 0); pb:SetOrder(2)
+    pulse:SetLooping("REPEAT")
+    local bounce = box:CreateAnimationGroup()
+    local bo = bounce:CreateAnimation("Translation")
+    bo:SetOffset(0, 6); bo:SetDuration(0.3); bo:SetSmoothing("OUT"); bo:SetOrder(1)
+    local bb = bounce:CreateAnimation("Translation")
+    bb:SetOffset(0, -6); bb:SetDuration(0.3); bb:SetSmoothing("IN"); bb:SetOrder(2)
+    bounce:SetLooping("REPEAT")
+    local blink = box:CreateAnimationGroup()
+    local lo = blink:CreateAnimation("Alpha")
+    lo:SetFromAlpha(1); lo:SetToAlpha(0.1); lo:SetDuration(0.4); lo:SetOrder(1)
+    local lb = blink:CreateAnimation("Alpha")
+    lb:SetFromAlpha(0.1); lb:SetToAlpha(1); lb:SetDuration(0.4); lb:SetOrder(2)
+    blink:SetLooping("REPEAT")
+    return { pulse = pulse, bounce = bounce, blink = blink }
+end
+
+local function ApplyCombatTextAnims(cfg)
+    if not combatTextAnims then return end
+    -- jamais pendant l'animation d'entree / sortie (2 Translation parent + enfant se perturbent)
+    if combatAppear:IsPlaying() or combatVanish:IsPlaying() then return end
+    local wanted = { pulse = cfg.textAnimPulse, bounce = cfg.textAnimBounce, blink = cfg.textAnimBlink }
+    for k, g in pairs(combatTextAnims) do
+        if wanted[k] then
+            if not g:IsPlaying() then g:Play() end
+        else
+            g:Finish()
+        end
+    end
+end
+
+local function StopCombatTextAnims()
+    if combatTextAnims then for _, g in pairs(combatTextAnims) do g:Finish() end end
+end
+
+local function EnsureCombatFrame()
+    if combatFrame then return combatFrame end
+    combatFrame = CreateFrame("Frame", nil, UIParent)
+    combatFrame:SetFrameStrata("HIGH")
+    combatFrame:EnableMouse(false)
+    combatFrame:Hide()
+    combatIcons = {}
+    combatTextBox = CreateFrame("Frame", nil, combatFrame)
+    combatTextBox:SetSize(1, 1)
+    combatText = combatTextBox:CreateFontString(nil, "OVERLAY")
+    combatText:SetPoint("CENTER", combatTextBox, "CENTER", 0, 0)
+    combatTextAnims = BuildCombatTextAnims(combatTextBox)
+    -- Sortie : glissement vers le bas + fondu (comme l'alerte normale)
+    combatVanish = combatFrame:CreateAnimationGroup()
+    local vs = combatVanish:CreateAnimation("Translation")
+    vs:SetOffset(0, -24); vs:SetDuration(0.3); vs:SetSmoothing("IN")
+    local vf = combatVanish:CreateAnimation("Alpha")
+    vf:SetFromAlpha(1); vf:SetToAlpha(0); vf:SetDuration(0.3); vf:SetSmoothing("IN")
+    combatVanish:SetScript("OnFinished", function()
+        StopCombatTextAnims()
+        combatFrame:Hide()
+        combatFrame:SetAlpha(1)
+    end)
+    -- Entree : glissement depuis le bas + fondu
+    combatAppear = combatFrame:CreateAnimationGroup()
+    local ap = combatAppear:CreateAnimation("Translation")
+    ap:SetOffset(0, -24); ap:SetDuration(0.01); ap:SetOrder(1)
+    local as = combatAppear:CreateAnimation("Translation")
+    as:SetOffset(0, 24); as:SetDuration(0.3); as:SetSmoothing("OUT"); as:SetOrder(2)
+    local af = combatAppear:CreateAnimation("Alpha")
+    af:SetFromAlpha(0); af:SetToAlpha(1); af:SetDuration(0.3); af:SetSmoothing("OUT"); af:SetOrder(2)
+    combatAppear:SetScript("OnFinished", function() ApplyCombatTextAnims(Cfg()) end)
+    return combatFrame
+end
+
+function MissingBuffs.HideCombatPet()
+    if combatSig then
+        -- L'alerte de substitution ne porte plus : on retire aussi ses cles (combos Animations 3D)
+        combatSig = nil
+        currentAlertSpell = nil
+        wipe(currentAlertKeys)
+        currentSig = nil
+        NotifySpellEffects()
+    end
+    if combatFrame and combatFrame:IsShown() and not combatVanish:IsPlaying() then
+        if combatAppear:IsPlaying() then combatAppear:Stop() end
+        StopCombatTextAnims()
+        combatVanish:Play()
+    end
+end
+
+local function ShowCombatPet(choices, text, sig)
+    if not frame then EnsureFrame() end
+    local cfg = Cfg()
+    local cf = EnsureCombatFrame()
+    local iSize = cfg.iconSize or ICON_SIZE
+    local gap = math.max(6, math.floor(iSize * 0.15))
+    local n = #choices
+    cf:ClearAllPoints()
+    cf:SetSize(n * iSize + (n - 1) * gap, iSize + 20)
+    -- Position du profil, lue directement (comme PositionFrameIfNeeded) : ancrer sur le frame principal le
+    -- plaçait en haut de l'ecran quand celui-ci n'avait pas encore ete positionne (jamais affiche hors combat).
+    local fp = cfg.framePoint
+    if fp then
+        cf:SetPoint(fp[1] or "CENTER", UIParent, fp[2] or fp[1] or "CENTER", fp[3] or 0, fp[4] or 250)
+    else
+        cf:SetPoint("CENTER", UIParent, "CENTER", 0, 250)
+    end
+    local bt = cfg.borderThickness or 2
+    for i = 1, n do
+        local ic = combatIcons[i]
+        if not ic then
+            ic = { border = cf:CreateTexture(nil, "BACKGROUND"), tex = cf:CreateTexture(nil, "ARTWORK") }
+            ic.tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            ic.mask = cf:CreateMaskTexture(nil, "OVERLAY")
+            ic.mask:SetAllPoints(ic.tex)
+            ic.mask:SetTexture(NO_MASK_TEXTURE)
+            ic.tex:AddMaskTexture(ic.mask)
+            combatIcons[i] = ic
+        end
+        local c = choices[i]
+        local tex = c.icon
+        if not tex and c.spellId and C_Spell and C_Spell.GetSpellTexture then
+            local ok, t = pcall(C_Spell.GetSpellTexture, c.spellId)
+            if ok then tex = t end
+        end
+        ic.tex:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
+        ic.tex:SetSize(iSize, iSize)
+        ic.tex:ClearAllPoints()
+        ic.tex:SetPoint("TOP", cf, "TOP", (i - (n + 1) / 2) * (iSize + gap), 0)
+        ic.tex:Show()
+        ic.border:ClearAllPoints()
+        ic.border:SetPoint("TOPLEFT", ic.tex, -bt, bt)
+        ic.border:SetPoint("BOTTOMRIGHT", ic.tex, bt, -bt)
+        ic.border:SetColorTexture(unpack(cfg.borderColor or { 1, 0.15, 0.15, 0.9 }))
+        ic.border:SetShown(cfg.borderEnabled ~= false)
+        -- Meme forme d'icone que l'alerte normale
+        local maskOpt = ns.MISSING_BUFF_ICON_MASKS[cfg.iconMaskIndex] or ns.MISSING_BUFF_ICON_MASKS[1]
+        pcall(function()
+            if maskOpt.atlas then ic.mask:SetAtlas(maskOpt.atlas, false)
+            elseif maskOpt.texture then ic.mask:SetTexture(maskOpt.texture)
+            else ic.mask:SetTexture(NO_MASK_TEXTURE) end
+        end)
+    end
+    for i = n + 1, #combatIcons do combatIcons[i].tex:Hide(); combatIcons[i].border:Hide() end
+    ns.ApplyFont(combatText, cfg.textFont or ns.Media.font, cfg.textSize or 12, "OUTLINE")
+    combatText:SetTextColor(unpack(cfg.textColor or { 1, 0.9, 0.3 }))
+    combatTextBox:ClearAllPoints()
+    combatTextBox:SetPoint("TOP", cf, "TOP", cfg.textOffsetX or 0, -(iSize + 2) + (cfg.textOffsetY or -2) + 2)
+    combatText:SetText(text or "")
+    combatText:SetShown(not cfg.hideText)
+
+    local wasHidden = not cf:IsShown()
+    if combatVanish:IsPlaying() then combatVanish:Stop(); cf:SetAlpha(1); wasHidden = false end
+    cf:Show()
+    if wasHidden then combatAppear:Stop(); combatAppear:Play() else ApplyCombatTextAnims(cfg) end
+
+    -- Cles exposees aux combos Animations 3D : ancrees sur la copie visuelle
+    if combatSig ~= sig then
+        combatSig = sig
+        wipe(currentAlertKeys)
+        for _, c in ipairs(choices) do if c.key then currentAlertKeys[c.key] = cf end end
+        currentAlertSpell = choices[1].key
+        currentSig = sig
+        local SE = _addon.Modules and _addon.Modules.SpellEffects
+        if SE and SE.ResetMissingBuffCombos then pcall(SE.ResetMissingBuffCombos) end
+        NotifySpellEffects()
+    end
+end
+
+-- Familier vivant en mode Passif ? (bouton Passif de la barre du familier actif)
+local function PetIsPassive()
+    if not (UnitExists("pet") and not UnitIsDead("pet") and GetPetActionInfo) then return false end
+    for i = 1, (NUM_PET_ACTION_SLOTS or 10) do
+        local ok, name, _, isToken, isActive = pcall(GetPetActionInfo, i)
+        if ok and isToken and name == "PET_MODE_PASSIVE" and isActive == true then return true end
+    end
+    return false
+end
+local PASSIVE_ICON = ns.MISSING_PET_PASSIVE_ICON
+
+-- Appelee en combat (evenements + ticker). Renvoie true si une alerte familier est en place (le
+-- frame principal ne doit alors pas etre masque).
+function MissingBuffs.CheckPetInCombat()
+    local cfg = Cfg()
+    local class = _addon._playerClass or select(2, UnitClass("player"))
+    local ignored = (class == "HUNTER" and cfg.ignoreHunterPets) or (class == "WARLOCK" and cfg.ignoreWarlockPets)
+    if not cfg.enabled or ignored or (class ~= "HUNTER" and class ~= "WARLOCK")
+       or UnitIsDeadOrGhost("player") or (cfg.ignoreBuffsWhileMounted and IsMounted and IsMounted())
+       or (IsMounted and IsMounted())
+       or (C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()) then
+        MissingBuffs.HideCombatPet(); return false
+    end
+    local choices, text
+    local ok, ch, tk = pcall(CheckPetMissing, class)
+    if ok and ch and #ch > 0 then
+        choices = ch
+        text = ns.MISSING_TEXT[tk]
+    elseif PetIsPassive() then
+        choices = { { key = ns.MISSING_PET_PASSIVE_KEY, icon = PASSIVE_ICON } }
+        text = ns.MISSING_TEXT.PET_PASSIVE
+    end
+    if not choices then MissingBuffs.HideCombatPet(); return false end
+
+    local keys = {}
+    for i, c in ipairs(choices) do keys[i] = tostring(c.key) end
+    local sig = table.concat(keys, ",")
+    -- Alerte reelle deja affichee pour ces memes propositions : on n'y touche pas
+    if frame and not combatSig and frame:IsShown() and frame:GetAlpha() > 0.01 and currentSig == sig then
+        if combatFrame and combatFrame:IsShown() then combatFrame:Hide() end
+        return true
+    end
+    -- Une autre alerte reelle visible (buff manquant...) est coupee avant la copie
+    if frame and frame:IsShown() and frame:GetAlpha() > 0.01 and not combatSig then
+        MissingBuffs.HideAlert()
+    end
+    pcall(ShowCombatPet, choices, text, sig)
+    return true
+end
+
+-- Pierres du Demoniste (Retail) : pierre de soins en sac, pierre d'ame posee sur quelqu'un.
+local HEALTHSTONE_ITEMS = { 5512, 224464 }  -- Healthstone, Demonic Healthstone
+local SPELL_CREATE_HEALTHSTONE = 6201
+local SPELL_SOULSTONE = 20707
+-- Aura de pierre d'ame sur n'importe qui du groupe (soi inclus), sans exigence de portee
+local SOULSTONE_ENTRY = { spellId = SPELL_SOULSTONE, onlyOnePerGroup = true, playerCanHaveMultiples = true,
+                          ignoreRangeCheck = true, ignoreDuration = true }
+
+local function IsKnownSpell(id)
+    if not (C_SpellBook and C_SpellBook.IsSpellKnown) then return false end
+    local ok, known = pcall(C_SpellBook.IsSpellKnown, id)
+    return ok and known == true
+end
+
+-- Contexte d'affichage des alertes de pierres : hors combat, en instance OU avec une cible attaquable
+local function StoneAlertContext()
+    if InCombatLockdown() then return false end
+    if IsInInstance() then return true end
+    return UnitExists("target") and not UnitIsDeadOrGhost("target")
+        and UnitCanAttack("player", "target") and true or false
+end
+
+-- Renvoie (choix, texte) ou nil
+local function CheckWarlockStones(cfg)
+    if _addon.IsForever or not StoneAlertContext() then return nil end
+
+    if not cfg.ignoreSoulstoneAlert and IsKnownSpell(SPELL_SOULSTONE) and AnyoneMissingBuff(SOULSTONE_ENTRY) then
+        return { { key = SPELL_SOULSTONE, spellId = SPELL_SOULSTONE,
+                   spellName = SpellNameById(SPELL_SOULSTONE), useTarget = true } },
+            ns.MISSING_TEXT.NO_SOULSTONE
+    end
+
+    if not cfg.ignoreHealthstoneAlert and IsKnownSpell(SPELL_CREATE_HEALTHSTONE) then
+        local count = 0
+        for _, id in ipairs(HEALTHSTONE_ITEMS) do
+            count = count + ((C_Item and C_Item.GetItemCount and C_Item.GetItemCount(id)) or 0)
+        end
+        if count == 0 then
+            return { { key = SPELL_CREATE_HEALTHSTONE, spellId = SPELL_CREATE_HEALTHSTONE,
+                       spellName = SpellNameById(SPELL_CREATE_HEALTHSTONE) } },
+                ns.MISSING_TEXT.NO_HEALTHSTONE
+        end
+    end
+    return nil
+end
+
+local fallRecheck = false
+
 -- Orchestration principale : ordre de priorite fixe (stance/aura/attunement de soi -> poisons ->
 -- familier -> buff de classe)
 function MissingBuffs.CheckForMissings()
@@ -1035,9 +1653,10 @@ function MissingBuffs.CheckForMissings()
     -- la sortie du mode apercu ici.
     if InCombatLockdown() then
         if previewMode then previewMode = false end
-        MissingBuffs.HideAlert()
+        if not MissingBuffs.CheckPetInCombat() then MissingBuffs.HideAlert() end
         return
     end
+    MissingBuffs.HideCombatPet()
     if previewMode then return end
     -- Cle Mythique+ active : payloads d'aura secrets (anti-triche), meme la lecture sur soi peut
     -- rater un buff pourtant actif. Plutot que fiabiliser la lecture secrete (fragile), on coupe
@@ -1071,80 +1690,114 @@ function MissingBuffs.CheckForMissings()
     local class = _addon._playerClass or select(2, UnitClass("player"))
     if not class then MissingBuffs.HideAlert(); return end
 
-    -- 1) Stance / aura / attunement / forme (priorite max, soi uniquement)
+    -- En chute (souvent juste apres une descente de monture) : le familier n'est pas encore revenu,
+    -- aucune nouvelle alerte tant qu'on n'a pas touche le sol. Une alerte deja affichee reste en
+    -- l'etat ; pas d'evenement a l'atterrissage, d'ou le rescan differe.
+    if IsFalling and IsFalling() then
+        if not fallRecheck then
+            fallRecheck = true
+            C_Timer.After(0.3, function() fallRecheck = false; MissingBuffs.RequestCheck() end)
+        end
+        return
+    end
+
+    -- 1) Stance / aura / attunement / forme (priorite max, soi uniquement). Toutes les options
+    -- apprises sont proposees (une icone chacune).
     if class == "WARRIOR" and not cfg.ignoreWarriorStances then
-        local missing, opt = ExclusiveGroupMissing(ns.MISSING_WARRIOR_STANCES, cfg.overrideWarriorStance)
-        if missing then
-            MissingBuffs.ShowAlert(opt.spellId, ns.MISSING_TEXT.USE_STANCE, BuildClickInfo(opt, "player")); return
-        end
+        local choices = ExclusiveGroupAlert(ns.MISSING_WARRIOR_STANCES)
+        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_STANCE); return end
     elseif class == "PALADIN" and not cfg.ignorePaladinAuras then
-        local missing, opt = ExclusiveGroupMissing(ns.MISSING_PALADIN_AURAS, cfg.overridePaladinAura)
-        if missing then
-            MissingBuffs.ShowAlert(opt.spellId, ns.MISSING_TEXT.USE_AURA, BuildClickInfo(opt, "player")); return
-        end
+        local choices = ExclusiveGroupAlert(ns.MISSING_PALADIN_AURAS)
+        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_AURA); return end
     elseif class == "EVOKER" and _addon._specID == ns.MISSING_AUGMENTATION_EVOKER_SPEC and not cfg.ignoreEvokerAttunements then
-        local missing, opt = ExclusiveGroupMissing(ns.MISSING_EVOKER_ATTUNEMENTS, cfg.overrideEvokerAttunement)
-        if missing then
-            MissingBuffs.ShowAlert(opt.spellId, ns.MISSING_TEXT.USE_ATTUNEMENT, BuildClickInfo(opt, "player")); return
-        end
+        local choices = ExclusiveGroupAlert(ns.MISSING_EVOKER_ATTUNEMENTS)
+        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_ATTUNEMENT); return end
     elseif class == "DRUID" and _addon._specID == ns.MISSING_BALANCE_DRUID_SPEC and not cfg.ignoreDruidForms then
         local e = ns.MISSING_BALANCE_MOONKIN
         if IsEntryLearned(e) and not GetSelfAura(e.spellId) then
-            MissingBuffs.ShowAlert(e.spellId, ns.MISSING_TEXT.USE_STANCE, BuildClickInfo(e, "player")); return
+            MissingBuffs.ShowAlertChoices(ChoicesFromEntry(e, "player"), ns.MISSING_TEXT.USE_STANCE); return
         end
     elseif class == "PRIEST" and _addon._specID == ns.MISSING_SHADOW_PRIEST_SPEC then
         local e = ns.MISSING_SHADOW_FORM
         if IsEntryLearned(e) and not SelfHasBuff(e) then
-            MissingBuffs.ShowAlert(e.spellId, ns.MISSING_TEXT.USE_STANCE, BuildClickInfo(e, "player")); return
+            MissingBuffs.ShowAlertChoices(ChoicesFromEntry(e, "player"), ns.MISSING_TEXT.USE_STANCE); return
         end
     end
 
-    -- 2) Poisons Voleur (soi uniquement)
+    -- 2) Poisons Voleur (soi uniquement) : tous les poisons connus en propositions
     if class == "ROGUE" then
-        local missing, opt, textKey = CheckRoguePoisons()
-        if missing then
-            MissingBuffs.ShowAlert(opt.spellId, ns.MISSING_TEXT[textKey], BuildClickInfo(opt, "player")); return
+        local choices, textKey = CheckRoguePoisons()
+        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT[textKey]); return end
+    end
+
+    -- 3) Familier (Chasseur / Demoniste, soi uniquement) : tous les familiers / demons invocables
+    -- En monture (skyriding compris) : pas d'alerte familier, il n'est pas invoque et ne reapparait pas a l'atterrissage
+    local flying = IsMounted and IsMounted()
+    if flying then
+        -- rien
+    elseif class == "HUNTER" and not cfg.ignoreHunterPets then
+        local choices, textKey = CheckPetMissing("HUNTER")
+        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT[textKey]); return end
+    elseif class == "WARLOCK" and not cfg.ignoreWarlockPets then
+        local choices, textKey = CheckPetMissing("WARLOCK")
+        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT[textKey]); return end
+    end
+
+    -- 3b) Familier en Passif avec une cible attaquable : clic = mode Assistance (hors combat : bouton
+    -- securise normal ; l'alerte reste en place et cliquable a l'entree en combat)
+    if not flying and ((class == "HUNTER" and not cfg.ignoreHunterPets) or (class == "WARLOCK" and not cfg.ignoreWarlockPets)) then
+        if PetIsPassive() and UnitExists("target") and not UnitIsDeadOrGhost("target")
+           and UnitCanAttack("player", "target") then
+            MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_PET_PASSIVE_KEY, icon = PASSIVE_ICON, macro = "/petassist" } },
+                ns.MISSING_TEXT.PET_PASSIVE)
+            return
         end
     end
 
-    -- 3) Familier (Chasseur / Demoniste, soi uniquement)
-    if class == "HUNTER" and not cfg.ignoreHunterPets then
-        local missing, e, textKey = CheckPetMissing("HUNTER")
-        if missing then
-            MissingBuffs.ShowAlert(e.spellId, ns.MISSING_TEXT[textKey], BuildClickInfo(e, "player")); return
-        end
-    elseif class == "WARLOCK" and not cfg.ignoreWarlockPets then
-        local missing, e, textKey = CheckPetMissing("WARLOCK")
-        if missing then
-            MissingBuffs.ShowAlert(e.spellId, ns.MISSING_TEXT[textKey], BuildClickInfo(e, "player")); return
-        end
+    -- 3c) Pierre de soins / pierre d'ame (Demoniste)
+    if class == "WARLOCK" then
+        local choices, text = CheckWarlockStones(cfg)
+        if choices then MissingBuffs.ShowAlertChoices(choices, text); return end
     end
 
     -- 4) Buff de classe manquant (soi puis allies -- cf. limite en tete de fichier)
-    -- On affiche le PREMIER trouve (icone/texte, priorite inchangee) mais on CHAINE tous les
-    -- autres actuellement manquants dans la meme macro : la plupart de ces sorts ne partagent
-    -- pas le GCD, un seul clic les applique tous a la suite ; ceux qui le partagent attendront le clic suivant.
+    -- On affiche le PREMIER trouve (texte, priorite inchangee). Une entree a plusieurs sorts connus
+    -- (Forever : enchantements, armures, Aspects...) et les enchantements d'arme equivalents de la meme
+    -- arme (Retail) donnent une icone par proposition. Sinon, on CHAINE tous les autres buffs
+    -- actuellement manquants dans la meme macro : la plupart de ces sorts ne partagent pas le GCD,
+    -- un seul clic les applique tous a la suite ; ceux qui le partagent attendront le clic suivant.
     local list = ns.MISSING_CLASS_BUFFS[class]
     if list then
-        local primaryEntry, primaryText
+        local primaryEntry, primaryText, primaryUnit
         local castLines = {}
+        local weaponMissing = {}   -- [slot] = entrees d'enchantement d'arme manquantes de cet emplacement
         -- Rappel "bientot expire" : priorite strictement plus basse qu'un vrai manquant. On
         -- retient le premier candidat expirant trouve, utilise seulement si aucun primaryEntry.
         local expiringEntry
         -- cfg.expiringSoonThreshold est en minutes (reglage GUI), converti ici en secondes.
         local expiringThreshold = cfg.expiringSoonEnabled and cfg.expiringSoonThreshold and (cfg.expiringSoonThreshold * 60)
         for _, entry in ipairs(list) do
-            if IsEntryLearned(entry) and EntryApplies(entry) then
-                local missing, unit
-                if entry.requiresHealerInGroup then
+            if (entry.kind or IsEntryLearned(entry)) and EntryApplies(entry) then
+                local missing, unit, itemCount
+                if entry.kind then
+                    missing, itemCount = ItemEntryMissing(entry)
+                    unit = "player"
+                elseif entry.requiresHealerInGroup then
                     missing, unit = HealerMissingBuff(entry)
                 else
                     missing, unit = AnyoneMissingBuff(entry)
                 end
                 if missing then
+                    if entry.weaponEnchantSlot then
+                        local w = weaponMissing[entry.weaponEnchantSlot] or {}
+                        weaponMissing[entry.weaponEnchantSlot] = w
+                        w[#w + 1] = entry
+                    end
                     if not primaryEntry then
-                        primaryEntry = entry
-                        if entry.showRaidCount and (IsInRaid() or IsInGroup()) then
+                        primaryEntry, primaryUnit = entry, unit
+                        if entry.kind then
+                            primaryText = string.format("%s (%d)", ns.MISSING_TEXT[entry.text] or "", itemCount or 0)
+                        elseif entry.showRaidCount and (IsInRaid() or IsInGroup()) then
                             -- Affichage "10/14" : combien de monde a deja le buff sur le total
                             -- applicable a portee -- plus parlant qu'un simple "Manquant".
                             local have, total = CountBuffCoverage(entry)
@@ -1153,7 +1806,7 @@ function MissingBuffs.CheckForMissings()
                             primaryText = ns.MISSING_TEXT[entry.text or "MISSING"]
                         end
                     end
-                    local line = BuildCastLine(entry, unit)
+                    local line = (not entry.kind) and BuildCastLine(entry, unit) or nil
                     if line then castLines[#castLines + 1] = line end
                 elseif expiringThreshold and not expiringEntry and not primaryEntry then
                     if GetSelfBuffExpiringSoon(entry, expiringThreshold) then
@@ -1163,14 +1816,34 @@ function MissingBuffs.CheckForMissings()
             end
         end
         if primaryEntry then
-            MissingBuffs.ShowAlert(primaryEntry.spellId, primaryText, { castMacro = table.concat(castLines, "\n") })
-            return
+            local choices
+            local sameHand = primaryEntry.weaponEnchantSlot and weaponMissing[primaryEntry.weaponEnchantSlot]
+            if sameHand then
+                choices = {}
+                local seenKey = {}
+                for _, we in ipairs(sameHand) do
+                    for _, c in ipairs(ChoicesFromEntry(we, "player")) do
+                        if not seenKey[c.key] then seenKey[c.key] = true; choices[#choices + 1] = c end
+                    end
+                end
+            else
+                choices = ChoicesFromEntry(primaryEntry, primaryUnit)
+                -- Une seule icone : le clic enchaine tous les buffs manquants (macro), comme avant
+                if #choices == 1 and not primaryEntry.kind and #castLines > 0 then
+                    choices[1].macro = table.concat(castLines, "\n")
+                end
+            end
+            if #choices > 0 then
+                MissingBuffs.ShowAlertChoices(choices, primaryText)
+                return
+            end
         end
         if expiringEntry then
-            local line = BuildCastLine(expiringEntry, "player")
-            MissingBuffs.ShowAlert(expiringEntry.spellId, ns.MISSING_TEXT.EXPIRING_SOON,
-                { castMacro = line or "" })
-            return
+            local choices = ChoicesFromEntry(expiringEntry, "player")
+            if #choices > 0 then
+                MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.EXPIRING_SOON)
+                return
+            end
         end
     end
 
@@ -1200,7 +1873,11 @@ function MissingBuffs.RequestCheck()
     if not cfg.enabled then MissingBuffs.HideAlert(); return end
     -- Meme gardefou qu'en tete de CheckForMissings, mais ici avant toute planification : coupe
     -- le flot d'evenements combat qui redeclencherait un DoCheck differe pour rien.
-    if InCombatLockdown() then scanScheduled = false; MissingBuffs.HideAlert(); return end
+    if InCombatLockdown() then
+        scanScheduled = false
+        if not MissingBuffs.CheckPetInCombat() then MissingBuffs.HideAlert() end
+        return
+    end
     local now = GetTime()
     if now < enterWorldGraceUntil then
         if not scanScheduled then
@@ -1224,7 +1901,7 @@ local GROUP_EVENTS = {
     "PLAYER_ENTERING_WORLD", "GROUP_ROSTER_UPDATE", "UNIT_AURA",
     "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "PLAYER_ALIVE", "PLAYER_UNGHOST",
     "UNIT_CONNECTION", "UPDATE_SHAPESHIFT_FORM", "SPELLS_CHANGED", "TRAIT_CONFIG_UPDATED",
-    "UNIT_PET", "UNIT_INVENTORY_CHANGED", "PLAYER_SPECIALIZATION_CHANGED",
+    "UNIT_PET", "UNIT_INVENTORY_CHANGED", "PLAYER_SPECIALIZATION_CHANGED", "PET_BAR_UPDATE",
     -- Necessaire pour l'exception "cible attaquable en zone de repos" (cf. CheckForMissings) :
     -- sans cet evenement, cibler/decibler un mannequin d'entrainement ne redeclenchait aucun rescan.
     "PLAYER_TARGET_CHANGED",
@@ -1265,6 +1942,18 @@ function MissingBuffs.Init()
     pcall(eventFrame.RegisterUnitEvent, eventFrame, "UNIT_SPELLCAST_SUCCEEDED", "player")
     MissingBuffs.RequestCheck()
 
+    -- Familier en combat : la mort / le renvoi du familier ne declenche pas toujours d'evenement exploitable
+    local wasFlying = false
+    C_Timer.NewTicker(1, function()
+        if InCombatLockdown() and Cfg().enabled then MissingBuffs.CheckPetInCombat() end
+        -- Mise en selle / descente : on relance l'evaluation du familier
+        local fl = IsMounted and IsMounted() or false
+        if fl ~= wasFlying then
+            wasFlying = fl
+            if not InCombatLockdown() then MissingBuffs.RequestCheck() end
+        end
+    end)
+
     -- Rappel "bientot expire" : contrairement au reste du module (event-driven), le franchissement
     -- du seuil de duree n'est pas un evenement -- ticker leger (2s), inoffensif si desactive.
     C_Timer.NewTicker(2, function()
@@ -1290,13 +1979,22 @@ end
 function MissingBuffs.SetIgnored(settingsId, ignored)
     local cfg = Cfg()
     if not (cfg and settingsId) then return end
-    cfg.ignoredSettingsIds = cfg.ignoredSettingsIds or {}
-    cfg.ignoredSettingsIds[settingsId] = ignored or nil
+    -- Rappel optionnel (Forever, decoche par defaut) : "ignore" = non coche, on stocke donc l'inverse
+    if ns.MISSING_OPTIN_IDS and ns.MISSING_OPTIN_IDS[settingsId] then
+        cfg.optInSettingsIds = cfg.optInSettingsIds or {}
+        cfg.optInSettingsIds[settingsId] = (not ignored) or nil
+    else
+        cfg.ignoredSettingsIds = cfg.ignoredSettingsIds or {}
+        cfg.ignoredSettingsIds[settingsId] = ignored or nil
+    end
     MissingBuffs.RequestCheck()
 end
 
 function MissingBuffs.IsIgnored(settingsId)
     local cfg = Cfg()
+    if ns.MISSING_OPTIN_IDS and ns.MISSING_OPTIN_IDS[settingsId] then
+        return not (cfg and cfg.optInSettingsIds and cfg.optInSettingsIds[settingsId])
+    end
     return cfg and cfg.ignoredSettingsIds and cfg.ignoredSettingsIds[settingsId] == true
 end
 
@@ -1311,13 +2009,28 @@ function MissingBuffs.GetTriggerSpells()
         if id and not seen[id] then seen[id] = true; out[#out + 1] = id end
     end
 
+    -- Forever : les entrees portent "casts" (cles = spellIDs de rang 1, un par sort distinct) ;
+    -- Retail : un spellId par entree.
+    local seenName = {}
+    local function addEntry(e)
+        if e.casts then
+            for _, v in ipairs(e.casts) do
+                if type(v) == "number" then
+                    local n = SpellNameById(v)
+                    if n and not seenName[n] then seenName[n] = true; add(v) end
+                end
+            end
+        else
+            add(e.spellId)
+        end
+    end
     local list = ns.MISSING_CLASS_BUFFS[class]
-    if list then for _, e in ipairs(list) do add(e.spellId) end end
+    if list then for _, e in ipairs(list) do addEntry(e) end end
 
     if class == "WARRIOR" then
-        for _, o in ipairs(ns.MISSING_WARRIOR_STANCES) do add(o.spellId) end
+        for _, o in ipairs(ns.MISSING_WARRIOR_STANCES) do addEntry(o) end
     elseif class == "PALADIN" then
-        for _, o in ipairs(ns.MISSING_PALADIN_AURAS) do add(o.spellId) end
+        for _, o in ipairs(ns.MISSING_PALADIN_AURAS) do addEntry(o) end
     elseif class == "EVOKER" then
         for _, o in ipairs(ns.MISSING_EVOKER_ATTUNEMENTS) do add(o.spellId) end
     elseif class == "DRUID" then
@@ -1326,15 +2039,23 @@ function MissingBuffs.GetTriggerSpells()
         add(ns.MISSING_SHADOW_FORM.spellId)
     elseif class == "HUNTER" then
         add(ns.MISSING_HUNTER_PET_DEAD)
-        for _, o in ipairs(ns.MISSING_HUNTER_ALL_PETS) do add(o.spellId) end
+        add(ns.MISSING_PET_PASSIVE_KEY)
+        for _, o in ipairs(ns.MISSING_HUNTER_ALL_PETS) do addEntry(o) end
+        if ns.MISSING_HUNTER_REVIVE_ENTRY then addEntry(ns.MISSING_HUNTER_REVIVE_ENTRY) end
     elseif class == "WARLOCK" then
-        for _, o in ipairs(ns.MISSING_WARLOCK_ALL_PETS) do add(o.spellId) end
+        for _, o in ipairs(ns.MISSING_WARLOCK_ALL_PETS) do addEntry(o) end
         -- Presence dans le picker de combo uniquement -- cf. IsBurningRushActive,
         -- jamais ajoute a ns.MISSING_CLASS_BUFFS (pas de detection "absent").
-        add(ns.MISSING_WARLOCK_BURNING_RUSH)
+        if not _addon.IsForever then
+            add(ns.MISSING_WARLOCK_BURNING_RUSH)
+            add(SPELL_CREATE_HEALTHSTONE)
+            add(SPELL_SOULSTONE)
+        end
+        add(ns.MISSING_PET_PASSIVE_KEY)
     elseif class == "ROGUE" then
-        for _, o in ipairs(ns.MISSING_ROGUE_POISONS.nonlethal) do add(o.spellId) end
-        for _, o in ipairs(ns.MISSING_ROGUE_POISONS.lethal) do add(o.spellId) end
+        for _, o in ipairs(ns.MISSING_ROGUE_POISONS.nonlethal) do addEntry(o) end
+        for _, o in ipairs(ns.MISSING_ROGUE_POISONS.lethal) do addEntry(o) end
+        for _, o in ipairs(ns.MISSING_ROGUE_POISONS.forever or {}) do addEntry(o) end
     end
 
     return out
@@ -1411,5 +2132,75 @@ SlashCmdList["AISHBUFFDEBUG"] = function(msg)
     end)
     if not ok then
         print("|cffff4444[AishCore]|r Erreur pendant le debug : " .. tostring(err))
+    end
+end
+
+-- Forever : /aishbuffs affiche, pour la classe courante, chaque rappel avec les noms de sort
+-- deduits des spellIDs (langue du client), le sort connu retenu et l'etat de l'aura sur soi.
+-- Sert a verifier que les IDs de MissingBuffsData.lua correspondent bien a ce client.
+if _addon.IsForever then
+    SLASH_AISHBUFFS1 = "/aishbuffs"
+    SlashCmdList["AISHBUFFS"] = function()
+        local P = "|cff00ff00[AishCore buffs]|r "
+        local class = _addon._playerClass or select(2, UnitClass("player"))
+        local function names(list)
+            if not list or #list == 0 then return "-" end
+            local out = {}
+            for _, v in ipairs(list) do
+                if type(v) == "number" then
+                    local n = ExpandNames({ v })[1]
+                    out[#out + 1] = n and (n .. "(" .. v .. ")") or ("?" .. v)
+                end
+            end
+            return #out > 0 and table.concat(out, ", ") or "-"
+        end
+        local function line(label, e)
+            local known = e.casts and IsEntryLearned(e) or false
+            local active = e.names and FindAuraByNames("player", e.names) and "oui" or "non"
+            -- casts vide (aura reconnue seulement) : on montre les noms d'aura attendus
+            local shown = (e.casts and #e.casts == 0) and ("aura attendue: " .. names(e.names)) or names(e.casts)
+            print(P .. string.format("%s | sorts: %s | connu: %s (%s) | aura sur soi: %s",
+                label, shown, tostring(known), tostring(e._castName), active))
+        end
+        print(P .. "classe=" .. tostring(class) .. " spe=" .. tostring(_addon._specID))
+        for _, e in ipairs(ns.MISSING_CLASS_BUFFS[class] or {}) do
+            if e.kind then
+                local missing, n = ItemEntryMissing(e)
+                print(P .. string.format("%s | quantite=%s seuil=%s manquant=%s", e.displayName or e.kind, tostring(n), tostring(e.min), tostring(missing)))
+            else
+                line(e.displayName or "?", e)
+            end
+        end
+        if class == "PALADIN" then for _, e in ipairs(ns.MISSING_PALADIN_AURAS) do line("aura", e) end end
+        if class == "PRIEST" then line("Shadowform", ns.MISSING_SHADOW_FORM) end
+        if class == "HUNTER" then
+            line("Call Pet", ns.MISSING_HUNTER_ALL_PETS[1]); line("Revive Pet", ns.MISSING_HUNTER_REVIVE_ENTRY)
+        end
+        if class == "WARLOCK" then for _, e in ipairs(ns.MISSING_WARLOCK_ALL_PETS) do line("demon", e) end end
+        if class == "ROGUE" then for _, e in ipairs(ns.MISSING_ROGUE_POISONS.forever) do line("poison", e) end end
+        if GetWeaponEnchantInfo then
+            local ok, a, b, c, d, e, f, g, h = pcall(GetWeaponEnchantInfo)
+            print(P .. "GetWeaponEnchantInfo: ok=" .. tostring(ok) .. " -> " .. tostring(a) .. ", " .. tostring(b) ..
+                  ", " .. tostring(c) .. ", " .. tostring(d) .. ", " .. tostring(e) .. ", " .. tostring(f) ..
+                  ", " .. tostring(g) .. ", " .. tostring(h))
+            print(P .. "arme main droite: " .. tostring(GetInventoryItemID and GetInventoryItemID("player", 16)) ..
+                  " main gauche: " .. tostring(GetInventoryItemID and GetInventoryItemID("player", 17)))
+        else
+            print(P .. "GetWeaponEnchantInfo: ABSENT sur ce client")
+        end
+        do
+            local hm, em = WeaponEnchantState("main")
+            local ho, eo = WeaponEnchantState("off")
+            print(P .. string.format("etat enchantement (C_Item) : main=%s (%s ms) off=%s (%s ms) | C_Item.GetWeaponEnchantInfo=%s",
+                tostring(hm), tostring(em), tostring(ho), tostring(eo), tostring(C_Item and C_Item.GetWeaponEnchantInfo ~= nil)))
+        end
+        -- Auras actuelles du joueur : pour comparer les noms reels a ceux attendus
+        local have = {}
+        for i = 1, 40 do
+            local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
+            if not ok or not a then break end
+            if a.name and not IsSecret(a.name) then have[#have + 1] = a.name end
+        end
+        print(P .. "auras actuelles: " .. (#have > 0 and table.concat(have, ", ") or "(aucune)"))
     end
 end

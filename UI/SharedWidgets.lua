@@ -676,6 +676,97 @@ local function _ApplyBD(f, bg, edge)
   f:SetBackdropBorderColor(edge[1], edge[2], edge[3], edge[4] or 0.8)
 end
 
+-- Relayout anime. layoutFn() repositionne / affiche / masque les frames de `frames` comme d'habitude
+-- (resultat final immediat) ; on compare l'avant/l'apres pour glisser verticalement les frames qui
+-- bougent et fondre celles qui apparaissent ou disparaissent. Sans pilote d'animation, ou si le
+-- panneau n'est pas visible : layoutFn() seul. `key` identifie l'animation en cours (une par page).
+local _layoutAnims = {}
+function SharedWidgets.AnimateLayout(key, frames, layoutFn)
+  local SWm = SharedWidgets
+  if not (SWm.StartAnim and SWm.animEnabled) or not (frames[1] and frames[1]:IsVisible()) then
+    layoutFn()
+    return
+  end
+  -- Une animation precedente est terminee d'office : on repart d'un etat final propre
+  local prev = _layoutAnims[key]
+  if prev then SWm.StopAnim(key); prev() ; _layoutAnims[key] = nil end
+
+  local before = {}
+  for i, f in ipairs(frames) do
+    local info = { shown = f:IsShown(), pts = {} }
+    if info.shown then
+      for p = 1, f:GetNumPoints() do info.pts[p] = { f:GetPoint(p) } end
+    end
+    before[i] = info
+  end
+
+  layoutFn()
+
+  local moving, fadeIn, fadeOut = {}, {}, {}
+  for i, f in ipairs(frames) do
+    local b, shown = before[i], f:IsShown()
+    if shown and b.shown then
+      local n = f:GetNumPoints()
+      if n == #b.pts and n > 0 then
+        local after, dy = {}, 0
+        for p = 1, n do after[p] = { f:GetPoint(p) } end
+        dy = (b.pts[1][5] or 0) - (after[1][5] or 0)
+        if math.abs(dy) > 0.5 then moving[#moving + 1] = { f = f, after = after, dy = dy } end
+      end
+    elseif shown and not b.shown then
+      fadeIn[#fadeIn + 1] = f
+    elseif b.shown and not shown then
+      -- on la garde visible le temps du fondu, a son ancienne position
+      f:ClearAllPoints()
+      for _, pt in ipairs(b.pts) do f:SetPoint(pt[1], pt[2], pt[3], pt[4], pt[5]) end
+      f:Show()
+      fadeOut[#fadeOut + 1] = f
+    end
+  end
+  if #moving + #fadeIn + #fadeOut == 0 then return end
+
+  local function Finish()
+    for _, m in ipairs(moving) do
+      m.f:ClearAllPoints()
+      for _, pt in ipairs(m.after) do m.f:SetPoint(pt[1], pt[2], pt[3], pt[4], pt[5]) end
+    end
+    for _, f in ipairs(fadeIn) do f:SetAlpha(1) end
+    for _, f in ipairs(fadeOut) do f:Hide(); f:SetAlpha(1) end
+  end
+  _layoutAnims[key] = Finish
+  for _, f in ipairs(fadeIn) do f:SetAlpha(0) end
+  SWm.StartAnim(key, 0.18, function(e)
+    for _, m in ipairs(moving) do
+      m.f:ClearAllPoints()
+      for _, pt in ipairs(m.after) do
+        m.f:SetPoint(pt[1], pt[2], pt[3], pt[4], (pt[5] or 0) + m.dy * (1 - e))
+      end
+    end
+    for _, f in ipairs(fadeIn) do f:SetAlpha(e) end
+    for _, f in ipairs(fadeOut) do f:SetAlpha(1 - e) end
+  end, function()
+    Finish()
+    _layoutAnims[key] = nil
+  end)
+end
+
+-- Ouverture animee d'un menu deroulant (fondu + deploiement en hauteur), pilote SW.StartAnim defini
+-- par UI/SettingsPanel.lua. Partage avec les menus du module Auras. Sans pilote : ouverture seche.
+function SharedWidgets.AnimateMenuOpen(menu)
+  if not (SharedWidgets.StartAnim and SharedWidgets.animEnabled) then return end
+  local fullH = menu:GetHeight()
+  if not fullH or fullH <= 6 then return end
+  menu:SetAlpha(0)
+  menu:SetHeight(4)
+  SharedWidgets.StartAnim(menu, 0.14, function(e)
+    menu:SetAlpha(e)
+    menu:SetHeight(math.max(4, fullH * e))
+  end, function()
+    menu:SetAlpha(1)
+    menu:SetHeight(fullH)
+  end)
+end
+
 -- Dropdown (liste déroulante) — style AishUI : label au-dessus, bouton pleine largeur
 function SharedWidgets.CreateDropdown(parent, label, options, width)
   -- options = { { value = ..., text = "..." }, ... }
@@ -857,6 +948,7 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
     else
       BuildMenuItems()
       menu:Show()
+      SharedWidgets.AnimateMenuOpen(menu)
     end
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
   end)

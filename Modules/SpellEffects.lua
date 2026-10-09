@@ -225,7 +225,7 @@ end
 -- et les tickers de refresh live, pour eviter un retrecissement brutal au 1er tick.
 local function GetBaseSizeForAnchor(anchor)
   local anchorName = anchor and anchor.GetName and anchor:GetName() or ""
-  if anchorName == "AishCoreMissingBuffFrame" then return 500 end
+  if anchorName:find("^AishCoreMissingBuff") then return 500 end
   -- Logos : un seul combo sert deux logos de tailles differentes (en-tete du panneau,
   -- 74 px fixes / mode AFK, dimensions configurables). La base suit donc la taille de
   -- l'ancre, pour un rendu proportionnel des deux cotes. Le facteur 2.7 redonne
@@ -288,7 +288,7 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor, skipModel)
   local anchorName = pAnchor.GetName and pAnchor:GetName() or ""
   local isOoc = (anchorName == "AishCoreHealthRing")
   local isOrb = anchorName:find("^AishCoreSecDot") or anchorName:find("^AishCoreOCSecDot")
-  local isMissingBuff = (anchorName == "AishCoreMissingBuffFrame")
+  local isMissingBuff = anchorName:find("^AishCoreMissingBuff") ~= nil  -- frame global ou icone de proposition
   local isLogo = (anchorName == "AishCoreGuiLogoAnchor" or anchorName == "AishCoreAFKLogoAnchor")
 
   local baseSize = GetBaseSizeForAnchor(pAnchor)
@@ -1049,7 +1049,10 @@ function SpellEffects.StartMissingBuffSustained(spellID)
 
   local entries = {}
   sustainedMissingBuffEntries[spellID] = entries
-  local anchor = _G["AishCoreMissingBuffFrame"] or UIParent
+  -- Ancre = l'icone qui affiche CE sort (une icone par proposition), sinon le frame global
+  local MBm = ns.Auras and ns.Auras.MissingBuffs
+  local anchor = (MBm and MBm.GetSlotForSpell and MBm.GetSlotForSpell(spellID))
+    or _G["AishCoreMissingBuffFrame"] or UIParent
 
   for _, anim in ipairs(combo) do
     if anim.enabled ~= false then
@@ -1063,6 +1066,8 @@ function SpellEffects.StartMissingBuffSustained(spellID)
           end
           return
         end
+        entry.anim = anim
+        entry.lastMid = tonumber(anim.modelID)
         ApplyAnimConfig(entry.frame, anim, anchor)
         entry.frame:Show()
         entries[#entries + 1] = entry
@@ -1073,6 +1078,26 @@ function SpellEffects.StartMissingBuffSustained(spellID)
       else
         spawn()
       end
+    end
+  end
+end
+
+--- Reapplique les reglages d'un combo aux modeles soutenus deja affiches pour ce sort (sliders du
+--- panneau en direct), sans recharger le modele sauf s'il a change. Le modele reel de l'icone
+--- d'apercu tient lieu de preview : sans ce rafraichissement il restait fige sur sa valeur de depart.
+function SpellEffects.RefreshMissingBuffSustained(spellID)
+  local entries = sustainedMissingBuffEntries[spellID]
+  if not entries then return end
+  local MBm = ns.Auras and ns.Auras.MissingBuffs
+  local anchor = (MBm and MBm.GetSlotForSpell and MBm.GetSlotForSpell(spellID))
+    or _G["AishCoreMissingBuffFrame"] or UIParent
+  for _, entry in ipairs(entries) do
+    local anim = entry.anim
+    if anim then
+      local mid = tonumber(anim.modelID)
+      local sameModel = (mid == entry.lastMid)
+      entry.lastMid = mid
+      ApplyAnimConfig(entry.frame, anim, anchor, nil, sameModel)
     end
   end
 end
@@ -2505,6 +2530,8 @@ local function ScanMissingBuffCombos()
 
   local MB = ns.Auras and ns.Auras.MissingBuffs
   local currentSpellID = MB and MB.GetCurrentAlertSpell and MB.GetCurrentAlertSpell()
+  -- Plusieurs icones peuvent etre affichees a la fois (propositions) : chacune a son combo
+  local activeSet = MB and MB.GetCurrentAlertSpells and MB.GetCurrentAlertSpells()
 
   for spellID, combo in pairs(missingBuffsCombos) do
     if type(spellID) == "number" and combo and #combo > 0 then
@@ -2513,7 +2540,7 @@ local function ScanMissingBuffCombos()
       if isBurningRush then
         active = MB and MB.IsBurningRushActive and MB.IsBurningRushActive() or false
       else
-        active = (currentSpellID == spellID)
+        active = (activeSet and activeSet[spellID] ~= nil) or (currentSpellID == spellID)
       end
       if active and not _missingBuffActive[spellID] then
         _missingBuffActive[spellID] = true
@@ -2538,6 +2565,18 @@ local function ScanMissingBuffCombos()
 end
 -- Exposée pour MissingBuffs.lua : permet un scan immédiat sur changement, sans attendre le ticker de 2s.
 SpellEffects.ScanMissingBuffCombos = ScanMissingBuffCombos
+
+-- Relance tous les combos "Buffs manquants" actifs (hors Ruee ardente) : appele quand la rangee d'icones
+-- de propositions change, pour que chaque combo se re-ancre sur l'icone de son sort.
+SpellEffects.ResetMissingBuffCombos = function()
+  local burningRushID = ns.Auras and ns.Auras.MISSING_WARLOCK_BURNING_RUSH
+  for spellID in pairs(_missingBuffActive) do
+    if not (burningRushID and spellID == burningRushID) then
+      _missingBuffActive[spellID] = nil
+      SpellEffects.StopMissingBuffSustained(spellID)
+    end
+  end
+end
 
 -- /sedebugcombos : snapshot instantané de toute la chaîne (sans limite de temps, contrairement à /sedebug all).
 function SpellEffects.DebugDumpAuraCombos()
@@ -2844,6 +2883,7 @@ function SpellEffects.Init()
 
   -- Changement de spé : rafraîchir les décorations (OOC combo peut changer)
   local specFrame = CreateFrame("Frame")
+  ns.TrackSpecFrame(specFrame)
   specFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
   specFrame:RegisterEvent("UPDATE_STEALTH")
   specFrame:SetScript("OnEvent", function()

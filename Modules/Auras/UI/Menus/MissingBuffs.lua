@@ -8,6 +8,47 @@ local function Cfg()
     return ns.MissingBuffs and ns.MissingBuffs.Cfg() or {}
 end
 
+-- Libelle d'une entree Forever (sans spellID fixe) : noms de sort localises, lus depuis les spellIDs
+-- de "casts" (valables meme pour un sort pas encore appris). Au plus 3 noms, separes par " / ".
+local function ForeverEntryLabel(entry)
+    if entry.kind == "item" then return L["MISSINGBUFFS_ENTRY_SHARDS"] or entry.displayName end
+    if entry.kind == "ammo" then return L["MISSINGBUFFS_ENTRY_AMMO"] or entry.displayName end
+    local out, seen = {}, {}
+    for _, v in ipairs(entry.casts or {}) do
+        if type(v) == "number" and #out < 3 then
+            local ok, n = pcall(C_Spell.GetSpellName, v)
+            if ok and n and not seen[n] then seen[n] = true; out[#out + 1] = n end
+        end
+    end
+    if #out == 0 then
+        if entry.displayName then return entry.displayName end
+        for _, v in ipairs(entry.casts or {}) do if type(v) == "string" then return v end end
+        return nil
+    end
+    local label = table.concat(out, " / ")
+    if entry.weaponEnchantSlot == "off" then
+        label = label .. " (" .. (L["MISSINGBUFFS_OFFHAND"] or "off-hand") .. ")"
+    end
+    return label
+end
+
+-- Forever : une entree dont AUCUN sort n'existe sur ce client (ID inconnu, ex. Aura de croise) n'a rien
+-- a faire dans les options.
+local function Existing(list)
+    if not _addon.IsForever then return list or {} end
+    local out = {}
+    for _, e in ipairs(list or {}) do
+        local ok = (not e.casts) or #e.casts == 0
+        for _, v in ipairs(e.casts or {}) do
+            if type(v) ~= "number" then ok = true; break end
+            local good, n = pcall(C_Spell.GetSpellName, v)
+            if good and n then ok = true; break end
+        end
+        if ok then out[#out + 1] = e end
+    end
+    return out
+end
+
 -- Ligne "buff a ignorer" : case a cocher (coche = trace) + icone + nom
 local function CreateBuffRow(parent, entry, y, W)
     local Theme = ns.THEME
@@ -25,8 +66,9 @@ local function CreateBuffRow(parent, entry, y, W)
     local icon = row:CreateTexture(nil, "ARTWORK")
     icon:SetSize(18, 18); icon:SetPoint("LEFT", box, "RIGHT", 6, 0)
     icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    if entry.icon then icon:SetTexture(entry.icon) end  -- Forever : entree sans spellID fixe
     pcall(function()
-        local t = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(entry.spellId)
+        local t = entry.spellId and C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(entry.spellId)
         if t then icon:SetTexture(t) end
     end)
 
@@ -36,11 +78,12 @@ local function CreateBuffRow(parent, entry, y, W)
     label:SetPoint("RIGHT", -4, 0)
     label:SetJustifyH("LEFT")
     label:SetTextColor(unpack(Theme.textNormal))
-    local name = "?" .. tostring(entry.spellId)
+    local name = entry.displayName or ("?" .. tostring(entry.spellId))
     pcall(function()
-        local n = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(entry.spellId)
+        local n = entry.spellId and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(entry.spellId)
         if n then name = n end
     end)
+    if entry.casts or entry.kind then name = ForeverEntryLabel(entry) or name end
     label:SetText(name)
 
     local function Refresh()
@@ -74,11 +117,24 @@ local function AddDbCheckbox(sub, y, W, label, key, invert)
     return cb, y + 26
 end
 
+-- Curseur de seuil (Forever : fragments d'ame / munitions), stocke dans ns.db.missingBuffs[key]
+local function AddThresholdSlider(sub, y, W, label, key, minV, maxV, step, default)
+    local SW = ns.SharedWidgets
+    local sl = SW.CreateSlider(sub, label, minV, maxV, step, W - 20)
+    sl:SetPoint("TOPLEFT", 0, -y)
+    sl:SetValue(Cfg()[key] or default)
+    sl.onChanged = function(v)
+        Cfg()[key] = v
+        if ns.MissingBuffs then ns.MissingBuffs.RequestCheck() end
+    end
+    return y + 56
+end
+
 -- Sections par classe : buffs de groupe + toggles specifiques (stances/auras/attunements/pets/poisons)
 local function BuildGenericClassSection(entries)
     return function(sub, W)
         local y = 0
-        for _, entry in ipairs(entries) do
+        for _, entry in ipairs(Existing(entries)) do
             CreateBuffRow(sub, entry, y, W)
             y = y + 24
         end
@@ -100,8 +156,14 @@ local function BuildPaladinSection(sub, W)
     local y = 0
     local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_AURAS"] or "Ignorer les auras", "ignorePaladinAuras")
     y = y2
-    for _, entry in ipairs(ns.MISSING_CLASS_BUFFS.PALADIN) do
+    for _, entry in ipairs(Existing(ns.MISSING_CLASS_BUFFS.PALADIN)) do
         CreateBuffRow(sub, entry, y, W); y = y + 24
+    end
+    -- Forever : une ligne par aura proposable (decochee = jamais proposee, mais compte comme active)
+    if _addon.IsForever then
+        for _, entry in ipairs(Existing(ns.MISSING_PALADIN_AURAS)) do
+            if entry.settingsId then CreateBuffRow(sub, entry, y, W); y = y + 24 end
+        end
     end
     sub:SetHeight(math.max(y, 1))
 end
@@ -120,6 +182,13 @@ local function BuildHunterSection(sub, W)
     local y = 0
     local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_PET"] or "Ignorer le familier", "ignoreHunterPets")
     y = y2
+    for _, entry in ipairs(Existing(ns.MISSING_CLASS_BUFFS.HUNTER)) do
+        CreateBuffRow(sub, entry, y, W); y = y + 24
+    end
+    if _addon.IsForever then
+        y = AddThresholdSlider(sub, y + 6, W, L["MISSINGBUFFS_AMMO_THRESHOLD"] or "Ammo alert threshold",
+            "ammoThreshold", 20, 1000, 20, 200)
+    end
     sub:SetHeight(math.max(y, 1))
 end
 
@@ -127,9 +196,15 @@ local function BuildWarlockSection(sub, W)
     local y = 0
     local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_PET"] or "Ignorer le familier", "ignoreWarlockPets")
     y = y2
+    if not _addon.IsForever then
+        _, y = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_HEALTHSTONE"] or "Ignorer la pierre de soins", "ignoreHealthstoneAlert")
+        _, y = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_SOULSTONE"] or "Ignorer la pierre d'âme", "ignoreSoulstoneAlert")
+    end
 
     -- Cas special "presence" (inverse) : resynchronise SpellEffects immediatement au clic
+    -- Ruee ardente : n'existe pas sur Forever
     local SW = ns.SharedWidgets
+    if not _addon.IsForever then
     local cbBurningRush = SW.CreateCheckbox(sub, L["MISSINGBUFFS_BURNING_RUSH_ALERT"] or "Alerte Ruée Ardente", W)
     cbBurningRush:SetPoint("TOPLEFT", 0, -y)
     cbBurningRush:SetChecked(Cfg().burningRushAlert and true or false)
@@ -147,9 +222,14 @@ local function BuildWarlockSection(sub, W)
         if ns.MissingBuffs and ns.MissingBuffs.SyncBurningRush then ns.MissingBuffs.SyncBurningRush() end
     end
     y = y + 26
+    end
 
-    for _, entry in ipairs(ns.MISSING_CLASS_BUFFS.WARLOCK) do
+    for _, entry in ipairs(Existing(ns.MISSING_CLASS_BUFFS.WARLOCK)) do
         CreateBuffRow(sub, entry, y, W); y = y + 24
+    end
+    if _addon.IsForever then
+        y = AddThresholdSlider(sub, y + 6, W, L["MISSINGBUFFS_SHARDS_THRESHOLD"] or "Soul shards alert threshold",
+            "shardsThreshold", 1, 20, 1, 3)
     end
     sub:SetHeight(math.max(y, 1))
 end
@@ -158,7 +238,7 @@ local function BuildDruidSection(sub, W)
     local y = 0
     local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_FORMS"] or "Ignorer le changement de forme", "ignoreDruidForms")
     y = y2
-    for _, entry in ipairs(ns.MISSING_CLASS_BUFFS.DRUID) do
+    for _, entry in ipairs(Existing(ns.MISSING_CLASS_BUFFS.DRUID)) do
         CreateBuffRow(sub, entry, y, W); y = y + 24
     end
     sub:SetHeight(math.max(y, 1))
@@ -186,6 +266,13 @@ local CLASS_SECTIONS = {
     { class = "DRUID",   build = BuildDruidSection },
     { class = "EVOKER",  build = BuildEvokerSection },
 }
+
+-- Forever : pas d'evocateur
+if _addon.IsForever then
+    for i = #CLASS_SECTIONS, 1, -1 do
+        if CLASS_SECTIONS[i].class == "EVOKER" then table.remove(CLASS_SECTIONS, i) end
+    end
+end
 
 local function ClassLabel(token)
     local name = _G.LOCALIZED_CLASS_NAMES_MALE and _G.LOCALIZED_CLASS_NAMES_MALE[token]

@@ -40,7 +40,7 @@ ns.Defaults = {
     defaultGlowAlpha = 0.7, defaultGlowScale = 1.0, defaultProcGlowIdx = 1,
     iconlistEnabled = true, circlebarsEnabled = true, iconsEnabled = true,
     freebarsEnabled = true, totemsEnabled = true,
-    equipmentEnabled = true, effectsEnabled = false,
+    effectsEnabled = false,
     -- Si true, masque les modèles 3D en raid (goulot GPU), réactivés à la sortie
     effects3DAutoDisableInRaid = false,
 
@@ -179,13 +179,6 @@ ns.Defaults = {
         popEaseStrength=5,
         popAlphaFade=true,
     },
-    equipment = {
-        layout="grid_fixed", combatOnly=true,
-        groupX=-200, groupY=-184, groupGrowth="RIGHT", groupGap=4,
-        groupW=31, groupH=24, groupAlpha=1.0,
-        borderStyle="square", borderWidth=1,
-        borderColor={0.055, 0.055, 0.055, 1},
-    },
     -- "Buffs manquants" (cf. Modules/Auras/Core/MissingBuffs.lua)
     missingBuffs = {
         enabled = true,
@@ -210,6 +203,8 @@ ns.Defaults = {
         -- texte) tant que ce buff EST present, cf. MissingBuffs.lua
         -- IsBurningRushActive. Opt-in (false), specifique au Demoniste.
         burningRushAlert = false,
+        -- Alertes pierre de soins / pierre d'ame (Demoniste, Retail)
+        ignoreHealthstoneAlert = false, ignoreSoulstoneAlert = false,
         ignoreLethalPoisons = false, overrideLethalPoison = nil,
         ignoreNonlethalPoisons = false, overrideNonlethalPoison = nil,
         -- Rappel "bientot expire" (2026-08-30) : affiche l'alerte native
@@ -240,13 +235,6 @@ ns.Defaults = {
         -- ou "SLUG" (anneau de copies noires, cf. Core.lua ApplyTextOutlineStyle).
         textOutlineStyle = "OUTLINE",
     },
-}
-
-ns.SlotDefaults = {
-    enabled=false, x=0, y=-184, w=31, h=24,
-    alpha=1.0, bgAlpha=0.85, combatOnly=nil,
-    glowEnabled=true, glowIdx=2, glowAlpha=0.7, glowColor=nil,
-    desat=false, glowScale=1.0,
 }
 
 ns.SpellDefaults = {

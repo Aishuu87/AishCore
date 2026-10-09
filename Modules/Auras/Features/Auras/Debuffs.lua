@@ -262,6 +262,7 @@ local function PlayProcStart(ib, idx, color, scale)
     EnsureProcStart(ib)
 
     local iw, ih = ib:GetSize()
+    if issecretvalue and (issecretvalue(iw) or issecretvalue(ih)) then iw, ih = nil, nil end
     -- Filet : la frame preview du popup de test peut ne pas avoir sa taille resolue au premier appel
     if not iw or iw <= 0 then iw = 32 end
     if not ih or ih <= 0 then ih = 32 end

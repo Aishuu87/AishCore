@@ -58,6 +58,7 @@ local ttTex           -- texture background tooltip (pour maj rotation)
 local tooltipXP
 local tooltipRested
 local centerXPText
+local fontObjs = {}     -- objets Font des textes d'info, cf. XPBar.ApplySettings
 local hoverFrame
 local fxModel
 local restModel       -- animation 3D indicateur de zone de repos
@@ -700,6 +701,72 @@ local function UpdateBarFill()
   end
 end
 
+-- Entree / sortie des elements du survol : fondu + leger glissement vers le haut, decales entre eux
+-- (fond, puis textes). Chaque cle (tooltipFrame, centerXPText) a une progression p dans [0,1].
+local FADE_IN, FADE_OUT = 0.3, 0.2
+local SLIDE = 8
+local fades, fadeP, hookedFade = {}, {}, {}
+local fadeDriver
+
+local function Eased(p, delay)
+  local v = (p - delay) / (1 - 0.4)
+  if v < 0 then v = 0 elseif v > 1 then v = 1 end
+  return 1 - (1 - v) * (1 - v)
+end
+
+local function ApplyFade(obj, p)
+  if obj == centerXPText then
+    local e = Eased(p, 0.1)
+    obj:SetAlpha(e)
+    obj:ClearAllPoints()
+    obj:SetPoint("CENTER", obj:GetParent(), "CENTER", 0, -SLIDE * (1 - e))
+  elseif obj == tooltipFrame then
+    local eBg, eTxt, eRest = Eased(p, 0), Eased(p, 0.2), Eased(p, 0.4)
+    ttTex:SetAlpha(eBg)
+    tooltipXP:SetAlpha(eTxt)
+    tooltipXP:ClearAllPoints()
+    tooltipXP:SetPoint("TOPLEFT", tooltipFrame, "TOPLEFT", 32, -12 - SLIDE * (1 - eTxt))
+    tooltipRested:SetAlpha(eRest)
+    tooltipRested:ClearAllPoints()
+    tooltipRested:SetPoint("TOPLEFT", tooltipFrame, "TOPLEFT", 10, -26 - SLIDE * (1 - eRest))
+  end
+end
+
+local function FadeStep(_, el)
+  for obj, to in pairs(fades) do
+    local p = fadeP[obj] or 0
+    if to == 1 then p = math.min(1, p + el / FADE_IN) else p = math.max(0, p - el / FADE_OUT) end
+    fadeP[obj] = p
+    ApplyFade(obj, p)
+    if p == to then
+      fades[obj] = nil
+      if to == 0 then fadeP[obj] = 1; ApplyFade(obj, 1); obj:Hide() end
+    end
+  end
+  if not next(fades) then fadeDriver:SetScript("OnUpdate", nil) end
+end
+
+local function FadeTo(obj, show)
+  if not obj then return end
+  if not fadeDriver then fadeDriver = CreateFrame("Frame") end
+  if not hookedFade[obj] then
+    hookedFade[obj] = true
+    -- Quelle que soit la facon dont l'objet est cache, on le remet dans son etat nominal : les
+    -- affichages directs (mode layout) le retrouvent complet.
+    if obj.HookScript then
+      obj:HookScript("OnHide", function() fades[obj] = nil; fadeP[obj] = 1; ApplyFade(obj, 1) end)
+    end
+  end
+  if show then
+    if not obj:IsShown() then fadeP[obj] = 0; ApplyFade(obj, 0); obj:Show() end
+    if (fadeP[obj] or 1) >= 1 and not fades[obj] then return end
+  else
+    if not obj:IsShown() then fades[obj] = nil; return end
+  end
+  fades[obj] = show and 1 or 0
+  fadeDriver:SetScript("OnUpdate", FadeStep)
+end
+
 local function UpdateTooltip()
   if not tooltipFrame then return end
   if IsMaxLevel() then
@@ -709,10 +776,10 @@ local function UpdateTooltip()
       tooltipXP:SetText(string.format(L["XP_TOOLTIP_COMPANION_LEVEL"], comp.level, comp.maxLevel or 60, comp.pct * 100))
       tooltipRested:Hide()
       tooltipFrame:SetHeight(28)
-      tooltipFrame:Show()
+      FadeTo(tooltipFrame, true)
       if centerXPText then
         centerXPText:SetText(string.format("[ %s  /  %s ]", ShortNum(comp.xp), ShortNum(comp.maxXP)))
-        centerXPText:Show()
+        FadeTo(centerXPText, true)
       end
       return
     end
@@ -735,11 +802,11 @@ local function UpdateTooltip()
     end
     tooltipRested:Show()
     tooltipFrame:SetHeight(48)
-    tooltipFrame:Show()
+    FadeTo(tooltipFrame, true)
     if centerXPText then
       centerXPText:SetText(string.format("[ %s / %s ]  %s  —  %.1f%%",
         ShortNum(rep.cur), ShortNum(rep.max), rep.standing, rep.pct * 100))
-      centerXPText:Show()
+      FadeTo(centerXPText, true)
     end
     return
   end
@@ -758,11 +825,11 @@ local function UpdateTooltip()
     tooltipRested:Hide()
     tooltipFrame:SetHeight(28)
   end
-  tooltipFrame:Show()
+  FadeTo(tooltipFrame, true)
 
   if centerXPText then
     centerXPText:SetText(string.format("[ %s  /  %s ]", ShortNum(xp), ShortNum(maxXP)))
-    centerXPText:Show()
+    FadeTo(centerXPText, true)
   end
 end
 
@@ -1080,8 +1147,8 @@ local function OnHoverLeave()
   -- Restaurer l'abréviation dans le badge
   if repNameLabel then repNameLabel:Hide() end
   if levelText then levelText:Show() end
-  if tooltipFrame and not isLayoutMode then tooltipFrame:Hide() end
-  if centerXPText then centerXPText:Hide() end
+  if tooltipFrame and not isLayoutMode then FadeTo(tooltipFrame, false) end
+  if centerXPText then FadeTo(centerXPText, false) end
   if not showTimer then HideXPBar() end
 end
 
@@ -1821,6 +1888,42 @@ function XPBar.ApplySettings()
     local _, sz = levelText:GetFont()
     -- GetFont peut rendre une hauteur <= 0 (police pas encore chargee) : SetFont plante alors
     SetLevelTextFont((sz and sz > 0) and sz or 19)
+    -- Un SetFont ne rafraichit pas toujours le rendu du texte deja pose : on le re-pose
+    local t = levelText:GetText()
+    if t then levelText:SetText(t) end
+  end
+  -- Textes d'info (infobulle XP / repos, XP centrale) : police et contour appliques en direct, sinon
+  -- seul le /reload les prenait en compte (ils n'etaient styles qu'a la creation)
+  do
+    -- Via un objet Font (SetFontObject) : changer la police d'un FontString deja affiche avec un
+    -- simple SetFont n'est pas toujours pris en compte par le client, alors que la mise a jour d'un
+    -- objet Font se propage a tous les textes qui l'utilisent.
+    local style = cfg.levelOutlineStyle
+    local flags = (style == "THICKOUTLINE") and "THICKOUTLINE" or ((style == "SLUG" or style == "") and "" or "OUTLINE")
+    local function RestyleInfo(fs, key, defSize)
+      if not fs then return end
+      local _, sz = fs:GetFont()
+      sz = (sz and sz > 0) and sz or defSize
+      local fo = fontObjs[key]
+      if not fo then
+        fo = CreateFont("AishCoreXPInfoFont_" .. key)
+        fontObjs[key] = fo
+      end
+      local okF, res = pcall(fo.SetFont, fo, xpFontInfo, sz, flags)
+      if not okF or res == false then fo:SetFont("Fonts\\FRIZQT__.TTF", sz, flags) end
+      if style == "SLUG" then
+        fo:SetShadowOffset(0, 0)
+      else
+        fo:SetShadowColor(0, 0, 0, 1)
+        fo:SetShadowOffset(1, -1)
+      end
+      fs:SetFontObject(fo)
+      local t = fs:GetText()
+      if t then fs:SetText("") ; fs:SetText(t) end
+    end
+    RestyleInfo(tooltipXP, "tooltipXP", 12)
+    RestyleInfo(tooltipRested, "tooltipRested", 12)
+    RestyleInfo(centerXPText, "centerXP", 13)
   end
   if repNameLabel then
     local _, sz = repNameLabel:GetFont()

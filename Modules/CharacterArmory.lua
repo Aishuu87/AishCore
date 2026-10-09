@@ -3,6 +3,9 @@
 local addonName, ns = ...
 local L = ns.L
 
+-- Module desactive (cf. MODULE_RULES dans Core.lua) : ne s'enregistre pas du tout
+if not ns.IsModuleAvailable("characterArmory") then return end
+
 ns.Modules = ns.Modules or {}
 local CharacterArmory = {}
 ns.Modules.CharacterArmory = CharacterArmory

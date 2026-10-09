@@ -15,6 +15,7 @@ local ALERT_TEXT_KEYS = {
     USE_AURA         = "MISSINGBUFFS_ALERT_USE_AURA",
     USE_ATTUNEMENT   = "MISSINGBUFFS_ALERT_USE_ATTUNEMENT",
     SUMMON_PET       = "MISSINGBUFFS_ALERT_SUMMON_PET",
+    PET_PASSIVE      = "MISSINGBUFFS_ALERT_PET_PASSIVE",
     REVIVE_PET       = "MISSINGBUFFS_ALERT_REVIVE_PET",
     APPLY_LETHAL     = "MISSINGBUFFS_ALERT_APPLY_LETHAL",
     APPLY_NONLETHAL  = "MISSINGBUFFS_ALERT_APPLY_NONLETHAL",
@@ -25,6 +26,10 @@ local ALERT_TEXT_KEYS = {
     USE_FLASK        = "MISSINGBUFFS_ALERT_USE_FLASK",
     EAT_FOOD         = "MISSINGBUFFS_ALERT_EAT_FOOD",
     USE_WEAPON_BUFF  = "MISSINGBUFFS_ALERT_USE_WEAPON_BUFF",
+    LOW_AMMO         = "MISSINGBUFFS_ALERT_LOW_AMMO",
+    LOW_SHARDS       = "MISSINGBUFFS_ALERT_LOW_SHARDS",
+    NO_HEALTHSTONE   = "MISSINGBUFFS_ALERT_NO_HEALTHSTONE",
+    NO_SOULSTONE     = "MISSINGBUFFS_ALERT_NO_SOULSTONE",
 }
 ns.MISSING_TEXT = setmetatable({}, {
     __index = function(_, key)
@@ -186,6 +191,10 @@ ns.MISSING_HUNTER_ALL_PETS = {
     { spellId = 83245, name = "Pet 5" },
 }
 
+-- Alerte "familier en Passif" : pas de sort associe, cle de combo fictive (cf. PSEUDO_SPELLS_3D dans SettingsPanel.lua)
+ns.MISSING_PET_PASSIVE_KEY = 9000010
+ns.MISSING_PET_PASSIVE_ICON = "Interface\\Icons\\Ability_Seal"
+
 ns.MISSING_WARLOCK_PET = 688 -- Imp
 ns.MISSING_WARLOCK_ALL_PETS = {
     { spellId = 688,    name = "Imp",        default = true },
@@ -231,3 +240,176 @@ ns.MISSING_MARKSMANSHIP_HUNTER_SPEC = 254
 -- Zones/difficultes (reserve pour reglages fins par zone/difficulte)
 ns.MISSING_DUNGEON_DIFFICULTIES = { [1] = "normal", [2] = "heroic", [23] = "mythic", [8] = "mythicplus" }
 ns.MISSING_RAID_DIFFICULTIES    = { [14] = "normal", [15] = "heroic", [16] = "mythic", [17] = "lfr" }
+
+-- ═══ FOREVER : liste reduite, resolue par NOM ═══════════════════════════════════════════════
+-- Ne garde que les buffs communs a Retail et au rappel de reference de Forever (Buff Reminder
+-- Forever). Les spellIDs different d'un client a l'autre ET d'un rang a l'autre : chaque entree
+-- se reconnait par le NOM de l'aura (`names`, tous rangs et variantes de groupe) et se lance par
+-- le NOM du sort (`casts`, par ordre de preference). L'alerte n'apparait que si un des `casts`
+-- est dans le grimoire (cf. MissingBuffs.lua : IsEntryLearned / ForeverResolve) ; spellId est
+-- alors rempli dynamiquement avec le rang connu, pour l'icone et le clic.
+-- Garde aussi les rappels propres a Forever de Buff Reminder Forever (Aspects, Trueshot Aura, Inner Fire,
+-- Epines, Presence de clarte, armures de mage/demoniste, munitions, fragments d'ame).
+-- Retire (retail seul) : postures de guerrier, forme de sélénien, Symbiose, Familier arcanique,
+-- Faveurs, Benedictions, accords, etc.
+if _addon.IsForever then
+    local I = "Interface\\Icons\\"
+    -- Chaque sort est donne par son spellID de rang 1 (le NOM localise en est deduit a l'execution, donc
+    -- valable dans toutes les langues) suivi de son nom anglais (repli si l'ID est inconnu du client).
+    ns.MISSING_CLASS_BUFFS = {
+        DRUID = {
+            { settingsId = 31, names = { 1126, "Mark of the Wild", 21849, "Gift of the Wild" },
+              casts = { 1126, "Mark of the Wild" },
+              displayName = "Mark of the Wild", icon = I .. "Spell_Nature_Regeneration",
+              showRaidCount = true, text = "MISSING" },
+            { settingsId = 101, onlySelf = true, names = { 467, "Thorns" }, casts = { 467, "Thorns" },
+              displayName = "Thorns", icon = I .. "Spell_Nature_Thorns", text = "MISSING" },
+            { settingsId = 102, onlySelf = true, names = { 16864, "Omen of Clarity" },
+              casts = { 16864, "Omen of Clarity" },
+              displayName = "Omen of Clarity", icon = I .. "Spell_Nature_CrystalBall", text = "MISSING" },
+        },
+        EVOKER = {},
+        MAGE = {
+            { settingsId = 5, names = { 1459, "Arcane Intellect", 23028, "Arcane Brilliance" },
+              casts = { 1459, "Arcane Intellect" },
+              displayName = "Arcane Intellect", icon = I .. "Spell_Holy_MagicalSentry",
+              showRaidCount = true, text = "MISSING" },
+            { settingsId = 103, onlySelf = true,
+              names = { 6117, "Mage Armor", 7302, "Ice Armor", 168, "Frost Armor", 30482, "Molten Armor" },
+              casts = { 30482, "Molten Armor", 6117, "Mage Armor", 7302, "Ice Armor", 168, "Frost Armor" },
+              displayName = "Mage / Ice / Frost Armor", icon = I .. "Spell_Frost_FrostArmor02", text = "MISSING" },
+            { settingsId = 117, optIn = true, onlySelf = true,
+              names = { 604, "Dampen Magic", 1008, "Amplify Magic" }, casts = { 604, "Dampen Magic", 1008, "Amplify Magic" },
+              displayName = "Dampen / Amplify Magic", icon = I .. "Spell_Nature_AbolishMagic", text = "MISSING" },
+        },
+        PALADIN = {
+            -- Benediction (n'importe laquelle) sur soi : propose Rois, puissance, sagesse dans cet ordre
+            { settingsId = 113, onlySelf = true,
+              names = { 19740, "Blessing of Might", 19742, "Blessing of Wisdom", 20217, "Blessing of Kings",
+                        1038, "Blessing of Salvation", 19977, "Blessing of Light", 20911, "Blessing of Sanctuary",
+                        25782, "Greater Blessing of Might", 25894, "Greater Blessing of Wisdom",
+                        25898, "Greater Blessing of Kings", 25895, "Greater Blessing of Salvation",
+                        25890, "Greater Blessing of Light", 25899, "Greater Blessing of Sanctuary" },
+              casts = { 20217, "Blessing of Kings", 19740, "Blessing of Might", 19742, "Blessing of Wisdom" },
+              displayName = "Blessing", icon = I .. "Spell_Holy_FistOfJustice", text = "MISSING" },
+            -- Optionnel (decoche par defaut) : tank
+            { settingsId = 114, optIn = true, onlySelf = true, names = { 25780, "Righteous Fury" },
+              casts = { 25780, "Righteous Fury" },
+              displayName = "Righteous Fury", icon = I .. "Spell_Holy_SealOfFury", text = "MISSING" },
+        },
+        PRIEST = {
+            { settingsId = 12, names = { 1243, "Power Word: Fortitude", 21562, "Prayer of Fortitude" },
+              casts = { 1243, "Power Word: Fortitude" }, displayName = "Power Word: Fortitude",
+              icon = I .. "Spell_Holy_WordFortitude", showRaidCount = true, text = "MISSING" },
+            { settingsId = 104, onlySelf = true, names = { 588, "Inner Fire" }, casts = { 588, "Inner Fire" },
+              displayName = "Inner Fire", icon = I .. "Spell_Holy_InnerFire", text = "MISSING" },
+            -- Optionnels (decoches par defaut)
+            { settingsId = 115, optIn = true, onlySelf = true,
+              names = { 14752, "Divine Spirit", 27681, "Prayer of Spirit" }, casts = { 14752, "Divine Spirit" },
+              displayName = "Divine Spirit", icon = I .. "Spell_Holy_DivineSpirit", text = "MISSING" },
+            { settingsId = 116, optIn = true, onlySelf = true,
+              names = { 976, "Shadow Protection", 27683, "Prayer of Shadow Protection" },
+              casts = { 976, "Shadow Protection" },
+              displayName = "Shadow Protection", icon = I .. "Spell_Shadow_AntiShadow", text = "MISSING" },
+        },
+        SHAMAN = {
+            { settingsId = 14, specIds = { 262, 263 }, onlySelf = true,
+              names = { 324, "Lightning Shield", 24398, 52127, 33736, "Water Shield" }, casts = { 324, "Lightning Shield" },
+              displayName = "Lightning Shield", icon = I .. "Spell_Nature_LightningShield", text = "MISSING" },
+            { settingsId = 15, specIds = { 264 }, onlySelf = true,
+              names = { 24398, 52127, 33736, "Water Shield", 324, "Lightning Shield" }, casts = { 24398, 52127, 33736, "Water Shield" },
+              displayName = "Water Shield", icon = I .. "Ability_Shaman_WaterShield", text = "MISSING" },
+            { settingsId = 17, names = { 974, "Earth Shield" }, casts = { 974, "Earth Shield" },
+              displayName = "Earth Shield", icon = I .. "Spell_Nature_SkinofEarth",
+              clickingUsesTarget = true, ignoreSelf = true, onlyOnePerGroup = true,
+              playerCanHaveMultiples = true, requireOwnCast = true, text = "BUFF_ALLY" },
+            -- Pas de main gauche pour le chaman Forever : un seul enchantement, en main droite. Sort lance
+            -- = le premier connu de cette liste (Rockbiter 8018/8017, Frostbrand 8033), sans condition de spe.
+            { settingsId = 20, weaponEnchantSlot = "main", needsWeaponSlot = 16,
+              casts = { 8232, "Windfury Weapon", 8024, "Flametongue Weapon", 8033, "Frostbrand Weapon",
+                        8018, 8017, "Rockbiter Weapon" },
+              displayName = "Weapon imbue", icon = I .. "Spell_Nature_Cyclone", text = "USE_WEAPON_BUFF" },
+        },
+        WARLOCK = {
+            { settingsId = 105, onlySelf = true,
+              names = { 28176, "Fel Armor", 706, "Demon Armor", 687, "Demon Skin" },
+              casts = { 28176, "Fel Armor", 706, "Demon Armor", 687, "Demon Skin" },
+              displayName = "Demon Armor / Skin", icon = I .. "Spell_Shadow_RagingScream", text = "MISSING" },
+            -- Fragments d'ame : objet des sacs (6265), alerte sous le seuil
+            { settingsId = 106, kind = "item", item = 6265, min = 3, text = "LOW_SHARDS",
+              displayName = "Soul Shards", icon = I .. "INV_Misc_Gem_Amethyst_02" },
+        },
+        HUNTER = {
+            { settingsId = 107, onlySelf = true,
+              names = { 13165, "Aspect of the Hawk", "Aspect of the Eagle", 13163, "Aspect of the Monkey",
+                        5118, "Aspect of the Cheetah", 13159, "Aspect of the Pack", 20043, "Aspect of the Wild",
+                        13161, "Aspect of the Beast", 34074, "Aspect of the Viper",
+                        61846, "Aspect of the Dragonhawk" },
+              casts = { 61846, "Aspect of the Dragonhawk", 13165, "Aspect of the Hawk", "Aspect of the Eagle",
+                        13163, "Aspect of the Monkey", 34074, "Aspect of the Viper", 20043, "Aspect of the Wild",
+                        5118, "Aspect of the Cheetah", 13159, "Aspect of the Pack", 13161, "Aspect of the Beast" },
+              displayName = "Aspect", icon = I .. "Spell_Nature_RavenForm", text = "MISSING" },
+            { settingsId = 108, onlySelf = true, names = { 19506, "Trueshot Aura" }, casts = { 19506, "Trueshot Aura" },
+              displayName = "Trueshot Aura", icon = I .. "Ability_TrueShot", text = "MISSING" },
+            -- Munitions : stack equipe dans l'emplacement de munitions, alerte sous le seuil
+            { settingsId = 109, kind = "ammo", min = 200, text = "LOW_AMMO",
+              displayName = "Ammo", icon = I .. "INV_Ammo_Arrow_02" },
+        },
+        WARRIOR = {
+            { settingsId = 24, names = { 6673, "Battle Shout", 469, "Commanding Shout" }, casts = { 6673, "Battle Shout" },
+              displayName = "Battle Shout", icon = I .. "Ability_Warrior_BattleShout",
+              ignoreRangeCheck = true, showRaidCount = true, text = "MISSING" },
+        },
+    }
+
+    -- Forme (soi) : seule Ombre est commune aux deux listes.
+    ns.MISSING_BALANCE_MOONKIN = { casts = {}, names = {} }
+    ns.MISSING_SHADOW_FORM = { names = { 15473, "Shadowform" }, casts = { 15473, "Shadowform" }, ignoreDuration = true,
+                               onlySelf = true, text = "USE_STANCE" }
+
+    -- Rappels decoches par defaut : ne s'appliquent que si le joueur les coche (cf. MissingBuffs.IsIgnored)
+    ns.MISSING_OPTIN_IDS = { [114] = true, [115] = true, [116] = true, [117] = true }
+
+    ns.MISSING_WARRIOR_STANCES = {}
+    ns.MISSING_EVOKER_ATTUNEMENTS = {}
+
+    -- Auras de paladin : seules Devotion/Concentration/Crusader sont proposees au lancement ; les
+    -- autres comptent seulement comme "une aura est active" (casts vide = jamais proposees).
+    ns.MISSING_PALADIN_AURAS = {
+        { settingsId = 110, icon = I .. "Spell_Holy_DevotionAura", names = { 465, "Devotion Aura" },       casts = { 465, "Devotion Aura" },       default = true, text = "USE_AURA" },
+        { settingsId = 111, icon = I .. "Spell_Holy_MindSooth", names = { 19746, "Concentration Aura" }, casts = { 19746, "Concentration Aura" }, text = "USE_AURA" },
+        { names = { 7294, "Retribution Aura" },        casts = {} },
+        { names = { 20218, "Sanctity Aura" },          casts = {} },
+        { names = { 19876, "Shadow Resistance Aura" }, casts = {} },
+        { names = { 19888, "Frost Resistance Aura" },  casts = {} },
+        { names = { 19891, "Fire Resistance Aura" },   casts = {} },
+    }
+
+    ns.MISSING_HUNTER_REVIVE_ENTRY = { casts = { 982, "Revive Pet" } }
+    ns.MISSING_HUNTER_ALL_PETS = {
+        { casts = { 883, "Call Pet" }, default = true },
+    }
+
+    ns.MISSING_WARLOCK_ALL_PETS = {
+        { casts = { 688, "Summon Imp" },        default = true },
+        { casts = { 697, "Summon Voidwalker" } },
+        { casts = { 712, "Summon Succubus" } },
+        { casts = { 691, "Summon Felhunter" } },
+        { casts = { 30146, "Summon Felguard" } },
+    }
+    -- Sacrifice du demon (buffs qui remplacent le familier) : pas d'alerte "familier manquant".
+    ns.MISSING_WARLOCK_SACRIFICE_NAMES = { 18791, "Touch of Shadow", 18789, "Burning Wish",
+                                           18790, "Fel Stamina", 18792, "Fel Energy" }
+
+    -- Poisons : sur ce client ce sont des enchantements d'arme (pas des auras), un par arme.
+    ns.MISSING_ROGUE_POISONS = {
+        nonlethal = {}, lethal = {},
+        forever = {
+            { casts = { 8681, "Instant Poison" }, default = true },
+            { casts = { 2823, "Deadly Poison" } },
+            { casts = { 13218, "Wound Poison" } },
+            { casts = { 3408, "Crippling Poison" } },
+            { casts = { 5761, "Mind-numbing Poison" } },
+        },
+    }
+end

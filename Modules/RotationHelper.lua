@@ -507,7 +507,10 @@ end
 -- Polling
 local function PollGlows()
   if testMode or previewMode then return end
-  local currentGlows = ShouldShowIcons() and CollectGlowedSpells() or {}
+  local showIcons = ShouldShowIcons()
+  -- Rien d'affiche et rien a afficher : pas de scan, pas d'allocation
+  if not showIcons and next(activeSet) == nil then return end
+  local currentGlows = showIcons and CollectGlowedSpells() or {}
 
   for spellID in pairs(currentGlows) do
     if not activeSet[spellID] then

@@ -17,6 +17,8 @@ ns.IsForever = ns.CLIENT == "forever"
 -- (page Modules, sidebar, recherche, arbre de profils, categories d'Auras).
 local MODULE_RULES = {
   skyriding    = function() return not ns.IsForever end,
+  -- Fiche personnage : desactivee le temps d'etre refaite (ne marchait pas bien). Repasser a true pour la rouvrir.
+  characterArmory = function() return false end,
   cdmLayout    = function() return C_CooldownViewer ~= nil end,
   cdmEssential = function() return C_CooldownViewer ~= nil end,
   cdmUtility   = function() return C_CooldownViewer ~= nil end,
@@ -45,6 +47,19 @@ function ns.PruneUnavailable(list, field)
     if not ns.IsModuleAvailable(id) then table.remove(list, i) end
   end
   return list
+end
+
+-- Frames ecoutant PLAYER_SPECIALIZATION_CHANGED : sur Forever l'evenement n'existe pas (la spe est
+-- deduite des talents), on le rejoue donc nous-memes vers ces frames (cf. bloc Forever ci-dessous).
+local specFrames = {}
+function ns.TrackSpecFrame(f, first)
+	if first then table.insert(specFrames, 1, f) else specFrames[#specFrames + 1] = f end
+end
+function ns.FireSpecChanged()
+	for _, f in ipairs(specFrames) do
+		local h = f:GetScript("OnEvent")
+		if h then pcall(h, f, "PLAYER_SPECIALIZATION_CHANGED") end
+	end
 end
 
 -- FOREVER UNIQUEMENT. En Retail, reassigner ces globals depuis un addon les marquerait (taint)
@@ -212,15 +227,15 @@ if ns.IsForever then
 		if type(GetNumTalentTabs) == "function" and type(GetTalentTabInfo) == "function" then
 			local okN, numTabs = pcall(GetNumTalentTabs)
 			if okN and numTabs then
-				local bestTab, bestPoints = nil, 0
+				local bestTab, bestPoints, tied = nil, 0, false
 				for i = 1, numTabs do
 					local okT, _, _, pointsSpent = pcall(GetTalentTabInfo, i)
 					local pts = okT and tonumber(pointsSpent) or 0
-					-- Strictement superieur : a egalite le premier l'emporte, sinon la spe oscillerait
-					-- entre deux branches au fil des points depenses.
-					if pts > bestPoints then bestTab, bestPoints = i, pts end
+					if pts > bestPoints then bestTab, bestPoints, tied = i, pts, false
+					elseif pts == bestPoints and pts > 0 then tied = true end
 				end
-				cachedTab = bestTab
+				-- Egalite entre arbres : pas de spe (la spe par defaut des couleurs thematiques prend le relais)
+				cachedTab = (not tied) and bestTab or nil
 				return cachedTab
 			end
 		end
@@ -228,37 +243,16 @@ if ns.IsForever then
 		-- Clients a arbre de traits unique (Forever).
 		local points, groups = TraitBranchPoints()
 		if points and groups then
-			-- Quelle branche vient de recevoir un point ? On ne peut pas le demander au jeu,
-			-- mais on peut l'observer : on compare le releve courant au precedent. Memorise dans
-			-- la SavedVariable, donc conserve a travers un /reload.
-			local db   = ns.DB
-			local prev = db and db._talentBranchPoints
-			if prev then
-				for i = 1, #groups do
-					if (points[i] or 0) > (prev[i] or 0) then
-						if db then db._lastTalentBranch = i end
-					end
-				end
-			end
-			if db then
-				local snap = {}
-				for i = 1, #groups do snap[i] = points[i] or 0 end
-				db._talentBranchPoints = snap
-			end
-
-			local bestBranch, bestPoints = nil, 0
+			local bestBranch, bestPoints, tied = nil, 0, false
 			for i = 1, #groups do
 				local p = points[i] or 0
-				if p > bestPoints then bestBranch, bestPoints = i, p end
+				if p > bestPoints then bestBranch, bestPoints, tied = i, p, false
+				elseif p == bestPoints and p > 0 then tied = true end
 			end
-
-			-- EGALITE : c'est le dernier point investi qui tranche. Sans cela la branche
-			-- d'index le plus faible l'emportait, et poser un point menant a une egalite
-			-- faisait basculer la spe -- couleurs et sorts avec.
-			local lastB = db and db._lastTalentBranch
-			if lastB and bestPoints > 0 and (points[lastB] or 0) == bestPoints then
-				bestBranch = lastB
-			end
+			-- Egalite entre branches (ou aucun point) : pas de spe. La spe par defaut choisie dans les
+			-- couleurs thematiques prend alors le relais (cf. GetSpecialization plus bas) -- le dernier
+			-- point investi ne tranche plus.
+			if tied then bestBranch = nil end
 			cachedTab = bestBranch
 		end
 		return cachedTab
@@ -285,7 +279,28 @@ if ns.IsForever then
 	}) do
 		pcall(_specInvEvt.RegisterEvent, _specInvEvt, e)
 	end
-	_specInvEvt:SetScript("OnEvent", function() cachedAt = -1 end)
+	-- Invalide les DEUX caches (dont celui du scan des traits) puis, apres un court delai, rejoue
+	-- PLAYER_SPECIALIZATION_CHANGED si la branche dominante a change : sans cela le 1er point de
+	-- talent ne colorait rien avant un /reload.
+	local lastNotifiedTab, notifyPending = nil, false
+	_specInvEvt:SetScript("OnEvent", function(_, event)
+		cachedAt, _tbpAt, lastScanAt = -1, -1, -1
+		if event == "PLAYER_ENTERING_WORLD" then
+			lastNotifiedTab = DominantTalentTab()
+			return
+		end
+		if notifyPending then return end
+		notifyPending = true
+		C_Timer.After(0.5, function()
+			notifyPending = false
+			cachedAt, _tbpAt, lastScanAt = -1, -1, -1
+			local tab = DominantTalentTab()
+			if tab ~= lastNotifiedTab then
+				lastNotifiedTab = tab
+				ns.FireSpecChanged()
+			end
+		end)
+	end)
 
 	local function TabSpecID(index)
 		if not index then return nil end
@@ -294,6 +309,19 @@ if ns.IsForever then
 		return list and list[index] or nil
 	end
 	ns.GetTalentTabSpecID = TabSpecID
+
+	-- Spe par defaut du joueur (cliquee droit dans les couleurs thematiques) -> index d'arbre, ou nil.
+	local function DefaultTalentTab()
+		local _, classFile = UnitClass("player")
+		local list = classFile and TALENT_TAB_SPECS[classFile]
+		local col = ns.DB and ns.DB.colors
+		local want = col and col.defaultSpec and classFile and col.defaultSpec[classFile:lower()]
+		if not (list and want) then return nil end
+		for i, specID in ipairs(list) do
+			if specID == want then return i end
+		end
+		return nil
+	end
 
 	-- Ce client EXPOSE GetSpecialization et GetSpecializationInfo, mais elles ne decrivent aucune
 	-- specialisation reelle : l'ID renvoye (1489) n'appartient a aucune specialisation connue.
@@ -340,7 +368,7 @@ if ns.IsForever then
 			if type(rawGetSpecialization) == "function" then return rawGetSpecialization(...) end
 			if CSI and CSI.GetSpecialization then return CSI.GetSpecialization(...) end
 		end
-		return DominantTalentTab()
+		return DominantTalentTab() or DefaultTalentTab()
 	end
 
 	GetSpecializationInfo = function(index, ...)
@@ -1196,6 +1224,63 @@ function ns.GetFontList()
     return WithFallbackFont(ns.FONT_LIST)
 end
 
+-- Police "fiable" d'un FontString : passe par un objet Font (SetFontObject) plutot que par SetFont direct, et sur
+-- Forever la reapplique apres un court delai. Sur ce client la police d'un autre addon (SharedMedia...) est parfois
+-- refusee ou ignoree quand on la pose tout de suite au chargement : le texte restait en 2002 jusqu'a un
+-- changement de police manuel. `key` identifie l'objet Font (un par texte).
+local _fontObjs = {}
+-- `path`/`size` peuvent etre des fonctions : relues a chaque tentative (le profil peut changer apres le login).
+ns._fontDebug = {}
+function ns.ApplyFontReliable(fs, key, path, size, flags)
+    if not fs then return end
+    flags = flags or ""
+    local function apply()
+        local p = type(path) == "function" and path() or path
+        local sz = type(size) == "function" and size() or size
+        -- Pose directe d'abord (flags "" explicite, comme les textes qui marchent) ; l'objet Font ne sert que
+        -- si le texte ne porte pas la police demandee ensuite.
+        if p and fs.SetFont then
+            pcall(fs.SetFont, fs, p, sz, flags)
+            local cur = fs:GetFont()
+            if cur and cur:lower():gsub("/", "\\") == p:lower():gsub("/", "\\") then
+                ns._fontDebug[key] = { fs = fs, wanted = p, used = p .. " (direct)", ok = true, at = GetTime() }
+                return
+            end
+        end
+        local fo = _fontObjs[key]
+        if not fo then fo = CreateFont("AishCoreFont_" .. key); _fontObjs[key] = fo end
+        local ok, res = pcall(fo.SetFont, fo, p or ("Fonts\\2002.TTF"), sz, flags)
+        local used = p
+        if not ok or res == false then
+            pcall(fo.SetFont, fo, "Fonts\\2002.TTF", sz, flags)
+            used = "Fonts\\2002.TTF (repli)"
+        end
+        fs:SetFontObject(fo)
+        ns._fontDebug[key] = { fs = fs, wanted = p, used = used, ok = ok, res = res, at = GetTime() }
+    end
+    apply()
+    -- Retail aussi : une police d'un autre addon (SharedMedia) peut ne pas etre encore enregistree
+    -- au moment du premier appel, selon l'ordre de chargement des addons.
+    if C_Timer then
+        C_Timer.After(2, apply)
+        C_Timer.After(6, apply)
+    end
+end
+
+-- /aishfont : ce qui est demande, ce qui a ete pose, et la police reellement portee par le texte
+SLASH_AISHFONT1 = "/aishfont"
+SlashCmdList["AISHFONT"] = function()
+    local P = "|cff00ccff[AishCore police]|r "
+    local any = false
+    for key, d in pairs(ns._fontDebug) do
+        any = true
+        local cur = d.fs and d.fs.GetFont and select(1, d.fs:GetFont())
+        print(P .. string.format("%s : demande=%s | pose=%s | SetFont ok=%s res=%s | texte porte=%s",
+            key, tostring(d.wanted), tostring(d.used), tostring(d.ok), tostring(d.res), tostring(cur)))
+    end
+    if not any then print(P .. "aucun texte suivi.") end
+end
+
 -- Style de contour de texte partagé : Fin/Epais (natifs) ou SLUG (anneau de 8 copies noires,
 -- plus lisible que OUTLINE a petite taille).
 local SLUG_RING_OFFSETS = {
@@ -1342,6 +1427,38 @@ function ns.MergeDefaults(saved, defaults)
 end
 
 -- Retourne true si le joueur est dans un état bloquant l'affichage (véhicule ou battle pet)
+-- GC incremental etale sur plusieurs frames (un "collect" complet = micro freeze). Utilise apres le
+-- chargement, a la fermeture du GUI et en periode calme : la memoire Lua affichee reste proche de la
+-- memoire reellement utile au lieu de gonfler de garbage jusqu'au prochain cycle.
+local _gcFrame
+function ns.IncrementalGC(maxFrames, stepSize)
+  if _gcFrame and _gcFrame._running then return end
+  if not _gcFrame then _gcFrame = CreateFrame("Frame") end
+  _gcFrame._running = true
+  local frames, limit, size = 0, maxFrames or 600, stepSize or 150
+  _gcFrame:SetScript("OnUpdate", function(self)
+    frames = frames + 1
+    if frames > limit or InCombatLockdown() or collectgarbage("step", size) then
+      self:SetScript("OnUpdate", nil)
+      self._running = false
+    end
+  end)
+end
+
+do
+  -- Apres le chargement (pic de garbage du parsing des fichiers), puis toutes les 15 s hors combat
+  local f = CreateFrame("Frame")
+  f:RegisterEvent("PLAYER_ENTERING_WORLD")
+  f:SetScript("OnEvent", function()
+    C_Timer.After(4, function() ns.IncrementalGC(900) end)
+    if not f._ticker then
+      f._ticker = C_Timer.NewTicker(15, function()
+        if not InCombatLockdown() then ns.IncrementalGC(120) end
+      end)
+    end
+  end)
+end
+
 function ns.IsInBlockedState()
   if UnitInVehicle and UnitInVehicle("player") then return true end
   if C_PetBattles and C_PetBattles.IsInBattle and C_PetBattles.IsInBattle() then return true end

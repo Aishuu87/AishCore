@@ -446,6 +446,70 @@ local function CreateButton(bar, i, j)
   return b
 end
 
+-- Transition d'opacite a l'apparition / disparition d'une barre (visibilite combat / hors combat / blesse) -----
+-- Le pilote d'etat securise affiche et cache la barre d'un coup (seule facon de le faire en combat). On
+-- accroche donc OnShow (fondu d'entree) et OnHide (fantome non securise qui s'estompe a la place de la barre).
+local VIS_FADE_IN, VIS_FADE_OUT = 0.2, 0.25
+local fadeJobs = {}
+local fadeDriver = CreateFrame("Frame")
+fadeDriver:Hide()
+fadeDriver:SetScript("OnUpdate", function(self)
+  local now = GetTime()
+  for obj, j in pairs(fadeJobs) do
+    local p = (now - j.t0) / j.dur
+    if p >= 1 then
+      fadeJobs[obj] = nil
+      obj:SetAlpha(j.to)
+      if j.done then j.done(obj) end
+    else
+      obj:SetAlpha(j.from + (j.to - j.from) * p)
+    end
+  end
+  if not next(fadeJobs) then self:Hide() end
+end)
+local function StartFade(obj, from, to, dur, done)
+  fadeJobs[obj] = { t0 = GetTime(), dur = dur, from = from, to = to, done = done }
+  obj:SetAlpha(from)
+  fadeDriver:Show()
+end
+
+-- Copie visuelle (icones seulement) de la barre qui vient de se cacher, estompee puis masquee
+local function SpawnGhost(bar, alpha)
+  local g = bar._ghost
+  if not g then
+    g = CreateFrame("Frame", nil, UIParent)
+    g:EnableMouse(false)
+    g.tex = {}
+    bar._ghost = g
+  end
+  g:SetFrameStrata(bar:GetFrameStrata())
+  g:SetFrameLevel(bar:GetFrameLevel())
+  g:SetSize(bar:GetWidth(), bar:GetHeight())
+  g:ClearAllPoints()
+  local pt, rel, rp, x, y = bar:GetPoint(1)
+  if not pt then return end
+  g:SetPoint(pt, rel, rp, x, y)
+  local n = 0
+  for _, b in ipairs(bar.buttons) do
+    if b:IsShown() and b.icon then  -- drapeau propre du bouton : reste vrai quand c'est le parent qui se cache
+      n = n + 1
+      local t = g.tex[n]
+      if not t then t = g:CreateTexture(nil, "ARTWORK"); g.tex[n] = t end
+      t:SetTexture(b.icon:GetTexture())
+      t:SetTexCoord(b.icon:GetTexCoord())
+      t:SetSize(b:GetWidth(), b:GetHeight())
+      local bp, _, brp, bx, by = b:GetPoint(1)
+      t:ClearAllPoints()
+      t:SetPoint(bp or "TOPLEFT", g, brp or "TOPLEFT", bx or 0, by or 0)
+      t:Show()
+    end
+  end
+  for k = n + 1, #g.tex do g.tex[k]:Hide() end
+  if n == 0 then g:Hide(); return end
+  g:Show()
+  StartFade(g, alpha, 0, VIS_FADE_OUT, function(o) o:Hide() end)
+end
+
 local function GetBar(i)
   local bar = bars[i]
   if bar then return bar end
@@ -474,17 +538,56 @@ local function GetBar(i)
     local cx, cy = bar:GetCenter()
     local ux, uy = UIParent:GetCenter()
     local scale = bar:GetEffectiveScale() / UIParent:GetEffectiveScale()
-    bc.x = math.floor(cx * scale - ux + 0.5)
+    -- x = coordonnee du POINT D'ANCRAGE de la barre (bord gauche, bord droit ou centre), y = centre
+    local a = bc.anchor or "CENTER"
+    local px = (a == "LEFT" and bar:GetLeft()) or (a == "RIGHT" and bar:GetRight()) or cx
+    bc.x = math.floor(px * scale - ux + 0.5)
     bc.y = math.floor(cy * scale - uy + 0.5)
     bar:ClearAllPoints()
-    bar:SetPoint("CENTER", UIParent, "CENTER", bc.x, bc.y)
+    bar:SetPoint(a, UIParent, "CENTER", bc.x, bc.y)
   end)
   bar.mover:Hide()
+
+  bar:HookScript("OnShow", function(self)
+    if dragUnlocked or self._skipFade then return end
+    -- Le fantome de la disparition precedente s'efface net
+    if self._ghost then fadeJobs[self._ghost] = nil; self._ghost:Hide() end
+    local target = self:GetAlpha()
+    if target <= 0.01 then return end
+    self._fading = true
+    StartFade(self, 0, target, VIS_FADE_IN, function(b) b._fading = nil end)
+  end)
+  bar:HookScript("OnHide", function(self)
+    fadeJobs[self] = nil
+    self._fading = nil
+    self._combatEnded = nil
+    if dragUnlocked or self._skipFade then return end
+    local bc = self.__cfg
+    if not bc then return end
+    local alpha = self:GetAlpha()
+    -- Opacite de repos pour la prochaine apparition (un fondu interrompu laisserait une valeur partielle)
+    self:SetAlpha(bc.mouseover and (bc.mouseoverAlpha or 0) or (bc.alpha or 1))
+    if alpha > 0.01 then SpawnGhost(self, alpha) end
+  end)
+
   bars[i] = bar
   return bar
 end
 
 function ExtraBars.GetBarFrame(i) return bars[i] end
+
+-- Change l'ancrage d'une barre SANS la deplacer a l'ecran : x est converti vers le nouveau point d'ancrage.
+function ExtraBars.SetAnchor(i, newAnchor)
+  local bc = BarCfg(i)
+  if not bc then return end
+  local old = bc.anchor or "CENTER"
+  if old == newAnchor then return end
+  local bar = bars[i]
+  local w = (bar and bar:GetWidth()) or 0
+  local cx = (old == "LEFT" and (bc.x or 0) + w / 2) or (old == "RIGHT" and (bc.x or 0) - w / 2) or (bc.x or 0)
+  bc.x = math.floor((newAnchor == "LEFT" and cx - w / 2) or (newAnchor == "RIGHT" and cx + w / 2) or cx + 0.5)
+  bc.anchor = newAnchor
+end
 
 -- Bandages : pas de cooldown d'objet, c'est le debuff "Bandage appliqué récemment" qui bloque la
 -- réutilisation. On affiche sa durée sur l'icône (option bandageCooldown de la barre).
@@ -583,6 +686,31 @@ local function VisibilityDriver(bc)
   return base .. "show"
 end
 
+-- Barres "en combat seulement" : le pilote d'etat securise ([combat] = UnitAffectingCombat) ne les cache que
+-- quelques secondes APRES la fin reelle du combat (le drapeau de combat traine). On les estompe donc des la
+-- sortie de verrou (PLAYER_REGEN_ENABLED) par l'opacite seule (non protegee) ; le pilote finit par les cacher,
+-- et une reprise de combat les ramene a leur opacite normale.
+local function FadeCombatBars(ended)
+  if dragUnlocked then return end
+  for _, bar in pairs(bars) do
+    local bc = bar.__cfg
+    if bc and bc.visibility == "combat" and bar:IsShown() then
+      if ended then
+        if not bar._combatEnded then
+          bar._combatEnded = true
+          bar._fading = true
+          StartFade(bar, bar:GetAlpha(), 0, VIS_FADE_OUT, function(b) b._fading = nil end)
+        end
+      elseif bar._combatEnded then
+        bar._combatEnded = nil
+        local rest = bc.mouseover and (bc.mouseoverAlpha or 0) or (bc.alpha or 1)
+        bar._fading = true
+        StartFade(bar, bar:GetAlpha(), rest, VIS_FADE_IN, function(b) b._fading = nil end)
+      end
+    end
+  end
+end
+
 -- Mode "blesse ou en combat" : reevalue hors combat quand la vie change (le pilote de visibilite
 -- ne sait pas tester la vie, il est reenregistre avec la valeur courante).
 local function RefreshInjuredVisibility()
@@ -613,7 +741,10 @@ local function LayoutBar(i)
   local enabled = Cfg().enabled ~= false and bc and bc.enabled
   if not enabled then
     UnregisterStateDriver(bar, "visibility")
+    bar._skipFade = true
     bar:Hide()
+    bar._skipFade = nil
+    if bar._ghost then fadeJobs[bar._ghost] = nil; bar._ghost:Hide() end
     return
   end
 
@@ -652,11 +783,12 @@ local function LayoutBar(i)
   bar:SetSize(gw, gh)
   ExtraBars.StyleBackground(bar, bc, gw, gh, shown > 0 or dragUnlocked)
   bar:ClearAllPoints()
-  bar:SetPoint("CENTER", UIParent, "CENTER", bc.x or 0, bc.y or 0)
+  -- Le point d'ancrage reste fixe : la barre grandit vers la droite (LEFT), la gauche (RIGHT) ou des deux cotes
+  bar:SetPoint(bc.anchor or "CENTER", UIParent, "CENTER", bc.x or 0, bc.y or 0)
   bar.mover.label:SetText(ExtraBars.BarName(i, bc))
   bar.mover:SetShown(dragUnlocked)
   -- En mode survol, l'opacité appartient au fondu : la remettre à fond ferait clignoter la barre
-  if not bc.mouseover or dragUnlocked then bar:SetAlpha(bc.alpha or 1) end
+  if (not bc.mouseover or dragUnlocked) and not bar._combatEnded then bar:SetAlpha(bc.alpha or 1) end
   bar.__cfg = bc
   if dragUnlocked then
     UnregisterStateDriver(bar, "visibility")
@@ -681,12 +813,12 @@ local function UpdateHover(_, elapsed)
   local any = false
   for _, bar in pairs(bars) do
     local bc = bar.__cfg
-    if bc and bc.mouseover and bar:IsShown() and not dragUnlocked then
+    if bc and bc.mouseover and bar:IsShown() and not dragUnlocked and not bar._combatEnded then
       any = true
       local full, low = bc.alpha or 1, bc.mouseoverAlpha or 0
       local target = bar:IsMouseOver() and full or low
       local cur = bar:GetAlpha()
-      if cur ~= target then
+      if not bar._fading and cur ~= target then
         local span = math.max(math.abs(full - low), 0.01)
         local step = span * elapsed / (target > cur and FADE_IN or FADE_OUT)
         if math.abs(target - cur) <= step then
@@ -743,6 +875,7 @@ ev:RegisterEvent("BAG_UPDATE_COOLDOWN")
 ev:RegisterUnitEvent("UNIT_AURA", "player")
 ev:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:RegisterEvent("UPDATE_BINDINGS")
 ev:RegisterUnitEvent("UNIT_HEALTH", "player")
 ev:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
@@ -753,7 +886,10 @@ ev:SetScript("OnEvent", function(_, event)
     RefreshKeybinds()
   elseif event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
     CheckInjuredSoon()
+  elseif event == "PLAYER_REGEN_DISABLED" then
+    FadeCombatBars(false)
   elseif event == "PLAYER_REGEN_ENABLED" then
+    FadeCombatBars(true)
     if pendingLayout then ExtraBars.Layout() end
     CheckInjuredSoon()
   elseif event == "PLAYER_ENTERING_WORLD" then

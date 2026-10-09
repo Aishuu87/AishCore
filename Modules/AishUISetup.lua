@@ -150,11 +150,24 @@ function DisplaySetupPopup(name, titleText, msgText, buttons)
     local edge = primary and GOLD or (T.border or { 0.18, 0.18, 0.195 })
     b:SetBackdropColor(bgc[1], bgc[2], bgc[3], 1)
     b:SetBackdropBorderColor(edge[1], edge[2], edge[3], 1)
+    -- Texte du bouton : ancrage et justification explicites (le SetAllPoints() seul laissait le
+    -- texte invisible sur Forever), couche au-dessus du fond, et repli si la police est refusee.
+    b:SetFrameLevel(box:GetFrameLevel() + 10)
     local fs = b:CreateFontString(nil, "OVERLAY")
-    fs:SetFont(FONT, 13, "")
-    fs:SetAllPoints()
+    fs:SetDrawLayer("OVERLAY", 7)
+    if not pcall(fs.SetFont, fs, FONT, 13, "") then fs:SetFont("Fonts\\FRIZQT__.TTF", 13, "") end
+    fs:SetPoint("CENTER", b, "CENTER", 0, 0)
+    fs:SetWidth(w - 8)
+    fs:SetJustifyH("CENTER")
+    fs:SetJustifyV("MIDDLE")
     if primary then fs:SetTextColor(at[1], at[2], at[3]) else fs:SetTextColor(tn[1], tn[2], tn[3]) end
-    fs:SetText(text)
+    fs:SetText(text or "")
+    b.label = fs
+    -- Relu a l'affichage : certains clients perdent le texte pose avant le 1er Show()
+    b:SetScript("OnShow", function(self) self.label:SetText(text or "") end)
+    if (text or "") ~= "" and fs:GetStringWidth() == 0 then
+      print("|cff33aaffAishCore|r texte de bouton vide : '" .. tostring(text) .. "' (police " .. tostring(FONT) .. ")")
+    end
     b:SetScript("OnEnter", function(s) s:SetBackdropColor(bgc[1] + 0.06, bgc[2] + 0.06, bgc[3] + 0.06, 1) end)
     b:SetScript("OnLeave", function(s) s:SetBackdropColor(bgc[1], bgc[2], bgc[3], 1) end)
     return b
@@ -208,8 +221,43 @@ local function ShowReloadPopup()
   })
 end
 
--- Modules EllesmereUI (niveau compte). Renvoie true si un reload est nécessaire.
-local function SetupEllesmere()
+-- Active/desactive les addons EllesmereUI* selon KEEP. Renvoie true si au moins un a change d'etat
+-- (donc reload necessaire).
+local function ApplyEllesmereStates()
+  local matched, needReload = 0, false
+  for i = 1, C_AddOns.GetNumAddOns() do
+    local name = C_AddOns.GetAddOnInfo(i)
+    if name and name:find("^EllesmereUI") and not SKIP[name] then
+      matched = matched + 1
+      local keep = KEEP[name] and true or false
+      local loaded = C_AddOns.IsAddOnLoaded(name) and true or false
+      if keep ~= loaded then
+        needReload = true
+        -- Sans nom de perso. pcall : un appel refuse par ce client ne doit jamais interrompre la
+        -- suite de Apply() (Platynator, profil prive ElvUI) -- vecu avec une variante a deux
+        -- arguments retiree depuis.
+        pcall(keep and C_AddOns.EnableAddOn or C_AddOns.DisableAddOn, name)
+      end
+    end
+  end
+  if matched == 0 then
+    print("|cffff4444[AishCore]|r SetupEllesmere : aucun addon EllesmereUI* trouvé par GetAddOnInfo (rien à activer/désactiver).")
+  end
+  return needReload
+end
+
+-- Modules EllesmereUI. Renvoie true si un reload est nécessaire.
+-- L'etat des addons vit dans l'AddOns.txt de CHAQUE personnage : un verrou par compte ne suffit donc
+-- pas, un perso fraichement cree gardait les modules actives (et seul /aishsetup, qui efface le
+-- verrou, les corrigeait). Trois cas :
+--   1) Compte jamais configure (ou /aishsetup) : on applique, et on note le compte + ce perso.
+--   2) Compte deja verrouille mais perso NEUF (AishUISetupCharDB encore vide : premier login de ce
+--      perso avec l'addon) : on applique pour ce perso. Les persos deja connus de l'addon ne sont
+--      jamais retouches par ce chemin.
+--   3) Perso traite au login precedent : une seule verification apres le reload (la 1re ecriture
+--      de l'etat d'un perso neuf n'est pas toujours prise en compte), puis plus jamais -- l'utilisateur
+--      reste libre de reactiver un module a la main.
+local function SetupEllesmere(done, freshChar)
   if not (C_AddOns.DoesAddOnExist and C_AddOns.DoesAddOnExist("EllesmereUI")) then return end
   -- ElvUI chargé ce perso = l'utilisateur est sur ce flavor-là (choix de l'installeur ou manuel) :
   -- ne jamais réactiver EllesmereUI par-dessus, même si EllesmereUI est resté sur le disque et que
@@ -220,34 +268,21 @@ local function SetupEllesmere()
   if not battleTag or battleTag == "" then return end  -- Battle.net hors ligne : retenté au prochain login
 
   local id = Hash(battleTag)
-  -- Une seule tentative pour toujours, jamais plus : passé ce premier login, l'utilisateur est
-  -- libre de réactiver/désactiver n'importe quel module EllesmereUI à la main sans qu'on revienne
-  -- le corriger derrière lui ni le relancer avec ce popup. (Le verrou doit donc se poser ici,
-  -- AVANT la correction, pas après : sinon une correction qui échoue retenterait indéfiniment --
-  -- bug vécu -- mais une fois tentée, qu'elle ait réussi ou non, on n'y retouche plus.)
-  if AishaddonDB._ellesmereSetup == id then return end
-  AishaddonDB._ellesmereSetup = id
+  local accountLocked = AishaddonDB._ellesmereSetup == id
 
-  local matched, needReload = 0, false
-  for i = 1, C_AddOns.GetNumAddOns() do
-    local name = C_AddOns.GetAddOnInfo(i)
-    if name and name:find("^EllesmereUI") and not SKIP[name] then
-      matched = matched + 1
-      local keep = KEEP[name] and true or false
-      local loaded = C_AddOns.IsAddOnLoaded(name) and true or false
-      if keep ~= loaded then
-        needReload = true
-        -- Sans nom de perso : s'applique à tous les personnages du compte. pcall : un appel
-        -- refusé par ce client ne doit jamais interrompre la suite de Apply() (Platynator,
-        -- profil privé ElvUI) -- vécu avec une variante à deux arguments retirée depuis.
-        pcall(keep and C_AddOns.EnableAddOn or C_AddOns.DisableAddOn, name)
-      end
-    end
+  if done.ellesmere then
+    -- Cas 3 : verification unique apres le reload
+    if done.ellesmereVerified then return end
+    done.ellesmereVerified = true
+    return ApplyEllesmereStates()
   end
-  if matched == 0 then
-    print("|cffff4444[AishCore]|r SetupEllesmere : aucun addon EllesmereUI* trouvé par GetAddOnInfo (rien à activer/désactiver).")
-  end
-  return needReload
+
+  -- Cas 1 / 2 : le verrou se pose AVANT la correction (une correction qui échoue ne doit jamais
+  -- retenter indéfiniment -- bug vécu).
+  if accountLocked and not freshChar then return end
+  done.ellesmere = true
+  AishaddonDB._ellesmereSetup = id
+  return ApplyEllesmereStates()
 end
 
 -- Profils par personnage : une seule fois par perso (AishUISetupCharDB), pour laisser
@@ -370,6 +405,9 @@ local function Apply()
 
   AishUISetupCharDB = AishUISetupCharDB or {}
   local done = AishUISetupCharDB
+  -- Perso neuf = aucune de ces etapes encore posee (editMode ignore : son evenement peut passer avant
+  -- PLAYER_LOGIN). SetupEllesmere tourne en premier, avant que Platynator/ElvUI posent leur cle.
+  local freshChar = not (done.platynator or done.elvuiPrivate or done.ellesmere)
 
   -- Chaque étape dans son propre pcall : une erreur dans l'une (ex. SetupEllesmere sur un client
   -- qui refuse un appel) ne doit plus jamais empêcher les suivantes de tourner -- vécu avec
@@ -383,7 +421,7 @@ local function Apply()
     return result
   end
 
-  local r1 = Try(SetupEllesmere)
+  local r1 = Try(SetupEllesmere, done, freshChar)
   local r2 = Try(SetupPlatynator, done)
   local r3 = Try(SetupElvUIPrivate, done)
   if r1 or r2 or r3 then ShowReloadPopup() end
@@ -424,6 +462,65 @@ f:SetScript("OnEvent", function(self, event)
   end
 end)
 
+-- ── /aishuiswitch : bascule ce personnage entre ElvUI et EllesmereUI ─────────────────────────────────
+-- Les deux familles ne tournent jamais ensemble (cf. l'installeur) : on active celle qui est absente et on
+-- coupe l'autre, puis reload. Cote EllesmereUI on retombe sur la meme liste de modules que le setup auto
+-- (KEEP/SKIP). L'etat des addons est PAR PERSONNAGE : seule la session courante est concernee.
+local function UiFlavorOf(name)
+  if name:find("^ElvUI") then return "ElvUI" end
+  if name:find("^EllesmereUI") then return "Ellesmere" end
+  return nil
+end
+
+local function SwitchUiFlavor(target)
+  for i = 1, C_AddOns.GetNumAddOns() do
+    local name = C_AddOns.GetAddOnInfo(i)
+    local flavor = name and UiFlavorOf(name)
+    if flavor then
+      local enable
+      if flavor ~= target then
+        enable = false
+      elseif flavor == "Ellesmere" then
+        enable = (KEEP[name] or SKIP[name]) and true or false   -- meme liste que le setup auto
+      elseif name == "ElvUI_SLE" then
+        enable = nil   -- Shadow & Light : jamais active par la commande (on ne touche pas a son etat)
+      else
+        enable = true
+      end
+      if enable ~= nil then pcall(enable and C_AddOns.EnableAddOn or C_AddOns.DisableAddOn, name) end
+    end
+  end
+  -- Le setup auto des modules EllesmereUI est deja fait pour ce perso : pas de repassage au prochain login
+  if target == "Ellesmere" then
+    AishUISetupCharDB = AishUISetupCharDB or {}
+    AishUISetupCharDB.ellesmere = true
+    AishUISetupCharDB.ellesmereVerified = true
+  end
+end
+
+SLASH_AISHUISWITCH1 = "/aishuiswitch"
+SlashCmdList["AISHUISWITCH"] = function()
+  local P = "|cff00ccff[AishCore]|r "
+  if InCombatLockdown() then print(P .. L["UISWITCH_COMBAT"]); return end
+  local hasElv = C_AddOns.DoesAddOnExist and C_AddOns.DoesAddOnExist("ElvUI")
+  local hasEui = C_AddOns.DoesAddOnExist and C_AddOns.DoesAddOnExist("EllesmereUI")
+  local current = C_AddOns.IsAddOnLoaded("ElvUI") and "ElvUI"
+    or (C_AddOns.IsAddOnLoaded("EllesmereUI") and "Ellesmere") or nil
+  local target = (current == "ElvUI") and "Ellesmere" or "ElvUI"
+  if (target == "ElvUI" and not hasElv) or (target == "Ellesmere" and not hasEui) then
+    print(P .. string.format(L["UISWITCH_MISSING"], target == "ElvUI" and "ElvUI" or "EllesmereUI"))
+    return
+  end
+  local function Label(f) return f == "ElvUI" and "ElvUI" or "EllesmereUI" end
+  local msg = current
+    and string.format(L["UISWITCH_PROMPT"], Label(current), Label(target))
+    or string.format(L["UISWITCH_PROMPT_NONE"], Label(target))
+  ShowSetupPopup("AishCoreUiSwitch", L["UISWITCH_TITLE"], msg, {
+    { L["UISWITCH_CONFIRM"], true, function() SwitchUiFlavor(target); ReloadUI() end },
+    { L["UISWITCH_CANCEL"], false, function() end },
+  })
+end
+
 -- Commande slash dédiée : AishCore.lua charge APRÈS ce fichier (section "# Init" en fin de .toc)
 -- et écrase SlashCmdList["AISHCORE"] sans jamais chaîner vers un handler précédent -- un sous-
 -- commande "setup" greffée sur /aishcore serait donc silencieusement perdue. Commande à part,
@@ -438,6 +535,8 @@ SlashCmdList["AISHSETUP"] = function()
   AishaddonDB = AishaddonDB or {}
   AishaddonDB._ellesmereSetup = nil
   AishUISetupCharDB = AishUISetupCharDB or {}
+  AishUISetupCharDB.ellesmere = nil
+  AishUISetupCharDB.ellesmereVerified = nil
   AishUISetupCharDB.platynator = nil
   AishUISetupCharDB.elvuiPrivate = nil
   AishUISetupCharDB.editMode = nil

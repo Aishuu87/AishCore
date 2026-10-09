@@ -355,6 +355,18 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
     { value = "BOTTOMRIGHT", text = L["EXTRABARS_CORNER_BOTTOMRIGHT"] },
   }, W2), "startCorner", "string")
   ctx:Add(ddCorner)
+  -- Ancrage : point fixe de la barre, qui grandit a partir de lui (conversion de x faite par EB.SetAnchor)
+  local ddAnchor = SW.CreateDropdown(container, L["EXTRABARS_ANCHOR"], {
+    { value = "LEFT",   text = L["EXTRABARS_ANCHOR_LEFT"] },
+    { value = "CENTER", text = L["EXTRABARS_ANCHOR_CENTER"] },
+    { value = "RIGHT",  text = L["EXTRABARS_ANCHOR_RIGHT"] },
+  }, W2)
+  bound[#bound + 1] = { w = ddAnchor, key = "anchor", kind = "string" }
+  ddAnchor.onChanged = function(v)
+    if EB and EB.SetAnchor then EB.SetAnchor(ns._extraBarsSelected, v) end
+    Changed()
+  end
+  ctx:Add(ddAnchor)
 
   -- Arrière-plan ---------------------------------------------------------------------------------
   ctx:Spacer(6)
@@ -506,6 +518,8 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
         if type(v) == "table" then e.w:SetColor(v[1], v[2], v[3], v[4]) end
       elseif v ~= nil then
         e.w:SetValue(v)
+      elseif e.key == "anchor" then
+        e.w:SetValue("CENTER")  -- barre sans la cle (profil ancien) : ancrage centre
       end
     end
     for _, pill in ipairs(pills) do pill:SetActive(bc.tags and bc.tags[pill.tag] == true) end

@@ -11,10 +11,58 @@ local CVAR_TOGGLES = {
   { key = "groundFade",    cvar = "groundEffectFade",      on = 370, off = 70  },
   { key = "groundDist",    cvar = "groundEffectDist",      on = 500, off = 320 },
   { key = "sharpen",       cvar = "ResampleAlwaysSharpen", on = 1,   off = 0   },
+  -- off = nil : valeur par defaut du jeu, lue a l'application (C_CVar.GetCVarDefault)
+  { key = "objFade",       cvar = "lodObjectFadeScale",    on = 200 },
+  { key = "objCull",       cvar = "lodObjectCullSize",     on = 8   },
+  { key = "terrainLod",    cvar = "terrainLodDist",        on = 1000 },
+  { key = "reflection",    cvar = "reflectionMode",        on = 3   },
+  { key = "weather",       cvar = "weatherDensity",        on = 3   },
 }
 
 local function Cfg()
   return ns.GetCfg("comfort") or {}
+end
+
+-- ── Rendu graphique : reglages du PC, pas du profil ─────────────────────────
+-- Les 4 bascules de CVAR_TOGGLES dependent de la machine (carte graphique, gout d'affichage) : elles
+-- vivent dans AishaddonDB._device[<compte>], jamais dans le profil. Un profil partage n'en emporte donc
+-- aucune (desactivees par defaut chez les autres) ; la cle de compte (hash du BattleTag, comme le setup
+-- AishUI) empeche aussi un pack livre avec ma SavedVariable de les activer chez les joueurs.
+local function DeviceKey()
+  if BNGetInfo then
+    local _, tag = BNGetInfo()
+    if tag and tag ~= "" then
+      local h = 5381
+      for i = 1, #tag do h = (h * 33 + tag:byte(i)) % 4294967296 end
+      return string.format("%08x", h)
+    end
+  end
+  return "local"
+end
+
+local function GetDevice()
+  if not AishaddonDB then return {} end
+  AishaddonDB._device = AishaddonDB._device or {}
+  local k = DeviceKey()
+  AishaddonDB._device[k] = AishaddonDB._device[k] or {}
+  return AishaddonDB._device[k]
+end
+
+-- Ancien emplacement (profil) : on recupere la valeur du profil actif une fois, puis on la retire du profil.
+local function MigrateFromProfile()
+  local prof = ns.DB and ns.DB.comfort
+  if not prof then return end
+  local dev = GetDevice()
+  for _, t in ipairs(CVAR_TOGGLES) do
+    if prof[t.key] ~= nil then
+      if dev[t.key] == nil then dev[t.key] = prof[t.key] and true or false end
+      prof[t.key] = nil
+    end
+  end
+end
+
+function Comfort.GetToggle(key)
+  return GetDevice()[key] == true
 end
 
 local function GetCVarNum(name)
@@ -22,16 +70,23 @@ local function GetCVarNum(name)
   return ok and tonumber(v) or nil
 end
 
+local function DefaultOff(t)
+  if t.off ~= nil then return t.off end
+  local ok, v = pcall(C_CVar.GetCVarDefault, t.cvar)
+  return ok and tonumber(v) or nil
+end
+
 -- Active : pose la valeur "on". Desactive : ne restaure la valeur Blizzard que si la valeur actuelle
 -- est bien la notre, pour ne jamais ecraser un reglage fait ailleurs.
 local function ApplyCVars()
-  local cfg = Cfg()
+  local dev = GetDevice()
   for _, t in ipairs(CVAR_TOGGLES) do
     local cur = GetCVarNum(t.cvar)
-    if cfg[t.key] then
+    if dev[t.key] then
       if cur ~= t.on then pcall(C_CVar.SetCVar, t.cvar, t.on) end
     elseif cur == t.on then
-      pcall(C_CVar.SetCVar, t.cvar, t.off)
+      local off = DefaultOff(t)
+      if off ~= nil then pcall(C_CVar.SetCVar, t.cvar, off) end
     end
   end
 end
@@ -363,7 +418,29 @@ local function RXPLoaded()
   return C_AddOns.IsAddOnLoaded("RXPGuides") or C_AddOns.IsAddOnLoaded("EUI-RestedXP")
 end
 
+-- Tracker de quetes Blizzard : masque tant que la coupure Horizon/RestedXP est active
+-- (Horizon, qui le remplaçait, est coupe aussi). Hook Show pour qu'il ne reapparaisse pas.
+local trackerHidden, trackerHooked = false, false
+local function ApplyTracker(hide)
+  local T = _G.ObjectiveTrackerFrame
+  if not T then return end
+  if hide then
+    trackerHidden = true
+    if not trackerHooked then
+      trackerHooked = true
+      hooksecurefunc(T, "Show", function(self)
+        if trackerHidden then self:Hide() end
+      end)
+    end
+    T:Hide()
+  elseif trackerHidden then
+    trackerHidden = false
+    T:Show()
+  end
+end
+
 local function ApplyHorizon()
+  ApplyTracker(Cfg().horizonOffWithRXP and RXPLoaded())
   local H = _G.HorizonSuite
   if not (H and H.modules and H.DisableModule and H.EnableModule) then return end
   local cfg = ns.DB and ns.DB.comfort
@@ -414,10 +491,59 @@ SlashCmdList["AISHMERCHDBG"] = function(msg)
   if btn then Dump(btn, "btn") end
 end
 
+-- ── spellID dans l'infobulle des buffs / debuffs ────────────────────────────
+-- Client 12.1 : l'id d'une aura est une valeur secrete pour le Lua, seul le CVar moteur
+-- tooltipShowAuraSpellIDs sait l'afficher. Touche requise : on bascule le CVar selon l'etat
+-- de la touche (MODIFIER_STATE_CHANGED). Repli Lua (UnitAura) si le CVar n'existe pas.
+local AURA_CVAR = "tooltipShowAuraSpellIDs"
+local MOD_CHECK = { ALT = IsAltKeyDown, SHIFT = IsShiftKeyDown, CTRL = IsControlKeyDown }
+
+local function CVarSupported()
+  local ok, v = pcall(C_CVar.GetCVar, AURA_CVAR)
+  return ok and v ~= nil
+end
+
+local function SpellIDWanted()
+  local cfg = Cfg()
+  if not cfg.spellIDTooltip then return false end
+  local check = MOD_CHECK[cfg.spellIDModifier]
+  return not check or check() and true or false
+end
+
+local lastCVar
+local function ApplySpellIDCVar()
+  if not CVarSupported() then return end
+  local want = SpellIDWanted() and "1" or "0"
+  if want == lastCVar then return end
+  if pcall(C_CVar.SetCVar, AURA_CVAR, want) then lastCVar = want end
+end
+
+local function AddSpellID(tooltip, data)
+  if CVarSupported() or not SpellIDWanted() then return end
+  local id = data and data.id
+  if id == nil or (issecretvalue and issecretvalue(id)) then return end
+  tooltip:AddLine("Spell ID: |cffffffff" .. tostring(id) .. "|r", 0.5, 0.8, 1)
+  tooltip:Show()
+end
+
+if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum.TooltipDataType.UnitAura then
+  TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.UnitAura, AddSpellID)
+end
+
+function Comfort.SetToggle(key, value)
+  GetDevice()[key] = value and true or false
+  ApplyCVars()
+end
+
 function Comfort.ApplySettings()
+  MigrateFromProfile()
   ApplyCVars()
   ApplySlashes()
   ApplyMerchant()
+  lastCVar = nil
+  ApplySpellIDCVar()
+  -- EllesmereUI reecrit ce CVar a chaque PLAYER_ENTERING_WORLD : on repasse apres lui
+  C_Timer.After(2, function() lastCVar = nil; ApplySpellIDCVar() end)
   -- Horizon Suite active ses modules apres nous : on attend qu'ils le soient
   C_Timer.After(2, ApplyHorizon)
 end
@@ -425,4 +551,7 @@ end
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
-ev:SetScript("OnEvent", Comfort.ApplySettings)
+ev:RegisterEvent("MODIFIER_STATE_CHANGED")
+ev:SetScript("OnEvent", function(_, event)
+  if event == "MODIFIER_STATE_CHANGED" then ApplySpellIDCVar() else Comfort.ApplySettings() end
+end)

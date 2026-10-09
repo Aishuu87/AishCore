@@ -292,6 +292,8 @@ local cdViewerTicker = nil  -- ticker isole pour ScanCooldownViewer (evite taint
 local debugMode = false
 local testMode = false
 local dragEnabled = false
+-- Edition par glisser-deposer depuis le grimoire (section "GLISSER-DEPOSER" plus bas)
+local PBEdit = { on = false, bookOpen = false, drag = nil, pending = nil }
 -- Kill-switch canal event-driven ChargeCount (cf. CDMHooks.lua) ; false = fallback poll+estimation
 local CDM_CHARGE_HOOK_ENABLED = true
 -- Kill-switch isolation swipe/desat (cf. ScanLiveSwipeState) ; desactive, ticker partage pas assez isole
@@ -313,6 +315,25 @@ local _everHadRealCD     = {}
 -- (cooldown remanie par les talents ou la hate). On retient la plus COURTE observee : elle ne peut
 -- qu'etre surestimee, l'instant "de nouveau disponible" n'etant constate qu'a la passe suivante.
 local _learnedCD         = {}
+
+-- Durees de CD reelles apprises, sauvegardees par perso (AishUILearnDB) et par spe : evite de
+-- reapprendre 2 cycles a chaque session. Une mesure plus courte ecrase toujours la valeur stockee.
+local function LearnedStore()
+  local idx = GetSpecialization and GetSpecialization() or 0
+  AishUILearnDB = AishUILearnDB or { learnedDurations = {}, verbose = false }
+  AishUILearnDB.pbLearnedCD = AishUILearnDB.pbLearnedCD or {}
+  local t = AishUILearnDB.pbLearnedCD[idx]
+  if not t then t = {}; AishUILearnDB.pbLearnedCD[idx] = t end
+  return t
+end
+local function LoadLearnedCD()
+  wipe(_learnedCD)
+  for sid, d in pairs(LearnedStore()) do _learnedCD[sid] = d end
+end
+local function SetLearnedCD(sid, d)
+  _learnedCD[sid] = d
+  LearnedStore()[sid] = d
+end
 -- [spellID] = instant ou le sort a ete CONSTATE disponible, hors GCD (donc sans ambiguite). Sert a
 -- perimer les preuves de cooldown : un cooldown peut etre remis a zero par un proc (Main brulante
 -- sur Fouet de lave, par exemple), et dans ce cas la prediction posee au cast comme la fenetre
@@ -410,6 +431,7 @@ end
 -- Extraire un entier PROPRE (0-20) à partir d'une valeur potentiellement tainted, via pcall(==) contre chaque littéral.
 local function CleanInt(val)
   if type(val) ~= "number" then return nil end
+  if issecretvalue and issecretvalue(val) then return nil end
   -- math.floor(secret+0) peut encore être secret : on valide via pcall(==) contre un littéral.
   local ok, n = pcall(function() return math.floor(val + 0) end)
   if not ok or type(n) ~= "number" then return nil end
@@ -553,7 +575,7 @@ local function RebuildChargeCache()
   -- supprimer le cooldown d'un sort. Les repartir de zero evite qu'un "ce sort a un cooldown"
   -- appris avant le changement ne grise l'icone a tort pendant les GCD suivants.
   wipe(_everHadRealCD)
-  wipe(_learnedCD)
+  LoadLearnedCD()
   wipe(_cdFreeSince)
   for i = 1, MAX_SLOTS do
     local slot = slotFrames[i]
@@ -844,7 +866,8 @@ local function ScanViewerFrame(itemFrame)
       if okS and shown then onCD = true end
       -- Temps exacts du swipe via GetCooldownTimes (ms → s)
       local okT, s, d = pcall(itemFrame.Cooldown.GetCooldownTimes, itemFrame.Cooldown)
-      if okT and s and d and d > 500 then
+      -- s/d peuvent etre secrets : ne jamais les comparer sans garde
+      if okT and s and d and not (issecretvalue and (issecretvalue(s) or issecretvalue(d))) and d > 500 then
         cdStart   = s / 1000
         cdDuration = d / 1000
       end
@@ -914,7 +937,10 @@ local function ScanCooldownViewer()
     for chSid in pairs(chargeCache) do
       local okCD, cdInfo = pcall(C_Spell.GetSpellCooldown, chSid)
       if okCD and cdInfo and cdInfo.duration then
-        local okCmp, isLong = pcall(function() return cdInfo.duration > 1.5 end)
+        local okCmp, isLong = false, nil
+        if not (issecretvalue and issecretvalue(cdInfo.duration)) then
+          okCmp, isLong = pcall(function() return cdInfo.duration > 1.5 end)
+        end
         _chargeIsOnRealCD[chSid] = (okCmp and isLong) or nil
       else
         _chargeIsOnRealCD[chSid] = nil
@@ -1180,6 +1206,11 @@ local function RefreshPBTooltip()
   if hoveredPBFrame.currentSpellID then
     GameTooltip:SetOwner(hoveredPBFrame, "ANCHOR_BOTTOM", 0, -4)
     GameTooltip:SetSpellByID(hoveredPBFrame.currentSpellID)
+    local alt = hoveredPBFrame._altNames
+    if alt then
+      if alt[2] then GameTooltip:AddLine(string.format(L["PB_TT_RIGHT_CLICK"], alt[2]), 0.7, 0.9, 1) end
+      if alt[3] then GameTooltip:AddLine(string.format(L["PB_TT_MIDDLE_CLICK"], alt[3]), 0.7, 0.9, 1) end
+    end
     GameTooltip:Show()
   end
 end
@@ -1487,6 +1518,9 @@ local function CreateSlotFrame(index, parent)
 
   -- Tooltip
   frame:EnableMouse(true)
+  -- Glisser-deposer (cf. PBEdit) : recoit aussi un sort pris dans le grimoire
+  frame:RegisterForDrag("LeftButton")
+  frame:SetScript("OnReceiveDrag", function(self) PBEdit.OnReceive(self) end)
   frame:SetScript("OnEnter", function(self)
     hoveredPBFrame = self
     RefreshPBTooltip()
@@ -1689,7 +1723,7 @@ local PLACEHOLDER_ICON = 134400  -- INV_Misc_QuestionMark
 
 local function PanelOpen()
   local panel = ns.SettingsPanel
-  return (panel and panel.IsShown and panel:IsShown()) and true or false
+  return ((panel and panel.IsShown and panel:IsShown()) or PBEdit.bookOpen) and true or false
 end
 
 -- Nombre de slots reellement utilises par la disposition courante : au-dela, rien a montrer.
@@ -1981,6 +2015,15 @@ local function CDInfoIsRealCD(cd)
   return ok and res or false
 end
 
+-- Retail : isOnGCD natif (booleen) du cooldown actif. true = c'est le GCD, false = vrai cooldown du
+-- sort, nil = inconnu/secret. Tranche pendant le GCD sans dependre d'un cast observe.
+local function CDInfoNativeOnGCD(cd)
+  if not cd or ns.IsForever then return nil end
+  local v = cd.isOnGCD
+  if v == nil or (issecretvalue and issecretvalue(v)) then return nil end
+  return v and true or false
+end
+
 -- 61304 : le sort "Global Cooldown" de Blizzard, reference standard pour savoir si le GCD tourne.
 local GCD_SPELL_ID = 61304
 local _gcdActiveCache, _gcdActiveAt = false, -1
@@ -2059,8 +2102,10 @@ local function HasRealCDEvidence(sid)
   local castAt = nm and _lastSuccessTime[nm]
   if castAt then
     local elapsed = GetTime() - castAt
-    local bd = spellCDBase[sid] or spellCDBase[base]
-              or _learnedCD[sid] or _learnedCD[base]
+    -- Le CD reel peut depasser la base annoncee (talents) : on retient la plus longue duree connue
+    local bd = math.max(spellCDBase[sid] or spellCDBase[base] or 0,
+                        _learnedCD[sid] or _learnedCD[base] or 0)
+    if bd == 0 then bd = nil end
     if bd and bd > 1.5 and elapsed < bd then return true end
     -- Sort dont le cooldown n'a pas encore ete mesure : on n'anticipe que sur la duree d'un GCD,
     -- le temps d'en apprendre la duree au premier cycle complet.
@@ -2075,9 +2120,23 @@ local function HasRealCDEvidence(sid)
   return false
 end
 
-local function ResolveNonGCD(sid, isActive)
+local function ResolveNonGCD(sid, isActive, nativeOnGCD)
   -- Forever : isActive est deja purge du GCD par CDInfoIsRealCD
   if ns.IsForever then return isActive and true or false end
+  -- Verdict natif : cooldown actif dont isOnGCD est explicite -> pas de devinette pendant le GCD.
+  if isActive and nativeOnGCD ~= nil then
+    if nativeOnGCD == false then
+      local nmN = GetSpellName(sid)
+      local castN = nmN and _lastSuccessTime[nmN]
+      if (not castN) or (GetTime() - castN) > GCD_CAST_WINDOW then
+        _everHadRealCD[sid] = true
+      end
+    end
+    if not nativeOnGCD then return true end
+    -- GCD annonce : seul un verdict "faux" est fiable (un sort a override peut exposer le GCD sur
+    -- un id et son vrai CD sur l'autre) ; on laisse la preuve positive trancher.
+    return HasRealCDEvidence(sid) and true or false
+  end
   local inGCD = IsGCDActive()
 
   if not isActive then
@@ -2094,14 +2153,21 @@ local function ResolveNonGCD(sid, isActive)
       if base ~= sid then _realCDEndTimes[base] = nil end
       -- _everHadRealCD est exige : sans lui, un sort SANS cooldown lance il y a dix secondes
       -- ferait apprendre "dix secondes de cooldown", duree ensuite servie comme preuve.
-      if castAt and (_everHadRealCD[sid] or _everHadRealCD[base])
-         and not (spellCDBase[sid] or spellCDBase[base]) then
+      if castAt and (_everHadRealCD[sid] or _everHadRealCD[base]) then
         local d = GetTime() - castAt
+        local known = spellCDBase[sid] or spellCDBase[base]
         -- Au-dela du GCD (sinon c'est un sort sans cooldown) et sous dix minutes (garde-fou
         -- contre un cast oublie depuis longtemps).
         if d > GCD_CAST_WINDOW and d < 600 then
           local prev = _learnedCD[sid]
-          if not prev or d < prev then _learnedCD[sid] = d end
+          if not known then
+            if not prev or d < prev then SetLearnedCD(sid, d) end
+          elseif d > known + 1 and d < known * 2
+                 and (not prev or d > prev or d < prev - 1.5) then
+            -- CD reel plus long que la base annoncee (talent) : sinon la preuve expire trop tot
+            -- et l'icone clignote en "dispo" pendant le GCD de fin de cooldown.
+            SetLearnedCD(sid, d)
+          end
         end
       end
     end
@@ -2171,15 +2237,17 @@ local function UpdateSlotExtras(slot)
       -- _liveSwipeState (ticker isolé, cf. ScanLiveSwipeState) est prioritaire : la même lecture dans la stack PollSlots peut être taintée.
       local liveEntry = CD_SWIPE_ISOLATION_ENABLED
                          and (_liveSwipeState[curID] or (baseID ~= curID and _liveSwipeState[baseID]))
-      local isRealCD
+      local isRealCD, nativeOnGCD
       if liveEntry then
         isRealCD = liveEntry.isActive
+        nativeOnGCD = liveEntry.onGCD
       else
         local spellCD = C_Spell and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(curID)
         if not spellCD and baseID and baseID ~= curID then
           spellCD = C_Spell.GetSpellCooldown(baseID)
         end
         isRealCD = CDInfoIsRealCD(spellCD)
+        nativeOnGCD = CDInfoNativeOnGCD(spellCD)
       end
 
       -- Auto-guérison _realCDEndTimes : si isRealCD dit "pas en CD" alors qu'une prédiction UNIT_SPELLCAST_SUCCEEDED est encore armée (proc qui reset le CD), on la nettoie immédiatement.
@@ -2195,7 +2263,7 @@ local function UpdateSlotExtras(slot)
       -- swipe et la desaturation, qui ne peuvent donc plus se contredire. L'ancienne garde
       -- s'appuyait sur cdmCDData, dont les deux sens d'erreur produisaient exactement les symptomes
       -- observes : un sort grise en permanence d'un cote, un vrai cooldown sans swipe de l'autre.
-      local nonGCD = ResolveNonGCD(curID, isRealCD and true or false)
+      local nonGCD = ResolveNonGCD(curID, isRealCD and true or false, nativeOnGCD)
       swipeIsRealCD = nonGCD
 
       -- Masquer le balayage du GCD : au choix de l'utilisateur pour un sort normal, toujours pour
@@ -2238,7 +2306,7 @@ local function UpdateSlotExtras(slot)
   if cfg.desaturateOnCooldown then
     local desat = false
 
-    if not slot._isHighlighted then
+    do
       local displayedID   = slot.currentSpellID
       local baseDisplayed = overrideToBase[displayedID] or displayedID
 
@@ -2252,7 +2320,9 @@ local function UpdateSlotExtras(slot)
         desat = true
       end
 
-      if not desat then
+      -- Sort en surbrillance : son CD est considere reset, seul le manque de ressource compte
+      -- (le highlight peut tomber sur le dernier sort dispo, meme s'il manque de ressource).
+      if not desat and not slot._isHighlighted then
         -- isChargeSpell : uniquement le sort AFFICHÉ, jamais un sort caché du slot (qui ne doit pas désaturer le sort affiché disponible).
         local isChargeSpell = chargeCache[displayedID] or chargeCache[baseDisplayed]
         local chargeSid     = chargeCache[displayedID] and displayedID
@@ -2376,6 +2446,8 @@ local function UpdateSlotExtras(slot)
       end
     end
     if tint then
+      -- Desature d'abord : la teinte se multiplie sur la couleur de base, d'ou des rendus etranges
+      slot.icon:SetDesaturated(true)
       slot.icon:SetVertexColor(tint[1] or 1, tint[2] or 1, tint[3] or 1, tint[4] or 1)
     else
       slot.icon:SetVertexColor(1, 1, 1, 1)
@@ -2441,6 +2513,9 @@ end
 -- Mise a jour d'un slot : icone + glow
 local function UpdateSlot(slot, glowedSpells)
   if not slot or not slot.spellIDs or #slot.spellIDs == 0 then
+    -- Emplacement vide en apercu (GUI ouvert / grimoire ouvert) : le placeholder doit rester affiche, c'est la
+    -- cible du glisser-deposer. Avant, cette passe le recachait aussitot.
+    if slot and slot._placeholder then return end
     -- Slot vide : cacher la frame entière (pas seulement la texture)
     if slot and slot:IsShown() then slot:Hide(); slot._hidden = true end
     return
@@ -2448,7 +2523,7 @@ local function UpdateSlot(slot, glowedSpells)
 
   -- Hide unlearned via learnedSpells cache (jamais IsPlayerSpell direct, secret boolean en combat) ; fail-open si cache vide
   local cfg = ns.GetCfg("priorityBar") or {}
-  if cfg.hideUnlearned and next(learnedSpells) ~= nil then
+  if cfg.hideUnlearned and not PBEdit.on and next(learnedSpells) ~= nil then
     local anyKnown = false
     for _, sid in ipairs(slot.spellIDs) do
       if learnedSpells[sid] then anyKnown = true; break end
@@ -2603,17 +2678,39 @@ local function ScanLiveSwipeState()
     if sid and not _liveSwipeState[sid] then
       local okCD, cd     = pcall(C_Spell.GetSpellCooldown, sid)
       local okDur, durObj = pcall(C_Spell.GetSpellCooldownDuration, sid)
-      _liveSwipeState[sid] = {
+      local entry = {
         isActive = (okCD and CDInfoIsRealCD(cd)) or false,
+        onGCD    = okCD and CDInfoNativeOnGCD(cd) or nil,
         durObj   = (okDur and durObj) or nil,
       }
+      -- Sort a override (ex. Brasier voltaique) : le vrai CD peut etre porte par l'id de base alors
+      -- que l'id affiche ne montre que le GCD.
+      local base = overrideToBase[sid]
+      if base and base ~= sid and entry.onGCD ~= false then
+        local okB, cdB = pcall(C_Spell.GetSpellCooldown, base)
+        if okB and cdB and CDInfoNativeOnGCD(cdB) == false and cdB.isActive then
+          local okDB, durB = pcall(C_Spell.GetSpellCooldownDuration, base)
+          entry.isActive = true
+          entry.onGCD = false
+          if okDB and durB then entry.durObj = durB end
+        end
+      end
+      _liveSwipeState[sid] = entry
     end
   end
+end
+
+-- Barre reellement affichee (le masquage passe par l'alpha des conteneurs, IsVisible reste vrai) :
+-- hors de ce cas, aucun scan ne sert a rien et chaque passe alloue du garbage.
+local function PBDisplayed()
+  return (leftContainer and leftContainer:GetAlpha() > 0)
+      or (rightContainer and rightContainer:GetAlpha() > 0)
 end
 
 -- Polling : scan les highlights et met a jour les 4 slots
 local function PollSlots()
   if testMode then return end
+  if not PBDisplayed() then return end
   -- Skip si aucun conteneur visible : pas la peine de scanner les glows
   if (not leftContainer or not leftContainer:IsVisible()) and
      (not rightContainer or not rightContainer:IsVisible()) then
@@ -2634,6 +2731,7 @@ local function StartPolling()
   -- Ticker isolé pour le scan CDViewer : évite la propagation de taint vers PollSlots
   if not cdViewerTicker then
     cdViewerTicker = C_Timer.NewTicker(0.15, function()
+      if not PBDisplayed() then return end
       ScanCooldownViewer()
       ScanSpellUsable()
       if CD_SWIPE_ISOLATION_ENABLED then ScanLiveSwipeState() end
@@ -2682,7 +2780,7 @@ local function PBShouldShow()
   local cfg = ns.GetCfg("priorityBar") or {}
   if cfg.enabled == false then return false end
   if ns.IsInBlockedState() then return false end
-  if dragEnabled then return true end
+  if dragEnabled or PBEdit.on then return true end
   -- "Toujours actif en instance" : ignore les transitions combat tant qu'on
   -- est en donjon/raid (ns.inInstance, cf. Core.lua).
   if cfg.alwaysInInstance and ns.inInstance then return true end
@@ -2805,19 +2903,9 @@ function PriorityBar.ConfigureSlots(slotConfigs)
       slotFrames[i].isHighlighted = true
       StopSlotGlow(slotFrames[i])
 
-      -- Configurer le SecureActionButton (hors combat seulement)
-      -- Macro /cast Spell1 \n /cast Spell2 ... pour multi-sorts
-      local macroLines = {}
-      for _, sid in ipairs(resolvedIDs) do
-        local name = GetSpellName(sid)
-        if name and name ~= ("Spell#" .. tostring(sid)) then
-          macroLines[#macroLines + 1] = "/cast " .. name
-        end
-      end
-      if #macroLines > 0 then
-        slotFrames[i]:SetAttribute("type", "macro")
-        slotFrames[i]:SetAttribute("macrotext", table.concat(macroLines, "\n"))
-      end
+      -- Configurer le SecureActionButton (hors combat seulement) : macro du sort affiche d'abord,
+      -- puis des autres sorts du slot (cf. PBEdit.ApplyMacro)
+      PBEdit.ApplyMacro(slotFrames[i])
 
       -- Afficher le premier sort par defaut
       if #slotFrames[i].spellIDs > 0 then
@@ -2859,6 +2947,7 @@ function PriorityBar.ConfigureSlots(slotConfigs)
   -- Les spellIDs sont maintenant à jour : reconstruire le cache des sorts appris
   -- immédiatement (ConfigureSlots est toujours appelé hors combat).
   RebuildLearnedCache()
+  PBEdit.RefreshAllMacros()
 end
 
 -- API publique
@@ -2944,6 +3033,582 @@ function PriorityBar._DumpSlotsForSpell(spellID)
   end
 end
 
+-- ═══ GLISSER-DEPOSER : edition de la barre depuis le grimoire ═══════════════════════════════
+-- Grimoire ouvert : la barre s'affiche (apercu + emplacements vides) et accepte les sorts qu'on y
+-- depose, avec le meme effet que le menu "+ Ajouter un sort" (PriorityBar.SetSlotSpells) :
+--   * depot d'un sort du grimoire sur un slot  -> ajoute au slot, sans remplacer les sorts deja la
+--   * glisser un slot sur un autre             -> deplace le sort
+--   * glisser un slot hors de la barre         -> retire le sort
+-- Seuls les sorts proposes par le menu (PriorityBar.GetSpecSpells : sorts actifs de la spe) sont acceptes.
+-- Une zone de depot non securisee recouvre chaque slot pendant l'edition : elle intercepte les clics
+-- (sinon appuyer sur un slot pour le glisser lancerait le sort) et se cache en combat.
+local function BuildSlotMacro(slot, startAt)
+  local ids = slot.spellIDs or {}
+  -- Ordre de PRIORITE de la config (le meme que celui du sort affiche par defaut). Un ordre calque sur le
+  -- sort affiche au moment du calcul se figeait des l'entree en combat (SetAttribute est interdit) et le
+  -- clic lancait alors un autre sort que celui montre. Les sorts non appris sont ecartes (cache des sorts
+  -- appris) et chaque ligne porte [known:...] : jamais de /cast sur un sort que le joueur n'a pas.
+  local cacheReady = next(learnedSpells) ~= nil
+  local list = {}
+  for _, sid in ipairs(ids) do
+    if not cacheReady or learnedSpells[sid] then list[#list + 1] = sid end
+  end
+  local lines, seen, firstName = {}, {}, nil
+  local n = #list
+  local start = startAt or 1
+  for k = 0, n - 1 do
+    local sid = list[((start - 1 + k) % n) + 1]
+    local name = GetSpellName(sid)
+    if name and name ~= ("Spell#" .. tostring(sid)) and not seen[name] then
+      seen[name] = true
+      lines[#lines + 1] = "/cast [known:" .. name .. "] " .. name
+      firstName = firstName or name
+    end
+  end
+  return table.concat(lines, "\n"), #lines, firstName, n
+end
+
+-- Pose la macro du bouton securise (hors combat ; sinon repoussee a la fin du combat)
+function PBEdit.ApplyMacro(slot)
+  if InCombatLockdown() then slot._macroDirty = true; return end
+  slot._macroDirty = nil
+  local text, n, _, count = BuildSlotMacro(slot, 1)
+  if n > 0 then
+    slot:SetAttribute("type", "macro")
+    slot:SetAttribute("macrotext", text)
+  else
+    slot:SetAttribute("type", nil)
+    slot:SetAttribute("macrotext", nil)
+  end
+  -- En combat une macro ne peut plus changer : le clic gauche suit la priorite de la config. Les clics
+  -- droit / milieu partent du 2e / 3e sort, pour lancer directement un autre sort du slot (ex. celui qui
+  -- est mis en avant alors que le premier est en recharge).
+  slot._altNames = nil
+  for button = 2, 3 do
+    local t, m, name = nil, 0, nil
+    if count >= button then t, m, name = BuildSlotMacro(slot, button) end
+    if m > 0 then
+      slot:SetAttribute("type" .. button, "macro")
+      slot:SetAttribute("macrotext" .. button, t)
+      slot._altNames = slot._altNames or {}
+      slot._altNames[button] = name
+    else
+      slot:SetAttribute("type" .. button, nil)
+      slot:SetAttribute("macrotext" .. button, nil)
+    end
+  end
+end
+
+-- Recalcule la macro de tous les slots (hors combat) : apres un changement de sorts appris ou de config
+function PBEdit.RefreshAllMacros()
+  for i = 1, MAX_SLOTS do
+    local slot = slotFrames[i]
+    if slot and slot.spellIDs and #slot.spellIDs > 0 then PBEdit.ApplyMacro(slot) end
+  end
+end
+
+local function CursorSpell()
+  local kind, a, b, c, d = GetCursorInfo()
+  if kind ~= "spell" then return nil end
+  if b == "pet" or (Enum.SpellBookSpellBank and b == Enum.SpellBookSpellBank.Pet) then return nil end
+  local sid = type(c) == "number" and c or nil
+  local base = type(d) == "number" and d or nil
+  if not sid and a and b and C_SpellBook and C_SpellBook.GetSpellBookItemInfo then
+    local ok, info = pcall(C_SpellBook.GetSpellBookItemInfo, a, b)
+    if ok and info then sid, base = info.spellID, info.actionID end
+  end
+  return sid, base
+end
+
+-- Sort compatible = present dans la liste du menu. Renvoie l'ID a enregistrer (celui de la liste), ou nil.
+local function CompatibleSpellID(sid, base)
+  if not sid then return nil end
+  local byID, byName = {}, {}
+  for _, e in ipairs(PriorityBar.GetSpecSpells()) do
+    byID[e.id] = true
+    if e.name then byName[e.name] = e.id end
+  end
+  if byID[sid] then return sid end
+  if base and byID[base] then return base end
+  local nm = GetSpellName(sid)
+  return nm and byName[nm] or nil  -- rangs (Forever) / sorts remplaces par une aura
+end
+
+local function SlotIDs(slotIndex)
+  local slots = PriorityBar.GetCurrentSpecSlots()
+  local cfgSlot = slots and slots[slotIndex]
+  return { unpack(cfgSlot and cfgSlot.spellIDs or {}) }
+end
+
+local function Notify()
+  -- Meme signal que le changement de spe : le menu reconstruit l'editeur de slots et les cartes
+  if ns.CallbackRegistry then ns.CallbackRegistry:Trigger("PriorityBar.SpecChanged") end
+end
+
+-- Le nouveau sort passe EN PREMIER (priorite maximale) ; l'ordre se reprend ensuite dans le menu
+local function AddToSlot(slotIndex, sid)
+  local ids = SlotIDs(slotIndex)
+  for _, ex in ipairs(ids) do if ex == sid then return false end end
+  table.insert(ids, 1, sid)
+  PriorityBar.SetSlotSpells(slotIndex, ids)
+  return true
+end
+
+local function RemoveFromSlot(slotIndex, sid)
+  local ids = SlotIDs(slotIndex)
+  for i = #ids, 1, -1 do if ids[i] == sid then table.remove(ids, i) end end
+  PriorityBar.SetSlotSpells(slotIndex, ids)
+end
+
+local function RejectDrop()
+  ClearCursor()
+  if UIErrorsFrame then UIErrorsFrame:AddMessage(L["PB_DROP_INCOMPATIBLE"], 1, 0.2, 0.2) end
+end
+
+function PBEdit.OnReceive(slot)
+  if not PBEdit.on or InCombatLockdown() then return end
+  -- Glisser d'un slot de la barre : gere par PBEdit.OnDragStop (icone de glisser maison)
+  if PBEdit.drag then return end
+  -- Depuis le grimoire
+  local sid, base = CursorSpell()
+  if not sid then return end
+  local id = CompatibleSpellID(sid, base)
+  if not id then RejectDrop(); return end
+  AddToSlot(slot.slotIndex, id)
+  ClearCursor()
+  Notify()
+end
+
+-- Sort enregistre correspondant a ce qu'affiche le slot
+local function StoredIDOfSlot(slot)
+  local ids = slot.spellIDs or {}
+  local cur = slot.currentSpellID
+  if cur then
+    for _, sid in ipairs(ids) do
+      if sid == cur or overrideToBase[cur] == sid or overrideToBase[sid] == cur then return sid end
+    end
+  end
+  return ids[1]
+end
+
+-- Retour visuel : "+" vert et lueur sur le slot survole quand on s'apprete a y ajouter un sort
+local function SetZoneHint(z, on)
+  if not z then return end
+  if on then
+    if not z.hintGlow then
+      z.hintGlow = z:CreateTexture(nil, "OVERLAY")
+      z.hintGlow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+      z.hintGlow:SetBlendMode("ADD")
+      z.hintGlow:SetPoint("CENTER")
+      z.hintGlow:SetVertexColor(0.3, 1, 0.4, 0.9)
+      z.hintPlus = z:CreateFontString(nil, "OVERLAY")
+      z.hintPlus:SetFont("Fonts\\2002.TTF", 24, "OUTLINE")
+      z.hintPlus:SetPoint("CENTER", z, "TOPRIGHT", -2, -2)
+      z.hintPlus:SetTextColor(0.3, 1, 0.4, 1)
+      z.hintPlus:SetText("+")
+    end
+    local w = z:GetWidth()
+    z.hintGlow:SetSize(w * 1.9, w * 1.9)
+    z.hintGlow:Show()
+    z.hintPlus:Show()
+  elseif z.hintGlow then
+    z.hintGlow:Hide()
+    z.hintPlus:Hide()
+  end
+end
+
+-- Un depot est-il possible ici ? (sort du grimoire compatible, ou sort d'un autre slot de la barre)
+local function ZoneAccepts(slot)
+  if PBEdit.drag then return PBEdit.drag.slot ~= slot end
+  local sid, base = CursorSpell()
+  return sid ~= nil and CompatibleSpellID(sid, base) ~= nil
+end
+
+function PBEdit.RefreshHint()
+  local z = PBEdit.hover
+  if not z then return end
+  SetZoneHint(z, z:IsShown() and ZoneAccepts(z._slot))
+end
+
+-- Icone de glisser maison (et non le curseur du jeu, toujours dessine par-dessus nos frames) : elle suit le
+-- curseur, porte la croix rouge DEVANT elle quand on est hors de la barre, et allume le "+" du slot survole.
+local function ZoneUnderCursor()
+  for i = 1, MAX_SLOTS do
+    local sl = slotFrames[i]
+    local z = sl and sl._dropZone
+    if z and z:IsShown() and ns.IsFrameMouseOver(z) then return z end
+  end
+  return nil
+end
+
+local function EnsureDragIcon()
+  if PBEdit.dragIcon then return PBEdit.dragIcon end
+  local f = CreateFrame("Frame", nil, UIParent)
+  f:SetSize(38, 38)
+  f:SetFrameStrata("TOOLTIP")
+  f:SetFrameLevel(100)
+  f.icon = f:CreateTexture(nil, "ARTWORK")
+  f.icon:SetAllPoints()
+  f.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  -- Croix rouge : calque au-dessus de l'icone, dans un sous-frame de niveau superieur
+  local cf = CreateFrame("Frame", nil, f)
+  cf:SetAllPoints()
+  cf:SetFrameLevel(f:GetFrameLevel() + 5)
+  f.cross = cf:CreateTexture(nil, "OVERLAY")
+  f.cross:SetSize(40, 40)
+  f.cross:SetPoint("CENTER")
+  f.cross:SetTexture("Interface\\RaidFrame\\ReadyCheck-NotReady")
+  f:SetScript("OnUpdate", function(self)
+    local d = PBEdit.drag
+    if not d then self:Hide(); return end
+    local cx, cy = GetCursorPosition()
+    local s = UIParent:GetEffectiveScale()
+    self:ClearAllPoints()
+    self:SetPoint("CENTER", UIParent, "BOTTOMLEFT", cx / s, cy / s)
+    local z = ZoneUnderCursor()
+    self.cross:SetShown(z == nil)
+    -- "+" sur un AUTRE slot (le curseur du jeu n'est pas pris pendant ce glisser : pas de survol natif)
+    local target = (z and z._slot ~= d.slot) and z or nil
+    if self._hinted ~= target then
+      if self._hinted then SetZoneHint(self._hinted, false) end
+      if target then SetZoneHint(target, true) end
+      self._hinted = target
+    end
+  end)
+  f:Hide()
+  PBEdit.dragIcon = f
+  return f
+end
+
+function PBEdit.OnDragStart(slot)
+  if not PBEdit.on or InCombatLockdown() then return end
+  local id = StoredIDOfSlot(slot)
+  if not id then return end
+  PBEdit.drag = { slot = slot, id = id }
+  local f = EnsureDragIcon()
+  f.icon:SetTexture(GetSpellIcon(id) or slot.icon:GetTexture())
+  f:Show()
+end
+
+function PBEdit.OnDragStop(slot)
+  local d = PBEdit.drag
+  if not d or d.slot ~= slot then return end
+  PBEdit.drag = nil
+  local f = PBEdit.dragIcon
+  local target = ZoneUnderCursor()
+  if f then
+    if f._hinted then SetZoneHint(f._hinted, false); f._hinted = nil end
+    f:Hide()
+  end
+  if InCombatLockdown() then return end
+  if not target then
+    -- Lache hors de la barre : le sort est retire
+    RemoveFromSlot(slot.slotIndex, d.id)
+    Notify()
+  elseif target._slot ~= slot then
+    -- Lache sur un autre slot : deplace (en tete du slot cible)
+    RemoveFromSlot(slot.slotIndex, d.id)
+    AddToSlot(target._slot.slotIndex, d.id)
+    Notify()
+  end
+end
+
+-- Zone de depot d'un slot : creee a la demande, cachee tant que l'edition est inactive
+local function EnsureDropZone(slot)
+  if slot._dropZone then return slot._dropZone end
+  local z = CreateFrame("Button", nil, slot)
+  z:SetAllPoints(slot)
+  z:SetFrameLevel(slot:GetFrameLevel() + 20)
+  z:EnableMouse(true)
+  z:RegisterForDrag("LeftButton")
+  z:SetScript("OnDragStart", function() PBEdit.OnDragStart(slot) end)
+  z:SetScript("OnDragStop", function() PBEdit.OnDragStop(slot) end)
+  z:SetScript("OnReceiveDrag", function() PBEdit.OnReceive(slot) end)
+  z:SetScript("OnMouseUp", function()
+    -- Un clic simple avec un sort au curseur depose aussi (comme sur une barre d'action)
+    if GetCursorInfo() then PBEdit.OnReceive(slot) end
+  end)
+  -- Infobulle du slot : on renvoie vers le script d'origine
+  z._slot = slot
+  z:SetScript("OnEnter", function(self)
+    PBEdit.hover = self
+    PBEdit.RefreshHint()
+    local h = slot:GetScript("OnEnter"); if h then h(slot) end
+  end)
+  z:SetScript("OnLeave", function(self)
+    if PBEdit.hover == self then PBEdit.hover = nil end
+    SetZoneHint(self, false)
+    local h = slot:GetScript("OnLeave"); if h then h(slot) end
+  end)
+  z:SetScript("OnHide", function(self) SetZoneHint(self, false) end)
+  z:Hide()
+  slot._dropZone = z
+  return z
+end
+
+local function ShowDropZones(on)
+  for i = 1, MAX_SLOTS do
+    local slot = slotFrames[i]
+    if slot then
+      local z = EnsureDropZone(slot)
+      if on then z:Show() else z:Hide() end
+    end
+  end
+end
+
+-- Habillage de la barre pendant l'edition au grimoire : strata au-dessus du livre, grosse ombre grunge dessous,
+-- titre ocre et filet lumineux, pour rester lisible sur les pages. Retire a la fermeture du grimoire.
+local BOOK_STRATA = "FULLSCREEN_DIALOG"
+local BOOK_TEX_DIR = "Interface\\AddOns\\AishCore\\Media\\UI\\"
+local BOOK_OCRE = { 0.85, 0.65, 0.25 }
+-- Atlas de la lueur sous le titre (blanc, teinte en ocre) ; liste pour pouvoir ajouter des replis
+local BOOK_GLOW_ATLASES = { "pvpscoreboard-header-glow" }
+
+-- Animation de l'habillage : l'ombre grossit, la lueur puis le titre montent depuis le bas (legerement
+-- decales l'un de l'autre), le tout en fondu. Meme progression a l'ouverture et a la fermeture.
+local BOOK_SHADOW1 = { -90, 25, 90, -70 }
+local BOOK_SHADOW2 = { -55, 5, 55, -50 }
+local BOOK_SLIDE = 24
+local BOOK_DELAY_GLOW, BOOK_DELAY_TITLE = 0.12, 0.28
+
+local function BookElemProgress(p, delay)
+  local v = (p - delay) / (1 - BOOK_DELAY_TITLE)
+  if v < 0 then v = 0 elseif v > 1 then v = 1 end
+  return 1 - (1 - v) * (1 - v)  -- ease out
+end
+
+local function ApplyBookAnim(b, p)
+  local es = BookElemProgress(p, 0)
+  local k = 0.35 + 0.65 * es
+  b.shadow:SetAlpha(es); b.shadow2:SetAlpha(es)
+  b.shadow:ClearAllPoints()
+  b.shadow:SetPoint("TOPLEFT", b, "TOPLEFT", BOOK_SHADOW1[1] * k, BOOK_SHADOW1[2] * k)
+  b.shadow:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", BOOK_SHADOW1[3] * k, BOOK_SHADOW1[4] * k)
+  b.shadow2:ClearAllPoints()
+  b.shadow2:SetPoint("TOPLEFT", b, "TOPLEFT", BOOK_SHADOW2[1] * k, BOOK_SHADOW2[2] * k)
+  b.shadow2:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", BOOK_SHADOW2[3] * k, BOOK_SHADOW2[4] * k)
+
+  local et = BookElemProgress(p, BOOK_DELAY_TITLE)
+  local eg = BookElemProgress(p, BOOK_DELAY_GLOW)
+  local titleSlide = BOOK_SLIDE * (1 - et)
+  b.title:SetAlpha(et)
+  b.title:ClearAllPoints()
+  b.title:SetPoint("TOP", b, "BOTTOM", 0, -28 - titleSlide)
+  -- la lueur est ancree au titre : on retranche le glissement du titre pour qu'elle suive le sien
+  local rel = BOOK_SLIDE * (1 - eg) - titleSlide
+  if b.glow then
+    b.glow:SetAlpha(eg)
+    b.glow:ClearAllPoints()
+    b.glow:SetPoint("CENTER", b.title, "TOP", 0, 28 + rel)
+  end
+  for _, ln in ipairs(b.lines or {}) do
+    ln:SetAlpha(eg)
+    ln:ClearAllPoints()
+    ln:SetPoint(ln._pt, b.title, "TOP", 0, 4 + rel)
+  end
+end
+
+local function FadeBackdrop(b, show)
+  b._to = show and 1 or 0
+  if show and not b:IsShown() then
+    b._p = 0
+    ApplyBookAnim(b, 0)
+    b:Show()
+  elseif not show and not b:IsShown() then
+    return
+  end
+  if b._animating then return end
+  b._animating = true
+  b:SetScript("OnUpdate", function(self, el)
+    local to = self._to
+    local p = self._p or 0
+    local step = el / (to == 1 and 0.5 or 0.3)
+    if to == 1 then p = math.min(1, p + step) else p = math.max(0, p - step) end
+    self._p = p
+    ApplyBookAnim(self, p)
+    if p == to then
+      self:SetScript("OnUpdate", nil); self._animating = false
+      if to == 0 then self:Hide() end
+    end
+  end)
+end
+
+local function EnsureBookBackdrop()
+  if PBEdit.backdrop then return PBEdit.backdrop end
+  local b = CreateFrame("Frame", nil, UIParent)
+  b:SetFrameStrata(BOOK_STRATA)
+  b:SetFrameLevel(40)
+  b:EnableMouse(false)
+  b:Hide()
+  -- grosse ombre : deux couches pour assombrir franchement le parchemin
+  b.shadow = b:CreateTexture(nil, "BACKGROUND", nil, 0)
+  b.shadow:SetTexture(BOOK_TEX_DIR .. "ExtraBarGrungeSoft.tga")
+  b.shadow:SetVertexColor(0, 0, 0, 0.7)
+  b.shadow:SetPoint("TOPLEFT", b, "TOPLEFT", -90, 25)
+  b.shadow:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 90, -70)
+  b.shadow2 = b:CreateTexture(nil, "BACKGROUND", nil, 1)
+  b.shadow2:SetTexture(BOOK_TEX_DIR .. "ExtraBarSoft.tga")
+  b.shadow2:SetVertexColor(0, 0, 0, 0.55)
+  b.shadow2:SetPoint("TOPLEFT", b, "TOPLEFT", -55, 5)
+  b.shadow2:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 55, -50)
+  -- titre
+  b.title = b:CreateFontString(nil, "OVERLAY")
+  b.title:SetFont("Fonts\\2002.TTF", 17, "OUTLINE")
+  b.title:SetTextColor(BOOK_OCRE[1], BOOK_OCRE[2], BOOK_OCRE[3])
+  b.title:SetText(L["PB_BOOK_TITLE"])
+  b.title:SetPoint("TOP", b, "BOTTOM", 0, -28)
+  -- filet flou au-dessus du texte : trait net + halo, fondus sur les bords
+  local function MakeLine(h, alpha)
+    local t = b:CreateTexture(nil, "ARTWORK")
+    t:SetHeight(h)
+    t:SetWidth(280)
+    t:SetPoint("BOTTOM", b.title, "TOP", 0, 4)
+    local r, g, bl = BOOK_OCRE[1], BOOK_OCRE[2], BOOK_OCRE[3]
+    if t.SetGradient and CreateColor then
+      t:SetColorTexture(1, 1, 1, 1)
+      -- moitie gauche/droite : on utilise deux textures par ligne (fondu vers le centre puis vers l'exterieur)
+      t:SetWidth(170)
+      t:ClearAllPoints()
+      t:SetPoint("BOTTOMRIGHT", b.title, "TOP", 0, 4)
+      t:SetGradient("HORIZONTAL", CreateColor(r, g, bl, 0), CreateColor(r, g, bl, alpha))
+      b.lines = b.lines or {}
+      t._pt = "BOTTOMRIGHT"; b.lines[#b.lines + 1] = t
+      local t2 = b:CreateTexture(nil, "ARTWORK")
+      t2:SetHeight(h); t2:SetWidth(170)
+      t2:SetPoint("BOTTOMLEFT", b.title, "TOP", 0, 4)
+      t2:SetColorTexture(1, 1, 1, 1)
+      t2:SetGradient("HORIZONTAL", CreateColor(r, g, bl, alpha), CreateColor(r, g, bl, 0))
+      t2._pt = "BOTTOMLEFT"; b.lines[#b.lines + 1] = t2
+      return t2
+    end
+    t:SetColorTexture(r, g, bl, alpha * 0.7)
+  end
+  -- Lueur Blizzard (liseré sous le nom des persos a la selection de personnage) si un atlas candidat
+  -- existe ; sinon repli sur le filet dessine a la main.
+  local glowAtlas
+  if C_Texture and C_Texture.GetAtlasInfo then
+    for _, name in ipairs(BOOK_GLOW_ATLASES) do
+      if C_Texture.GetAtlasInfo(name) then glowAtlas = name; break end
+    end
+  end
+  if glowAtlas then
+    b.glow = b:CreateTexture(nil, "ARTWORK")
+    b.glow:SetAtlas(glowAtlas, true)
+    b.glow:SetPoint("CENTER", b.title, "TOP", 0, 28)
+    b.glow:SetWidth(360)
+    b.glow:SetVertexColor(BOOK_OCRE[1], BOOK_OCRE[2], BOOK_OCRE[3], 1)
+    b.glow:SetBlendMode("ADD")
+  else
+    -- plusieurs couches de plus en plus fines : bords du filet fondus, pas de delimitation nette
+    MakeLine(16, 0.06)
+    MakeLine(10, 0.1)
+    MakeLine(5, 0.16)
+    MakeLine(2, 0.45)
+  end
+  PBEdit.backdrop = b
+  return b
+end
+
+-- Place l'habillage entre les deux conteneurs et monte barre + slots au-dessus du grimoire
+local function ApplyBookStyle(on)
+  if InCombatLockdown() then return end
+  local b = EnsureBookBackdrop()
+  local strata = on and BOOK_STRATA or "MEDIUM"
+  for _, c in ipairs({ leftContainer, rightContainer }) do
+    if c then c:SetFrameStrata(strata) end
+  end
+  for i = 1, MAX_SLOTS do
+    local s = slotFrames[i]
+    if s then s:SetFrameStrata(strata) end
+  end
+  if on and leftContainer and rightContainer then
+    b:ClearAllPoints()
+    b:SetPoint("TOPLEFT", leftContainer, "TOPLEFT", 0, 0)
+    b:SetPoint("BOTTOMRIGHT", rightContainer, "BOTTOMRIGHT", 0, 0)
+    FadeBackdrop(b, true)
+  else
+    FadeBackdrop(b, false)
+  end
+end
+
+-- Active / coupe l'edition (grimoire ouvert / ferme)
+function PBEdit.SetOn(on)
+  local cfg = ns.GetCfg("priorityBar") or {}
+  if on and cfg.enabled == false then return end
+  PBEdit.on = on and true or false
+  ShowDropZones(PBEdit.on and not InCombatLockdown())
+  ApplyBookStyle(PBEdit.on)
+  if on then
+    PriorityBar.SetPreview(true)
+    -- Slots dont aucun sort n'est appris (masques en temps normal) : visibles pendant l'edition, ce sont aussi
+    -- des cibles de depot
+    for i = 1, LayoutSlotCount() do
+      local s = slotFrames[i]
+      if s and s._hidden and #(s.spellIDs or {}) > 0 then s._hidden = false; s:Show() end
+    end
+  elseif not PanelOpen() then
+    PriorityBar.SetPreview(false)
+  end
+  pbLastVisState = nil
+  PriorityBar.UpdateVisibility()
+end
+
+function PriorityBar.SetSpellBookOpen(open)
+  PBEdit.bookOpen = open and true or false
+  if InCombatLockdown() then PBEdit.pending = true; return end
+  PBEdit.pending = nil
+  PBEdit.SetOn(PBEdit.bookOpen)
+end
+
+-- Accroche l'ouverture / fermeture du grimoire (Retail : PlayerSpellsFrame.SpellBookFrame ; Forever : SpellBookFrame)
+local function HookSpellBook()
+  local fr = (_G.PlayerSpellsFrame and _G.PlayerSpellsFrame.SpellBookFrame) or _G.SpellBookFrame
+  if not fr or fr._aishPBHooked then return fr ~= nil end
+  fr._aishPBHooked = true
+  fr:HookScript("OnShow", function() PriorityBar.SetSpellBookOpen(true) end)
+  fr:HookScript("OnHide", function() PriorityBar.SetSpellBookOpen(false) end)
+  if fr:IsShown() then PriorityBar.SetSpellBookOpen(true) end
+  return true
+end
+
+function PBEdit.Setup()
+  if PBEdit._setup then return end
+  PBEdit._setup = true
+  local f = CreateFrame("Frame")
+  f:RegisterEvent("ADDON_LOADED")
+  f:RegisterEvent("PLAYER_REGEN_DISABLED")
+  f:RegisterEvent("PLAYER_REGEN_ENABLED")
+  f:RegisterEvent("CURSOR_CHANGED")
+  f:SetScript("OnEvent", function(_, event, arg1)
+    if event == "CURSOR_CHANGED" then
+      if PBEdit.on then
+        PBEdit.RefreshHint()
+      end
+    elseif event == "ADDON_LOADED" then
+      -- Le grimoire est un addon Blizzard charge a la demande
+      if arg1 == "Blizzard_PlayerSpells" or arg1 == "Blizzard_SpellBook" then HookSpellBook() end
+    elseif event == "PLAYER_REGEN_DISABLED" then
+      -- Zones de depot non securisees : on les retire pour que la barre redevienne cliquable
+      if PBEdit.on then ShowDropZones(false) end
+    else -- PLAYER_REGEN_ENABLED
+      for i = 1, MAX_SLOTS do
+        local slot = slotFrames[i]
+        if slot and slot._macroDirty then PBEdit.ApplyMacro(slot) end
+      end
+      if PBEdit.pending then
+        PBEdit.pending = nil
+        PBEdit.SetOn(PBEdit.bookOpen)
+      elseif PBEdit.on then
+        ShowDropZones(true)
+      end
+    end
+  end)
+  if not HookSpellBook() then
+    -- Pas encore charge : ADDON_LOADED s'en charge ; filet apres le login
+    C_Timer.After(3, HookSpellBook)
+  end
+end
+
 function PriorityBar.Init()
   if initialized then return end
   initialized = true
@@ -2989,6 +3654,9 @@ function PriorityBar.Init()
 
   -- Évaluation initiale de la visibilité (remplace RegisterCombatStateDriver)
   PriorityBar.UpdateVisibility()
+
+  -- Edition par glisser-deposer depuis le grimoire
+  PBEdit.Setup()
 
   -- Frame d'evenements pour reconstruire le cache bouton→sort hors combat
   local eventFrame = CreateFrame("Frame")
@@ -3263,26 +3931,37 @@ function PriorityBar.Init()
     -- Ne pas appeler RebuildLearnedCache ici : provoquerait une race condition avec ACTIVE_TALENT_GROUP_CHANGED
   end)
 
-  -- Rechargement des slots a chaque changement de spec
+  -- Rechargement des slots a chaque changement de spec. Les conteneurs portent des boutons securises :
+  -- LayoutSlots (SetSize...) est interdit en combat. Si le combat commence pendant le delai, on reporte
+  -- a la fin du combat au lieu de declencher ADDON_ACTION_BLOCKED.
+  local specReloadPending = false
+  local function ReloadSlotsForSpec()
+    if InCombatLockdown() then specReloadPending = true; return end
+    specReloadPending = false
+    LayoutSlots()
+    local newSlots = PriorityBar.GetCurrentSpecSlots()
+    -- ConfigureSlots appelle RebuildLearnedCache en interne
+    PriorityBar.ConfigureSlots(newSlots)
+    RebuildChargeCache()
+    -- Wipe complet des CD au changement de spec (les sorts changent)
+    wipe(spellCDBase)
+    wipe(_realCDEndTimes)
+    RebuildCooldownCache()
+    RebuildSpellButtonCache()
+    if ns.CallbackRegistry then
+      ns.CallbackRegistry:Trigger("PriorityBar.SpecChanged")
+    end
+  end
   local specEventFrame = CreateFrame("Frame")
   specEventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
-  specEventFrame:SetScript("OnEvent", function()
-    if InCombatLockdown() then return end
-    C_Timer.After(0.5, function()
-      LayoutSlots()
-      local newSlots = PriorityBar.GetCurrentSpecSlots()
-      -- ConfigureSlots appelle RebuildLearnedCache en interne
-      PriorityBar.ConfigureSlots(newSlots)
-      RebuildChargeCache()
-      -- Wipe complet des CD au changement de spec (les sorts changent)
-      wipe(spellCDBase)
-      wipe(_realCDEndTimes)
-      RebuildCooldownCache()
-      RebuildSpellButtonCache()
-      if ns.CallbackRegistry then
-        ns.CallbackRegistry:Trigger("PriorityBar.SpecChanged")
-      end
-    end)
+  specEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+  specEventFrame:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_ENABLED" then
+      if specReloadPending then C_Timer.After(0.5, ReloadSlotsForSpec) end
+      return
+    end
+    if InCombatLockdown() then specReloadPending = true; return end
+    C_Timer.After(0.5, ReloadSlotsForSpec)
     -- Second passage à 2s : filet de sécurité si IsPlayerSpell n'était pas
     -- encore à jour à 0.5s (changement de build talent lent).
     C_Timer.After(2.0, function()
@@ -4434,7 +5113,44 @@ end
 
 -- Gestion per-spec des slots
 
+-- Forever : pas de vraies specialisations, la barre est propre a la CLASSE. La cle de stockage
+-- (slotsBySpec / layoutBySpec) est alors "class:<CLASSE>" au lieu d'un specID.
+-- Les donnees d'avant (une entree par specID deduit) sont reprises une fois : celle de la spe courante,
+-- sinon la premiere spe de la classe qui en avait.
+local _pbClassMigrated = {}
+local function MigrateSpecDataToClass(key)
+  if _pbClassMigrated[key] then return end
+  local pb = ns.DB and ns.DB.priorityBar
+  if not pb then return end   -- DB pas encore prete : on retentera
+  _pbClassMigrated[key] = true
+  local Colors = ns.Modules and ns.Modules.Colors
+  local cd = Colors and Colors._classKeyMap and Colors._classKeyMap[key:sub(7):lower()]
+  if not cd then return end
+  for _, tbl in ipairs({ "slotsBySpec", "layoutBySpec" }) do
+    pb[tbl] = pb[tbl] or {}
+    if pb[tbl][key] == nil then
+      local best
+      local cur = ns._specID
+      if cur and pb[tbl][cur] ~= nil then best = pb[tbl][cur] end
+      if best == nil then
+        for _, sp in ipairs(cd.specs) do
+          if pb[tbl][sp.id] ~= nil then best = pb[tbl][sp.id]; break end
+        end
+      end
+      if best ~= nil then pb[tbl][key] = type(best) == "table" and CopyTable(best) or best end
+    end
+  end
+end
+
 local function GetCurrentSpecID_Internal()
+  if ns.IsForever then
+    local _, classFile = UnitClass("player")
+    if classFile then
+      local key = "class:" .. classFile
+      MigrateSpecDataToClass(key)
+      return key
+    end
+  end
   if GetSpecialization then
     local specIndex = GetSpecialization()
     if specIndex and specIndex > 0 then
@@ -4562,21 +5278,8 @@ function PriorityBar.SetSlotSpells(slotIndex, newSpellIDs)
   local slot = slotFrames[slotIndex]
   if not slot then return end
   slot.spellIDs = { unpack(newSpellIDs) }
-  -- Mettre a jour la macro du SecureActionButton
-  local macroLines = {}
-  for _, sid in ipairs(newSpellIDs) do
-    local name = GetSpellName(sid)
-    if name and name ~= ("Spell#" .. tostring(sid)) then
-      macroLines[#macroLines + 1] = "/cast " .. name
-    end
-  end
-  if #macroLines > 0 then
-    slot:SetAttribute("type", "macro")
-    slot:SetAttribute("macrotext", table.concat(macroLines, "\n"))
-  else
-    slot:SetAttribute("type", nil)
-    slot:SetAttribute("macrotext", nil)
-  end
+  -- Mettre a jour la macro du SecureActionButton (sort affiche d'abord)
+  PBEdit.ApplyMacro(slot)
   -- Mettre a jour l'icone et la visibilite du slot
   if #newSpellIDs > 0 then
     local defaultID = newSpellIDs[1]
@@ -4706,6 +5409,43 @@ function PriorityBar.GetSpecSpells()
           end
         end
         spells[#spells + 1] = { id = sid, name = name or ("Spell " .. sid), icon = icon }
+      end
+    end
+  end
+
+  -- Forever : le grimoire ne liste que les sorts appris ; le Gestionnaire de recharge (CDM) connait ceux de la
+  -- classe pas encore debloques. On les ajoute (sauf si un rang du meme sort est deja appris, qui garde son ID)
+  -- pour pouvoir les placer d'avance : le slot reste masque tant que le sort n'est pas appris.
+  if ns.IsForever and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
+     and C_CooldownViewer.GetCooldownViewerCooldownInfo and Enum.CooldownViewerCategory then
+    local keys = {}
+    if ns.SpellIdentityKey then
+      for _, e in ipairs(spells) do
+        local k = ns.SpellIdentityKey(e.id)
+        if k then keys[k] = true end
+      end
+    end
+    for _, catName in ipairs({ "Essential", "Utility" }) do
+      local cat = Enum.CooldownViewerCategory[catName]
+      local okS, ids = false, nil
+      if cat then okS, ids = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat, true) end
+      if okS and type(ids) == "table" then
+        for _, cdID in ipairs(ids) do
+          local okI, info = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cdID)
+          local sid = okI and type(info) == "table" and (info.spellID or info.overrideSpellID) or nil
+          if sid and sid > 0 and not seen[sid] then
+            local key = ns.SpellIdentityKey and ns.SpellIdentityKey(sid)
+            if not (key and keys[key]) then
+              local okN, name = pcall(C_Spell.GetSpellName, sid)
+              if okN and name then
+                seen[sid] = true
+                if key then keys[key] = true end
+                local okT, icon = pcall(C_Spell.GetSpellTexture, sid)
+                spells[#spells + 1] = { id = sid, name = name, icon = okT and icon or nil }
+              end
+            end
+          end
+        end
       end
     end
   end

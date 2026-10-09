@@ -13,6 +13,9 @@ local function ExtraBarDefaults(enabled, y, tags)
     -- Disposition (largeur / hauteur indépendantes : l'icône est rognée, jamais déformée)
     x = 0, y = y, buttonWidth = 32, buttonHeight = 32, spacing = 4, buttonsPerRow = 12, maxButtons = 12,
     vertical = false, startCorner = "TOPLEFT",
+    -- Ancrage horizontal de la barre : "CENTER" (croit des deux cotes), "LEFT" (bord gauche fixe, croit vers
+    -- la droite) ou "RIGHT" (bord droit fixe, croit vers la gauche). x/y sont les coordonnees de ce point.
+    anchor = "CENTER",
     -- Visibilité : "always" | "combat" | "nocombat" ; survol = opacité réduite hors survol
     visibility = "always", alpha = 1, mouseover = false, mouseoverAlpha = 0,
     -- Icônes
@@ -772,14 +775,14 @@ ns.Defaults = {
 
   -- Confort de jeu, cf. Modules/Comfort.lua : CVars de rendu + raccourcis /rl /edit /cdm.
   comfort = {
-    groundDensity = false,
-    groundFade    = false,
-    groundDist    = false,
-    sharpen       = false,
+    -- Rendu graphique (groundDensity/groundFade/groundDist/sharpen) : lie au PC/compte et non au profil,
+    -- cf. Modules/Comfort.lua (GetDevice) -- jamais dans le profil, donc jamais partage avec lui.
     shortcuts     = false,
     horizonOffWithRXP = false, -- coupe Horizon Suite tant que RestedXP est charge
     merchantExtend = false,   -- fenetre marchand sur plusieurs pages a la fois
     merchantPages  = 3,
+    spellIDTooltip = false,   -- spellID dans l'infobulle des buffs/debuffs
+    spellIDModifier = "NONE", -- touche requise : NONE / ALT / SHIFT / CTRL
   },
 
   -- Barre de cible détaillée (haut d'écran) + cible de la cible

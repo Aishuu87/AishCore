@@ -115,7 +115,14 @@ function SW.CreateDropdown(parent, label, options, width)
     function c:SetValue(v) self.currentValue=v; for _,opt in ipairs(self._options) do
         if opt.value==v then btn.text:SetText(opt.text or tostring(v)); return end end; btn.text:SetText(tostring(v or "")) end
     function c:GetValue() return self.currentValue end
-    btn:SetScript("OnClick",function() if menu:IsShown() then Close() else Build(); menu:Show() end end)
+    btn:SetScript("OnClick",function()
+        if menu:IsShown() then Close() else
+            Build(); menu:Show()
+            -- meme animation d'ouverture que les menus de l'addon principal
+            local main = _addon.SharedWidgets
+            if main and main.AnimateMenuOpen then main.AnimateMenuOpen(menu) end
+        end
+    end)
     btn:SetScript("OnEnter",function(s) s:SetBackdropColor(0.16,0.16,0.18,1) end)
     btn:SetScript("OnLeave",function(s) s:SetBackdropColor(0.12,0.12,0.14,1) end); Build(); return c
 end
@@ -433,7 +440,15 @@ function SW.CreateSectionStack(parent, sections, cw, startY, stackId)
                 _stackCollapsed[entry.key] = false
             end
             SW.SetHeaderCollapsedState(hdr, entry.collapsed)
-            Relayout()
+            -- Pli/depli anime (meme pilote que le reste du GUI), repli sec si indisponible
+            local main = _addon.SharedWidgets
+            if main and main.AnimateLayout then
+                local frames = {}
+                for _, en in ipairs(entries) do frames[#frames + 1] = en.hdr; frames[#frames + 1] = en.sub end
+                main.AnimateLayout("stack:" .. tostring(stackId or wrap), frames, Relayout)
+            else
+                Relayout()
+            end
         end)
         SW.SetHeaderCollapsedState(hdr, entry.collapsed)
     end

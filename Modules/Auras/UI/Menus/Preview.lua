@@ -14,7 +14,6 @@ function ns.SettingsPanel.BuildPreviewMenu(p, cw)
         {name=L["AURASMENU_PREVIEW_RENDER_CIRCLE_BARS"],key="freebars",cfg=function() return ns.db and ns.db.freebars end},
         {name=L["AURASMENU_PREVIEW_RENDER_FREE_BARS"],key="circlebars",cfg=function() return ns.db and ns.db.circlebars end},
         {name=L["AURASMENU_PREVIEW_RENDER_ICONS"],key="icons",cfg=function() return ns.db and ns.db.icons end},
-        {name=L["AURASMENU_PREVIEW_RENDER_EQUIPMENT"],key="equipment",cfg=function() return ns.db and ns.db.equipment end},
     }
     SW.CreateAccordionStack(p,{
     {name=L["AURASMENU_PREVIEW_SECTION_PLACEHOLDERS"],build=function(c,w) local py=-5

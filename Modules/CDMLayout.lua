@@ -158,34 +158,62 @@ local function Provider()
   if ok then return dp end
 end
 
--- Les données du CDM ne reflètent la disposition du joueur que si elles ont été construites avec la
--- disposition active de la spé courante. Juste après un changement de spé (bascule de disposition en
--- file d'attente, données marquées sales, disposition d'une autre spé encore active), Blizzard n'y met
--- que ses catégories PAR DÉFAUT : les capturer puis les appliquer écrasait le rangement du joueur.
-local function DataMatchesLayout(dp)
-  local ok, queued = pcall(function() return dp.IsLayoutUpdateQueued and dp.IsLayoutUpdateQueued() end)
-  if not ok or queued then return false end
-  local okDirty, dirty = pcall(dp.IsDirty, dp)
-  if not okDirty or dirty then return false end
-  local okLm, lm = pcall(dp.GetLayoutManager, dp)
-  if not (okLm and lm) then return false end
-  local okLayout, layout = pcall(lm.GetActiveLayout, lm)
-  if not okLayout then return false end
-  -- Aucune disposition active : le joueur est sur la disposition par défaut, les données sont justes
-  if not layout then return true end
-  local tag = CooldownViewerUtil and CooldownViewerUtil.GetCurrentClassAndSpecTag and CooldownViewerUtil.GetCurrentClassAndSpecTag()
-  local layoutTag = CooldownManagerLayout_GetClassAndSpecTag and CooldownManagerLayout_GetClassAndSpecTag(layout)
-  return tag ~= nil and tag == layoutTag
-end
-
--- Lecture seule des données déjà construites par Blizzard (jamais CheckBuildDisplayData), et seulement
--- quand elles correspondent à la disposition active (cf. DataMatchesLayout).
+-- Lecture des données du CDM par l'API C (C_CooldownViewer) UNIQUEMENT. Les anciennes lectures passaient par
+-- le fournisseur de données Lua de Blizzard (GetDataProvider / GetLayoutManager / GetActiveLayout /
+-- GetDisplayData) : les executer depuis notre code laissait des donnees tainted dans le CDM, et tout le
+-- CooldownViewer plantait ensuite au changement de spe ("execution tainted by AishCore"). L'API C ne
+-- touche a aucune table Lua de Blizzard. Meme forme que l'ancien GetDisplayData :
+-- { orderedCooldownIDs = {...}, cooldownInfoByID = { [id] = { category = <categorie courante>, ... } } }.
 local function DisplayData()
-  local dp = Provider()
-  if not (dp and dp.GetDisplayData) then return nil end
-  if not DataMatchesLayout(dp) then return nil end
-  local ok, dd = pcall(dp.GetDisplayData, dp)
-  if ok and type(dd) == "table" and dd.cooldownInfoByID and dd.orderedCooldownIDs then return dd end
+  if not (C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
+          and C_CooldownViewer.GetCooldownViewerCooldownInfo) then return nil end
+  local dd = { orderedCooldownIDs = {}, cooldownInfoByID = {} }
+  local function Add(cid, cat)
+    if dd.cooldownInfoByID[cid] then return end
+    local okI, info = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cid)
+    if okI and info then
+      dd.orderedCooldownIDs[#dd.orderedCooldownIDs + 1] = cid
+      dd.cooldownInfoByID[cid] = {
+        category = cat, spellID = info.spellID,
+        overrideSpellID = info.overrideSpellID, isKnown = info.isKnown,
+      }
+    end
+  end
+  -- Categorie COURANTE et ordre : lus sur les frames des deux viewers (simple lecture de champs, rien
+  -- n'est appele cote Blizzard). Les sets de l'API C donnent, eux, la classification par defaut et pas
+  -- la disposition du joueur.
+  local found = 0
+  for _, v in ipairs({ { "EssentialCooldownViewer", Cat("Essential") }, { "UtilityCooldownViewer", Cat("Utility") } }) do
+    local viewer, cat = _G[v[1]], v[2]
+    local pool = viewer and viewer.itemFramePool
+    if cat and pool and pool.EnumerateActive then
+      local items = {}
+      for f in pool:EnumerateActive() do
+        local cid = f.cooldownID
+        if type(cid) == "number" and not (issecretvalue and issecretvalue(cid)) then
+          local li = f.layoutIndex
+          if type(li) ~= "number" or (issecretvalue and issecretvalue(li)) then li = 1e9 end
+          items[#items + 1] = { cid = cid, li = li }
+        end
+      end
+      table.sort(items, function(a, b) if a.li ~= b.li then return a.li < b.li end return a.cid < b.cid end)
+      for _, it in ipairs(items) do Add(it.cid, cat); found = found + 1 end
+    end
+  end
+  -- Viewers pas encore construits : donnees indisponibles (et non "tout non suivi")
+  if found == 0 then return nil end
+  -- Le reste de ce que connait le CDM : non suivi (categorie de repos, ni Essentiel ni Utilitaire)
+  local rest = Cat("HiddenActive") or -1
+  for _, name in ipairs({ "Essential", "Utility", "HiddenActive", "EquipSlotEssential", "SpecAgnosticEssential" }) do
+    local cat = Cat(name)
+    if cat then
+      local ok, ids = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat, true)
+      if ok and type(ids) == "table" then
+        for _, cid in ipairs(ids) do Add(cid, rest) end
+      end
+    end
+  end
+  return dd
 end
 
 function CDMLayout.IsAvailable()
@@ -289,12 +317,20 @@ function CDMLayout.Diff(specID)
   local currentEss = {}
   for _, e in ipairs(list) do
     local want = conf.cats[e.cooldownID] or 0
-    if want ~= e.current then diffs[#diffs + 1] = { entry = e, want = want, current = e.current } end
+    -- Cooldown pas appris : le viewer ne l'affiche pas (aucune frame), sa categorie courante est donc
+    -- illisible depuis les frames. On ne le compare pas ; Apply, lui, le range quand meme.
+    if e.isKnown and want ~= e.current then diffs[#diffs + 1] = { entry = e, want = want, current = e.current } end
     if e.current == ESSENTIAL then currentEss[#currentEss + 1] = e.cooldownID end
   end
   local orderDiffers = false
   if #diffs == 0 then
-    local wanted = CDMLayout.OrderedEssentials(conf, list)
+    -- Seuls les cooldowns appris ont une frame dans le viewer : l'ordre ne se compare que sur eux
+    local known = {}
+    for _, e in ipairs(list) do if e.isKnown then known[e.cooldownID] = true end end
+    local wanted = {}
+    for _, cid in ipairs(CDMLayout.OrderedEssentials(conf, list)) do
+      if known[cid] then wanted[#wanted + 1] = cid end
+    end
     for i = 1, math.max(#wanted, #currentEss) do
       if wanted[i] ~= currentEss[i] then orderDiffers = true; break end
     end
@@ -434,17 +470,49 @@ CheckSpec = function(tries)
   })
 end
 
+-- /cdmdiff : ecarts entre le CDM et le build de la spe (diagnostic du popup qui revient)
+SLASH_AISHCDMDIFF1 = "/cdmdiff"
+SlashCmdList["AISHCDMDIFF"] = function()
+  local P = "|cff00ccff[CDMDiff]|r "
+  local specID = CDMLayout.CurrentSpecID()
+  local conf = specID and CDMLayout.GetSpecConfig(specID)
+  if not conf then print(P .. "aucun build pour cette spe (specID=" .. tostring(specID) .. ")"); return end
+  local list = CDMLayout.ListCooldowns()
+  print(P .. string.format("spe=%s build=%s | cooldowns lus=%d | dispo=%s", tostring(specID),
+    tostring(CDMLayout.GetActiveName(specID)), #list, tostring(CDMLayout.IsAvailable())))
+  local diffs, orderDiffers = CDMLayout.Diff(specID)
+  print(P .. string.format("categories differentes=%d | ordre different=%s", #diffs, tostring(orderDiffers)))
+  local function nm(e) return (e.spellID and C_Spell.GetSpellName(e.spellID)) or ("#" .. e.cooldownID) end
+  for i, d in ipairs(diffs) do
+    if i > 15 then print(P .. "..."); break end
+    print(P .. string.format("  %s (cid %d) : voulu=%d courant=%d appris=%s", nm(d.entry), d.entry.cooldownID, d.want, d.current, tostring(d.entry.isKnown)))
+  end
+  if orderDiffers then
+    local cur, byId = {}, {}
+    for _, e in ipairs(list) do byId[e.cooldownID] = e; if e.current == ESSENTIAL then cur[#cur + 1] = e end end
+    local want = {}
+    for _, cid in ipairs(CDMLayout.OrderedEssentials(conf, list)) do
+      if byId[cid] and byId[cid].isKnown then want[#want + 1] = cid end
+    end
+    for i = 1, math.max(#cur, #want) do
+      local w = want[i] and byId[want[i]]
+      print(P .. string.format("  #%d voulu=%s courant=%s", i, w and nm(w) or "-", cur[i] and nm(cur[i]) or "-"))
+    end
+  end
+end
+
 function CDMLayout.ApplySettings() end
 
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+ns.TrackSpecFrame(ev)
 ev:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:SetScript("OnEvent", function(_, event, arg1)
   if event == "PLAYER_REGEN_ENABLED" then
     if pendingCheck then pendingCheck = nil; C_Timer.After(1, CheckSpec) end
   elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
-    -- Laisse le CDM basculer sur la disposition de la nouvelle spé et reconstruire ses données
+    -- Laisse le CDM basculer sur la disposition de la nouvelle spé et reconstruire ses frames
     if arg1 == "player" then C_Timer.After(3, CheckSpec) end
   else
     C_Timer.After(4, CheckSpec)

@@ -415,7 +415,7 @@ ns.SecondaryResourceDefs = {
   -- Mage Givre (64) : debuff de la CIBLE (useTargetDebuff bascule sur ApplyTargetStacksToText)
   [64] = { spellID = 1221389, useTargetDebuff = true, color = { 0.55, 0.85, 1.00, 1 } },
   -- Warlock Démonologie (266) : stacks de Cœur Démoniaque (264173, buff joueur stackable)
-  [266] = { spellID = 264173, useStacks = true, color = { 0.53, 0.53, 0.93, 1 } },
+  [266] = { spellID = 264173, useStacks = true, glowFallback = true, color = { 0.53, 0.53, 0.93, 1 } },
 }
 
 -- Forever : aucune ressource secondaire moderne n'existe (Bouclier d'os, fragments d'ame, Dur au

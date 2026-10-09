@@ -242,6 +242,46 @@ local _sectionCollapsed = {}   -- ["<catId>@<index>@<libelle>"] = false si depli
 local _buildingCatId = nil     -- categorie en cours de construction (cf. GetOrBuildContainer)
 local _buildingFrame = nil     -- frame de cette categorie : identifie le ctx "de page"
 
+-- Animations de l'interface : un seul pilote OnUpdate pour toutes les transitions (cle -> animation).
+-- Duree courte + ease-out quadratique, meme ressenti que Horizon Suite.
+-- Rangees dans SW (et non en locales) : le chunk principal est a la limite des 200 locales.
+SW.animEnabled = true
+SW.animDur     = 0.18
+SW.pageCtx     = {}   -- catId -> ctx de la page (cf. MainFrame:OpenSection)
+do
+  local activeAnims = {}
+  local animDriver  = CreateFrame("Frame")
+  animDriver:Hide()
+  animDriver:SetScript("OnUpdate", function()
+    local now = GetTime()
+    local snapshot = {}
+    for key, a in pairs(activeAnims) do snapshot[#snapshot + 1] = { key, a } end
+    for _, pair in ipairs(snapshot) do
+      local key, a = pair[1], pair[2]
+      if activeAnims[key] == a then
+        local p = (now - a.t0) / a.dur
+        if p >= 1 then
+          activeAnims[key] = nil
+          a.step(1)
+          if a.done then a.done() end
+        else
+          a.step(1 - (1 - p) * (1 - p))
+        end
+      end
+    end
+    if not next(activeAnims) then animDriver:Hide() end
+  end)
+
+  function SW.StartAnim(key, dur, step, done)
+    activeAnims[key] = { t0 = GetTime(), dur = dur, step = step, done = done }
+    animDriver:Show()
+  end
+
+  function SW.StopAnim(key)
+    activeAnims[key] = nil
+  end
+end
+
 local function NewLayout(container)
   local ctx = {
     y = 0,
@@ -253,6 +293,8 @@ local function NewLayout(container)
     _shadowY = 0,    -- y attendu si personne n'a touche ctx.y en direct
     _isPage  = (_buildingFrame ~= nil and container == _buildingFrame),
   }
+
+  if ctx._isPage and _buildingCatId then SW.pageCtx[_buildingCatId] = ctx end
 
   -- Un panneau qui positionne des widgets lui-meme (ctx.y / ctx.widgets manipules
   -- directement, cf. Animations 3D, Ecran AFK, Armurerie...) ne peut pas etre redispose
@@ -363,6 +405,22 @@ local function NewLayout(container)
     end
   end
 
+  -- Repere relatif : MinYFrom("nom", dy) impose que le flux descende au moins de dy sous le repere,
+  -- meme quand des sections au-dessus se replient (MinY, lui, est absolu).
+  function ctx:Mark(name)
+    self._marks = self._marks or {}
+    self._marks[name] = self.y
+    self.flow[#self.flow + 1] = { kind = "mark", name = name, section = self._section }
+  end
+
+  function ctx:MinYFrom(name, dy)
+    local base = self._marks and self._marks[name] or self.y
+    self.flow[#self.flow + 1] = { kind = "minYFrom", name = name, dy = dy, section = self._section }
+    if self.y < base + dy then
+      Advance(base + dy - self.y)
+    end
+  end
+
   -- Page volontairement non repliable (Profils...) : les en-tetes gardent leur rendu
   -- normal, sans prefixe +/- ni clic. Le titre de section, lui, reste promu.
   function ctx:DisableCollapse()
@@ -389,64 +447,53 @@ local function NewLayout(container)
     end
   end
 
-  function ctx:Relayout()
-    local y = 0
-    for _, item in ipairs(self.flow) do
-      -- Le header porte sa propre section : il reste visible quand elle est repliee.
-      local isHeader = (item.kind == "widget" and item.section and item.w == item.section.header)
-      local hidden = item.section and item.section.collapsed and not isHeader
+  local function ItemWidgets(item)
+    if item.kind == "widget" or item.kind == "manual" then return { item.w } end
+    if item.kind == "row" or item.kind == "group" then return item.widgets end
+    return nil
+  end
 
-      if item.kind == "spacer" then
-        if not hidden then y = y + item.h end
-      elseif item.kind == "group" then
-        if hidden then
-          for _, w in ipairs(item.widgets) do SetItemShown(item, w, false) end
-        else
-          item.place(y)
-          for _, w in ipairs(item.widgets) do SetItemShown(item, w, true) end
-          y = y + item.h
-        end
-      elseif item.kind == "minY" then
-        if not hidden and y < item.y then y = item.y end
-      elseif item.kind == "manual" then
-        if hidden then
-          SetItemShown(item, item.w, false)
-        else
-          item.w:ClearAllPoints()
-          item.w:SetPoint(item.point, container, item.point, item.x, -y)
-          SetItemShown(item, item.w, true)
-          y = y + (item.w:GetHeight() or ROW_HEIGHT) + 2
-        end
-      elseif item.kind == "widget" then
-        if hidden then
-          SetItemShown(item, item.w, false)
-        else
-          item.w:ClearAllPoints()
-          item.w:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y)
-          SetItemShown(item, item.w, true)
-          y = y + (item.w:GetHeight() or ROW_HEIGHT) + 2
-        end
-      elseif item.kind == "row" then
-        if hidden then
-          for _, w in ipairs(item.widgets) do SetItemShown(item, w, false) end
-        else
-          local xOff = 0
-          for _, w in ipairs(item.widgets) do
-            w:ClearAllPoints()
-            local yOff = item.centered
-              and math.floor((item.rowH - (w:GetHeight() or ROW_HEIGHT)) / 2) or 0
-            w:SetPoint("TOPLEFT", container, "TOPLEFT", xOff, -(y + yOff))
-            SetItemShown(item, w, true)
-            xOff = xOff + (w:GetWidth() or 0) + item.gap
-          end
-          y = y + item.rowH + 2
-        end
+  local function ItemHeight(item)
+    if item.kind == "spacer" or item.kind == "group" then return item.h end
+    if item.kind == "widget" or item.kind == "manual" then return (item.w:GetHeight() or ROW_HEIGHT) + 2 end
+    if item.kind == "row" then return item.rowH + 2 end
+    return 0
+  end
+
+  local function PlaceItem(item, y)
+    if item.kind == "widget" then
+      item.w:ClearAllPoints()
+      item.w:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y)
+    elseif item.kind == "manual" then
+      item.w:ClearAllPoints()
+      item.w:SetPoint(item.point, container, item.point, item.x, -y)
+    elseif item.kind == "group" then
+      item.place(y)
+    elseif item.kind == "row" then
+      local xOff = 0
+      for _, w in ipairs(item.widgets) do
+        w:ClearAllPoints()
+        local yOff = item.centered
+          and math.floor((item.rowH - (w:GetHeight() or ROW_HEIGHT)) / 2) or 0
+        w:SetPoint("TOPLEFT", container, "TOPLEFT", xOff, -(y + yOff))
+        xOff = xOff + (w:GetWidth() or 0) + item.gap
       end
-      item.byCollapse = hidden or nil
     end
-    self.y = y
-    container:SetHeight(y + PADDING)
+  end
 
+  -- Opacite de base de chaque widget : memorisee hors animation (une page peut griser un widget)
+  local function CaptureBaseAlpha(item, ws)
+    if (item._a or 1) == 1 then
+      for _, w in ipairs(ws) do w._aishBaseA = w:GetAlpha() end
+    end
+  end
+
+  local function SetItemAlpha(ws, a)
+    for _, w in ipairs(ws) do w:SetAlpha((w._aishBaseA or 1) * a) end
+  end
+
+  local function SetContainerHeight(h)
+    container:SetHeight(h)
     -- Le scroll child ne suit pas tout seul : sa hauteur n'est recalculee qu'au
     -- changement de categorie. Sans ca, plier/deplier laisse la barre de defilement
     -- sur l'ancienne plage. On reclampe aussi le scroll, qui peut se retrouver
@@ -458,6 +505,120 @@ local function NewLayout(container)
         scrollFrame:SetVerticalScroll(math.max(0, range))
       end
     end
+  end
+
+  -- animated : les sections se replient / se deplient en glissant et en fondu (clic sur un en-tete).
+  -- Les elements masques par le pli sont caches pour ne pas rester cliquables, mais un widget que la
+  -- page a cache elle-meme (option conditionnelle) n'est JAMAIS reaffiche ici : on ne touche qu'a ce
+  -- qu'on a masque soi-meme, trace par item.byCollapse.
+  function ctx:Relayout(animated)
+    SW.StopAnim(self)
+
+    -- 1) Plan : position cible de chaque element
+    local y = 0
+    local secBottom = {}   -- section -> y juste sous son en-tete (point de depart / d'arrivee des glissements)
+    local marks = {}       -- reperes relatifs (ctx:Mark)
+    for _, item in ipairs(self.flow) do
+      -- Le header porte sa propre section : il reste visible quand elle est repliee.
+      local isHeader = (item.kind == "widget" and item.section and item.w == item.section.header)
+      local hidden = (item.section and item.section.collapsed and not isHeader) and true or false
+      item._hidNow = hidden
+      item._ty = y
+      if item.kind == "mark" then
+        marks[item.name] = y
+      elseif item.kind == "minYFrom" then
+        local base = marks[item.name]
+        if base and not hidden and y < base + item.dy then y = base + item.dy end
+      elseif item.kind == "minY" then
+        if not hidden and y < item.y then y = item.y end
+      elseif not hidden then
+        y = y + ItemHeight(item)
+      end
+      if isHeader then secBottom[item.section] = y end
+    end
+    self.y = y
+    local finalH = y + PADDING
+
+    -- 2) Application
+    local canAnim = animated and SW.animEnabled and container:IsShown()
+    local moves = {}
+    for _, item in ipairs(self.flow) do
+      local ws = ItemWidgets(item)
+      if ws then
+        local vis = not item._hidNow
+        local was = item._vis
+        if canAnim and was ~= nil and (vis or was) then
+          local anchor = secBottom[item.section] or item._ty
+          local m = {
+            item = item, ws = ws,
+            from = was and (item._y or item._ty) or anchor,
+            to   = vis and item._ty or anchor,
+            aFrom = item._a or 1,
+            aTo   = vis and 1 or 0,
+          }
+          CaptureBaseAlpha(item, ws)
+          item._animTouched = true
+          if vis and not was then
+            if item.byCollapse then
+              for _, w in ipairs(ws) do w:Show() end
+            end
+            m.aFrom = item._a or 0
+          end
+          moves[#moves + 1] = m
+        elseif vis then
+          PlaceItem(item, item._ty)
+          item._y = item._ty
+          if item.byCollapse then
+            for _, w in ipairs(ws) do w:Show() end
+          end
+          if item._animTouched then SetItemAlpha(ws, 1); item._animTouched = nil end
+          item._a = 1
+        else
+          if item._animTouched then
+            SetItemAlpha(ws, 1)
+            item._animTouched = nil
+          else
+            CaptureBaseAlpha(item, ws)
+          end
+          for _, w in ipairs(ws) do w:Hide() end
+          item._a = 0
+        end
+        item._vis = vis
+        item.byCollapse = (not vis) or nil
+      end
+    end
+
+    if #moves == 0 then
+      SetContainerHeight(finalH)
+      return
+    end
+
+    local h0 = container:GetHeight()
+    SW.StartAnim(self, SW.animDur, function(e)
+      for _, m in ipairs(moves) do
+        local yy = m.from + (m.to - m.from) * e
+        PlaceItem(m.item, yy)
+        m.item._y = yy
+        local al = m.aFrom + (m.aTo - m.aFrom) * e
+        m.item._a = al
+        SetItemAlpha(m.ws, al)
+      end
+      SetContainerHeight(h0 + (finalH - h0) * e)
+    end, function()
+      for _, m in ipairs(moves) do
+        if m.item._vis then
+          PlaceItem(m.item, m.item._ty)
+          m.item._y = m.item._ty
+          m.item._a = 1
+        else
+          for _, w in ipairs(m.ws) do w:Hide() end
+          m.item._a = 0
+        end
+        SetItemAlpha(m.ws, 1)
+        m.item._animTouched = nil
+      end
+      SetContainerHeight(finalH)
+    end)
   end
 
   function ctx:Finalize()
@@ -490,7 +651,7 @@ local function NewLayout(container)
           _sectionCollapsed[sec.key] = false
         end
         SW.SetHeaderCollapsedState(sec.header, sec.collapsed)
-        self:Relayout()
+        self:Relayout(true)
       end)
       SW.SetHeaderCollapsedState(sec.header, sec.collapsed)
     end
@@ -561,6 +722,8 @@ end
 local DBKEY_TO_CATEGORY = {
   healthCircle              = "outOfCombat",
   outOfCombatResourceCircle = "outOfCombat",
+  groupNumber               = "visibility",   -- section de la page Integration
+  bigCursor                 = "comfortQoL",   -- section de la page QoL
 }
 
 -- Invalide la page dediee d'un module -- utilise UNIQUEMENT par la page "Modules" (jamais par LiveApply, qui tournerait sur la page en cours d'edition et casserait le focus des sliders).
@@ -2003,8 +2166,8 @@ function Build.UnitBars(container)
 end
 
 -- BUILD : Numero de Groupe (raid uniquement) : vignette + texte, page separee dans "Cadres d'unites" (pas une sous-section de Barres de Vie).
-function Build.GroupNumber(container)
-  local ctx = NewLayout(container)
+-- Section "Numeros de groupes" : ajoutee a la page Integration (ctx / container de la page hote).
+function Build.GroupNumberSection(ctx, container)
 
   -- Capture de reference (Media/UI/RaidFramesPreview.tga) : deux conteneurs de
   -- groupe ElvUI cote a cote. La TGA fait 256x256 (puissance de 2 obligatoire),
@@ -2127,7 +2290,6 @@ function Build.GroupNumber(container)
     -- Re-synchronise a chaque reaffichage de la page : les valeurs peuvent avoir
     -- change sans passer par onChanged (changement de profil, import...).
     preview:SetScript("OnShow", function(self) self:Update() end)
-    ctx:Overlay(preview)
   end
 
   -- Rafraichit l'apercu apres l'action normale du widget.
@@ -2144,13 +2306,29 @@ function Build.GroupNumber(container)
 
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_GROUP_NUMBER"], W))
 
+  -- L'apercu vit DANS la section (il suit son pli) : pose sous l'en-tete, colonne de droite.
+  if preview then
+    ctx:Mark("gn")
+    ctx:ManualGroup(function(y)
+      preview:ClearAllPoints()
+      preview:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -y)
+    end, 0, { preview })
+  end
+
+  -- Sous-titres internes : ni repliables ni sections a part (tout reste dans "Numeros de groupes")
+  local function SubHeader(text, width)
+    local h = SW.CreateSectionHeader(container, text, width)
+    h._isSectionHeader = nil
+    return ctx:Add(h)
+  end
+
   local cbGN = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_GN_ENABLE"], L["SETTINGS_GN_ENABLE_TT"], W))
   BindCheckbox(cbGN, "groupNumber", "enabled")
   Live(cbGN)
 
   -- Vignette
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_GN_BADGE"], W))
+  SubHeader(L["SETTINGS_SEC_GN_BADGE"], W)
 
   local slGNSize = SW.CreateSlider(container, L["SETTINGS_GN_BADGE_SIZE"], 16, 48, 1, W2)
   BindSlider(slGNSize, "groupNumber", "badgeSize")
@@ -2181,9 +2359,9 @@ function Build.GroupNumber(container)
   ctx:AddRow(8, Live(slGNBadgeX), Live(slGNBadgeY))
 
   -- Numero : la section passe sous l'apercu, donc de nouveau en pleine largeur.
-  if preview then ctx:MinY(PREVIEW_H + 6) end
+  if preview then ctx:MinYFrom("gn", PREVIEW_H + 6) end
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_GN_NUMBER"], WALL))
+  SubHeader(L["SETTINGS_SEC_GN_NUMBER"], WALL)
 
   -- Police / contour / taille / couleur du texte sur une seule rangee.
   local gnSL4 = math.floor((WALL - 3 * 8) / 4)
@@ -2208,9 +2386,6 @@ function Build.GroupNumber(container)
   ctx:AddRow(8, Live(slGNTextX), Live(slGNTextY))
 
   if preview then preview:Update() end
-
-  ctx:Finalize()
-  return ctx.widgets
 end
 
 -- BUILD : Barre de Cast
@@ -2716,6 +2891,8 @@ local PSEUDO_SPELLS_3D = {
   [9000004] = { name = L["SETTINGS_PSEUDO_MAELSTROM_5"],   icon = 136063,  specID = 263  },
   [9000005] = { name = L["SETTINGS_PSEUDO_MAELSTROM_8"],   icon = 136063,  specID = 263  },
   [9000006] = { name = L["SETTINGS_PSEUDO_MAELSTROM_10"],  icon = 136063,  specID = 263  },
+  -- Alerte "Buffs manquants" : familier en Passif (specID nil = jamais dans la liste des sorts de spe)
+  [9000010] = { name = L["SETTINGS_PSEUDO_PET_PASSIVE"], icon = "Interface\\Icons\\Ability_Seal" },
 }
 
 -- Utilitaire : résout le nom et l'icône d'un spellID
@@ -2914,7 +3091,10 @@ end
 -- Retourne l'ancre (ou table d'ancres) de preview selon la section active
 local function GetPreviewAnchor()
   if seActiveSection == "missingBuffs" then
-    return _G["AishCoreMissingBuffFrame"]
+    -- Icone de proposition qui affiche le sort selectionne (sinon le frame global)
+    local MBp = ns.Auras and ns.Auras.MissingBuffs
+    return (MBp and MBp.GetSlotForSpell and seSelectedAuraID and MBp.GetSlotForSpell(seSelectedAuraID))
+      or _G["AishCoreMissingBuffFrame"]
   elseif seActiveSection == "ooc" then
     return _G["AishCoreHealthRing"]
   elseif seActiveSection == "logos" then
@@ -4668,7 +4848,7 @@ local function BuildSpellListRow(parent, spellID, width, onClick, combosDB)
   -- Sort absent de ce client (configuration venue d'ailleurs) : libelle en orange et prefixe, pour
   -- ne pas le confondre avec un sort reellement disponible ici. Son nom n'etant pas lisible, on
   -- affiche son identifiant, seul repere exploitable.
-  local isForeign = (name == nil) or (ns.SpellIdentityKey and ns.SpellIdentityKey(spellID) == nil)
+  local isForeign = (name == nil) or (not PSEUDO_SPELLS_3D[spellID] and ns.SpellIdentityKey and ns.SpellIdentityKey(spellID) == nil)
   if isForeign then
     -- Nom memorise sur le client d'origine (cf. /setag) : sans lui il ne resterait qu'un
     -- identifiant nu, impossible a rattacher a un sort.
@@ -4891,6 +5071,10 @@ local function BuildAnimRow(parent, idx, anim, width, onClick, onTriggerChange, 
     UpdateToggle()
     -- Changement de structure : une anim desactivee doit cesser d'etre jouee
     NotifyLogoAnimEdited(true)
+    if seActiveSection == "missingBuffs" then
+      local SE = ns.Modules.SpellEffects
+      if SE and SE.ResetMissingBuffCombos then SE.ResetMissingBuffCombos(); SE.ScanMissingBuffCombos() end
+    end
   end
   row._toggleBtn = toggleBtn
 
@@ -5721,6 +5905,10 @@ function Build.SpellEffects(container)
     if seActiveSection == "logos" then
       local SE = ns.Modules.SpellEffects
       if SE and SE.RefreshLogoDecoConfig then SE.RefreshLogoDecoConfig() end
+    elseif seActiveSection == "missingBuffs" then
+      -- Meme principe : le modele reel de l'icone d'apercu doit suivre en direct
+      local SE = ns.Modules.SpellEffects
+      if SE and SE.RefreshMissingBuffSustained then SE.RefreshMissingBuffSustained(key) end
     end
   end
 
@@ -6819,7 +7007,12 @@ function Build.SpellEffects(container)
       RefreshAnimEditor()
       -- Section orbs/OOC : lancer immédiatement un DecoPreview sur l'anim ajoutée.
       -- Les logos en sont exclus : ils affichent deja l'animation reelle (cf. RefreshAnimList).
-      if seActiveSection ~= "spells" and seActiveSection ~= "logos" then
+      if seActiveSection == "missingBuffs" then
+        -- Pas de preview deco : le modele reel de l'icone d'apercu fait office de preview (et suit les
+        -- sliders via RefreshMissingBuffSustained). On le relance pour inclure l'anim ajoutee.
+        local SE = ns.Modules.SpellEffects
+        if SE and SE.ResetMissingBuffCombos then SE.ResetMissingBuffCombos(); SE.ScanMissingBuffCombos() end
+      elseif seActiveSection ~= "spells" and seActiveSection ~= "logos" then
         local SE = ns.Modules.SpellEffects
         if SE then
           if SE.StopDecoPreview then SE.StopDecoPreview() end
@@ -6848,6 +7041,10 @@ function Build.SpellEffects(container)
     seSelectedAnimIdx = nil
     RefreshAnimList()
     RefreshAnimEditor()
+    if seActiveSection == "missingBuffs" then
+      local SE = ns.Modules.SpellEffects
+      if SE and SE.ResetMissingBuffCombos then SE.ResetMissingBuffCombos(); SE.ScanMissingBuffCombos() end
+    end
     -- Rafraîchir les décorations si section orbs/OOC
     if seActiveSection ~= "spells" then
       local SE = ns.Modules.SpellEffects
@@ -7012,7 +7209,10 @@ function Build.SpellEffects(container)
       if modelName then seModelNameCache[fileID] = modelName end
       RefreshAnimList()
       RefreshAnimEditor()
-      if seActiveSection ~= "spells" then
+      if seActiveSection == "missingBuffs" then
+        local SE = ns.Modules.SpellEffects
+        if SE and SE.ResetMissingBuffCombos then SE.ResetMissingBuffCombos(); SE.ScanMissingBuffCombos() end
+      elseif seActiveSection ~= "spells" then
         local SE = ns.Modules.SpellEffects
         if SE then
           if SE.StopDecoPreview then SE.StopDecoPreview() end
@@ -8926,6 +9126,7 @@ function Build.Colors(container)
     sec.BuildContent = function()
       if sec.built then return end
       local fy = 0
+      local crownRefresh = {}   -- une entrée par spé de cette classe (couronne "spé par défaut")
       -- Nombre de colonnes recalculé à chaque build à partir de CONTENT_W
       -- courant (la catégorie est entièrement reconstruite au resize, cf.
       -- MainFrame OnSizeChanged) : la grille de rectangles revient donc seule
@@ -8942,6 +9143,39 @@ function Build.Colors(container)
         local powerColor = Colors.GetForSpec(cd.key, spec.id, "powercircle") or fc
         local specHeader = SW.CreateSectionHeader(cFrame, spec.name, CONTENT_W - SPEC_INDENT, powerColor)
         specHeader:SetPoint("TOPLEFT", cFrame, "TOPLEFT", SPEC_INDENT, -fy)
+
+        -- Clic droit sur le nom : définir cette spé comme spé par défaut de la classe (utilisée quand
+        -- aucune spé n'est déterminée). Une couronne s'affiche à droite du nom de la spé par défaut.
+        local crown = specHeader:CreateTexture(nil, "OVERLAY")
+        crown:SetSize(18, 18)
+        crown:SetPoint("LEFT", specHeader.text, "RIGHT", 6, 0)
+        local crownTint = (ns.Theme and (ns.Theme.gold or ns.Theme.accentText)) or { 0.95, 0.78, 0.25 }
+        crown:SetVertexColor(crownTint[1], crownTint[2], crownTint[3], 1)  -- icône blanche : teintée or
+        crown:SetTexture("Interface\\AddOns\\AishCore\\Media\\UI\\crown_icon")
+        local function RefreshCrown() crown:SetShown(Colors.GetDefaultSpec(cd.key) == spec.id) end
+        RefreshCrown()
+        crownRefresh[#crownRefresh + 1] = RefreshCrown
+        local specHit = CreateFrame("Button", nil, specHeader)
+        specHit:SetAllPoints(specHeader)
+        specHit:SetFrameLevel(specHeader:GetFrameLevel() + 1)
+        specHit:RegisterForClicks("RightButtonUp")
+        local specHl = specHit:CreateTexture(nil, "BACKGROUND")
+        specHl:SetAllPoints(); specHl:SetColorTexture(1, 1, 1, 0.05); specHl:Hide()
+        local function ShowSpecTip(self)
+          GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
+          local isDef = Colors.GetDefaultSpec(cd.key) == spec.id
+          GameTooltip:SetText(isDef and L["SETTINGS_COLORS_UNSET_DEFAULT_SPEC"] or L["SETTINGS_COLORS_SET_DEFAULT_SPEC"], 1, 1, 1)
+          GameTooltip:AddLine(L["SETTINGS_COLORS_DEFAULT_SPEC_TT"], 0.8, 0.8, 0.8, true)
+          GameTooltip:Show()
+        end
+        specHit:SetScript("OnEnter", function(self) specHl:Show(); ShowSpecTip(self) end)
+        specHit:SetScript("OnLeave", function() specHl:Hide(); GameTooltip:Hide() end)
+        specHit:SetScript("OnClick", function(self)
+          Colors.ToggleDefaultSpec(cd.key, spec.id)
+          for _, fn in ipairs(crownRefresh) do fn() end
+          ShowSpecTip(self)   -- libellé du tooltip à jour (définir / retirer)
+        end)
+
         fy = fy + specHeader:GetHeight() + 6
 
         -- Grille de couleurs : rectangles + libellé (2 lignes max) en dessous,
@@ -9066,7 +9300,13 @@ function Build.Colors(container)
       if expanded[cd.key] then
         sec.BuildContent()
       end
-      RebuildLayout()
+      -- Pli/depli anime : en-tetes qui glissent, contenu qui fond
+      local frames = {}
+      for _, s2 in ipairs(classSections) do
+        frames[#frames + 1] = s2.headerBtn
+        frames[#frames + 1] = s2.contentFrame
+      end
+      SW.AnimateLayout("colorsLayout", frames, RebuildLayout)
     end)
 
     table.insert(classSections, sec)
@@ -9964,6 +10204,10 @@ function Build.Visibility(container)
   AddonHeader(L["ADDONFONTS_SEC_BAGANATOR"], "Baganator", AF and AF.BagSkinConflict and AF.BagSkinConflict())
   FontBlock("bagItem", L["ADDONFONTS_BAG_ITEM"], L["ADDONFONTS_BAG_ITEM_TT"], 30, OUTLINES_SLUG)
 
+  -- Numeros de groupes (ex-page a part) : section repliable de cette page
+  ctx:Spacer(6)
+  Build.GroupNumberSection(ctx, container)
+
   ctx:Spacer()
   ctx:Finalize()
 end
@@ -10221,6 +10465,7 @@ _invalidateCategory = function(catId)
   if activeCategory == catId then
     local prev = catId
     activeCategory = nil
+    SW._fadeNext = true   -- cf. SelectCategory : fondu leger sur une page reconstruite
     C_Timer.After(0, function() MainFrame:SelectCategory(prev) end)
   end
 end
@@ -10832,11 +11077,6 @@ function Build.AurasTactics(container)
     ns.Auras.SettingsPanel.BuildTacticsMenu(container, CONTENT_W)
   end
 end
-function Build.AurasEquipment(container)
-  if ns.Auras and ns.Auras.SettingsPanel and ns.Auras.SettingsPanel.BuildEquipmentMenu then
-    ns.Auras.SettingsPanel.BuildEquipmentMenu(container, CONTENT_W)
-  end
-end
 function Build.AurasEffects(container)
   if ns.Auras and ns.Auras.SettingsPanel and ns.Auras.SettingsPanel.BuildEffectsMenu then
     ns.Auras.SettingsPanel.BuildEffectsMenu(container, CONTENT_W)
@@ -10865,6 +11105,16 @@ local function ModEntry(id, label, dbKey, subKey, tooltip)
     end,
   }
 end
+
+-- Page des reglages d'un module quand elle differe de son identifiant (clic droit sur la ligne)
+Build.MODULE_PAGE = {
+  unitBars_player = "unitBars", unitBars_target = "unitBars", unitBars_focus = "unitBars",
+  unitBars_pet = "unitBars", unitBars_tot = "unitBars", topTargetBar_tot = "topTargetBar",
+  animOoc = "spellEffects", animSpells = "spellEffects", animAuras = "spellEffects",
+  animMissing = "spellEffects", animLogos = "spellEffects", orbs = "spellEffects",
+  aurasTracking = "aurasTracked",
+  healthCircle = "outOfCombat", outOfCombatResourceCircle = "outOfCombat",
+}
 
 -- Entrée "barre d'unité" : délègue à UBGet/UBSet (unitBars.bars.<barKey>.enabled),
 -- qui applique déjà LiveApply("unitBars") en interne.
@@ -10927,11 +11177,10 @@ local MODULE_CATEGORIES = {
     modules = {
       ModEntry("resourceCircle", L["SETTINGS_SEC_RESOURCE_CIRCLE"],  "resourceCircle", "enabled"),
       ModEntry("priorityBar",    L["SETTINGS_SEC_PRIORITY_BAR"],     "priorityBar",    "enabled"),
+      ModEntry("rotationHelper", L["SETTINGS_CAT_ROTATION_HELPER"],  "rotationHelper", "enabled"),
       ModEntry("cdmEssential",   L["SETTINGS_CAT_CDM_ESSENTIAL"],    "cdmEssential",   "enabled"),
       ModEntry("cdmUtility",     L["SETTINGS_CAT_CDM_UTILITY"],      "cdmUtility",     "enabled"),
       ModEntry("cdmLayout",      L["SETTINGS_CAT_CDM_LAYOUT"],       "cdmLayout",      "enabled", L["SETTINGS_CAT_CDM_LAYOUT_TT"]),
-      ModEntry("bigCursor",      L["SETTINGS_MOD_BIG_CURSOR"],       "bigCursor",      "enabled", L["SETTINGS_MOD_BIG_CURSOR_TT"]),
-      ModEntry("rotationHelper", L["SETTINGS_CAT_ROTATION_HELPER"],  "rotationHelper", "enabled"),
     },
   },
   {
@@ -10960,7 +11209,6 @@ local MODULE_CATEGORIES = {
         }
         return m
       end)(),
-      ModEntry("groupNumber", L["SETTINGS_SEC_GROUP_NUMBER"], "groupNumber", "enabled"),
     },
   },
   {
@@ -10974,26 +11222,24 @@ local MODULE_CATEGORIES = {
       ModEntry("extraBars", L["SETTINGS_CAT_EXTRA_BARS"], "extraBars", "enabled", L["SETTINGS_CAT_EXTRA_BARS_TT"]),
       ModEntry("afkMode",   L["SETTINGS_CAT_AFK_MODE"],  "afkMode",   "enabled"),
       ModEntry("characterArmory", L["SETTINGS_CAT_CHARACTER_ARMORY"], "characterArmory", "enabled"),
-      ModEntry("visibility", L["SETTINGS_MOD_ELVUI_BUFFS"], "visibility", "elvuiBuffsEnabled", L["SETTINGS_MOD_ELVUI_BUFFS_TT"]),
     },
   },
   {
     -- Un interrupteur par type d'animation (spellEffects.<type>Enabled, cf. Modules/SpellEffects.lua)
     key = "animations", label = L["SETTINGS_GROUP_ANIMATIONS"],
     modules = {
-      ModEntry("animOoc",     L["PROFILE_ITEM_ANIM_OOC"],     "spellEffects", "oocEnabled"),
-      ModEntry("animSpells",  L["PROFILE_ITEM_ANIM_SPELLS"],  "spellEffects", "spellsEnabled"),
-      ModEntry("animAuras",   L["PROFILE_ITEM_ANIM_AURAS"],   "spellEffects", "aurasEnabled"),
-      ModEntry("animMissing", L["PROFILE_ITEM_ANIM_MISSING"], "spellEffects", "missingBuffsEnabled"),
-      ModEntry("animLogos",   L["PROFILE_ITEM_ANIM_LOGOS"],   "spellEffects", "logosEnabled"),
-      ModEntry("orbs",        L["PROFILE_ITEM_ANIM_ORBS"],    "spellEffects", "orbsEnabled", L["SETTINGS_MOD_ORBS_TT"]),
+      ModEntry("animOoc",     L["SETTINGS_MOD_ANIM_OOC"],     "spellEffects", "oocEnabled"),
+      ModEntry("animSpells",  L["SETTINGS_MOD_ANIM_SPELLS"],  "spellEffects", "spellsEnabled"),
+      ModEntry("animAuras",   L["SETTINGS_MOD_ANIM_AURAS"],   "spellEffects", "aurasEnabled"),
+      ModEntry("animMissing", L["SETTINGS_MOD_ANIM_MISSING"], "spellEffects", "missingBuffsEnabled"),
+      ModEntry("animLogos",   L["SETTINGS_MOD_ANIM_LOGOS"],   "spellEffects", "logosEnabled"),
+      ModEntry("orbs",        L["SETTINGS_MOD_ANIM_ORBS"],    "spellEffects", "orbsEnabled", L["SETTINGS_MOD_ORBS_TT"]),
     },
   },
   {
     key = "auras", label = L["SETTINGS_GROUP_AURAS_PROCS"],
     modules = {
       ModAurasTrackingEntry(),
-      ModAuraEntry("aurasTrinkets",   L["SETTINGS_CAT_TRINKETS"],    "equipmentEnabled"),
       {
         id = "aurasMissingBuffs", label = L["AURASDATA_SEC_MISSINGBUFFS_LABEL"],
         get = function()
@@ -11084,6 +11330,38 @@ local function MakeModuleRow(container, entry, indent, width)
     cb.box:SetPoint("LEFT", cb, "LEFT", 8 + indent, 0)
   end
   cb.onChanged = function(val) entry.set(val) end
+  -- Clic droit : ouvre la page (et la section) des reglages de ce module
+  cb:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  local toggle = cb:GetScript("OnClick")
+  cb:SetScript("OnClick", function(self, btn)
+    if btn == "RightButton" then
+      MainFrame:OpenModuleSettings(entry)
+      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+      return
+    end
+    toggle(self, btn)
+  end)
+  cb.tooltipText = (entry.tooltip and (entry.tooltip .. "\n\n") or "") .. "|cff888888" .. L["SETTINGS_MOD_OPEN_HINT"] .. "|r"
+
+  -- Survol : le libelle vire vers la couleur d'accent (comme la sidebar) pour montrer que la ligne
+  -- est cliquable (clic droit = reglages). Fondu court ; le OnEnter/OnLeave d'origine reste en place.
+  local function HoverTo(target)
+    local CLR = ns.Modules and ns.Modules.Colors
+    local ac = (CLR and CLR.Get and CLR.Get("powercircle")) or Theme.accentText or Theme.gold
+    local tn = Theme.textNormal
+    local from = cb._hv or 0
+    local function Paint(v)
+      cb.label:SetTextColor(tn[1] + (ac[1] - tn[1]) * v, tn[2] + (ac[2] - tn[2]) * v, tn[3] + (ac[3] - tn[3]) * v)
+    end
+    Paint(from)   -- le callback d'origine vient de forcer blanc / gris : on repart de la valeur courante
+    SW.StartAnim(cb, 0.12, function(e)
+      local v = from + (target - from) * e
+      cb._hv = v
+      Paint(v)
+    end)
+  end
+  cb:HookScript("OnEnter", function() HoverTo(1) end)
+  cb:HookScript("OnLeave", function() HoverTo(0) end)
   return cb
 end
 
@@ -11855,9 +12133,7 @@ do
 end
 
 -- Page dediee minimaliste : un seul reglage (enabled) + la taille du curseur.
-function Build.BigCursor(container)
-  local ctx = NewLayout(container)
-  local W = CONTENT_W
+function Build.BigCursorSection(ctx, container, W)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_MOD_BIG_CURSOR"], W))
   local cbBC = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_BIGCURSOR_ENABLE"], L["SETTINGS_MOD_BIG_CURSOR_TT"], W))
   BindCheckbox(cbBC, "bigCursor", "enabled")
@@ -11868,22 +12144,46 @@ function Build.BigCursor(container)
   -- en pixels par palier.
   local slBC = ctx:Add(SW.CreateSlider(container, L["SETTINGS_BIGCURSOR_SIZE"], 1, 4, 1, W))
   BindSlider(slBC, "bigCursor", "cursorSize")
-  ctx:Finalize()
-  return ctx.widgets
 end
 
 function Build.ComfortRender(container)
   local ctx = NewLayout(container)
   local W = CONTENT_W
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_RENDER"], W))
-  for _, t in ipairs({
+  -- Deux colonnes : les 4 reglages d'origine a gauche, les suivants a droite
+  local halfW = math.floor((W - 8) / 2)
+  local CF = ns.Modules and ns.Modules.Comfort
+  local function MakeToggle(t)
+    local cb = SW.CreateCheckbox(container, t[2], t[3], halfW)
+    -- Reglage du PC, pas du profil (cf. Modules/Comfort.lua) : lecture/ecriture dediees
+    cb:SetChecked(CF and CF.GetToggle(t[1]) or false)
+    cb.onChanged = function(val) if CF then CF.SetToggle(t[1], val) end end
+    return cb
+  end
+  local leftCol = {
     { "groundDensity", L["SETTINGS_COMFORT_DENSITY"], L["SETTINGS_COMFORT_DENSITY_TT"] },
     { "groundFade",    L["SETTINGS_COMFORT_FADE"],    L["SETTINGS_COMFORT_FADE_TT"] },
     { "groundDist",    L["SETTINGS_COMFORT_DIST"],    L["SETTINGS_COMFORT_DIST_TT"] },
     { "sharpen",       L["SETTINGS_COMFORT_SHARPEN"], L["SETTINGS_COMFORT_SHARPEN_TT"] },
-  }) do
-    local cb = ctx:Add(SW.CreateCheckbox(container, t[2], t[3], W))
-    BindCheckbox(cb, "comfort", t[1])
+  }
+  local rightCol = {
+    { "objFade",    L["SETTINGS_COMFORT_OBJFADE"],    L["SETTINGS_COMFORT_OBJFADE_TT"] },
+    { "objCull",    L["SETTINGS_COMFORT_OBJCULL"],    L["SETTINGS_COMFORT_OBJCULL_TT"] },
+    { "terrainLod", L["SETTINGS_COMFORT_TERRAINLOD"], L["SETTINGS_COMFORT_TERRAINLOD_TT"] },
+    { "reflection", L["SETTINGS_COMFORT_REFLECTION"], L["SETTINGS_COMFORT_REFLECTION_TT"] },
+    { "weather",    L["SETTINGS_COMFORT_WEATHER"],    L["SETTINGS_COMFORT_WEATHER_TT"] },
+  }
+  for i = 1, math.max(#leftCol, #rightCol) do
+    local a = leftCol[i] and MakeToggle(leftCol[i])
+    local b = rightCol[i] and MakeToggle(rightCol[i])
+    if a and b then
+      ctx:AddRowCentered(8, a, b)
+    elseif a then
+      ctx:Add(a)
+    else
+      -- Colonne de droite seule : meme x que les widgets de droite des rangees a deux colonnes
+      ctx:Manual(b, halfW + 8)
+    end
   end
   ctx:Finalize()
   return ctx.widgets
@@ -11893,6 +12193,7 @@ function Build.ComfortQoL(container)
   local ctx = NewLayout(container)
   local W = CONTENT_W
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_QOL"], W))
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_INTERFACE"], W))
   local cbSc = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_SHORTCUTS"], L["SETTINGS_COMFORT_SHORTCUTS_TT"], W))
   BindCheckbox(cbSc, "comfort", "shortcuts")
   local cbMer = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_MERCHANT"], L["SETTINGS_COMFORT_MERCHANT_TT"], W))
@@ -11901,6 +12202,23 @@ function Build.ComfortQoL(container)
   BindSlider(slMer, "comfort", "merchantPages")
   local cbHor = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_HORIZON"], L["SETTINGS_COMFORT_HORIZON_TT"], W))
   BindCheckbox(cbHor, "comfort", "horizonOffWithRXP")
+
+  -- spellID dans l'infobulle des auras : case + touche requise sur la meme ligne
+  local halfW = math.floor((W - 8) / 2)
+  local cbSid = SW.CreateCheckbox(container, L["SETTINGS_COMFORT_SPELLID"], L["SETTINGS_COMFORT_SPELLID_TT"], halfW)
+  BindCheckbox(cbSid, "comfort", "spellIDTooltip")
+  local ddMod = SW.CreateDropdown(container, L["SETTINGS_COMFORT_MODIFIERS"], {
+    { value = "NONE",  text = L["SETTINGS_COMFORT_MOD_NONE"] },
+    { value = "ALT",   text = "Alt" },
+    { value = "SHIFT", text = "Shift" },
+    { value = "CTRL",  text = "Ctrl" },
+  }, halfW)
+  BindDropdown(ddMod, "comfort", "spellIDModifier")
+  ctx:AddRowCentered(8, cbSid, ddMod)
+
+  -- Curseur en combat (ex-page a part)
+  ctx:Spacer(6)
+  Build.BigCursorSection(ctx, container, W)
   ctx:Finalize()
   return ctx.widgets
 end
@@ -11988,22 +12306,23 @@ end
 --
 -- MODIFIEZ ICI pour brancher les vraies infos (liens + images du carrousel) :
 -- les valeurs ci-dessous sont des PLACEHOLDERS en attendant les vrais liens/
--- visuels. Chaque entree de HEROIC_SUPPORT_LINKS est une icone cliquable
+-- visuels. Chaque entree de HS.LINKS est une icone cliquable
 -- qui ouvre la popup "copier le lien" (WoW ne peut pas ouvrir un navigateur
--- depuis un addon). Chaque entree de HEROIC_SUPPORT_IMAGES est une image du
+-- depuis un addon). Chaque entree de HS.IMAGES est une image du
 -- carrousel (textures existantes de l'addon en attendant les vrais visuels
 -- -- cf. SW.CreateCarousel : GIFs non supportes, images statiques uniquement).
 -- Logos "wordmark" (pas des icones carrees) : ratio W/H propre a chaque
 -- fichier (cf. Media/Logo/*.tga), necessaire pour les dimensionner sans les
 -- deformer -- imgW/imgH = dimensions reelles du fichier.
-local HEROIC_SUPPORT_LINKS = {
+local HS = {}   -- constantes de la page Soutien heroique (une seule locale du chunk)
+HS.LINKS = {
   { icon = "Interface\\AddOns\\AishCore\\Media\\Logo\\kofi",      imgW = 128, imgH = 35,  label = "Ko-fi",      url = "https://ko-fi.com/aishuutv" },
   { icon = "Interface\\AddOns\\AishCore\\Media\\Logo\\discord",   imgW = 128, imgH = 19,  label = "Discord",    url = "https://discord.gg/xamhJnSsbp" },
   { icon = "Interface\\AddOns\\AishCore\\Media\\Logo\\CurseForge", imgW = 776, imgH = 150, label = "CurseForge", url = "https://www.curseforge.com/wow/addons/aishcore" },
 }
 
 -- Toutes les images font 1374x552 (ratio verifie via les fichiers, cf.
--- CAROUSEL_IMG_RATIO ci-dessous) : chemin AVEC extension .jpg -- contrairement
+-- HS.IMG_RATIO ci-dessous) : chemin AVEC extension .jpg -- contrairement
 -- au reste de l'addon (.tga/.blp), qui laisse WoW resoudre l'extension toute
 -- seule, ce n'est fiable qu'avec ces 2 formats. A verifier en jeu : si une
 -- image reste invisible/noire, le client ne sait probablement pas charger un
@@ -12015,7 +12334,7 @@ local HEROIC_SUPPORT_LINKS = {
 -- UI/SharedWidgets.lua), pas juste un commentaire de dev : etaient avant en
 -- dur en francais, jamais traduites (confirme par l'historique -- ce carrousel
 -- n'a jamais eu de version anglaise depuis sa creation).
-local HEROIC_SUPPORT_IMAGES = {
+HS.IMAGES = {
   { texture = "Interface\\AddOns\\AishCore\\Media\\Carousel\\reshade.jpg",       tooltip = L["SETTINGS_HEROIC_CAROUSEL_1"] },
   { texture = "Interface\\AddOns\\AishCore\\Media\\Carousel\\fx_2.jpg",           tooltip = L["SETTINGS_HEROIC_CAROUSEL_2"] },
   { texture = "Interface\\AddOns\\AishCore\\Media\\Carousel\\modelpicker_1.jpg",  tooltip = L["SETTINGS_HEROIC_CAROUSEL_3"] },
@@ -12031,11 +12350,11 @@ local HEROIC_SUPPORT_IMAGES = {
 }
 -- Ratio EXACT des images (552/1374) : evite tout etirement -- SW.CreateCarousel
 -- recoit une hauteur calculee depuis ce ratio plutot qu'un pourcentage approximatif.
-local CAROUSEL_IMG_RATIO = 552 / 1374
+HS.IMG_RATIO = 552 / 1374
 
 -- Perks "Heroic support debloque" : une entree par ligne (icone coche +
 -- texte), cf. colonne gauche du bloc 2 colonnes plus bas.
-local HEROIC_SUPPORT_PERKS = {
+HS.PERKS = {
   L["SETTINGS_HEROIC_PERK_1"],  L["SETTINGS_HEROIC_PERK_2"],
   L["SETTINGS_HEROIC_PERK_3"],  L["SETTINGS_HEROIC_PERK_4"],
   L["SETTINGS_HEROIC_PERK_5"],  L["SETTINGS_HEROIC_PERK_6"],
@@ -12045,7 +12364,7 @@ local HEROIC_SUPPORT_PERKS = {
 }
 -- Texture standard des cases a cocher Blizzard (UICheckButtonTemplate) : sert
 -- ici de puce, simplement teintee en dore (CAROUSEL_GOLD) plutot que blanche.
-local HEROIC_PERK_CHECK_TEX = "Interface\\Buttons\\UI-CheckBox-Check"
+HS.CHECK_TEX = "Interface\\Buttons\\UI-CheckBox-Check"
 
 function Build.HeroicSupport(container)
   local ctx = NewLayout(container)
@@ -12077,7 +12396,7 @@ function Build.HeroicSupport(container)
   ctx:Manual(thanks, 0, "TOP")
   ctx:Spacer(10)
 
-  local carousel = SW.CreateCarousel(container, carouselW, math.floor(carouselW * CAROUSEL_IMG_RATIO), HEROIC_SUPPORT_IMAGES, 6)
+  local carousel = SW.CreateCarousel(container, carouselW, math.floor(carouselW * HS.IMG_RATIO), HS.IMAGES, 6)
   ctx:Manual(carousel, 0, "TOP")
   ctx:Spacer(18)
 
@@ -12094,7 +12413,7 @@ function Build.HeroicSupport(container)
   local THANKS_GAP, THANKS_FONT_SIZE = 16, 10 -- espace + police du bloc credits sous les logos
 
   local logoWidths, logosColW = {}, 0
-  for i, entry in ipairs(HEROIC_SUPPORT_LINKS) do
+  for i, entry in ipairs(HS.LINKS) do
     local w = math.floor(LOGO_H * (entry.imgW / entry.imgH))
     logoWidths[i] = w
     if w > logosColW then logosColW = w end
@@ -12130,10 +12449,10 @@ function Build.HeroicSupport(container)
 
   local py = perksHeader:GetStringHeight() + 2 + 6 + 8
 
-  for _, perkText in ipairs(HEROIC_SUPPORT_PERKS) do
+  for _, perkText in ipairs(HS.PERKS) do
     local icon = block:CreateTexture(nil, "OVERLAY")
     icon:SetSize(PERK_ICON, PERK_ICON)
-    icon:SetTexture(HEROIC_PERK_CHECK_TEX)
+    icon:SetTexture(HS.CHECK_TEX)
     icon:SetVertexColor(unpack(SW.HEROIC_GOLD))
 
     local line = block:CreateFontString(nil, "OVERLAY")
@@ -12155,7 +12474,7 @@ function Build.HeroicSupport(container)
   -- dans la colonne (largeurs differentes -- ratio propre a chaque fichier).
   local logosX = perksColW + COL_GAP * 2 + 1
   local ly = 0
-  for i, entry in ipairs(HEROIC_SUPPORT_LINKS) do
+  for i, entry in ipairs(HS.LINKS) do
     local w = logoWidths[i]
     local btn = CreateFrame("Button", nil, block)
     btn:SetSize(w, LOGO_H)
@@ -12279,12 +12598,6 @@ local CATEGORIES = {
     build = Build.TargetAuras,
   },
   {
-    id    = "groupNumber",
-    label = L["SETTINGS_SEC_GROUP_NUMBER"],
-    icon  = "Interface\\Icons\\INV_Misc_GroupNeedMore",
-    build = Build.GroupNumber,
-  },
-  {
     id    = "unitBars",
     label = L["SETTINGS_CAT_HEALTH_BARS"],
     icon  = "Interface\\Icons\\ability_warrior_defensivestance",
@@ -12381,13 +12694,6 @@ local CATEGORIES = {
     build = Build.CDMLayout,
   },
   {
-    -- Page dediee minimaliste : un seul reglage (enabled).
-    id    = "bigCursor",
-    label = L["SETTINGS_MOD_BIG_CURSOR"],
-    icon  = "Interface\\Icons\\INV_Misc_Spyglass_03",
-    build = Build.BigCursor,
-  },
-  {
     id    = "comfortRender",
     label = L["SETTINGS_COMFORT_SEC_RENDER"],
     icon  = "Interface\\Icons\\INV_Misc_Gear_01",
@@ -12437,12 +12743,6 @@ local CATEGORIES = {
     build = function(c) Build.AurasRender(c, "totems") end,
   },
   {
-    id    = "aurasTrinkets",
-    label = L["SETTINGS_CAT_TRINKETS"],
-    icon  = "Interface\\Icons\\inv_jewelry_trinketpvp_01",
-    build = Build.AurasEquipment,
-  },
-  {
     id    = "aurasMissingBuffs",
     label = L["AURASDATA_SEC_MISSINGBUFFS_LABEL"],
     icon  = "Interface\\Icons\\spell_holy_greaterheal",
@@ -12462,10 +12762,10 @@ ns.PruneUnavailable(CATEGORIES)
 -- Groupes de la sidebar (style AishUI : headers parchemin + sections cliquables)
 local SIDEBAR_GROUPS = {
   { label = L["SETTINGS_GROUP_GLOBAL"],      ids = { "modulesOverview", "colors", "profiles", "heroicSupport" } },
-  { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "castBar", "targetCastBar", "topTargetBar", "targetAuras", "groupNumber" } },
-  { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "cdmEssential", "cdmUtility", "cdmLayout", "bigCursor", "rotationHelper" } },
+  { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "castBar", "targetCastBar", "topTargetBar", "targetAuras" } },
+  { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "rotationHelper", "cdmEssential", "cdmUtility", "cdmLayout" } },
   { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "xpBar", "skyriding", "location", "extraBars", "afkMode", "characterArmory" } },
-  { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasTrinkets", "aurasMissingBuffs" } },
+  { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasMissingBuffs" } },
   -- Groupes sans sous-section : le clic sur le header ouvre directement la page (single)
   { label = L["SETTINGS_GROUP_ANIMATIONS"],  ids = { "spellEffects" }, single = true },
   { label = L["SETTINGS_GROUP_COMFORT"],     ids = { "visibility", "comfortRender", "comfortQoL" } },
@@ -12507,8 +12807,83 @@ end
 -- etat manuel -- on ne doit jamais pouvoir masquer la section courante.
 sidebar._groupCollapsed = sidebar._groupCollapsed or {}
 
+-- Pose les en-tetes / boutons de la sidebar a leurs positions cibles (targets[obj] = y, absent = cache).
+-- animated : glissement + fondu (depliage d'un groupe) ; sinon placement immediat.
+function sidebar.ApplyLayout(targets, animated)
+  local ac = sidebar._accContainer
+  SW.StopAnim("sidebar")
+
+  local function PlaceSB(obj, yy)
+    obj:ClearAllPoints()
+    obj:SetPoint("TOPLEFT",  ac, "TOPLEFT",  0, -yy)
+    obj:SetPoint("TOPRIGHT", ac, "TOPRIGHT", 0, -yy)
+  end
+
+  local canAnim = animated and SW.animEnabled and sidebar:IsShown()
+  local moves = {}
+  local function Handle(obj)
+    local ty = targets[obj]
+    local vis = ty ~= nil
+    local was = obj:IsShown()
+    if canAnim and (vis or was) then
+      local hdrY = obj._hdr and targets[obj._hdr]
+      local m = { obj = obj, aTo = vis and 1 or 0 }
+      if was then
+        m.from = obj._sy or ty or 0
+        m.aFrom = obj._sa or 1
+      else
+        m.from = hdrY or ty
+        m.aFrom = 0
+        PlaceSB(obj, m.from)
+        obj:SetAlpha(0)
+        obj:Show()
+      end
+      m.to = vis and ty or (hdrY or m.from)
+      moves[#moves + 1] = m
+    elseif vis then
+      PlaceSB(obj, ty)
+      obj:SetAlpha(1)
+      obj:Show()
+      obj._sy, obj._sa = ty, 1
+    else
+      obj:Hide()
+      obj:SetAlpha(1)
+      obj._sy, obj._sa = nil, 1
+    end
+  end
+
+  for _, entry in pairs(sidebar._groupEntries or {}) do
+    if entry.headerBtn then Handle(entry.headerBtn) end
+    for _, btn in pairs(entry.sectionBtns or {}) do Handle(btn) end
+  end
+
+  if #moves == 0 then return end
+  SW.StartAnim("sidebar", SW.animDur, function(e)
+    for _, m in ipairs(moves) do
+      local yy = m.from + (m.to - m.from) * e
+      PlaceSB(m.obj, yy)
+      local al = m.aFrom + (m.aTo - m.aFrom) * e
+      m.obj:SetAlpha(al)
+      m.obj._sy, m.obj._sa = yy, al
+    end
+  end, function()
+    for _, m in ipairs(moves) do
+      if m.aTo == 1 then
+        PlaceSB(m.obj, targets[m.obj])
+        m.obj:SetAlpha(1)
+        m.obj._sy, m.obj._sa = targets[m.obj], 1
+      else
+        m.obj:Hide()
+        m.obj:SetAlpha(1)
+        m.obj._sy, m.obj._sa = nil, 1
+      end
+    end
+  end)
+end
+
 -- Rafraîchit la position et l'état actif de tous les items de la sidebar
-local function RefreshSidebar()
+-- (animated : depliage / repliage d'un groupe en douceur)
+local function RefreshSidebar(animated)
   if not sidebar._accContainer then return end
   local filter    = _sbSearchFilter
   local hasFilter = filter ~= ""
@@ -12518,18 +12893,13 @@ local function RefreshSidebar()
   local catLabels = {}
   for _, cat in ipairs(CATEGORIES) do catLabels[cat.id] = cat.label end
 
-  -- Cache tout
-  for _, entry in pairs(sidebar._groupEntries or {}) do
-    if entry.headerBtn then entry.headerBtn:Hide() end
-    for _, btn in pairs(entry.sectionBtns or {}) do btn:Hide() end
-  end
-
   local CAT_HEADER_H   = 26
   local CAT_HEADER_GAP = 10
   local SECTION_H      = 20
   local CAT_TO_SECT    = 2
   local ac = sidebar._accContainer
   local y  = 0
+  local targets = {}
 
   for _, grp in ipairs(SIDEBAR_GROUPS) do
     local entry = sidebar._groupEntries[grp.label]
@@ -12555,17 +12925,16 @@ local function RefreshSidebar()
       if #matchingSections > 0 then
         -- Header groupe
         if y > 0 then y = y + CAT_HEADER_GAP end
-        entry.headerBtn:ClearAllPoints()
-        entry.headerBtn:SetPoint("TOPLEFT",  ac, "TOPLEFT",  0, -y)
-        entry.headerBtn:SetPoint("TOPRIGHT", ac, "TOPRIGHT", 0, -y)
-        entry.headerBtn:Show()
+        targets[entry.headerBtn] = y
         y = y + CAT_HEADER_H + CAT_TO_SECT
 
         -- Deploye si : filtre de recherche actif (sinon la recherche ne
         -- trouverait jamais rien dans un groupe replie), OU la section
         -- courante vit dans ce groupe, OU l'utilisateur a explicitement
         -- deplie ce groupe (clic sur le header).
-        local expanded = hasFilter or containsActive or (sidebar._groupCollapsed[grp.label] == false)
+        -- Tous les groupes sont repliables, y compris celui de la page ouverte (SelectCategory l'ouvre
+        -- a l'arrivee sur une page, mais un clic sur son en-tete peut ensuite le refermer).
+        local expanded = hasFilter or (sidebar._groupCollapsed[grp.label] == false)
         entry.headerBtn:SetExpanded(expanded)
 
         if grp.single then
@@ -12576,10 +12945,7 @@ local function RefreshSidebar()
           for _, cid in ipairs(matchingSections) do
             local btn = entry.sectionBtns[cid]
             if btn then
-              btn:ClearAllPoints()
-              btn:SetPoint("TOPLEFT",  ac, "TOPLEFT",  0, -y)
-              btn:SetPoint("TOPRIGHT", ac, "TOPRIGHT", 0, -y)
-              btn:Show()
+              targets[btn] = y
               btn:UpdateSelected(activeCategory == cid)
               y = y + SECTION_H
             end
@@ -12589,6 +12955,7 @@ local function RefreshSidebar()
     end
   end
 
+  sidebar.ApplyLayout(targets, animated)
   ac:SetHeight(math.max(50, y))
 end
 
@@ -12737,17 +13104,21 @@ local function BuildSidebar()
       else
         sidebar._groupCollapsed[grp.label] = not sidebar._groupCollapsed[grp.label]
       end
-      RefreshSidebar()
+      RefreshSidebar(true)
       PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
-    h:SetScript("OnEnter", function()
-      local c = GetGroupHeaderColor()
-      htxt:SetTextColor(math.min(1, c[1] * 1.3), math.min(1, c[2] * 1.3), math.min(1, c[3] * 1.3), 1)
-    end)
-    h:SetScript("OnLeave", function()
-      local c = GetGroupHeaderColor()
-      htxt:SetTextColor(c[1], c[2], c[3], 1)
-    end)
+    local function HeaderHoverTo(target)
+      local from = h._hovV or 0
+      SW.StartAnim(h, 0.12, function(e)
+        local v = from + (target - from) * e
+        h._hovV = v
+        local c = GetGroupHeaderColor()
+        local k = 1 + 0.3 * v
+        htxt:SetTextColor(math.min(1, c[1] * k), math.min(1, c[2] * k), math.min(1, c[3] * k), 1)
+      end)
+    end
+    h:SetScript("OnEnter", function() HeaderHoverTo(1) end)
+    h:SetScript("OnLeave", function() HeaderHoverTo(0) end)
     entry.headerBtn = h
 
     -- Boutons de section (cliquables)
@@ -12797,18 +13168,31 @@ local function BuildSidebar()
         -- Hover : teinte le texte avec la couleur "Cercle de puissance" de la
         -- spe active (ns.Modules.Colors, meme systeme que ResourceCircle) --
         -- repli sur Theme.textHighlight si le module Couleurs est indisponible.
+        -- Survol en fondu : v (0..1) fait monter le fond et vire le texte vers la couleur d'accent
+        local function HoverTo(btn, target, c)
+          local from = btn._hovV or 0
+          local tn = Theme.textNormal
+          SW.StartAnim(btn, 0.12, function(e)
+            local v = from + (target - from) * e
+            btn._hovV = v
+            sbg:SetAlpha(0.15 * v)
+            local cc = btn._hovC or c or tn
+            stxt:ClearAllPoints()
+            stxt:SetPoint("LEFT", 14 + 5 * v, 0)   -- le libelle glisse vers la droite (le fond le suit)
+            stxt:SetTextColor(tn[1] + (cc[1] - tn[1]) * v, tn[2] + (cc[2] - tn[2]) * v, tn[3] + (cc[3] - tn[3]) * v, 1)
+          end)
+        end
         s:SetScript("OnEnter", function(btn)
           if activeCategory ~= btn.catId then
-            sbg:SetAlpha(0.15)
             local CLR = ns.Modules and ns.Modules.Colors
             local c = (CLR and CLR.Get and CLR.Get("powercircle")) or Theme.textHighlight
-            stxt:SetTextColor(c[1], c[2], c[3], 1)
+            btn._hovC = c
+            HoverTo(btn, 1, c)
           end
         end)
         s:SetScript("OnLeave", function(btn)
           if activeCategory ~= btn.catId then
-            sbg:SetAlpha(0)
-            stxt:SetTextColor(Theme.textNormal[1], Theme.textNormal[2], Theme.textNormal[3], 1)
+            HoverTo(btn, 0)
           end
         end)
         s:SetScript("OnClick", function(btn)
@@ -12818,16 +13202,36 @@ local function BuildSidebar()
 
         -- UpdateSelected (appelé par SelectCategory)
         function s:UpdateSelected(selected)
-          self._hl:SetAlpha(selected and 1 or 0)
-          self._bg:SetAlpha(selected and 1 or 0)
-          if selected then
-            local bright = Theme.textBright or Theme.textHighlight or { 1, 0.96, 0.90 }
-            self._txt:SetTextColor(bright[1], bright[2], bright[3], 1)
-          else
-            self._txt:SetTextColor(Theme.textNormal[1], Theme.textNormal[2], Theme.textNormal[3], 1)
+          selected = selected and true or false
+          local bright = Theme.textBright or Theme.textHighlight or { 1, 0.96, 0.90 }
+          local tn = Theme.textNormal
+          if self._sel == selected then return end
+          local first = (self._sel == nil)
+          self._sel = selected
+          SW.StopAnim(self)   -- coupe un survol en cours
+          self._hovV = 0
+          self._txt:ClearAllPoints()
+          self._txt:SetPoint("LEFT", 14, 0)
+          local tgt = selected and 1 or 0
+          if first or not SW.animEnabled or not self:IsShown() then
+            self._hl:SetAlpha(tgt)
+            self._bg:SetAlpha(tgt)
+            local c = selected and bright or tn
+            self._txt:SetTextColor(c[1], c[2], c[3], 1)
+            return
           end
+          local a0 = self._bg:GetAlpha()
+          local r0, g0, b0 = self._txt:GetTextColor()
+          local c = selected and bright or tn
+          SW.StartAnim(self, 0.15, function(e)
+            local a = a0 + (tgt - a0) * e
+            self._hl:SetAlpha(a)
+            self._bg:SetAlpha(a)
+            self._txt:SetTextColor(r0 + (c[1] - r0) * e, g0 + (c[2] - g0) * e, b0 + (c[3] - b0) * e, 1)
+          end)
         end
 
+        s._hdr = h
         entry.sectionBtns[cid] = s
         categoryButtons[cid]   = s   -- accessible par catId (pairs)
       end
@@ -12911,13 +13315,26 @@ end
 -- conflit avec elle.
 local AURAS_PROCS_CATS = {
   aurasTracked = true, aurasIconlist = true, aurasFreebars = true,
-  aurasIcons = true, aurasCirclebars = true, aurasTotems = true, aurasTrinkets = true,
+  aurasIcons = true, aurasCirclebars = true, aurasTotems = true,
   aurasMissingBuffs = true,
 }
 
+-- Pages devenues des sections d'une autre page : l'ancien id redirige vers la page hote.
+MainFrame.categoryRedirect = { groupNumber = "visibility", bigCursor = "comfortQoL" }
+
 function MainFrame:SelectCategory(catId)
+  catId = MainFrame.categoryRedirect[catId] or catId
+  -- Ouvre le groupe qui contient la page (la section active peut ensuite etre repliee a la main)
+  for _, grp in ipairs(SIDEBAR_GROUPS) do
+    for _, cid in ipairs(grp.ids) do
+      if cid == catId and not grp.single then sidebar._groupCollapsed[grp.label] = false end
+    end
+  end
   local prevCat = activeCategory
-  if prevCat == catId then return end
+  if prevCat == catId then
+    if sidebar._accContainer then RefreshSidebar() end
+    return
+  end
   activeCategory = catId
 
   -- Quitter une section "Auras & Procs" ? réafficher le cercle de vie +
@@ -13124,17 +13541,70 @@ function MainFrame:SelectCategory(catId)
   end
   RefreshSidebar()
 
+  SW.StopAnim("page")
   for _, entry in pairs(categoryContainers) do
     entry.frame:Hide()
+    entry.frame:SetAlpha(1)
   end
 
   local entry = GetOrBuildContainer(catId)
   if entry then
     entry.frame:Show()
     content:SetHeight(entry.frame:GetHeight())
+    local rebuilt = SW._fadeNext
+    SW._fadeNext = nil
+    if SW.animEnabled and (prevCat or rebuilt) then
+      -- Fondu d'ouverture de la page (pas a la toute premiere ouverture du panneau) ; plus leger
+      -- quand c'est la meme page reconstruite apres un pli/depli ou une case "afficher".
+      local fr = entry.frame
+      local a0 = rebuilt and 0.45 or 0
+      fr:SetAlpha(a0)
+      SW.StartAnim("page", 0.15, function(e) fr:SetAlpha(a0 + (1 - a0) * e) end, function() fr:SetAlpha(1) end)
+    end
   end
 
   scrollFrame:SetVerticalScroll(0)
+end
+
+-- Deplie la section `label` d'une page deja construite et y fait defiler le panneau.
+function MainFrame:OpenSection(catId, label)
+  local ctx = SW.pageCtx[catId]
+  if not (ctx and ctx.sections and label) then return end
+  for _, sec in ipairs(ctx.sections) do
+    if sec.header._baseText == label then
+      if sec.collapsed then
+        sec.collapsed = false
+        if sec.key then _sectionCollapsed[sec.key] = false end
+        SW.SetHeaderCollapsedState(sec.header, false)
+        ctx:Relayout(false)
+      end
+      local targetY
+      for _, item in ipairs(ctx.flow) do
+        if item.kind == "widget" and item.w == sec.header then targetY = item._ty; break end
+      end
+      if targetY then
+        -- La plage de defilement n'est recalculee qu'a l'image suivante
+        C_Timer.After(0.05, function()
+          local range = scrollFrame:GetVerticalScrollRange() or 0
+          scrollFrame:SetVerticalScroll(math.max(0, math.min(range, targetY - 4)))
+        end)
+      end
+      return
+    end
+  end
+end
+
+-- Clic droit sur un module (page Modules) : ouvre ses reglages
+function MainFrame:OpenModuleSettings(entry)
+  local page = Build.MODULE_PAGE[entry.id] or entry.id
+  page = MainFrame.categoryRedirect[page] or page
+  local exists = false
+  for _, c in ipairs(CATEGORIES) do
+    if c.id == page then exists = true; break end
+  end
+  if not exists then return end
+  self:SelectCategory(page)
+  self:OpenSection(page, entry.section)
 end
 
 -- Refresh : recharger les valeurs depuis la DB
@@ -13350,6 +13820,12 @@ end)
 
 MainFrame:SetScript("OnHide", function(self)
   -- Stopper les previews et désactiver le mode GUI
+  -- Construire les pages du GUI genere beaucoup de garbage. GC incremental etale sur plusieurs frames
+  -- (un "collect" complet provoque un micro freeze), hors combat, jusqu'a la fin du cycle.
+  C_Timer.After(1, function()
+    if MainFrame:IsShown() or InCombatLockdown() then return end
+    ns.IncrementalGC(600)
+  end)
   local SE = ns.Modules.SpellEffects
   if SE then
     if SE.StopDecoPreview then SE.StopDecoPreview() end
