@@ -47,8 +47,10 @@ Procédure :
 
 1. Bumper `## Version:` dans le `.toc` (et toute constante de version dans le code) si ce n'est pas déjà fait.
 2. Commit sur `main` (sujet anglais, `bump to X.Y.Z`).
-3. **Demander ses patch notes** (cf. section ci-dessus), puis tag annoté `vX.Y.Z` avec ce message.
+3. **Demander ses patch notes** (cf. section ci-dessus), puis les écrire dans `RELEASE_NOTES.md` (inclus dans le commit) et dans le tag annoté `vX.Y.Z`.
 4. `git push origin main --follow-tags`.
+
+`RELEASE_NOTES.md` est le changelog publié sur GitHub et CurseForge (`manual-changelog` dans `.pkgmeta`) : sans lui, le packager ne publie que le sujet du commit. Pour une version mineure aux notes courtes (ex. bump de TOC), garder sous ses notes celles de la dernière version majeure, pour ne pas publier une ligne seule. Format : `## [vX.Y.Z](lien du tag) (date)`, puis `### Partie` et les puces.
 
 Le push du tag déclenche `.github/workflows/release.yml` → `BigWigsMods/packager` → upload CurseForge via `CF_API_KEY`. Remote : `https://github.com/Aishuu87/AishCore.git`.
 

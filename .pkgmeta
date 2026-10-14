@@ -2,3 +2,6 @@ package-as: AishCore
 ignore:
   - CLAUDE.md
   - docs
+manual-changelog:
+  filename: RELEASE_NOTES.md
+  markup-type: markdown
