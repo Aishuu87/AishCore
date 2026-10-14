@@ -1,4 +1,4 @@
--- Modules/AFKMode.lua : ecran AFK personnalise (modele 3D, timer, blasons, camera).
+﻿-- Modules/AFKMode.lua : ecran AFK personnalise (modele 3D, timer, blasons, camera).
 -- Elements configurables via ns.DB.afkMode.elements[cle], cf. UI/SettingsPanel.lua:BuildAFKMode.
 local addonName, ns = ...
 local L = ns.L
@@ -320,6 +320,20 @@ local function ShowNextTip()
   tipsFrame:AddMessage(tips[idx], c[1], c[2], c[3])
 end
 
+-- Nom affiche : sur Forever, UnitName renvoie le nom puis le nom de famille (retail : le royaume) ; on les joint
+-- avec le separateur de Blizzard. Une valeur secrete ou absente laisse le prenom seul.
+local function PlayerDisplayName()
+  local name, surname = UnitName("player")
+  if ns.IsForever and type(name) == "string" and type(surname) == "string" and surname ~= ""
+     and not (issecretvalue and (issecretvalue(name) or issecretvalue(surname))) then
+    local sep = Constants and Constants.CharacterNameSeparatorConsts
+      and Constants.CharacterNameSeparatorConsts.CHARACTERNAME_SURNAME_SEPARATOR or " "
+    local tail = sep .. surname
+    if name:sub(-#tail) ~= tail then name = name .. tail end   -- certains retours le contiennent deja
+  end
+  return name
+end
+
 -- Textes statiques (nom/classe/niveau/guilde) : recalcules a chaque affichage, pas a chaque tick
 local function RefreshTextStrings()
   local classColor = RAID_CLASS_COLORS and RAID_CLASS_COLORS[select(2, UnitClass("player"))]
@@ -337,7 +351,7 @@ local function RefreshTextStrings()
     else
       texts.playerName:SetTextColor(r, g, b)
     end
-    texts.playerName:SetText((UnitName("player")))
+    texts.playerName:SetText(PlayerDisplayName())
   end
 
   ApplyTextStyle("playerClass", TEXT_ELEMENTS[3])

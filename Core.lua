@@ -363,6 +363,14 @@ if ns.IsForever then
 	end
 	ns.NativeSpecsAreReal = NativeSpecsAreReal
 
+	-- Vrai quand la "spe" courante ne vient QUE de la spe par defaut des couleurs thematiques (aucune branche
+	-- dominante). Elle sert a colorer, pas a decrire le joueur : les detections de role (tank / soigneur) doivent
+	-- l'ignorer, sinon choisir Protection comme spe par defaut ferait traiter un perso sans spe comme un vrai tank.
+	function ns.IsSpecDefaulted()
+		if NativeSpecsAreReal() then return false end
+		return DominantTalentTab() == nil and DefaultTalentTab() ~= nil
+	end
+
 	GetSpecialization = function(...)
 		if NativeSpecsAreReal() then
 			if type(rawGetSpecialization) == "function" then return rawGetSpecialization(...) end
@@ -385,7 +393,8 @@ if ns.IsForever then
 			local g = groups and groups[index]
 			if g then name, icon = g.displayName, g.icon end
 		end
-		return specID, name, nil, icon, SPEC_ROLES[specID] or "DAMAGER"
+		local role = (ns.IsSpecDefaulted() and index == DefaultTalentTab()) and "DAMAGER" or SPEC_ROLES[specID] or "DAMAGER"
+		return specID, name, nil, icon, role
 	end
 
 	GetSpecializationRole = function(index, ...)
@@ -393,6 +402,7 @@ if ns.IsForever then
 			return rawGetSpecializationRole(index, ...)
 		end
 		local specID = TabSpecID(index)
+		if ns.IsSpecDefaulted() and index == DefaultTalentTab() then return specID and "DAMAGER" or nil end
 		return specID and (SPEC_ROLES[specID] or "DAMAGER") or nil
 	end
 end
@@ -1265,6 +1275,63 @@ function ns.ApplyFontReliable(fs, key, path, size, flags)
         C_Timer.After(2, apply)
         C_Timer.After(6, apply)
     end
+end
+
+-- Filet de securite des polices : sur Retail, une police SharedMedia posee a la connexion est parfois refusee
+-- (SetFont renvoie false, le texte garde une police par defaut) alors que la meme commande reussit plus tard.
+-- Chaque SetFont venant d'AishCore est memorise (post-hook, jamais de taint) ; apres la connexion et a chaque
+-- chargement d'addon, on re-pose la police demandee sur les textes qui ne la portent pas.
+do
+  local want = setmetatable({}, { __mode = "k" })   -- fs -> { path, size, flags }
+  local function norm(p) return (tostring(p):lower():gsub("/", "\\")) end
+  local okMeta, meta = pcall(function() return getmetatable(UIParent:CreateFontString(nil, "BACKGROUND")).__index end)
+  if okMeta and meta and debugstack then
+    local isSecret = issecretvalue or function() return false end
+    hooksecurefunc(meta, "SetFont", function(fs, path, size, flags)
+      -- Combat : rien a memoriser (polices posees hors combat) et la pile d'appels y est souvent secrete.
+      if InCombatLockdown() then return end
+      if type(path) ~= "string" or not size or isSecret(path) or isSecret(size) then return end
+      local ok, st = pcall(debugstack, 2, 10, 0)
+      if not (ok and type(st) == "string") or isSecret(st) then return end
+      local okF, mine = pcall(function() return st:lower():gsub("\\", "/"):find("aishcore/", 1, true) ~= nil end)
+      if not (okF and mine) then return end
+      local r = want[fs]
+      if r then r[1], r[2], r[3] = path, size, flags else want[fs] = { path, size, flags } end
+    end)
+  end
+  local function Sweep()
+    for fs, r in pairs(want) do
+      -- Texte devenu interdit (cadre securise Blizzard que touche AddonFonts...) : GetFont leve une erreur,
+      -- on l'oublie. Le reste passe aussi par pcall : un texte detruit ou protege ne doit jamais casser la boucle.
+      local okF, forbidden = pcall(function() return fs.IsForbidden and fs:IsForbidden() end)
+      if not okF or forbidden then
+        want[fs] = nil
+      else
+        local ok, cur = pcall(fs.GetFont, fs)
+        if not ok then
+          want[fs] = nil
+        elseif not cur or norm(cur) ~= norm(r[1]) then
+          pcall(fs.SetFont, fs, r[1], r[2], r[3])
+        end
+      end
+    end
+  end
+  local pending
+  local function Later(d)
+    if pending then return end
+    pending = C_Timer.NewTimer(d, function() pending = nil; Sweep() end)
+  end
+  local f = CreateFrame("Frame")
+  f:RegisterEvent("PLAYER_ENTERING_WORLD")
+  f:RegisterEvent("ADDON_LOADED")
+  f:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_ENTERING_WORLD" then
+      for _, d in ipairs({ 1.5, 4, 8, 15 }) do C_Timer.After(d, Sweep) end
+    else
+      Later(0.5)
+    end
+  end)
+  ns.SweepFonts = Sweep
 end
 
 -- /aishfont : ce qui est demande, ce qui a ete pose, et la police reellement portee par le texte

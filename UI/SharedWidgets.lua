@@ -814,9 +814,12 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
   local MAX_VISIBLE = 10
   local TOP_PAD     = 2
 
-  local menu = CreateFrame("Frame", nil, btn, "BackdropTemplate")
+  -- Parente a UIParent (et non au bouton) : la liste n'est ainsi pas decoupee par la zone defilante de la page et peut deborder
+  -- de la fenetre. Ancree au bouton ; l'echelle est recalee sur celle du bouton, la fermeture suit le masquage du bouton.
+  local menu = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
   menu:SetFrameStrata("TOOLTIP")
   menu:SetFrameLevel(200)
+  menu:SetClampedToScreen(true)
   menu:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -1)
   menu:SetSize(width, BTN_H)
   menu:Hide()
@@ -942,11 +945,23 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
     return self.currentValue
   end
 
+  btn:HookScript("OnHide", CloseMenu)
+
   btn:SetScript("OnClick", function()
     if menu:IsShown() then
       CloseMenu()
     else
       BuildMenuItems()
+      local ratio = btn:GetEffectiveScale() / UIParent:GetEffectiveScale()
+      menu:SetScale(ratio)
+      -- Pas la place en dessous : la liste s'ouvre vers le haut
+      menu:ClearAllPoints()
+      local bottom = btn:GetBottom() or 0
+      if bottom * btn:GetEffectiveScale() < menu:GetHeight() * menu:GetEffectiveScale() + 10 then
+        menu:SetPoint("BOTTOMLEFT", btn, "TOPLEFT", 0, 1)
+      else
+        menu:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -1)
+      end
       menu:Show()
       SharedWidgets.AnimateMenuOpen(menu)
     end
@@ -963,6 +978,7 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
   -- Fermer au clic extérieur
   menu:SetScript("OnUpdate", function(self)
     if not self:IsShown() then return end
+    if not btn:IsVisible() then return CloseMenu() end   -- page / panneau masque : la liste (parentee a UIParent) ne doit pas rester
     if not ns.IsFrameMouseOver(self) and not ns.IsFrameMouseOver(btn) then
       if IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton") then
         CloseMenu()

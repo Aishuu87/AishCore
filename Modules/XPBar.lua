@@ -58,6 +58,8 @@ local ttTex           -- texture background tooltip (pour maj rotation)
 local tooltipXP
 local tooltipRested
 local centerXPText
+local nlPanel            -- apercu du prochain niveau (coin bas droit), cf. ShowNextLevelPanel
+local qPanel             -- quetes pretes a rendre (Alt au survol), cf. ShowQuestPanel
 local fontObjs = {}     -- objets Font des textes d'info, cf. XPBar.ApplySettings
 local hoverFrame
 local fxModel
@@ -81,6 +83,7 @@ local showAnim
 local hideAnim
 local showTimer
 local isHovered       = false
+local petMode         = false  -- Forever : survol de la barre du familier (cf. XPBar.SetPetHover)
 local isLayoutMode    = false
 local isRepMode           = false  -- vrai quand on affiche la réputation (niveau max)
 local isCompanionMode     = false  -- vrai quand on affiche l'XP compagnon de gouffre
@@ -242,7 +245,7 @@ local function UpdateBarColor()
   local r, g, b
   local CLR = ns.Modules.Colors
   if CLR then
-    local c = CLR.Get("misc")  -- élément Misc = barre XP elle-même
+    local c = CLR.Get(petMode and "pethealthbar" or "misc")  -- Misc = barre XP elle-même ; sur le familier : "PV du Familier"
     r, g, b = c[1], c[2], c[3]
   else
     r, g, b = GetClassColor()
@@ -262,7 +265,7 @@ local function UpdateXPColors()
   local r, g, b
   local CLR = ns.Modules.Colors
   if CLR then
-    local c = CLR.Get("xpbar")  -- élément XP Bar = textes niveau
+    local c = CLR.Get(petMode and "pethealthbar" or "xpbar")  -- XP Bar = textes niveau ; sur le familier : "PV du Familier"
     r, g, b = c[1], c[2], c[3]
   else
     r, g, b = GetClassColor()
@@ -436,6 +439,125 @@ local function IsInDelve()
 end
 
 --- Données XP du compagnon de gouffre (Brann / Valeera), ou nil si inactif (niveau max + en gouffre requis).
+-- ═══ Forever : XP du familier de chasseur, affichee a la place de celle du joueur pendant le survol de sa barre ═══
+-- (cf. XPBar.SetPetHover, appelee par UnitBars). Niveau de loyaute : voir PetLoyaltyLine.
+local LOYALTY_PATTERNS = {}   -- rempli a la demande : nom localise (minuscules) -> niveau
+local function LoyaltyLevelFromName(text)
+  if type(text) ~= "string" or text == "" then return nil end
+  if #LOYALTY_PATTERNS == 0 then
+    for i = 1, 6 do
+      for _, key in ipairs({ "XP_PET_LOYALTY_" .. i, "XP_PET_LOYALTY_EN_" .. i }) do
+        local n = L[key]
+        if type(n) == "string" and n ~= key then LOYALTY_PATTERNS[#LOYALTY_PATTERNS + 1] = { n:lower(), i } end
+      end
+    end
+  end
+  local low = text:lower()
+  local digit = low:match("(%d)")
+  if digit then return tonumber(digit) end
+  for _, p in ipairs(LOYALTY_PATTERNS) do
+    if low:find(p[1], 1, true) then return p[2] end
+  end
+  return nil
+end
+
+-- Ligne "Loyaute N - Nom". Source : le texte du panneau Familier de Blizzard (PetCharacterLevelText), de la forme
+-- "Ours niveau 7 ((Niveau de loyaute 1) Rebelle)" -- le niveau de loyaute est le dernier nombre, juste avant ")".
+-- Repli : GetPetLoyalty() (texte ou nombre) s'il existe. /aishpet affiche ce que le jeu renvoie.
+-- PetCharacterLevelText est un CADRE (fstack) : le texte est dans une de ses regions ou dans un cadre enfant. On cherche
+-- le premier FontString non vide, sur trois niveaux.
+local function FindFrameText(f, depth)
+  if not f then return nil end
+  if f.GetText then
+    local ok, t = pcall(f.GetText, f)
+    if ok and type(t) == "string" and t ~= "" and not (issecretvalue and issecretvalue(t)) then return t end
+  end
+  if f.GetRegions then
+    for _, r in ipairs({ f:GetRegions() }) do
+      if r.GetText then
+        local ok, t = pcall(r.GetText, r)
+        if ok and type(t) == "string" and t ~= "" and not (issecretvalue and issecretvalue(t)) then return t end
+      end
+    end
+  end
+  if (depth or 0) < 2 and f.GetChildren then
+    for _, c in ipairs({ f:GetChildren() }) do
+      local t = FindFrameText(c, (depth or 0) + 1)
+      if t then return t end
+    end
+  end
+  return nil
+end
+
+local function PetPanelText()
+  return FindFrameText(_G.PetCharacterLevelText) or FindFrameText(_G.PaperDollPetLevelInfo)
+end
+
+-- Fonctions de loyaute du client : GetPetLoyalty() (Vanilla / TBC : c'est elle qui remplit le panneau Familier) ou toute autre
+-- fonction globale / de C_PetInfo dont le nom contient "loyal". Liste etablie une fois (le parcours de _G coute).
+local loyaltyFns
+local function LoyaltyFunctions()
+  if loyaltyFns then return loyaltyFns end
+  loyaltyFns = {}
+  local seen = {}
+  local function Add(name, fn)
+    if type(fn) == "function" and not seen[fn] then seen[fn] = true; loyaltyFns[#loyaltyFns + 1] = { name = name, fn = fn } end
+  end
+  Add("GetPetLoyalty", _G.GetPetLoyalty)
+  Add("UnitLoyalty", _G.UnitLoyalty)
+  if C_PetInfo then
+    Add("C_PetInfo.GetPetLoyalty", C_PetInfo.GetPetLoyalty)
+    for k, v in pairs(C_PetInfo) do
+      if type(k) == "string" and k:lower():find("loyal") then Add("C_PetInfo." .. k, v) end
+    end
+  end
+  for k, v in pairs(_G) do
+    if type(k) == "string" and type(v) == "function" then
+      local low = k:lower()
+      if low:find("loyal") and low:find("pet") then Add(k, v) end
+    end
+  end
+  return loyaltyFns
+end
+
+local function PetLoyaltyLine()
+  local raw, lvl
+  local panel = PetPanelText()
+  if type(panel) == "string" and panel ~= "" and not (issecretvalue and issecretvalue(panel)) then
+    local n = panel:match("(%d+)%s*%)")
+    if n then lvl = tonumber(n) else lvl = LoyaltyLevelFromName(panel:match("%)%s*([^%)]+)%)%s*$") or "") end
+  end
+  if not lvl then
+    for _, c in ipairs(LoyaltyFunctions()) do
+      local ok, v = pcall(c.fn, "pet")
+      if not ok or v == nil or v == false then ok, v = pcall(c.fn) end
+      if ok and v ~= nil and v ~= false and not (issecretvalue and issecretvalue(v)) then
+        local n = (type(v) == "number") and v or LoyaltyLevelFromName(tostring(v))
+        if n and n >= 1 and n <= 6 then lvl = n; break end
+        if raw == nil and type(v) == "string" and v ~= "" then raw = v end
+      end
+    end
+  end
+  if not lvl and raw ~= nil then
+    if type(raw) == "number" then lvl = raw else lvl = LoyaltyLevelFromName(tostring(raw)) end
+  end
+  if not lvl and raw == nil then return nil end
+  if lvl and lvl >= 1 and lvl <= 6 then
+    return string.format(L["XP_PET_LOYALTY"], lvl, L["XP_PET_LOYALTY_" .. lvl])
+  end
+  return type(raw) == "string" and raw ~= "" and raw or nil
+end
+
+local function GetPetXPData()
+  if not (ns.IsForever and UnitExists("pet") and GetPetExperience and HasPetUI) then return nil end
+  local _, isHunterPet = HasPetUI()
+  if not isHunterPet then return nil end
+  local ok, cur, maxXP = pcall(GetPetExperience)
+  if not ok or type(cur) ~= "number" or type(maxXP) ~= "number" or maxXP <= 0 then return nil end
+  if issecretvalue and (issecretvalue(cur) or issecretvalue(maxXP)) then return nil end
+  return { level = UnitLevel("pet") or 0, xp = cur, maxXP = maxXP, pct = cur / maxXP, loyalty = PetLoyaltyLine() }
+end
+
 local function GetCompanionXPData()
   if not IsMaxLevel() then return nil end
   local cfg = ns.GetCfg("xpBar")
@@ -671,6 +793,16 @@ end
 
 local function UpdateBarFill()
   if not xpBar then return end
+  if petMode then
+    local pd = GetPetXPData()
+    if pd then
+      isCompanionMode, isRepMode = false, false
+      xpBar:SetValue(pd.pct)
+      UpdateBarColor()
+      if sparkTex and gainPhase == "idle" then sparkTex:Hide() end
+      return
+    end
+  end
   if IsMaxLevel() then
     local comp = GetCompanionXPData()
     if comp then
@@ -720,6 +852,8 @@ local function ApplyFade(obj, p)
     obj:SetAlpha(e)
     obj:ClearAllPoints()
     obj:SetPoint("CENTER", obj:GetParent(), "CENTER", 0, -SLIDE * (1 - e))
+  elseif obj == nlPanel or obj == qPanel then
+    obj:SetAlpha(Eased(p, 0))
   elseif obj == tooltipFrame then
     local eBg, eTxt, eRest = Eased(p, 0), Eased(p, 0.2), Eased(p, 0.4)
     ttTex:SetAlpha(eBg)
@@ -769,6 +903,27 @@ end
 
 local function UpdateTooltip()
   if not tooltipFrame then return end
+  if petMode then
+    local pd = GetPetXPData()
+    if pd then
+      tooltipXP:SetText(string.format(L["XP_TOOLTIP_TOTAL"], string.format("%.2f%%", pd.pct * 100)))
+      if pd.loyalty then
+        tooltipRested:SetText(pd.loyalty)
+        tooltipRested:SetTextColor(0.40, 0.80, 1.00, 1)
+        tooltipRested:Show()
+        tooltipFrame:SetHeight(48)
+      else
+        tooltipRested:Hide()
+        tooltipFrame:SetHeight(28)
+      end
+      FadeTo(tooltipFrame, true)
+      if centerXPText then
+        centerXPText:SetText(string.format("[ %s  /  %s ]", ShortNum(pd.xp), ShortNum(pd.maxXP)))
+        FadeTo(centerXPText, true)
+      end
+      return
+    end
+  end
   if IsMaxLevel() then
     -- Priorité 1 (max level) : compagnon de gouffre
     local comp = GetCompanionXPData()
@@ -819,6 +974,7 @@ local function UpdateTooltip()
   local restedPct = (maxXP > 0) and (rested / maxXP * 100) or 0
   if restedPct > 0 then
     tooltipRested:SetText(string.format(L["XP_TOOLTIP_RESTED"], string.format("%.2f%%", restedPct)))
+    tooltipRested:SetTextColor(0.40, 0.80, 1.00, 1)
     tooltipRested:Show()
     tooltipFrame:SetHeight(48)
   else
@@ -875,7 +1031,7 @@ end
 
 -- Show / Hide
 local function ShowXPBar()
-  if IsMaxLevel() and not GetCompanionXPData() and not GetActiveRepData() then return end
+  if IsMaxLevel() and not petMode and not GetCompanionXPData() and not GetActiveRepData() then return end
   if not container then return end
 
   -- Si deja completement visible (hors anim en cours), juste maj du fill sans relancer l'entree
@@ -933,7 +1089,7 @@ end
 local function HideXPBar()
   if not container then return end
   if not container:IsVisible() then return end
-  if isHovered then return end
+  if isHovered or petMode then return end
   if IsAlwaysVisible() then return end
   if showAnim and showAnim:IsPlaying() then showAnim:Stop() end
   if hideAnim and not hideAnim:IsPlaying() then
@@ -1122,6 +1278,1278 @@ local function OnTooltipDragStop(self)
   end
 end
 
+-- ═══ Apercu du prochain niveau (survol du niveau) ═════════════════════════════════════════════════
+-- Grosse ombre dans le coin bas droit de l'ecran (comme le detail de RestedXP) listant ce que debloque le
+-- prochain niveau. Sorts : livre de sorts (sorts "futurs" appris a ce niveau). Gains de PV / stats : aucune
+-- API ne les donne a l'avance, on affiche donc ceux du DERNIER niveau gagne (releves a chaque PLAYER_LEVEL_UP,
+-- sauvegardes par personnage) comme estimation. Les tables livrees (Data/LevelGains.lua) passent avant ce repli.
+
+-- Gains de niveau SANS equipement ni buffs : les arguments de PLAYER_LEVEL_UP ne distinguent pas ce qui vient du niveau de
+-- ce qu'apporte l'equipement, on fait donc la difference entre deux instantanes de stats DE BASE (stat effective moins bonus
+-- positifs et negatifs), pris a chaque connexion puis apres chaque montee de niveau.
+-- PV et ressource sont ramenes a la base de la meme facon : on retire ce que l'endurance / l'intelligence de bonus apportent.
+local HP_PER_STA, MANA_PER_INT = 10, 15
+
+local function ReadBaseStats()
+  local function N(v) return (type(v) == "number" and not (issecretvalue and issecretvalue(v))) and v or nil end
+  local base, eff = {}, {}
+  for i, k in ipairs({ "str", "agi", "sta", "int", "spi" }) do
+    local _, e, pos, neg = UnitStat("player", i)
+    e = N(e)
+    if not e then return nil end
+    eff[k] = e
+    base[k] = e - (N(pos) or 0) - (N(neg) or 0)
+  end
+  local maxHP = N(UnitHealthMax("player"))
+  if maxHP then base.hp = maxHP - HP_PER_STA * (eff.sta - base.sta) end
+  if UnitPowerType and UnitPowerType("player") == 0 then
+    local mp = N(UnitPowerMax("player", 0))
+    if mp then base.power = mp - MANA_PER_INT * (eff.int - base.int) end
+  end
+  base.level = UnitLevel("player")
+  return base
+end
+
+local function SnapshotBaseStats()
+  local snap = ReadBaseStats()
+  if not snap then return end
+  AishUILearnDB = AishUILearnDB or { learnedDurations = {}, verbose = false }
+  AishUILearnDB.baseSnap = snap
+end
+
+local function RecordLevelGains(level, _, _, talents)
+  -- Le jeu met les stats a jour un instant apres l'evenement
+  C_Timer.After(2, function()
+    local now = ReadBaseStats()
+    if not now then return end
+    AishUILearnDB = AishUILearnDB or { learnedDurations = {}, verbose = false }
+    local prev = AishUILearnDB.baseSnap
+    AishUILearnDB.baseSnap = now
+    -- Pas d'instantane du niveau precedent (premiere fois, ou niveaux pris hors connexion) : rien a comparer
+    if not (prev and type(level) == "number" and prev.level == level - 1 and now.level == level) then return end
+    -- v = 2 : gains sans equipement. Les anciens releves (sans v) incluaient l'equipement et sont ignores.
+    local gains = { v = 2, level = level, talents = (type(talents) == "number" and talents ~= 0) and talents or nil }
+    for _, k in ipairs({ "hp", "power", "str", "agi", "sta", "int", "spi" }) do
+      if now[k] and prev[k] then
+        local d = now[k] - prev[k]
+        if d < 0 or d > ((k == "hp" or k == "power") and 1000 or 50) then return end   -- mesure incoherente
+        if d > 0 then gains[k] = d end
+      end
+    end
+    AishUILearnDB.levelGains = gains
+    -- Memoire du compte : gains releves par classe ET par niveau. Aucune table des gains n'existe cote client (ils sont
+    -- calcules par le serveur) : chaque personnage qui monte complete la liste, et le panneau affiche la valeur exacte
+    -- releve pour ce niveau de cette classe quand elle existe (sinon l'estimation des tables livrees, Data/LevelGains.lua).
+    local cf = select(2, UnitClass("player"))
+    if cf and AishaddonDB then
+      AishaddonDB.levelGainsByClass = AishaddonDB.levelGainsByClass or {}
+      AishaddonDB.levelGainsByClass[cf] = AishaddonDB.levelGainsByClass[cf] or {}
+      AishaddonDB.levelGainsByClass[cf][level] = gains
+    end
+  end)
+end
+
+-- Sorts a venir releves chez l'entraineur de classe : le livre de sorts de Forever ne liste que les sorts deja
+-- appris (aucun sort "futur"), l'entraineur est la seule source d'un niveau d'apprentissage. A chaque ouverture
+-- on memorise, par niveau requis, les sorts pas encore appris, pour TOUT LE COMPTE et par classe
+-- (AishaddonDB.futureSpells[classe]) : un seul passage par classe suffit, tous les personnages en profitent.
+-- Le spellID (extrait du lien du sort) rend la donnee independante de la langue.
+-- Donnees livrees avec l'addon (optionnel) : ns.ClassSpellLevels[classe][niveau] = { spellID, ... }.
+-- Retail : pas d'entraineur de classe ni de rangs, tout s'apprend en montant de niveau, et le livre de sorts liste lui-meme les
+-- sorts "futurs" avec leur niveau (C_SpellBook). Releves d'entraineur, donnees livrees (build Forever) et mode Maj n'ont alors
+-- aucun sens. Detection par API plutot que par nom de client.
+-- Forever expose ces API (moteur moderne) mais son livre de sorts ne liste aucun sort futur : on force les entraineurs.
+local HAS_CLASS_TRAINERS = ns.IsForever or not (C_SpellBook and C_SpellBook.GetSpellBookItemLevelLearned
+                                and Enum and Enum.SpellBookItemType and Enum.SpellBookItemType.FutureSpell)
+
+local function ScanTrainerSpells()
+  if not HAS_CLASS_TRAINERS then return end
+  if not (GetNumTrainerServices and GetTrainerServiceInfo and GetTrainerServiceLevelReq) then return end
+  if IsTradeskillTrainer and IsTradeskillTrainer() then return end      -- metiers : pas des sorts de classe
+  local n = GetNumTrainerServices() or 0
+  if n <= 0 then return end
+  local classFile = select(2, UnitClass("player"))
+  if not (classFile and AishaddonDB) then return end
+  local byLevel, total = {}, 0
+  for i = 1, n do
+    -- Sur Forever le 2e retour est la CATEGORIE ("available" / "unavailable" / "used" / "header"), pas le rang :
+    -- on la cherche parmi les retours suivants, et le rang n'est retenu que s'il en reste une autre chaine.
+    local name, r2, r3 = GetTrainerServiceInfo(i)
+    local CAT = { available = true, unavailable = true, used = true, header = true }
+    local category = (CAT[r2] and r2) or (CAT[r3] and r3) or nil
+    local rank = (type(r2) == "string" and not CAT[r2] and r2) or (type(r3) == "string" and not CAT[r3] and r3) or nil
+    if type(name) == "string" and category ~= "header" then
+      local lvl = GetTrainerServiceLevelReq(i)
+      if type(lvl) == "number" and lvl > 0 then
+        local row = byLevel[lvl]
+        if not row then row = {}; byLevel[lvl] = row end
+        local id
+        if GetTrainerServiceItemLink then
+          local link = GetTrainerServiceItemLink(i)
+          id = type(link) == "string" and tonumber(link:match("spell:(%d+)")) or nil
+        end
+        local cost = GetTrainerServiceCost and select(1, GetTrainerServiceCost(i)) or nil
+        row[#row + 1] = { id = id, name = name, rank = (type(rank) == "string" and rank ~= "") and rank or nil,
+                          icon = GetTrainerServiceIcon and GetTrainerServiceIcon(i) or nil,
+                          cost = (type(cost) == "number" and cost > 0) and cost or nil,
+                          used = (category == "used") or nil }     -- deja appris : releve quand meme (liste complete de l'entraineur)
+        total = total + 1
+      end
+    end
+  end
+  if total == 0 then return end
+  -- FUSION avec les releves precedents (jamais d'ecrasement) : un personnage de haut niveau, qui a tout appris, voit toute
+  -- la liste de l'entraineur ; un personnage de bas niveau complete ce qu'il voit en plus.
+  AishaddonDB.futureSpells = AishaddonDB.futureSpells or {}
+  local old = AishaddonDB.futureSpells[classFile] or {}
+  for lvl, row in pairs(byLevel) do
+    local dst = old[lvl]
+    if not dst then
+      old[lvl] = row
+    else
+      for _, e in ipairs(row) do
+        local found
+        for _, d in ipairs(dst) do
+          if d.name == e.name and d.icon == e.icon and d.rank == e.rank then found = d; break end
+        end
+        if found then
+          found.used = e.used
+          found.cost = e.cost or found.cost
+          found.id = e.id or found.id
+        else
+          dst[#dst + 1] = e
+        end
+      end
+    end
+  end
+  AishaddonDB.futureSpells[classFile] = old
+end
+
+local trainerEvt = CreateFrame("Frame")
+trainerEvt:SetScript("OnEvent", function() pcall(ScanTrainerSpells) end)
+for _, ev in ipairs({ "TRAINER_SHOW", "TRAINER_UPDATE" }) do pcall(trainerEvt.RegisterEvent, trainerEvt, ev) end
+
+-- Sorts appris au niveau `lvl` : sorts "futurs" du livre de sorts (Retail), sinon ceux releves chez l'entraineur.
+-- Renvoie une liste { id, name, icon, rank }.
+local function SpellsLearnedAtLevel(lvl)
+  local out, seen = {}, {}
+  local SB = C_SpellBook
+  local T = Enum and Enum.SpellBookItemType
+  if not (SB and T and T.FutureSpell and SB.GetNumSpellBookSkillLines and SB.GetSpellBookSkillLineInfo
+          and SB.GetSpellBookItemInfo and SB.GetSpellBookItemLevelLearned) then return out end
+  local bank = Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player or 0
+  pcall(function()
+    for line = 1, SB.GetNumSpellBookSkillLines() do
+      local li = SB.GetSpellBookSkillLineInfo(line)
+      if li and (not li.offSpecID or li.offSpecID == 0) then
+        for slot = li.itemIndexOffset + 1, li.itemIndexOffset + li.numSpellBookItems do
+          local info = SB.GetSpellBookItemInfo(slot, bank)
+          if info and info.itemType == T.FutureSpell and info.spellID and not seen[info.spellID] then
+            if SB.GetSpellBookItemLevelLearned(slot, bank) == lvl then
+              seen[info.spellID] = true
+              out[#out + 1] = { id = info.spellID, name = info.name, icon = info.iconID }
+            end
+          end
+        end
+      end
+    end
+  end)
+  if #out == 0 and HAS_CLASS_TRAINERS then
+    local classFile = select(2, UnitClass("player"))
+    -- donnees livrees avec l'addon (spellIDs), sinon celles relevees chez l'entraineur sur ce compte
+    -- 1) releves du joueur (dans SA langue)
+    -- 0) donnees livrees (Data/ClassSpellLevels.lua) : avec identifiant, le jeu donne nom / icone / rang dans la langue
+    --    du joueur ; sans identifiant (rares sorts a competences), nom francais valable en frFR seulement
+    local shipped = ns.ClassSpellLevels and ns.ClassSpellLevels[classFile] and ns.ClassSpellLevels[classFile][lvl]
+    if shipped then
+      for _, e in ipairs(shipped) do
+        if e.id then
+          local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(e.id)
+          local icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(e.id)
+          if name then out[#out + 1] = { id = e.id, name = name, icon = icon } end
+        elseif ns.ClassSpellLevelsLocale == GetLocale() then
+          out[#out + 1] = { name = e.name, icon = e.icon }
+        end
+      end
+    end
+    local saved = AishaddonDB and AishaddonDB.futureSpells and AishaddonDB.futureSpells[classFile]
+    saved = saved and saved[lvl]
+    if #out > 0 then
+      -- (donnees livrees trouvees)
+    elseif saved then
+      for _, e in ipairs(saved) do
+        if not e.used then
+          local name = e.id and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(e.id) or e.name
+          local icon = e.id and C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(e.id) or e.icon
+          -- anciens releves : le champ "rang" contenait la categorie (available / unavailable / used)
+          local rank = (e.rank ~= "unavailable" and e.rank ~= "available" and e.rank ~= "used") and e.rank or nil
+          out[#out + 1] = { id = e.id, name = name, rank = rank, icon = icon }
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- /xpnl : diagnostic de la source des sorts du prochain niveau (livre de sorts)
+SLASH_AISHXPNL1 = "/xpnl"
+SlashCmdList["AISHXPNL"] = function()
+  local P = "|cff33aaff[XPNL]|r "
+  local SB = C_SpellBook
+  print(P .. string.format("niveau=%s | C_SpellBook=%s FutureSpell=%s GetSpellBookItemLevelLearned=%s GetSpellLevelLearned=%s",
+    tostring(UnitLevel("player")), tostring(SB ~= nil), tostring(Enum and Enum.SpellBookItemType and Enum.SpellBookItemType.FutureSpell),
+    tostring(SB and SB.GetSpellBookItemLevelLearned ~= nil), tostring(GetSpellLevelLearned ~= nil)))
+  local saved = AishaddonDB and AishaddonDB.futureSpells and AishaddonDB.futureSpells[select(2, UnitClass("player"))]
+  local nSaved = 0
+  if saved then for _, t in pairs(saved) do nSaved = nSaved + #t end end
+  print(P .. string.format("entraineur : API=%s/%s/%s | sorts a venir memorises=%d", tostring(GetNumTrainerServices ~= nil),
+    tostring(GetTrainerServiceInfo ~= nil), tostring(GetTrainerServiceLevelReq ~= nil), nSaved))
+  if not (SB and SB.GetNumSpellBookSkillLines) then return end
+  local bank = Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player or 0
+  local nLines = SB.GetNumSpellBookSkillLines()
+  print(P .. "lignes de livre de sorts : " .. tostring(nLines))
+  local shown = 0
+  for line = 1, nLines do
+    local li = SB.GetSpellBookSkillLineInfo(line)
+    if li then
+      local counts = {}
+      local lastFuture
+      for slot = li.itemIndexOffset + 1, li.itemIndexOffset + li.numSpellBookItems do
+        local info = SB.GetSpellBookItemInfo(slot, bank)
+        local t = info and tostring(info.itemType) or "nil"
+        counts[t] = (counts[t] or 0) + 1
+        if info and info.itemType == (Enum.SpellBookItemType and Enum.SpellBookItemType.FutureSpell) and shown < 6 then
+          shown = shown + 1
+          local lv = SB.GetSpellBookItemLevelLearned and SB.GetSpellBookItemLevelLearned(slot, bank)
+          print(P .. string.format("  futur : %s (id %s) niveau=%s", tostring(info.name), tostring(info.spellID), tostring(lv)))
+        end
+      end
+      local parts = {}
+      for t, n in pairs(counts) do parts[#parts + 1] = t .. "=" .. n end
+      print(P .. string.format("  ligne %d '%s' offSpec=%s items=%d types : %s", line, tostring(li.name), tostring(li.offSpecID),
+        li.numSpellBookItems or 0, table.concat(parts, ", ")))
+    end
+  end
+end
+
+-- Le tout vit dans un bloc `do ... end` : sans cela ses ~60 locales depasseraient la limite de 200 du fichier.
+local ShowNextLevelPanel, HideNextLevelPanel, ShowQuestPanel, HideQuestPanel, NLSetMode, NLSetAlt
+do
+local NL = {}
+-- ═══ Panneau du prochain niveau : mise en page du mockup ═══════════════════════════════════════════
+-- Tout est exprime dans le repere du mockup : coin BAS DROIT de l'ecran (la texture d'ombre de 1024 px est
+-- collee dans ce coin, 1 pixel de texture = 1 unite d'interface). dx = distance au bord droit, dy = distance
+-- au bord bas. Les blocs s'empilent du bas vers le haut : le cas complet (3 rangees de stats, 2 rangees de
+-- sorts) retombe exactement sur le mockup, un cas plus court descend, un plus long remonte.
+NL.MEDIA       = "Interface\\AddOns\\AishCore\\Media\\XPBar\\"
+NL.TEX_SHADOW  = NL.MEDIA .. "grunge_shadow_big.png"   -- 656x400, collee dans le coin bas droit
+NL.TEX_RECT    = NL.MEDIA .. "grunge_shadow_rectangle.png"   -- 621x211, fond du panneau des quetes
+NL.TEX_DIVIDER = NL.MEDIA .. "divider_dual.png"       -- 314x129 : deux filets (rangees 0-3 et 124-128)
+NL.ICONS = {
+  hp = "hp_icon.tga", power = "res_icon.tga", str = "str_icon.tga", agi = "agi_icon.tga",
+  sta = "stam_icon.tga", int = "int_icon.tga", spi = "spi_icon.tga",
+}
+NL.SM          = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\"
+NL.TEAL        = { 0.00, 0.89, 0.64 }
+NL.CREAM       = { 0.95, 0.86, 0.64 }
+NL.BROWN       = { 0.42, 0.30, 0.17 }
+NL.DIM         = { 0.62, 0.58, 0.50 }
+NL.STATS_RIGHT = { 272, 168, 64 }                   -- dx du bord droit de l'icone, colonnes 1 a 3
+NL.STAT_ICON, NL.STAT_ROW_H = 42, 32
+NL.LABEL_DX = 10   -- libelles de stats (Alt) : decalage vers la droite, en px
+NL.SPELL_ICON, NL.SPELL_ROW_H = 33, 41
+-- colonnes de sorts (x = bord gauche de l'icone depuis la gauche du mockup 680 px, tw = largeur du texte)
+NL.SPELL_LAYOUT = {
+  [3] = { L = { 180, 345, 520 }, tw = { 113, 123, 100 } },
+  [2] = { L = { 280, 470 },      tw = { 132, 154 } },
+  [1] = { L = { 420 },           tw = { 204 } },
+}
+NL.W = 680
+NL.SHADOW_DUR = 1.6   -- l'ombre arrive plus doucement que le texte : fondu + leger glissement + leger zoom
+NL.ANIM_DUR, NL.ANIM_SLIDE, NL.ANIM_STAGGER = 0.65, 22, 1.9   -- duree d'un element, glissement, etirement des decalages
+NL.OCRE = { 1, 189 / 255, 116 / 255 }   -- ocre des tooltips XP (#FFBD74) : icones de stats, quetes de difficulte "normale"
+NL.GREY = { 72 / 255, 72 / 255, 72 / 255 }       -- "5525xp to" (#484848)
+
+-- Montserrat vient de SharedMedia_MyMedia, que le client n'accepte pas toujours des le premier SetFont (cf.
+-- ns.ApplyFontReliable) : la police est reposee apres 2 s et 6 s, et le texte reste en 2002 tant qu'elle manque.
+NL.FONT_LIGHT       = NL.SM .. "Montserrat-MediumItalic.ttf"
+NL.FONT_BOLD_ITALIC = NL.SM .. "Montserrat-BoldItalic.ttf"
+NL.FONT_BOLD        = NL.SM .. "Montserrat-Bold.ttf"
+local nlFontSeq = 0
+
+function NL.Text(parent, font, size, color, justify)
+  local fs = parent:CreateFontString(nil, "OVERLAY")
+  if font == ns.FONT_FALLBACK then
+    fs:SetFont(font, size, "")
+  elseif ns.ApplyFontReliable then
+    nlFontSeq = nlFontSeq + 1
+    ns.ApplyFontReliable(fs, "NextLevel" .. nlFontSeq, font, size, "")
+  else
+    local ok, res = pcall(fs.SetFont, fs, font, size, "")
+    if not ok or res == false then fs:SetFont(ns.FONT_FALLBACK, size, "") end
+  end
+  fs:SetTextColor(color[1], color[2], color[3], 1)
+  fs:SetJustifyH(justify or "RIGHT")
+  fs:SetShadowColor(0, 0, 0, 0.7)
+  fs:SetShadowOffset(1, -1)
+  return fs
+end
+
+-- La barre d'xp (barre, badge de niveau, infobulle, texte central) doit rester visible PAR-DESSUS les panneaux :
+-- on la monte d'une strate tant que l'un d'eux est affiche, puis on remet les strates d'origine.
+local nlRaised
+local nlRaiseUsers = {}
+function NL.RaiseXPBar(user)
+  nlRaiseUsers[user] = true
+  if nlRaised then return end
+  nlRaised = {}
+  local frames = { container, levelBg, levelText and levelText:GetParent(), tooltipFrame,
+                   centerXPText and centerXPText:GetParent() }
+  for _, fr in pairs(frames) do
+    if fr and fr.GetFrameStrata then
+      nlRaised[#nlRaised + 1] = { fr = fr, strata = fr:GetFrameStrata() }
+      fr:SetFrameStrata("FULLSCREEN_DIALOG")
+    end
+  end
+end
+
+function NL.RestoreXPBar(user)
+  nlRaiseUsers[user] = nil
+  if next(nlRaiseUsers) or not nlRaised then return end
+  for _, e in ipairs(nlRaised) do e.fr:SetFrameStrata(e.strata) end
+  nlRaised = nil
+end
+
+-- cellule = prix | icone | nom ; w = largeur de la cellule, L = bord gauche (repere du mockup, 680 px de large)
+NL.TRAIN_LAYOUT = {
+  [1] = { w = 240, L = { 425 } },
+  [2] = { w = 215, L = { 225, 450 } },
+  [3] = { w = 172, L = { 120, 298, 476 } },
+}
+NL.GREY_RANK = { 0.60, 0.60, 0.60 }
+
+local function BuildNextLevelPanel()
+  local f = CreateFrame("Frame", nil, UIParent)
+  f:SetSize(656, 400)
+  f:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", 0, 0)
+  f:SetFrameStrata("FULLSCREEN")   -- devant les barres dynamiques, cadres de dialogue...
+  f:Hide()
+  f:SetScript("OnHide", function() NL.hiding = false; NL.RestoreXPBar("level") end)
+  f.shadow = f:CreateTexture(nil, "BACKGROUND")
+  f.shadow:SetTexture(NL.TEX_SHADOW)
+  f.shadow:SetSize(656, 400)
+  f.shadow:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+  f.shadowX, f.shadowY, f.curX, f.curY, f.shadowT = 0, 0, 0, 0, 0
+
+  -- chaque element vit dans sa cellule : c'est elle qui glisse / se fond a l'apparition
+  local function Cell()
+    local c = CreateFrame("Frame", nil, f)
+    c:SetFrameLevel(f:GetFrameLevel() + 2)
+    c:Hide()
+    return c
+  end
+
+  -- titre : "4500 xp to " (Medium Italic) + "level 10" (Bold Italic)
+  f.title = Cell()
+  f.titleLight = NL.Text(f.title, NL.FONT_LIGHT, 21, NL.GREY, "RIGHT")        -- "5525 xp to" : plus petit
+  f.titleBold = NL.Text(f.title, NL.FONT_BOLD_ITALIC, 28, NL.CREAM, "RIGHT")   -- "level 10"
+  f.titleBold:SetPoint("BOTTOMRIGHT", f.title, "BOTTOMRIGHT", 0, 0)
+  f.titleLight:SetPoint("BOTTOMRIGHT", f.titleBold, "BOTTOMLEFT", 0, 1)       -- meme ligne de base
+
+  -- en-tetes (police du jeu) avec leur filet a gauche
+  local function Header(r0, r1)
+    local c = Cell()
+    c.text = NL.Text(c, ns.FONT_FALLBACK, 15, NL.BROWN, "RIGHT")
+    c.text:SetPoint("RIGHT", c, "RIGHT", 0, 0)
+    c.line = c:CreateTexture(nil, "ARTWORK")
+    c.line:SetTexture(NL.TEX_DIVIDER)
+    c.line:SetSize(314, r1 - r0)
+    -- rognage d'un des deux filets (rangees r0..r1-1 des 129 de la texture) ; le filet finit au bord droit
+    c.line:SetTexCoord(0, 1, r0 / 129, r1 / 129)
+    c.line:SetPoint("RIGHT", c.text, "LEFT", -8, 0)
+    return c
+  end
+  f.hdrGain = Header(0, 4)
+  f.hdrSpells = Header(124, 129)
+
+  -- stats : "+N" Montserrat Bold turquoise puis l'icone a droite
+  f.stats = {}
+  for i = 1, 7 do
+    local c = Cell()
+    c:SetSize(104, NL.STAT_ICON)
+    c.icon = c:CreateTexture(nil, "ARTWORK")
+    c.icon:SetSize(NL.STAT_ICON, NL.STAT_ICON)
+    c.icon:SetVertexColor(NL.OCRE[1], NL.OCRE[2], NL.OCRE[3], 1)
+    c.icon:SetPoint("RIGHT", c, "RIGHT", 0, 0)
+    c.value = NL.Text(c, NL.FONT_BOLD, 23, NL.TEAL, "RIGHT")
+    -- ancre a la cellule (pas a l'icone) : l'icone glisse avec Alt, le "+N" reste en place
+    c.value:SetPoint("RIGHT", c, "RIGHT", -(NL.STAT_ICON - 4), 0)
+    -- Alt maintenu : l'icone monte et s'efface, ce texte (PV, FOR, ESP...) arrive par le bas a sa place
+    -- Montserrat Bold comme le "+N" s'il est installe, sinon la 2002 (repli fait par NL.Text / ApplyFontReliable)
+    c.label = NL.Text(c, NL.FONT_BOLD, 17, NL.OCRE, "LEFT")
+    c.label:SetPoint("LEFT", c, "RIGHT", -NL.STAT_ICON + NL.LABEL_DX, 0)   -- justifie a gauche, depuis le bord gauche de l'icone
+    c.label:SetAlpha(0)
+    f.stats[i] = c
+  end
+
+  -- sorts : icone, "+" turquoise au coin, nom (police du jeu) et "(Rang X)" gris dessous
+  f.spells = {}
+  for i = 1, 12 do
+    local c = Cell()
+    c:SetHeight(NL.SPELL_ICON)
+    c.icon = c:CreateTexture(nil, "ARTWORK")
+    c.icon:SetSize(NL.SPELL_ICON, NL.SPELL_ICON)
+    c.icon:SetPoint("LEFT", c, "LEFT", 0, 0)
+    c.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    c.plus = NL.Text(c, NL.FONT_BOLD, 32, NL.TEAL, "CENTER")
+    c.plus:SetText("+")
+    c.plus:SetPoint("CENTER", c.icon, "TOPRIGHT", -7, -2)
+    c.name = NL.Text(c, ns.FONT_FALLBACK, 12, NL.TEAL, "LEFT")
+    c.name:SetWordWrap(true)
+    c.name:SetMaxLines(2)
+    c.rank = NL.Text(c, ns.FONT_FALLBACK, 10, NL.GREY_RANK, "LEFT")
+    f.spells[i] = c
+  end
+
+  -- competences a entrainer (Maj) : prix a gauche de l'icone, nom + rang a droite
+  f.train = {}
+  for i = 1, 18 do
+    local c = Cell()
+    c:SetSize(190, 36)
+    c.price = NL.Text(c, ns.FONT_FALLBACK, 11, { 1, 1, 1 }, "RIGHT")
+    c.price:SetPoint("LEFT", c, "LEFT", 0, 0)
+    c.price:SetWidth(56)
+    c.icon = c:CreateTexture(nil, "ARTWORK")
+    c.icon:SetSize(36, 36)
+    c.icon:SetPoint("LEFT", c, "LEFT", 60, 0)
+    c.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    c.name = NL.Text(c, ns.FONT_FALLBACK, 12, NL.TEAL, "LEFT")
+    c.name:SetWordWrap(true)
+    c.name:SetMaxLines(2)
+    c.rank = NL.Text(c, ns.FONT_FALLBACK, 10, NL.GREY_RANK, "LEFT")
+    f.train[i] = c
+  end
+  f.total = Cell()
+  f.total:SetSize(300, 24)
+  f.totalValue = NL.Text(f.total, ns.FONT_FALLBACK, 16, NL.CREAM, "RIGHT")
+  f.totalValue:SetPoint("RIGHT", f.total, "RIGHT", 0, 0)
+  f.totalLabel = NL.Text(f.total, ns.FONT_FALLBACK, 16, NL.CREAM, "RIGHT")
+  f.totalLabel:SetPoint("RIGHT", f.totalValue, "LEFT", -12, 0)
+
+  -- "..." : des competences ne tiennent pas dans l'affichage (le total, lui, les compte toutes)
+  f.more = Cell()
+  f.more:SetSize(30, 14)
+  f.moreText = NL.Text(f.more, ns.FONT_FALLBACK, 16, NL.CREAM, "RIGHT")
+  f.moreText:SetPoint("RIGHT", f.more, "RIGHT", 0, 0)
+  f.moreText:SetText("...")
+
+  f.hint = Cell()
+  f.hintText = NL.Text(f.hint, ns.FONT_FALLBACK, 13, NL.DIM, "RIGHT")
+  f.hintText:SetPoint("RIGHT", f.hint, "RIGHT", 0, 0)
+  f.hintText:SetWidth(300)
+  f.hintText:SetWordWrap(true)
+
+  f.items = {}
+  return f
+end
+
+-- Nom d'un sort + "(Rang X)" sous le nom (gris, plus petit), le bloc etant centre sur l'icone
+function NL.NameBlock(c, name, rank, tw, iconSize)
+  c.name:SetWidth(tw)
+  c.name:SetText(name or "")
+  local r = (type(rank) == "string" and rank ~= "") and rank or nil
+  if r then
+    if not r:find("^%(") then r = "(" .. r .. ")" end
+    c.rank:SetWidth(tw)
+    c.rank:SetText(r)
+    c.rank:Show()
+  else
+    c.rank:Hide()
+  end
+  local block = c.name:GetStringHeight() + (r and (c.rank:GetStringHeight() + 1) or 0)
+  c.name:ClearAllPoints()
+  c.name:SetPoint("TOPLEFT", c.icon, "TOPRIGHT", 6, -math.max(0, (iconSize - block) / 2))
+  c.rank:ClearAllPoints()
+  c.rank:SetPoint("TOPLEFT", c.name, "BOTTOMLEFT", 0, -1)
+end
+
+-- Prix avec les icones de pieces (or / argent / cuivre) a la suite de chaque montant ; size = hauteur de l'icone
+function NL.Money(copper, size)
+  copper = math.floor(copper or 0)
+  size = size or 12
+  local function Coin(tex) return string.format("|TInterface\\MoneyFrame\\%s:%d:%d:2:0|t", tex, size, size) end
+  local g, s, k = math.floor(copper / 10000), math.floor(copper % 10000 / 100), copper % 100
+  local t = {}
+  if g > 0 then t[#t + 1] = g .. Coin("UI-GoldIcon") end
+  if s > 0 then t[#t + 1] = s .. Coin("UI-SilverIcon") end
+  if k > 0 or #t == 0 then t[#t + 1] = k .. Coin("UI-CopperIcon") end
+  return table.concat(t, " ")
+end
+
+-- Place une cellule : coin bas droit a (dx, dy) du coin bas droit de l'ecran
+function NL.Place(f, cell, dx, dy, w, h)
+  cell.dx, cell.dy = dx, dy
+  if w then cell:SetWidth(w) end
+  if h then cell:SetHeight(h) end
+  cell:ClearAllPoints()
+  cell:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -dx, dy)
+end
+
+function NL.Add(f, cell, delay)
+  cell:SetAlpha(0)
+  cell:Show()
+  f.items[#f.items + 1] = { cell = cell, delay = delay * NL.ANIM_STAGGER }
+end
+
+-- Apparition de l'ombre : fondu + leger glissement + leger zoom (et rattrapage doux de son decalage hors ecran)
+function NL.ShadowStep(f)
+  local v = f.shadowT / NL.SHADOW_DUR
+  if v > 1 then v = 1 end
+  local e = 1 - (1 - v) * (1 - v) * (1 - v)
+  local sc = 0.97 + 0.03 * e
+  f.shadow:SetAlpha(e)
+  f.shadow:SetSize(656 * sc, 400 * sc)
+  f.shadow:ClearAllPoints()
+  f.shadow:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", f.curX + (1 - e) * 14, f.curY - (1 - e) * 9)
+end
+
+-- Apparition des elements : fondu + glissement depuis la droite, decales d'un element a l'autre.
+-- keepShadow : changement de contenu (Maj) -> l'ombre reste, seuls les elements rejouent leur entree.
+function NL.Animate(f, keepShadow)
+  f.t = 0
+  if not keepShadow then
+    f.shadowT = 0
+    f.curX, f.curY = f.shadowX, f.shadowY
+  end
+  NL.ShadowStep(f)
+  for _, it in ipairs(f.items) do
+    it.cell:SetAlpha(0)
+    it.cell:ClearAllPoints()
+    it.cell:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -it.cell.dx + NL.ANIM_SLIDE, it.cell.dy)
+  end
+  f:SetScript("OnUpdate", function(self, el)
+    self.t = self.t + el
+    self.shadowT = self.shadowT + el
+    local k = math.min(1, el * 6)
+    local dX, dY = self.shadowX - self.curX, self.shadowY - self.curY
+    self.curX, self.curY = self.curX + dX * k, self.curY + dY * k
+    local pending = self.shadowT < NL.SHADOW_DUR or math.abs(dX) > 0.5 or math.abs(dY) > 0.5
+    NL.ShadowStep(self)
+    for _, it in ipairs(self.items) do
+      local v = (self.t - it.delay) / NL.ANIM_DUR
+      if v < 1 then pending = true end
+      if v < 0 then v = 0 elseif v > 1 then v = 1 end
+      local e = 1 - (1 - v) * (1 - v) * (1 - v)
+      it.cell:SetAlpha(e)
+      it.cell:ClearAllPoints()
+      it.cell:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -it.cell.dx + (1 - e) * NL.ANIM_SLIDE, it.cell.dy)
+    end
+    if not pending then self:SetScript("OnUpdate", nil) end
+  end)
+end
+
+-- Competences debloquees mais pas encore apprises : releves a la derniere visite chez l'entraineur
+-- (AishaddonDB.futureSpells), niveau requis atteint, sort pas encore connu. Renvoie la liste et le cout total.
+-- Rang d'un sort ("Rang 2") : sous-texte du sort ; nil si le sort n'en a pas
+function NL.SpellRank(id)
+  if not id then return nil end
+  local ok, sub = pcall(function()
+    if C_Spell and C_Spell.GetSpellSubtext then return C_Spell.GetSpellSubtext(id) end
+    if GetSpellSubtext then return GetSpellSubtext(id) end
+  end)
+  if ok and type(sub) == "string" and sub ~= "" then return sub end
+  return nil
+end
+
+function NL.CollectTrainable()
+  local out, total = {}, 0
+  local cf = select(2, UnitClass("player"))
+  local lvl = UnitLevel("player") or 0
+  local function IsKnown(id)
+    -- IsSpellKnown(id, true) : competences de familier (grimoires du Demoniste), pas dans le livre de sorts du joueur
+    return (IsPlayerSpell and IsPlayerSpell(id)) or (IsSpellKnown and (IsSpellKnown(id) or IsSpellKnown(id, true))) or false
+  end
+
+  -- 1) donnees livrees (toutes les classes, cout et rang exacts) : sort vendu, niveau requis atteint, pas encore appris
+  local data = ns.ClassSpellLevels and ns.ClassSpellLevels[cf]
+  if data then
+    -- rang le plus eleve connu par famille de sorts : un rang plus bas est alors remplace, donc deja "connu"
+    local knownRank = {}
+    for _, list in pairs(data) do
+      for _, e in ipairs(list) do
+        if e.id and e.f and IsKnown(e.id) then knownRank[e.f] = math.max(knownRank[e.f] or 0, e.r or 0) end
+      end
+    end
+    local levels = {}
+    for l in pairs(data) do if type(l) == "number" and l <= lvl then levels[#levels + 1] = l end end
+    table.sort(levels)
+    for _, l in ipairs(levels) do
+      for _, e in ipairs(data[l]) do
+        local known, name, icon, rank
+        if e.id then
+          known = IsKnown(e.id) or (e.f and knownRank[e.f] and (e.r or 0) <= knownRank[e.f]) or false
+          name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(e.id)
+          icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(e.id)
+          rank = NL.SpellRank(e.id)
+        elseif ns.ClassSpellLevelsLocale == GetLocale() then
+          name, icon = e.name, e.icon
+          local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(e.name)
+          known = info ~= nil
+        else
+          known = true      -- nom francais inutilisable dans une autre langue : on ne l'affiche pas
+        end
+        if not known and name then
+          out[#out + 1] = { name = name, icon = icon, rank = rank, cost = e.cost }
+          if e.cost then total = total + e.cost end
+        end
+      end
+    end
+    return out, total
+  end
+
+  -- 2) classe absente des donnees livrees : releves faits par le joueur chez son entraineur
+  local saved = AishaddonDB and AishaddonDB.futureSpells and AishaddonDB.futureSpells[cf]
+  if not saved then return out, 0 end
+  local levels = {}
+  for l in pairs(saved) do if type(l) == "number" and l <= lvl then levels[#levels + 1] = l end end
+  table.sort(levels)
+  for _, l in ipairs(levels) do
+    for _, e in ipairs(saved[l]) do
+      if not e.used and not (e.id and IsKnown(e.id)) then
+        local name = e.id and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(e.id) or e.name
+        local icon = e.id and C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(e.id) or e.icon
+        local rank = (e.rank ~= "unavailable" and e.rank ~= "available" and e.rank ~= "used") and e.rank or nil
+        out[#out + 1] = { name = name, icon = icon, rank = rank or NL.SpellRank(e.id), cost = type(e.cost) == "number" and e.cost or nil }
+        if type(e.cost) == "number" then total = total + e.cost end
+      end
+    end
+  end
+  return out, total
+end
+
+local nlMode = "level"     -- "level" : prochain niveau ; "train" : competences a entrainer (Maj enfonce)
+NLSetMode = function(mode) nlMode = mode end
+
+-- Alt maintenu : les icones des stats montent en s'effacant, les libelles (PV, FOR, ESP...) les remplacent par le bas.
+-- NL.altP = progression 0 (icones) -> 1 (libelles), lissee par un petit pilote.
+NL.altP, NL.altTarget = 0, 0
+local ALT_SLIDE, ALT_DUR = 12, 0.25
+function NL.ApplyStatAlt(f, p)
+  if not (f and f.stats) then return end
+  local e = 1 - (1 - p) * (1 - p)
+  for _, c in ipairs(f.stats) do
+    c.icon:SetAlpha(1 - e)
+    c.icon:ClearAllPoints()
+    c.icon:SetPoint("RIGHT", c, "RIGHT", 0, ALT_SLIDE * e)
+    c.label:SetAlpha(e)
+    c.label:ClearAllPoints()
+    c.label:SetPoint("LEFT", c, "RIGHT", -NL.STAT_ICON + NL.LABEL_DX - (c.labelDX or 0), -ALT_SLIDE * (1 - e))
+  end
+end
+local altDriver = CreateFrame("Frame")
+local function AltStep(_, el)
+  local t, p = NL.altTarget, NL.altP
+  if t > p then p = math.min(t, p + el / ALT_DUR) else p = math.max(t, p - el / ALT_DUR) end
+  NL.altP = p
+  NL.ApplyStatAlt(nlPanel, p)
+  if p == t then altDriver:SetScript("OnUpdate", nil) end
+end
+NLSetAlt = function(on, instant)
+  NL.altTarget = on and 1 or 0
+  if instant then
+    NL.altP = NL.altTarget
+    NL.ApplyStatAlt(nlPanel, NL.altP)
+    altDriver:SetScript("OnUpdate", nil)
+  elseif NL.altP ~= NL.altTarget then
+    altDriver:SetScript("OnUpdate", AltStep)
+  end
+end
+
+-- Bord gauche de l'ombre (texture 656x400) : distance au bord DROIT de l'ecran selon la hauteur depuis le bas.
+local NL_EDGE = { { 0, 595 }, { 50, 573 }, { 100, 537 }, { 150, 481 }, { 200, 414 }, { 250, 385 }, { 300, 367 },
+                  { 340, 250 }, { 365, 75 } }
+function NL.EdgeAt(h)
+  if h <= 0 then return NL_EDGE[1][2] end
+  for i = 2, #NL_EDGE do
+    local a, b = NL_EDGE[i - 1], NL_EDGE[i]
+    if h <= b[1] then return a[2] + (b[2] - a[2]) * (h - a[1]) / (b[1] - a[1]) end
+  end
+  return 0
+end
+
+-- Ombre decalee hors ecran (vers le bas ET vers la droite) : la plus petite qui couvre encore chaque element du contenu
+-- avec une petite marge a gauche (15) et au-dessus (30). Le bord gauche est en pente : descendre l'ombre ou la pousser vers la droite
+-- la retrecit ; chaque element impose sa propre limite (un titre etroit en haut n'a pas besoin de la largeur des sorts).
+function NL.FitShadow(f)
+  local boxes, top = {}, 0
+  for _, it in ipairs(f.items) do
+    local c = it.cell
+    local ext = (c.dx or 0) + c:GetWidth()
+    if c.line then ext = ext + 8 + 120 end        -- le filet d'un en-tete s'efface vite : on n'en compte qu'une partie
+    local t = (c.dy or 0) + c:GetHeight()
+    boxes[#boxes + 1] = { left = ext, top = t }
+    top = math.max(top, t)
+  end
+  -- d'abord on descend l'ombre autant que possible (c'est elle qui depasse le plus au-dessus du texte), puis on la
+  -- pousse un peu vers la droite avec ce qui reste de marge (au plus 40 px)
+  local function Fits(S, X)
+    -- le plein de l'ombre monte a ~300 px au bord droit (au-dessus ce ne sont que des eclaboussures)
+    if top + S + 30 > 300 then return false end
+    for _, bx in ipairs(boxes) do
+      if NL.EdgeAt(bx.top + S) - X < bx.left + 15 then return false end
+    end
+    return true
+  end
+  local bestS, bestX = 0, 0
+  for S = 0, 260, 2 do
+    if Fits(S, 0) then bestS = S else break end
+  end
+  for X = 0, 40, 2 do
+    if Fits(bestS, X) then bestX = X else break end
+  end
+  f.shadowX, f.shadowY = bestX, -bestS
+end
+
+function NL.HideAll(f)
+  for _, c in ipairs(f.stats) do c:Hide() end
+  for _, c in ipairs(f.spells) do c:Hide() end
+  for _, c in ipairs(f.train) do c:Hide() end
+  f.title:Hide(); f.hdrGain:Hide(); f.hdrSpells:Hide(); f.hint:Hide(); f.total:Hide(); f.more:Hide()
+  f.items = {}
+end
+
+function NL.LayoutTrain(f, lvlX, lvlY)
+  local list, total = NL.CollectTrainable()
+  local n = math.min(#list, 18)
+  local delay = 0
+  -- peu de competences : 1 ou 2 colonnes calees a droite (comme les nouveaux sorts), 3 colonnes a partir de 5
+  -- 1 colonne jusqu'a 2, 2 colonnes jusqu'a 8 (plus de lignes plutot que des colonnes trop serrees), 3 au-dela
+  local ncols = n <= 2 and 1 or (n <= 8 and 2 or 3)
+  local lay = NL.TRAIN_LAYOUT[ncols]
+  local Ls, cellW = lay.L, lay.w
+  local rows = math.max(1, math.ceil(n / ncols))
+  local lastRow = (total > 0) and 76 or 44      -- le total occupe le bas : les rangees remontent d'autant
+  local topRow = lastRow + (rows - 1) * NL.SPELL_ROW_H
+  local yHdr = (n == 0) and 64 or (topRow + 39)   -- rien a entrainer : en-tete et message serres, en bas
+
+  f.hdrSpells.text:SetText(L["XP_NL_TRAIN"])
+  f.hdrSpells:SetSize(f.hdrSpells.text:GetStringWidth() + 4, 24)
+  NL.Place(f, f.hdrSpells, 30, yHdr - 12)   -- cale a droite, a quelques pixels du bord (comme les noms de sorts dessous)
+  NL.Add(f, f.hdrSpells, delay)
+  delay = delay + 0.05
+
+  if n == 0 then
+    local cf = select(2, UnitClass("player"))
+    local hasData = (ns.ClassSpellLevels and ns.ClassSpellLevels[cf])
+                    or (AishaddonDB and AishaddonDB.futureSpells and AishaddonDB.futureSpells[cf]
+                        and next(AishaddonDB.futureSpells[cf]) ~= nil)
+    f.hintText:SetText(hasData and L["XP_NL_TRAIN_NONE"] or L["XP_NEXTLEVEL_NO_DATA"])
+    f.hint:SetSize(300, 40)
+    NL.Place(f, f.hint, 30, 40 - 20)
+    NL.Add(f, f.hint, delay)
+    -- rien a afficher : l'ombre garde exactement la taille du mode normal (sans Maj)
+    f.shadowX, f.shadowY = lvlX or 0, lvlY or 0
+    return
+  end
+  for k = 1, n do
+    local sp = list[k]
+    local c = f.train[k]
+    local col = (k - 1) % ncols + 1
+    local row = math.ceil(k / ncols)
+    c.icon:SetTexture(sp.icon)
+    c.price:SetText(sp.cost and NL.Money(sp.cost) or "")
+    NL.NameBlock(c, sp.name, sp.rank, cellW - 60 - 36 - 6, 36)
+    local cy = lastRow + (rows - row) * NL.SPELL_ROW_H
+    NL.Place(f, c, NL.W - (Ls[col] + cellW), cy - 18, cellW)
+    NL.Add(f, c, delay + (k - 1) * 0.04)
+  end
+  if total > 0 then
+    f.totalLabel:SetText(L["XP_NL_TOTAL"])
+    f.totalValue:SetText(NL.Money(total, 16))
+    f.total:SetSize(f.totalLabel:GetStringWidth() + f.totalValue:GetStringWidth() + 34, 24)
+    NL.Place(f, f.total, 30, 30 - 12)
+    NL.Add(f, f.total, delay + n * 0.04 + 0.05)
+  end
+  -- plus de competences que de cases : "..." juste au-dessus du coin haut droit du total (qui compte tout)
+  if #list > n then
+    NL.Place(f, f.more, 30, (total > 0) and 40 or 30)
+    NL.Add(f, f.more, delay + n * 0.04 + 0.1)
+  end
+  -- une ou deux competences SANS total : meme empreinte que le mode normal -> meme ombre ; avec le total (ligne en plus en bas), l'ombre se calcule sur le contenu
+  if n <= 2 and total <= 0 and lvlX then
+    f.shadowX, f.shadowY = lvlX, lvlY
+  else
+    NL.FitShadow(f)
+  end
+end
+
+function NL.LayoutLevel(f)
+  local nextLvl = (UnitLevel("player") or 0) + 1
+  local okXP, remaining = pcall(function() return (UnitXPMax("player") or 0) - (UnitXP("player") or 0) end)
+  if not okXP or type(remaining) ~= "number" or remaining < 0 then remaining = nil end
+
+  -- gains exacts releves pour ce niveau de cette classe (compte entier), sinon estimation : dernier niveau gagne
+  local cfc = select(2, UnitClass("player"))
+  local byClass = AishaddonDB and AishaddonDB.levelGainsByClass and AishaddonDB.levelGainsByClass[cfc]
+  local g = byClass and byClass[nextLvl]
+  if g and g.v ~= 2 then g = nil end    -- ancien releve (equipement inclus) : ignore
+  if not g then
+    -- tables livrees (Data/LevelGains.lua) : estimation par classe et par niveau, avant le repli sur le dernier niveau gagne
+    local row = ns.LevelGains and ns.LevelGains[cfc] and ns.LevelGains[cfc][nextLvl]
+    if row then
+      local function Z(v) return v and v ~= 0 and v or nil end
+      g = { hp = Z(row[1]), power = Z(row[2]), str = Z(row[3]), agi = Z(row[4]), sta = Z(row[5]), int = Z(row[6]), spi = Z(row[7]) }
+    end
+  end
+  if not g then
+    local last = AishUILearnDB and AishUILearnDB.levelGains
+    g = (last and last.v == 2) and last or nil
+  end
+  local cols = { {}, {}, {} }
+  if g then
+    if g.hp then cols[1][#cols[1] + 1] = { key = "hp", v = g.hp } end
+    if g.power then cols[1][#cols[1] + 1] = { key = "power", v = g.power } end
+    local others = {}
+    for _, k in ipairs({ "str", "agi", "sta", "int", "spi" }) do
+      if g[k] then others[#others + 1] = { key = k, v = g[k] } end
+    end
+    -- colonnes 2 et 3 : la 3e est toujours la plus fournie (nombre impair -> la derniere colonne prend l'extra)
+    local n2 = math.floor(#others / 2)
+    for i, s in ipairs(others) do
+      local col = (i <= n2) and cols[2] or cols[3]
+      col[#col + 1] = s
+    end
+  end
+  local statRows = math.max(#cols[1], #cols[2], #cols[3])
+  local spells = SpellsLearnedAtLevel(nextLvl)
+  local nSp = #spells
+  local spOverflow = nSp > 12
+  if nSp > 12 then nSp = 12 end
+  local cf = select(2, UnitClass("player"))
+  -- Retail : le livre de sorts fait foi, un niveau sans nouveau sort n'est pas un manque de donnees
+  local hasData = (not HAS_CLASS_TRAINERS) or (ns.ClassSpellLevels and ns.ClassSpellLevels[cf])
+                  or (AishaddonDB and AishaddonDB.futureSpells and AishaddonDB.futureSpells[cf]
+                      and next(AishaddonDB.futureSpells[cf]) ~= nil)
+  local showSpellBlock = nSp > 0 or not hasData
+
+  -- ----- mise en page, de bas en haut
+  local spCols = nSp <= 2 and 1 or (nSp <= 4 and 2 or 3)
+  local spRows = nSp > 0 and math.ceil(nSp / spCols) or 1
+  local y                                       -- centre de la rangee la plus basse du bloc suivant
+  local yHdrSpells, yTopSpell
+  if showSpellBlock then
+    yTopSpell = 44 + (spRows - 1) * NL.SPELL_ROW_H
+    yHdrSpells = yTopSpell + 39
+    y = yHdrSpells + 31
+  else
+    y = 60
+  end
+  local lastStatRow, yHdrGain, yTitle
+  if statRows > 0 then
+    lastStatRow = y
+    local yTopStat = lastStatRow + (statRows - 1) * NL.STAT_ROW_H
+    yHdrGain = yTopStat + 29
+    yTitle = yHdrGain + 22
+  else
+    yTitle = (showSpellBlock and (yHdrSpells + 35)) or 38   -- rien d'autre a afficher : le titre descend vers le bas
+  end
+  local delay = 0
+  -- titre
+  f.titleLight:SetText(string.format("%s %s ", remaining and ShortNum(remaining) or "?", L["XP_NL_XPTO"]))
+  f.titleBold:SetText(string.format("%s %d", L["XP_NL_LEVEL"], nextLvl))
+  f.title:SetSize(f.titleLight:GetStringWidth() + f.titleBold:GetStringWidth() + 4, 34)
+  NL.Place(f, f.title, 52, yTitle - 17 + 10)
+  NL.Add(f, f.title, delay)
+
+  -- gains
+  if statRows > 0 then
+    delay = delay + 0.06
+    f.hdrGain.text:SetText(L["XP_NL_GAIN"])
+    f.hdrGain:SetSize(f.hdrGain.text:GetStringWidth() + 4, 24)
+    NL.Place(f, f.hdrGain, 57, yHdrGain - 12 + 4)
+    NL.Add(f, f.hdrGain, delay)
+    delay = delay + 0.05
+    local idx = 0
+    for ci = 1, 3 do
+      for ri, s in ipairs(cols[ci]) do
+        idx = idx + 1
+        local c = f.stats[idx]
+        if c then
+          c.icon:SetTexture(NL.MEDIA .. NL.ICONS[s.key])
+          c.label:SetText(L["XP_STAT_LABEL_" .. s.key] or s.key)
+          c.value:SetText("+" .. ShortNum(s.v))
+          local cy = lastStatRow + (statRows - ri) * NL.STAT_ROW_H
+          NL.Place(f, c, NL.STATS_RIGHT[ci] - 15, cy - NL.STAT_ICON / 2)
+          NL.Add(f, c, delay)
+          delay = delay + 0.04
+        end
+      end
+    end
+  end
+
+  -- sorts
+  if showSpellBlock then
+    delay = delay + 0.04
+    f.hdrSpells.text:SetText(L["XP_NL_SPELLS"])
+    f.hdrSpells:SetSize(f.hdrSpells.text:GetStringWidth() + 4, 24)
+    NL.Place(f, f.hdrSpells, 53, yHdrSpells - 12)
+    NL.Add(f, f.hdrSpells, delay)
+    delay = delay + 0.05
+    if nSp == 0 then
+      f.hintText:SetText(L["XP_NEXTLEVEL_NO_DATA"])
+      f.hint:SetSize(300, 40)
+      NL.Place(f, f.hint, 53, 44 - 20)
+      NL.Add(f, f.hint, delay)
+    else
+      local lay = NL.SPELL_LAYOUT[spCols]
+      local order = (spCols == 3) and { 2, 3, 1 } or { 1, 2 }   -- on remplit d'abord la colonne centrale
+      for k = 1, nSp do
+        local sp = spells[k]
+        local colIdx = order[math.ceil(k / spRows)]
+        local row = (k - 1) % spRows + 1
+        local c = f.spells[k]
+        local tw = lay.tw[colIdx]
+        c.icon:SetTexture(sp.icon)
+        NL.NameBlock(c, sp.name, sp.rank or NL.SpellRank(sp.id), tw, NL.SPELL_ICON)
+        local cellW = NL.SPELL_ICON + 6 + tw
+        local cy = 44 + (spRows - row) * NL.SPELL_ROW_H
+        NL.Place(f, c, NL.W - (lay.L[colIdx] + cellW), cy - NL.SPELL_ICON / 2, cellW)
+        NL.Add(f, c, delay + (k - 1) * 0.05)
+      end
+      -- plus de sorts que de cases : "..." sous la derniere rangee, a droite (meme repere que le total du mode Maj)
+      if spOverflow then
+        NL.Place(f, f.more, 53, 44 - NL.SPELL_ICON / 2 - 16)
+        NL.Add(f, f.more, delay + nSp * 0.05)
+      end
+    end
+  end
+  NL.FitShadow(f)
+end
+
+-- Rappel des touches, en gris, a droite du badge de niveau pendant le survol
+function NL.ShowHint()
+  if not NL.hint then
+    local h = CreateFrame("Frame", nil, UIParent)
+    h:SetSize(10, 16)
+    h:SetFrameStrata("TOOLTIP")   -- au-dessus de l'infobulle total / xp reposee, qui est remontee pendant le survol
+    h:Hide()
+    h.text = NL.Text(h, ns.FONT_FALLBACK, 9, { 0.55, 0.55, 0.55 }, "RIGHT")
+    h.text:SetPoint("RIGHT", h, "RIGHT", 0, 0)
+    h.target = 0
+    h:SetScript("OnUpdate", function(self, el)
+      local a = self:GetAlpha()
+      if self.target > a then a = math.min(1, a + el / 0.35) else a = math.max(0, a - el / 0.2) end
+      self:SetAlpha(a)
+      if a == self.target then
+        if a == 0 then self:Hide() end
+      end
+    end)
+    NL.hint = h
+  end
+  local h = NL.hint
+  h.text:SetText(HAS_CLASS_TRAINERS and L["XP_NL_HINT"] or L["XP_NL_HINT_ALT"])
+  -- meme couleur que la barre d'xp (celle du texte d'xp, cf. UpdateBarColor)
+  local r, g, b = 0.55, 0.55, 0.55
+  if tooltipXP and tooltipXP.GetTextColor then r, g, b = tooltipXP:GetTextColor() end
+  h.text:SetTextColor(r, g, b, 1)
+  h:SetWidth(h.text:GetStringWidth() + 4)
+  h:ClearAllPoints()
+  h:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -10, BAR_H)   -- coin bas droit, juste au-dessus de la barre d'xp
+  if not h:IsShown() then h:SetAlpha(0); h:Show() end
+  h.target = 1
+end
+
+function NL.HideHint()
+  if NL.hint and NL.hint:IsShown() then NL.hint.target = 0 end
+end
+
+-- refresh : le panneau est deja affiche (Maj enfonce / relache) -> on garde l'ombre, on remplace le contenu
+ShowNextLevelPanel = function(refresh)
+  local cfg = ns.GetCfg("xpBar")
+  if cfg and cfg.nextLevelPreview == false then return end
+  if IsMaxLevel() then return end
+  -- deja affiche et pas en train de disparaitre (survol relance, Alt...) : on ne rejoue pas l'animation
+  if not refresh and nlPanel and nlPanel:IsShown() and not NL.hiding then return end
+  NL.hiding = false
+  if not nlPanel then nlPanel = BuildNextLevelPanel() end
+  local f = nlPanel
+  f:SetScript("OnUpdate", nil)
+  NL.HideAll(f)
+  if nlMode == "train" then
+    -- on calcule d'abord la mise en page normale pour connaitre la taille d'ombre de reference
+    NL.LayoutLevel(f)
+    local lx, ly = f.shadowX, f.shadowY
+    NL.HideAll(f)
+    NL.LayoutTrain(f, lx, ly)
+  else
+    NL.LayoutLevel(f)
+  end
+  NL.RaiseXPBar("level")
+  if not refresh then NL.ShowHint() end
+  if refresh and f:IsShown() then
+    NL.Animate(f, true)
+  else
+    NL.Animate(f)
+    FadeTo(f, true)
+  end
+end
+
+HideNextLevelPanel = function()
+  NL.HideHint()
+  if nlPanel and nlPanel:IsShown() then NL.hiding = true end
+  if nlPanel then FadeTo(nlPanel, false) end
+end
+
+-- ═══ Quetes pretes a rendre (ALT enfonce au survol) ═══════════════════════════════════════════════
+-- Au-dessus du texte d'xp central : chaque quete terminee avec l'xp qu'elle donnerait, en % de la barre du niveau,
+-- puis le total si on rendait tout.
+local function GetTurnInQuests()
+  local out, totalXP = {}, 0
+  local n = (C_QuestLog and C_QuestLog.GetNumQuestLogEntries and select(1, C_QuestLog.GetNumQuestLogEntries()))
+            or (GetNumQuestLogEntries and select(1, GetNumQuestLogEntries())) or 0
+  for i = 1, n do
+    pcall(function()
+      local title, level, questID, isHeader, ready
+      if C_QuestLog and C_QuestLog.GetInfo then
+        local info = C_QuestLog.GetInfo(i)
+        if info then title, level, questID, isHeader = info.title, info.level, info.questID, info.isHeader end
+        if questID and not isHeader then
+          ready = (C_QuestLog.ReadyForTurnIn and C_QuestLog.ReadyForTurnIn(questID))
+                  or (C_QuestLog.IsComplete and C_QuestLog.IsComplete(questID))
+        end
+      elseif GetQuestLogTitle then
+        local t, lv, _, hdr, _, isComplete, _, qid = GetQuestLogTitle(i)
+        title, level, isHeader, questID = t, lv, hdr, qid
+        ready = (isComplete == 1) or (isComplete == true)
+      end
+      if not title or isHeader or not ready then return end
+      local xp
+      if GetQuestLogRewardXP and questID then xp = GetQuestLogRewardXP(questID) end
+      if (not xp or xp == 0) and GetRewardXP and SelectQuestLogEntry then
+        local prev = GetQuestLogSelection and GetQuestLogSelection()
+        SelectQuestLogEntry(i)
+        xp = GetRewardXP()
+        if prev and prev > 0 then SelectQuestLogEntry(prev) end
+      end
+      if type(xp) == "number" and xp > 0 then
+        out[#out + 1] = { title = title, level = level, xp = xp }
+        totalXP = totalXP + xp
+      end
+    end)
+  end
+  return out, totalXP
+end
+
+-- Couleur d'une quete selon sa difficulte par rapport au joueur ; "normale" (niveau proche du sien) = ocre #FFBD74
+local function QuestColor(level)
+  local plvl = UnitLevel("player") or 1
+  if type(level) ~= "number" or level <= 0 then return NL.OCRE end
+  local d = level - plvl
+  if d >= 5 then return { 1.00, 0.10, 0.10 } end          -- impossible
+  if d >= 3 then return { 1.00, 0.50, 0.25 } end          -- tres difficile
+  if d >= -2 then return NL.OCRE end                      -- normale
+  local green = (GetQuestGreenRange and GetQuestGreenRange()) or 8
+  if -d <= green then return { 0.25, 0.75, 0.25 } end     -- facile
+  return { 0.50, 0.50, 0.50 }                             -- triviale
+end
+
+-- Barre turquoise du gain potentiel, posee sur la barre d'xp elle-meme (du remplissage actuel vers actuel + gain)
+local potTex, potDrv
+local function PotStep(self, el)
+  self.t = self.t + el
+  if self.mode == "in" then
+    local v = math.min(1, self.t / 0.55)
+    local e = 1 - (1 - v) * (1 - v) * (1 - v)
+    potTex:SetWidth(math.max(1, self.w * e))
+    potTex:SetAlpha(0.95 * math.min(1, self.t / 0.25))
+    if v >= 1 then self:SetScript("OnUpdate", nil) end
+  else
+    local v = math.min(1, self.t / 0.3)
+    potTex:SetAlpha(0.95 * (1 - v))
+    if v >= 1 then potTex:Hide(); self:SetScript("OnUpdate", nil) end
+  end
+end
+
+function NL.ShowPot(totalXP, xpMax)
+  if not xpBar then return end
+  if not potTex then
+    potTex = xpBar:CreateTexture(nil, "ARTWORK", nil, 1)   -- au-dessus du remplissage, sous le cadre decoratif
+    potTex:SetColorTexture(NL.TEAL[1], NL.TEAL[2], NL.TEAL[3], 1)
+    potDrv = CreateFrame("Frame")
+  end
+  local okC, cur = pcall(UnitXP, "player")
+  if not okC or type(cur) ~= "number" then return end
+  local W = GetBarWidth()
+  local frac0 = math.min(1, cur / xpMax)
+  local frac1 = math.min(1, (cur + totalXP) / xpMax)
+  potTex:ClearAllPoints()
+  potTex:SetPoint("TOPLEFT", xpBar, "TOPLEFT", frac0 * W, 0)
+  potTex:SetPoint("BOTTOMLEFT", xpBar, "BOTTOMLEFT", frac0 * W, 0)
+  potTex:SetWidth(1)
+  potTex:SetAlpha(0)
+  potTex:Show()
+  potDrv.t, potDrv.mode, potDrv.w = 0, "in", math.max(2, (frac1 - frac0) * W)
+  potDrv:SetScript("OnUpdate", PotStep)
+end
+
+function NL.HidePot()
+  if not potTex or not potTex:IsShown() then return end
+  potDrv.t, potDrv.mode = 0, "out"
+  potDrv:SetScript("OnUpdate", PotStep)
+end
+
+local function BuildQuestPanel()
+  local q = CreateFrame("Frame", nil, UIParent)
+  q:SetFrameStrata("FULLSCREEN")
+  q:Hide()
+  q:SetScript("OnHide", function() NL.RestoreXPBar("quest") end)
+  q.shadow = q:CreateTexture(nil, "BACKGROUND")
+  q.shadow:SetTexture(NL.TEX_RECT)
+  q.shadow:SetPoint("TOPLEFT", q, "TOPLEFT", -60, 46)
+  q.shadow:SetPoint("BOTTOMRIGHT", q, "BOTTOMRIGHT", 60, -28)
+  local function Sub()
+    local c = CreateFrame("Frame", nil, q)
+    c:SetFrameLevel(q:GetFrameLevel() + 2)
+    c:Hide()
+    return c
+  end
+  -- en-tete + filet
+  q.hdr = Sub()
+  q.hdr.text = NL.Text(q.hdr, ns.FONT_FALLBACK, 14, NL.BROWN, "LEFT")
+  q.hdr.text:SetPoint("TOPLEFT", q.hdr, "TOPLEFT", 0, 0)
+  q.hdr.rule = q.hdr:CreateTexture(nil, "ARTWORK")
+  q.hdr.rule:SetTexture(NL.TEX_DIVIDER)
+  q.hdr.rule:SetTexCoord(0, 1, 0, 4 / 129)
+  -- une ligne par quete : titre colore par difficulte a gauche, "+x%" turquoise a droite
+  q.rows = {}
+  for i = 1, 15 do
+    local r = Sub()
+    r.name = NL.Text(r, ns.FONT_FALLBACK, 13, NL.TEAL, "LEFT")
+    r.name:SetPoint("LEFT", r, "LEFT", 0, 0)
+    r.pct = NL.Text(r, ns.FONT_FALLBACK, 13, NL.TEAL, "RIGHT")
+    r.pct:SetPoint("RIGHT", r, "RIGHT", 0, 0)
+    q.rows[i] = r
+  end
+  -- total
+  q.tot = Sub()
+  q.tot.value = NL.Text(q.tot, ns.FONT_FALLBACK, 17, NL.CREAM, "RIGHT")
+  q.tot.value:SetPoint("RIGHT", q.tot, "RIGHT", 0, 0)
+  q.tot.label = NL.Text(q.tot, ns.FONT_FALLBACK, 17, NL.CREAM, "RIGHT")
+  q.tot.label:SetPoint("RIGHT", q.tot.value, "LEFT", -22, 0)
+  return q
+end
+
+HideQuestPanel = function()
+  if qPanel then FadeTo(qPanel, false) end
+  NL.HidePot()
+end
+
+ShowQuestPanel = function()
+  if not IsAltKeyDown() or IsMaxLevel() then HideQuestPanel(); return end
+  local list, totalXP = GetTurnInQuests()
+  local xpMax = (UnitXPMax and UnitXPMax("player")) or 0
+  if #list == 0 or xpMax <= 0 then HideQuestPanel(); return end
+  if not qPanel then qPanel = BuildQuestPanel() end
+  local q = qPanel
+  local function Pct(xp)
+    local p = xp / xpMax * 100
+    if p < 1 then return string.format("+%.1f%%", p) end
+    return string.format("+%d%%", math.floor(p + 0.5))
+  end
+  for _, r in ipairs(q.rows) do r:Hide() end
+  q.hdr:Hide(); q.tot:Hide()
+
+  q.hdr.text:SetText(L["XP_QUESTS_READY"])
+  local nameW = q.hdr.text:GetStringWidth()
+  local n = math.min(#list, #q.rows)
+  for i = 1, n do
+    local e, r = list[i], q.rows[i]
+    r.name:SetText(string.format("[%s] %s", tostring(e.level or "?"), e.title))
+    local col = QuestColor(e.level)
+    r.name:SetTextColor(col[1], col[2], col[3], 1)
+    r.pct:SetText(Pct(e.xp))
+    nameW = math.max(nameW, r.name:GetStringWidth() + 70)
+  end
+  q.tot.label:SetText(L["XP_NL_TOTAL"])
+  q.tot.value:SetText(Pct(totalXP))
+  local W = math.max(190, nameW + 10)
+  local LH = 16
+
+  -- positions de base (depuis le coin haut gauche du panneau) ; l'animation les decale vers la gauche
+  q.items = {}
+  local function Item(frame, w, h, y, delay)
+    frame:SetSize(w, h)
+    q.items[#q.items + 1] = { f = frame, x = 0, y = y, delay = delay }
+    frame:SetAlpha(0)
+    frame:Show()
+  end
+  q.hdr.rule:ClearAllPoints()
+  q.hdr.rule:SetPoint("TOPLEFT", q.hdr, "TOPLEFT", 0, -20)
+  q.hdr.rule:SetSize(W, 4)
+  Item(q.hdr, W, 24, 0, 0.08)
+  local y = -32
+  for i = 1, n do
+    Item(q.rows[i], W, LH, y, 0.2 + (i - 1) * 0.08)
+    y = y - LH
+  end
+  y = y - 4
+  Item(q.tot, W, 22, y, 0.2 + n * 0.08 + 0.06)
+  q:SetSize(W, -y + 22)
+  q:ClearAllPoints()
+  q:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, BAR_H + 20 + 10)
+
+  -- animation : lignes en glissement leger depuis la gauche (decalees), ombre en glissement leger depuis le bas
+  q.t = 0
+  q:SetScript("OnUpdate", function(self, el)
+    self.t = self.t + el
+    local pending = false
+    local sv = math.min(1, self.t / 0.9)
+    local se = 1 - (1 - sv) * (1 - sv) * (1 - sv)
+    self.shadow:SetAlpha(se)
+    self.shadow:ClearAllPoints()
+    self.shadow:SetPoint("TOPLEFT", self, "TOPLEFT", -60, 46 - (1 - se) * 34)
+    self.shadow:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 60, -28 - (1 - se) * 34)
+    if sv < 1 then pending = true end
+    for _, it in ipairs(self.items) do
+      local v = (self.t - it.delay) / 0.6
+      if v < 1 then pending = true end
+      if v < 0 then v = 0 elseif v > 1 then v = 1 end
+      local e = 1 - (1 - v) * (1 - v) * (1 - v)
+      it.f:SetAlpha(e)
+      it.f:ClearAllPoints()
+      it.f:SetPoint("TOPLEFT", self, "TOPLEFT", it.x - (1 - e) * 24, it.y)
+    end
+    if not pending then self:SetScript("OnUpdate", nil) end
+  end)
+  for _, it in ipairs(q.items) do
+    it.f:ClearAllPoints()
+    it.f:SetPoint("TOPLEFT", q, "TOPLEFT", it.x - 24, it.y)
+  end
+  q.shadow:SetAlpha(0)
+
+  NL.RaiseXPBar("quest")
+  FadeTo(q, true)
+  NL.ShowPot(totalXP, xpMax)
+end
+
+-- Maj : remplace le contenu du panneau du prochain niveau par les competences a entrainer ; Alt : quetes a rendre
+local nlModEvt = CreateFrame("Frame")
+nlModEvt:RegisterEvent("MODIFIER_STATE_CHANGED")
+nlModEvt:SetScript("OnEvent", function(_, _, key)
+  if not isHovered then return end
+  if HAS_CLASS_TRAINERS and (key == "LSHIFT" or key == "RSHIFT") then
+    local mode = IsShiftKeyDown() and "train" or "level"
+    if mode ~= nlMode then
+      nlMode = mode
+      if nlPanel and nlPanel:IsShown() then ShowNextLevelPanel(true) end
+    end
+  elseif key == "LALT" or key == "RALT" then
+    NLSetAlt(IsAltKeyDown())
+    ShowQuestPanel()
+  end
+end)
+end  -- do (panneaux du prochain niveau / des quetes)
+
 local function OnHoverEnter()
   isHovered = true
   -- Mode badge (rep ou compagnon) : remplacer l'abréviation par le nom complet
@@ -1140,10 +2568,17 @@ local function OnHoverEnter()
   end
   ShowXPBar()
   UpdateTooltip()
+  NLSetMode((HAS_CLASS_TRAINERS and IsShiftKeyDown()) and "train" or "level")
+  ShowNextLevelPanel()
+  NLSetAlt(IsAltKeyDown())
+  ShowQuestPanel()
 end
 
 local function OnHoverLeave()
   isHovered = false
+  NLSetAlt(false, true)
+  HideNextLevelPanel()
+  HideQuestPanel()
   -- Restaurer l'abréviation dans le badge
   if repNameLabel then repNameLabel:Hide() end
   if levelText then levelText:Show() end
@@ -1268,13 +2703,24 @@ local function OnCompanionUpdate()
   end
 end
 
-local function OnXPBarEvent(_, event, arg1)
+local function OnXPBarEvent(_, event, arg1, ...)
   if event == "PLAYER_XP_UPDATE" then
     OnXPGained()
   elseif event == "PLAYER_LEVEL_UP" then
+    -- gains de ce niveau (PV, ressource, stats, talents) : servent d'estimation pour le suivant
+    pcall(RecordLevelGains, arg1, ...)
     prevXP = 0
+    -- UnitLevel("player") n'est pas encore a jour quand l'evenement arrive (le badge restait au niveau precedent) :
+    -- on pose tout de suite le niveau de l'evenement (arg1), puis on rafraichit une fois le jeu a jour.
+    if levelText and not petMode and type(arg1) == "number" and arg1 < GetMaxPlayerLevel() then
+      SetLevelTextFont(19)
+      levelText:SetText(tostring(arg1))
+    end
     XPBar.UpdateVisibility()
+    C_Timer.After(1, function() XPBar.Update() end)
   elseif event == "PLAYER_ENTERING_WORLD" then
+    -- Instantane des stats de base du niveau courant : point de comparaison du prochain gain de niveau
+    C_Timer.After(5, function() pcall(SnapshotBaseStats) end)
     prevXP = UnitXP("player")
     ResetCompanionState()
     isRepMode         = false
@@ -1429,7 +2875,9 @@ local function CreateXPBar_Container()
   overlayHolder:SetFrameLevel(xpBar:GetFrameLevel() + 1)
 
   overlayTex = overlayHolder:CreateTexture(nil, "ARTWORK")
-  overlayTex:SetAllPoints(overlayHolder)
+  -- Cadre decoratif 4 px plus large de chaque cote que la barre
+  overlayTex:SetPoint("TOPLEFT", overlayHolder, "TOPLEFT", -4, 0)
+  overlayTex:SetPoint("BOTTOMRIGHT", overlayHolder, "BOTTOMRIGHT", 4, 0)
   overlayTex:SetTexture(TEX_OVERLAY)
 
   gainBar = overlayHolder:CreateTexture(nil, "OVERLAY", nil, 0)
@@ -1497,7 +2945,7 @@ local function CreateXPBar_Tooltip(tf)
   tooltipXP:SetFont(xpFontInfo, 12, "OUTLINE")
   tooltipXP:SetPoint("TOPLEFT", tooltipFrame, "TOPLEFT", 32, -12)
   tooltipXP:SetJustifyH("LEFT")
-  tooltipXP:SetTextColor(0.780, 0.667, 0.400, 1)
+  tooltipXP:SetTextColor(1, 0.741, 0.455, 1)
 
   ttTex = tooltipFrame:CreateTexture(nil, "BACKGROUND")
   ttTex:SetTexture(TEX_GRUNGE)
@@ -1522,7 +2970,7 @@ local function CreateXPBar_Tooltip(tf)
   centerXPText:SetFont(xpFontInfo, 13, "OUTLINE")
   centerXPText:SetPoint("CENTER", centerXPHolder, "CENTER", 0, 0)
   centerXPText:SetJustifyH("CENTER")
-  centerXPText:SetTextColor(0.780, 0.667, 0.400, 1)
+  centerXPText:SetTextColor(1, 0.741, 0.455, 1)
   centerXPText:SetShadowOffset(1, -1)
   centerXPText:SetShadowColor(0, 0, 0, 1)
   centerXPText:Hide()
@@ -1716,10 +3164,71 @@ function XPBar.GetHoverFrame()
   return hoverFrame
 end
 
+-- Forever : survol de la barre du familier (UnitBars) -> la barre d'xp, le badge de niveau et l'infobulle passent sur le
+-- familier (niveau, xp, loyaute). Sans effet hors Forever ou sans familier de chasseur.
+function XPBar.SetPetHover(on)
+  if not (container and ns.IsForever) then return end
+  local cfg = ns.GetCfg("xpBar")
+  if cfg and cfg.enabled == false then return end
+  if on then
+    if petMode or not GetPetXPData() then return end
+    petMode = true
+    if repNameLabel then repNameLabel:Hide() end
+    if levelText then levelText:Show() end
+    XPBar.Update()
+    ShowXPBar()
+    UpdateTooltip()
+  else
+    if not petMode then return end
+    petMode = false
+    XPBar.Update()
+    UpdateBarColor()
+    UpdateBarFill()
+    if tooltipFrame and not isLayoutMode then FadeTo(tooltipFrame, false) end
+    if centerXPText then FadeTo(centerXPText, false) end
+    if not isHovered and not showTimer then HideXPBar() end
+  end
+end
+
+-- /aishpet : ce que le jeu renvoie pour le familier (xp, loyaute, satisfaction), pour ajuster la lecture si besoin
+SLASH_AISHPET1 = "/aishpet"
+SlashCmdList["AISHPET"] = function()
+  local P = "|cff33aaff[AishPet]|r "
+  local function J(...) local t = {} for i = 1, select("#", ...) do t[#t + 1] = tostring((select(i, ...))) end return table.concat(t, ", ") end
+  print(P .. "UnitExists(pet)=" .. tostring(UnitExists("pet")) .. " niveau=" .. tostring(UnitLevel("pet")))
+  if HasPetUI then print(P .. "HasPetUI = " .. J(HasPetUI())) end
+  if GetPetExperience then print(P .. "GetPetExperience = " .. J(GetPetExperience())) end
+  local fns = LoyaltyFunctions()
+  if #fns == 0 then
+    print(P .. "aucune fonction de loyaute trouvee (GetPetLoyalty, UnitLoyalty, C_PetInfo, _G)")
+  end
+  for _, c in ipairs(fns) do
+    print(P .. c.name .. "() = " .. J(pcall(c.fn)) .. "  |  (\"pet\") = " .. J(pcall(c.fn, "pet")))
+  end
+  if C_PetInfo and C_PetInfo.GetPetHappiness then print(P .. "C_PetInfo.GetPetHappiness = " .. J(C_PetInfo.GetPetHappiness())) end
+  if GetPetHappiness then print(P .. "GetPetHappiness = " .. J(GetPetHappiness())) end
+  print(P .. "PetCharacterLevelText (cadre) : " .. tostring(_G.PetCharacterLevelText)
+    .. " | PaperDollPetLevelInfo : " .. tostring(_G.PaperDollPetLevelInfo))
+  print(P .. "texte du panneau Familier : " .. tostring(PetPanelText()))
+  local pd = GetPetXPData()
+  print(P .. "ligne de loyaute : " .. tostring(pd and pd.loyalty))
+end
+
 -- Update
 function XPBar.Update()
   if not container then return end
   if not levelText then return end
+  if petMode then
+    local pd = GetPetXPData()
+    if pd then
+      SetLevelTextFont(19)
+      levelText:SetText(tostring(pd.level))
+      UpdateXPColors()
+      UpdateBarColor()
+      UpdateBarFill()
+      return
+    end
+  end
   if IsMaxLevel() then
     local comp = GetCompanionXPData()
     if comp then
@@ -1733,6 +3242,9 @@ function XPBar.Update()
       SetLevelTextFont(13)  -- plus petit pour 4 chars
       levelText:SetText(rep.letter)
       UpdateXPColors()
+    else
+      SetLevelTextFont(19)
+      levelText:SetText(tostring(UnitLevel("player")))   -- sortie du survol du familier : le badge reprend le niveau du joueur
     end
     return
   end

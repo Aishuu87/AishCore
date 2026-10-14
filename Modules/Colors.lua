@@ -6,6 +6,60 @@ ns.Modules = ns.Modules or {}
 local Colors = {}
 ns.Modules.Colors = Colors
 
+-- Furtivite (Camouflage, Disparition, Danse de l'ombre, Subterfuge, Rodeur...) : partage avec le Mode furtif.
+-- IsStealthed() couvre la plupart des cas ; les auras connues rattrapent les autres (Camouflage, Sous camouflage...).
+local STEALTH_AURAS = { 1784, 1785, 1786, 1787, 5215, 11327, 115191, 115192, 185313, 185422, 58984, 20580, 199483, 66, 32612 }
+-- Renvoie (furtif, faible) : faible = detecte uniquement par la barre d'action "bonus" du Voleur, la seule regle sujette
+-- aux faux positifs (monture...) : ceux-la sont confirmes apres un court delai par les appelants. IsStealthed() et les
+-- auras sont fiables, donc immediates.
+function ns.IsPlayerStealthed()
+    -- La comparaison est faite DANS le pcall : en combat, une valeur secrete leve une erreur a la comparaison
+    local ok, v = pcall(function() return (IsStealthed and IsStealthed()) == true end)
+    if ok and v == true then return true end
+    -- Voleur : IsStealthed() est faux en Danse de l'ombre / Subterfuge ; la barre d'action "bonus" change, elle, avec la
+    -- furtivite (meme regle que les animations d'orbes, cf. SpellEffects.IsInStealth)
+    -- Cette barre change aussi en monture (volante / skyriding), en vehicule ou avec une barre de remplacement : ces cas
+    -- ne sont pas de la furtivite, on les exclut.
+    if (ns._playerClass or select(2, UnitClass("player"))) == "ROGUE" and GetBonusBarIndex
+       and not (IsMounted and IsMounted())
+       and not (HasVehicleActionBar and HasVehicleActionBar())
+       and not (HasOverrideActionBar and HasOverrideActionBar())
+       and not (UnitInVehicle and UnitInVehicle("player"))
+       and not UnitCastingInfo("player") then   -- invocation d'une monture en cours : la barre change deja, pas encore IsMounted
+        local okB, inBonus = pcall(function() return GetBonusBarIndex() ~= 0 end)
+        if okB and inBonus == true then return true, true end
+    end
+    local get = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
+    if get then
+        for _, id in ipairs(STEALTH_AURAS) do
+            local okA, a = pcall(get, id)
+            if okA and a then return true end
+        end
+    end
+    return false
+end
+
+-- /sestealth : detail de chaque critere de furtivite (a coller pour diagnostiquer un faux positif, monture par exemple)
+SLASH_SESTEALTH1 = "/sestealth"
+SlashCmdList["SESTEALTH"] = function()
+    local P = "|cff33aaff[SEstealth]|r "
+    local function B(f, ...) local ok, v = pcall(f, ...); return ok and tostring(v) or "err" end
+    print(P .. "final=" .. tostring(ns.IsPlayerStealthed()) .. " classe=" .. tostring(ns._playerClass) .. " monte=" .. tostring(IsMounted and IsMounted())
+        .. " vol=" .. B(IsFlying) .. " vehicule=" .. B(UnitInVehicle, "player") .. " incante=" .. tostring((UnitCastingInfo("player"))))
+    print(P .. "IsStealthed=" .. B(function() return IsStealthed() end) .. " | barre bonus=" .. B(GetBonusBarIndex)
+        .. " | barre vehicule=" .. B(HasVehicleActionBar) .. " | barre de remplacement=" .. B(HasOverrideActionBar))
+    local get = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
+    local found = {}
+    if get then
+        for _, id in ipairs(STEALTH_AURAS) do
+            local ok, a = pcall(get, id)
+            if ok and a then found[#found + 1] = id end
+        end
+    end
+    print(P .. "auras de furtivite presentes : " .. (#found > 0 and table.concat(found, ", ") or "aucune"))
+    print(P .. "etat suivi par les couleurs : " .. tostring(ns.Modules and ns.Modules.Colors and ns.Modules.Colors._stealthed))
+end
+
 -- Éléments colorables : clés internes + labels UI
 Colors.ELEMENT_KEYS = {
     "powercircle", "powertext", "powerdotsa", "powerdotsb",
@@ -93,6 +147,32 @@ if ns.IsForever then
     end
 end
 
+-- Conditions : lignes de couleurs en plus des spes (pseudo-spe d'id texte), appliquees quand la condition est vraie.
+-- Furtivite : Voleur et Druide. L'id sert de cle dans ns.DB.colors.overrides[classe][id].
+Colors.STEALTH_ID = "stealth"
+for _, c in ipairs(Colors.CLASSES) do
+    if c.file == "ROGUE" or c.file == "DRUID" then
+        c.conditions = { { id = Colors.STEALTH_ID, name = L["COLORSMOD_COND_STEALTH"] } }
+    end
+end
+
+-- Palette violette par defaut de la condition Furtivite (modifiable element par element dans les options)
+Colors.STEALTH_DEFAULTS = {
+    powercircle     = { 0.58, 0.42, 0.86, 1 },
+    powertext       = { 0.64, 0.52, 0.90, 1 },
+    powerdotsa      = { 0.34, 0.24, 0.60, 1 },
+    powerdotsb      = { 0.46, 0.32, 0.78, 1 },
+    glow            = { 0.40, 0.28, 0.75, 1 },
+    oochealth       = { 0.42, 0.30, 0.76, 1 },
+    oocdot          = { 0.60, 0.50, 0.85, 1 },
+    xpbar           = { 0.58, 0.45, 0.85, 1 },
+    playerhealthbar = { 0.44, 0.30, 0.76, 1 },
+    playerdots      = { 0.48, 0.36, 0.80, 1 },
+    pethealthbar    = { 0.58, 0.45, 0.85, 1 },
+    petdots         = { 0.60, 0.50, 0.86, 1 },
+    misc            = { 0.32, 0.22, 0.58, 1 },
+}
+
 -- Index rapides
 Colors._classFileMap = {}
 Colors._classKeyMap  = {}
@@ -119,6 +199,10 @@ function Colors.Get(element)
     if ns.DB and ns.DB.colors and ns.DB.colors.useClassDefaults then
         return Colors.CLASS_FALLBACK[classFile] or { 1, 1, 1, 1 }
     end
+    -- Condition Furtivite active (Voleur / Druide) : sa ligne de couleurs remplace celle de la spe
+    if classKey and Colors.StealthConditionActive(classKey) then
+        return Colors.GetForSpec(classKey, Colors.STEALTH_ID, element)
+    end
     local specID = ns._specID
     if not specID then
         local idx = GetSpecialization and GetSpecialization() or nil
@@ -137,6 +221,31 @@ function Colors.Get(element)
     -- Aucune spe (perso sans spe, ou egalite entre arbres sur Forever) : spe par defaut choisie
     if not specID then specID = Colors.GetDefaultSpec(classKey) end
     return Colors.GetForSpec(classKey, specID, element)
+end
+
+--- Une condition est-elle activee (case a cocher de sa ligne) ? Activee par defaut.
+function Colors.IsConditionEnabled(classKey, condID)
+    local c = ns.DB and ns.DB.colors and ns.DB.colors.conditions
+    local cls = c and classKey and c[classKey]
+    return not (cls and cls[condID] == false)
+end
+
+function Colors.SetConditionEnabled(classKey, condID, val)
+    if not ns.DB then ns.DB = {} end
+    local col = ns.DB.colors
+    if not col then col = {}; ns.DB.colors = col end
+    col.conditions = col.conditions or {}
+    col.conditions[classKey] = col.conditions[classKey] or {}
+    col.conditions[classKey][condID] = val and true or false
+    Colors.Broadcast()
+end
+
+--- Condition Furtivite : la classe en a une, elle est activee, et le joueur est en furtivite.
+function Colors.StealthConditionActive(classKey)
+    local cd = Colors._classKeyMap[classKey]
+    if not (cd and cd.conditions) then return false end
+    if not Colors.IsConditionEnabled(classKey, Colors.STEALTH_ID) then return false end
+    return Colors._stealthed == true
 end
 
 --- Spe par defaut d'une classe (clic droit sur son nom dans les couleurs thematiques), ou nil.
@@ -178,6 +287,11 @@ function Colors.GetForSpec(classKey, specID, element)
         if cov and cov[specID] and cov[specID][element] then
             return cov[specID][element]
         end
+    end
+    -- 2a. Condition Furtivite : palette violette par defaut
+    if specID == Colors.STEALTH_ID then
+        local d = Colors.STEALTH_DEFAULTS[element]
+        if d then return d end
     end
     -- 2. Défaut de spé (table SPEC_DEFAULTS)
     if classKey and specID then
@@ -230,6 +344,45 @@ end
 
 -- Alias pour compatibilité avec ApplyAllSettings() du système de profils
 Colors.ApplySettings = Colors.Broadcast
+
+-- Suivi de la furtivite : au changement d'etat, les modules relisent leurs couleurs (si la classe a la condition)
+local _stealthEvt = CreateFrame("Frame")
+_stealthEvt:RegisterEvent("UPDATE_STEALTH")
+_stealthEvt:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+_stealthEvt:RegisterEvent("PLAYER_ENTERING_WORLD")
+_stealthEvt:RegisterUnitEvent("UNIT_AURA", "player")
+-- Rattrapage Danse de l'ombre / Subterfuge (cf. SpellEffects) : leur entree ne declenche pas toujours UPDATE_STEALTH
+_stealthEvt:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
+_stealthEvt:SetScript("OnEvent", function()
+    local cls = ns._playerClass
+    if not cls or cls == "" then cls = select(2, UnitClass("player")) end
+    local cd = cls and Colors._classFileMap[cls]
+    if not (cd and cd.conditions) then return end   -- classe sans condition : rien a suivre
+    local now, weak = ns.IsPlayerStealthed()
+    if now == Colors._stealthed then return end
+    if now and not weak then
+        Colors._stealthed = true
+        if Colors.IsConditionEnabled(cls:lower(), Colors.STEALTH_ID) then C_Timer.After(0, Colors.Broadcast) end
+        return
+    end
+    if now then
+        -- Entree en furtivite : confirmee apres un court delai. Sur monture, la barre d'action change un instant avant
+        -- IsMounted() : l'etat "furtif" passait vrai puis faux quelques secondes plus tard. Une vraie furtivite tient.
+        if Colors._stealthPending then return end
+        Colors._stealthPending = true
+        C_Timer.After(0.4, function()
+            Colors._stealthPending = false
+            if Colors._stealthed or not ns.IsPlayerStealthed() then return end
+            Colors._stealthed = true
+            if Colors.IsConditionEnabled(cls:lower(), Colors.STEALTH_ID) then Colors.Broadcast() end
+        end)
+        return
+    end
+    Colors._stealthed = false
+    if Colors.IsConditionEnabled(cls:lower(), Colors.STEALTH_ID) then
+        C_Timer.After(0, Colors.Broadcast)
+    end
+end)
 
 -- Réagir aux changements de spécialisation
 local _colEvt = CreateFrame("Frame")

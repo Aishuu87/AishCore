@@ -130,7 +130,7 @@ local LOOP_GLOW_TYPES = {
   { name = "ABE Zereth Square",
     texture = ABE_ASSETS .. "proc_4.tga",
     rows = 6, columns = 5, frames = 30, duration = 1.2,
-    frameW = 100, frameH = 100, scale = 1.01 },
+    frameW = 100, frameH = 100, scale = 1.01, offX = -1 },
   { name = "ABE Pulse",
     texture = ABE_ASSETS .. "pulse_01.tga",
     rows = 6, columns = 5, frames = 30, duration = 1.0,
@@ -304,6 +304,7 @@ local _liveSwipeState    = {}  -- spellID → { isActive=bool, durObj=handle } (
 local chargeCache        = {}  -- spellID → maxCharges (construit hors combat)
 local overrideToBase     = {}  -- overrideSpellID → baseSpellID (reverse map)
 local learnedSpells      = {}  -- spellID → true si IsPlayerSpell (construit hors combat, jamais tainted)
+local learnedBuilt       = false -- cache construit au moins une fois (un cache VIDE est alors un vrai resultat : perso sans aucun de ces sorts)
 local spellCDBase        = {}  -- spellID → base cooldown en secondes (construit hors combat)
 local _realCDEndTimes    = {}  -- spellID → GetTime() estimé de fin de CD (en combat)
 -- [spellID] = true des qu'un vrai cooldown a ete constate au moins une fois hors GCD. Distingue un
@@ -1050,6 +1051,7 @@ local function RebuildLearnedCache()
       end
     end
   end
+  learnedBuilt = true
   Debug("Learned cache rebuilt (" .. (next(learnedSpells) and "OK" or "empty") .. ")")
 end
 
@@ -1119,6 +1121,28 @@ local function AddGlowedSpell(glowed, sid, bName)
       Debug("    base: " .. base .. " (" .. (GetSpellName(base) or "?") .. ")")
     end
   end
+end
+
+-- Surbrillance (Procs) : option activee, et spe Soigneur / Tank si "seulement Heal/Tank". Le sort est
+-- ensuite teste par slot via l'API d'alerte d'activation de Blizzard (celle des barres d'action), qui
+-- retombe a faux des que le proc finit : aucune etat a nous a tenir a jour.
+local function ProcGlowAllowed()
+  local pbCfg = ns.GetCfg("priorityBar")
+  if not (pbCfg and pbCfg.procGlowEnabled) then return false end
+  if pbCfg.procGlowRoleOnly then
+    local okR, role = pcall(function() return GetSpecializationRole and GetSpecializationRole(GetSpecialization()) end)
+    if not (okR and (role == "HEALER" or role == "TANK")) then return false end
+  end
+  return true
+end
+
+local function SpellIsOverlayed(sid)
+  local fn = (C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed) or IsSpellOverlayed
+  if not (fn and sid) then return false end
+  local ok, res = pcall(fn, sid)
+  if not ok or res == nil then return false end
+  if issecretvalue and issecretvalue(res) then return false end
+  return res and true or false
 end
 
 local function CollectGlowedSpells()
@@ -1403,18 +1427,22 @@ local function CreateSlotFrame(index, parent)
   frame.procStartFlip:SetOrder(1)
 
   -- Applique la config du glow (type, couleur, taille)
-  local function ApplyGlowConfig()
+  -- mode "rot" : surbrillance Rotation (Assistant) ; "proc" : surbrillance Procs (reglages procGlow*)
+  local function ApplyGlowConfig(mode)
+    mode = mode or frame._glowMode or "rot"
+    frame._glowMode = mode
+    local isProc = (mode == "proc")
     local c = ns.GetCfg("priorityBar") or {}
 
     -- Resolve glow color
     local glowColor
-    if c.useSpecGlowColor then
+    if (isProc and c.procGlowUseSpecColor) or (not isProc and c.useSpecGlowColor) then
       local Clr = ns.Modules and ns.Modules.Colors
       if Clr and Clr.Get then glowColor = Clr.Get("glow") end
     end
-    glowColor = glowColor or c.glowColor or { 1, 0.85, 0, 0.8 }
-    local glowSize = c.glowSize or 4
-    local loopIdx = c.loopGlowIndex or 1
+    glowColor = glowColor or (isProc and c.procGlowColor or c.glowColor) or { 1, 0.85, 0, 0.8 }
+    local glowSize = (isProc and c.procGlowSize or c.glowSize) or 4
+    local loopIdx = (isProc and c.procGlowLoopIndex or c.loopGlowIndex) or 1
     local gt = LOOP_GLOW_TYPES[loopIdx] or LOOP_GLOW_TYPES[1]
 
     -- === Pulse (type #1) vs Flipbook ===
@@ -1431,12 +1459,16 @@ local function CreateSlotFrame(index, parent)
         else frame.glow:SetTexCoord(0,1,0,1) end
       end
       frame.glow:SetBlendMode(gt.blendMode or "ADD")
-      frame.glow:SetVertexColor(glowColor[1], glowColor[2], glowColor[3], glowColor[4] or 1)
+      -- Le pulse est une animation d'alpha : l'opacite de la couleur doit la mettre a l'echelle (l'alpha du
+      -- vertex seul ne suffit pas a le faire), sinon le reglage d'opacite n'a aucun effet sur ce type.
+      local pa = glowColor[4] or 1
+      frame._pulseFrom, frame._pulseTo = gt.fromAlpha or 0.4, gt.toAlpha or 0.8
+      frame.glow:SetVertexColor(glowColor[1], glowColor[2], glowColor[3], 1)
       frame.glow:ClearAllPoints()
       frame.glow:SetPoint("TOPLEFT", inner, "TOPLEFT", -glowSize, glowSize)
       frame.glow:SetPoint("BOTTOMRIGHT", inner, "BOTTOMRIGHT", glowSize, -glowSize)
-      frame.glowPulse:SetFromAlpha(gt.fromAlpha or 0.4)
-      frame.glowPulse:SetToAlpha(gt.toAlpha or 0.8)
+      frame.glowPulse:SetFromAlpha(frame._pulseFrom * pa)
+      frame.glowPulse:SetToAlpha(frame._pulseTo * pa)
       frame.glowPulse:SetDuration(gt.duration or 0.8)
     else
       -- Flipbook mode
@@ -1453,7 +1485,7 @@ local function CreateSlotFrame(index, parent)
       local texSize = baseSize * sc + glowSize * 2
       frame.loopFlipTex:ClearAllPoints()
       frame.loopFlipTex:SetSize(texSize, texSize)
-      frame.loopFlipTex:SetPoint("CENTER", inner, "CENTER", 0, 0)
+      frame.loopFlipTex:SetPoint("CENTER", inner, "CENTER", gt.offX or 0, gt.offY or 0)
       frame.loopFlipTex:SetVertexColor(glowColor[1], glowColor[2], glowColor[3], glowColor[4] or 1)
       frame.loopFlipTex:SetBlendMode("ADD")
       frame.loopFlipAnim:SetFlipBookRows(gt.rows or 6)
@@ -1465,7 +1497,7 @@ local function CreateSlotFrame(index, parent)
     end
 
     -- === Proc start ===
-    local psIdx = c.procStartIndex or 1
+    local psIdx = (isProc and c.procGlowStartIndex or c.procStartIndex) or 1
     local ps = PROC_START_TYPES[psIdx]
     frame._procStartEnabled = (ps and psIdx > 1) or false
     if frame._procStartEnabled then
@@ -1544,13 +1576,27 @@ local function CreateSlotFrame(index, parent)
 end
 
 -- Glow ON / OFF
-local function StartSlotGlow(slot)
+local function StartSlotGlow(slot, mode)
+  mode = mode or "rot"
   -- Ré-appliquer le frame level du glowContainer à chaque activation : corrige la dérive Z-order après PlaySlideIn/SetParent
   if slot.glowContainer and slot.innerFrame then
     slot.glowContainer:SetFrameLevel(slot.innerFrame:GetFrameLevel() + 1)
   end
 
-  if slot.isHighlighted and slot._glowSpellID == slot.currentSpellID then return end
+  if slot.isHighlighted and slot._glowSpellID == slot.currentSpellID and slot._glowActiveMode == mode then return end
+  -- Changement de style (Rotation <-> Procs) : on repart d'un glow propre avec l'autre config
+  if slot.isHighlighted and slot._glowActiveMode ~= mode then
+    slot.isHighlighted = false
+    slot._glowSpellID = nil
+    if slot.glowAG then slot.glowAG:Stop() end
+    if slot.glow then slot.glow:SetAlpha(0); slot.glow:Hide() end
+    if slot.loopFlipAG then slot.loopFlipAG:Stop() end
+    if slot.loopFlipTex then slot.loopFlipTex:SetAlpha(0); slot.loopFlipTex:Hide() end
+    if slot.procStartAG then slot.procStartAG:Stop() end
+    if slot.procStartTex then slot.procStartTex:SetAlpha(0); slot.procStartTex:Hide() end
+  end
+  if slot._glowMode ~= mode and slot.ApplyGlowConfig then slot.ApplyGlowConfig(mode) end
+  slot._glowActiveMode = mode
   -- isNewProc = vrai si le slot n'était pas en glow, OU si le sort a changé (slide-in vers un nouveau sort)
   local isNewProc = not slot.isHighlighted or (slot._glowSpellID ~= slot.currentSpellID)
   slot.isHighlighted = true
@@ -1558,14 +1604,15 @@ local function StartSlotGlow(slot)
 
   local cfg = ns.GetCfg("priorityBar") or {}
   local gc
-  if cfg.spellColors and slot.currentSpellID then
+  local isProc = (mode == "proc")
+  if not isProc and cfg.spellColors and slot.currentSpellID then
     gc = cfg.spellColors[slot.currentSpellID]
   end
-  if not gc and cfg.useSpecGlowColor then
+  if not gc and ((isProc and cfg.procGlowUseSpecColor) or (not isProc and cfg.useSpecGlowColor)) then
     local Clr = ns.Modules and ns.Modules.Colors
     if Clr and Clr.Get then gc = Clr.Get("glow") end
   end
-  gc = gc or cfg.glowColor or { 1, 0.85, 0, 0.8 }
+  gc = gc or (isProc and cfg.procGlowColor or cfg.glowColor) or { 1, 0.85, 0, 0.8 }
 
   if slot._useFlipbook then
     -- Flipbook loop glow
@@ -1575,8 +1622,13 @@ local function StartSlotGlow(slot)
     if not slot.loopFlipAG:IsPlaying() then slot.loopFlipAG:Play() end
   else
     -- Legacy pulse mode
-    slot.glow:SetVertexColor(gc[1], gc[2], gc[3], gc[4] or 1)
-    slot.glow:SetAlpha(0.6)
+    local pa = gc[4] or 1
+    slot.glow:SetVertexColor(gc[1], gc[2], gc[3], 1)
+    if slot.glowPulse and slot._pulseFrom then
+      slot.glowPulse:SetFromAlpha(slot._pulseFrom * pa)
+      slot.glowPulse:SetToAlpha(slot._pulseTo * pa)
+    end
+    slot.glow:SetAlpha(0.6 * pa)
     slot.glow:Show()
     if not slot.glowAG:IsPlaying() then slot.glowAG:Play() end
   end
@@ -2003,16 +2055,28 @@ local OUT_OF_RANGE_COLOR_FALLBACK = { 0.9, 0.25, 0.25, 1 }
 
 -- Forever : isActive inclut le GCD (contrairement a Retail). On le retire via isOnGCD, ou a defaut
 -- via la duree (> 1.5 s = vrai cooldown). Retail : isActive tel quel, inchange.
-local function CDInfoIsRealCD(cd)
+-- En combat, ces champs peuvent etre des valeurs secretes (illisibles) : la lecture echouait et le sort etait alors
+-- declare "disponible" pendant tout son cooldown (pas de swipe, pas de grisage). Dans ce cas, c'est la preuve par
+-- prediction (cast observe + duree connue, cf. HasRealCDEvidence) qui tranche ; `sid` la rend possible.
+local HasRealCDEvidence   -- definie plus bas (depend de variables declarees apres)
+local function CDInfoIsRealCD(cd, sid)
   if not cd then return false end
   if not ns.IsForever then return cd.isActive end
-  local ok, res = pcall(function()
-    if not cd.isActive then return false end
-    if cd.isOnGCD ~= nil then return not cd.isOnGCD end
+  local function Secret(v) return issecretvalue and issecretvalue(v) end
+  local state    -- true / false, ou nil si indeterminable
+  pcall(function()
+    local a = cd.isActive
+    if Secret(a) then return end
+    if not a then state = false; return end
+    local g = cd.isOnGCD
+    if g ~= nil and not Secret(g) then state = not g; return end
     local d = cd.duration
-    return type(d) == "number" and d > 1.5
+    if type(d) == "number" and not Secret(d) then state = d > 1.5 end
   end)
-  return ok and res or false
+  if state == nil then
+    return (sid and HasRealCDEvidence and HasRealCDEvidence(sid)) and true or false
+  end
+  return state
 end
 
 -- Retail : isOnGCD natif (booleen) du cooldown actif. true = c'est le GCD, false = vrai cooldown du
@@ -2074,7 +2138,7 @@ end
 -- ternirait d'un coup toutes les icones a cooldown pourtant disponibles.
 local GCD_CAST_WINDOW = 2  -- secondes ; le GCD plafonne a 1,5 s, le reste est une marge
 
-local function HasRealCDEvidence(sid)
+HasRealCDEvidence = function(sid)
   if not sid then return false end
   local base = overrideToBase[sid] or sid
 
@@ -2246,7 +2310,7 @@ local function UpdateSlotExtras(slot)
         if not spellCD and baseID and baseID ~= curID then
           spellCD = C_Spell.GetSpellCooldown(baseID)
         end
-        isRealCD = CDInfoIsRealCD(spellCD)
+        isRealCD = CDInfoIsRealCD(spellCD, curID)
         nativeOnGCD = CDInfoNativeOnGCD(spellCD)
       end
 
@@ -2365,7 +2429,7 @@ local function UpdateSlotExtras(slot)
                 -- lecture, faite ici. isActive se teste, contrairement a duration.
                 local okCD, cdI = pcall(C_Spell.GetSpellCooldown, chargeSid)
                 if okCD and cdI then
-                  zero = CDInfoIsRealCD(cdI) and true or false
+                  zero = CDInfoIsRealCD(cdI, chargeSid) and true or false
                 end
               end
               -- 1 est ici un simple "il reste des charges" : seul le test == 0 compte plus bas.
@@ -2510,42 +2574,52 @@ local function UpdateSlotExtras(slot)
   end
 end
 
+-- Les slots portent des boutons securises : Show()/Hide() sont interdits en combat (ADDON_ACTION_BLOCKED).
+-- En combat on joue donc sur l'opacite, et le vrai Show/Hide est rattrape a la passe suivante hors combat.
+local function SlotHide(slot)
+  if InCombatLockdown() then slot:SetAlpha(0) else slot:SetAlpha(1); slot:Hide() end
+end
+local function SlotShow(slot)
+  slot:SetAlpha(1)
+  if not InCombatLockdown() then slot:Show() end
+end
+
 -- Mise a jour d'un slot : icone + glow
-local function UpdateSlot(slot, glowedSpells)
+local function UpdateSlot(slot, glowedSpells, procAllowed)
   if not slot or not slot.spellIDs or #slot.spellIDs == 0 then
     -- Emplacement vide en apercu (GUI ouvert / grimoire ouvert) : le placeholder doit rester affiche, c'est la
     -- cible du glisser-deposer. Avant, cette passe le recachait aussitot.
     if slot and slot._placeholder then return end
     -- Slot vide : cacher la frame entière (pas seulement la texture)
-    if slot and slot:IsShown() then slot:Hide(); slot._hidden = true end
+    if slot and slot:IsShown() then SlotHide(slot); slot._hidden = true end
     return
   end
 
   -- Hide unlearned via learnedSpells cache (jamais IsPlayerSpell direct, secret boolean en combat) ; fail-open si cache vide
   local cfg = ns.GetCfg("priorityBar") or {}
-  if cfg.hideUnlearned and not PBEdit.on and next(learnedSpells) ~= nil then
+  if cfg.hideUnlearned and not PBEdit.on and learnedBuilt then
     local anyKnown = false
     for _, sid in ipairs(slot.spellIDs) do
       if learnedSpells[sid] then anyKnown = true; break end
     end
     if not anyKnown then
-      slot:Hide()
+      SlotHide(slot)
       slot._hidden = true
       return
     elseif slot._hidden then
       slot._hidden = false
-      slot:Show()
+      SlotShow(slot)
     end
   elseif slot._hidden then
     slot._hidden = false
-    slot:Show()
+    SlotShow(slot)
   end
 
   local highlightedID = FindHighlightedSpell(slot, glowedSpells)
 
   -- Sort par défaut : premier sort appris de la liste (fallback spellIDs[1] si cache vide), résout l'override pour l'icône live
   local defaultID = nil
-  local cacheReady = next(learnedSpells) ~= nil
+  local cacheReady = learnedBuilt
   for _, sid in ipairs(slot.spellIDs) do
     if not cacheReady or learnedSpells[sid] then
       defaultID = sid
@@ -2626,9 +2700,15 @@ local function UpdateSlot(slot, glowedSpells)
 
   -- Glow : on/off
   if highlightedID then
-    StartSlotGlow(slot)
+    StartSlotGlow(slot, "rot")
   else
-    StopSlotGlow(slot)
+    -- Surbrillance de proc : seulement sur le sort affiche, jamais sur un sort cache du slot
+    local procOn = false
+    if procAllowed and slot.currentSpellID then
+      local sid = slot.currentSpellID
+      procOn = SpellIsOverlayed(sid) or SpellIsOverlayed(overrideToBase[sid] or sid)
+    end
+    if procOn then StartSlotGlow(slot, "proc") else StopSlotGlow(slot) end
   end
 
   -- Cooldown, charges, desaturation
@@ -2679,7 +2759,7 @@ local function ScanLiveSwipeState()
       local okCD, cd     = pcall(C_Spell.GetSpellCooldown, sid)
       local okDur, durObj = pcall(C_Spell.GetSpellCooldownDuration, sid)
       local entry = {
-        isActive = (okCD and CDInfoIsRealCD(cd)) or false,
+        isActive = (okCD and CDInfoIsRealCD(cd, sid)) or false,
         onGCD    = okCD and CDInfoNativeOnGCD(cd) or nil,
         durObj   = (okDur and durObj) or nil,
       }
@@ -2718,9 +2798,10 @@ local function PollSlots()
   end
   -- ScanCooldownViewer() tourne sur son propre ticker isole (voir StartPolling)
   local glowedSpells = CollectGlowedSpells()
+  local procAllowed = ProcGlowAllowed()
   for i = 1, MAX_SLOTS do
     if slotFrames[i] and slotFrames[i]:IsShown() then
-      UpdateSlot(slotFrames[i], glowedSpells)
+      UpdateSlot(slotFrames[i], glowedSpells, procAllowed)
     end
   end
 end
@@ -3048,7 +3129,7 @@ local function BuildSlotMacro(slot, startAt)
   -- sort affiche au moment du calcul se figeait des l'entree en combat (SetAttribute est interdit) et le
   -- clic lancait alors un autre sort que celui montre. Les sorts non appris sont ecartes (cache des sorts
   -- appris) et chaque ligne porte [known:...] : jamais de /cast sur un sort que le joueur n'a pas.
-  local cacheReady = next(learnedSpells) ~= nil
+  local cacheReady = learnedBuilt
   local list = {}
   for _, sid in ipairs(ids) do
     if not cacheReady or learnedSpells[sid] then list[#list + 1] = sid end
@@ -3369,6 +3450,8 @@ local BOOK_GLOW_ATLASES = { "pvpscoreboard-header-glow" }
 local BOOK_SHADOW1 = { -90, 25, 90, -70 }
 local BOOK_SHADOW2 = { -55, 5, 55, -50 }
 local BOOK_SLIDE = 24
+-- Opacite des deux ombres du fond, en fraction de leur valeur de base (80 % : le parchemin reste lisible dessous)
+local BOOK_SHADOW_OPACITY = 0.8
 local BOOK_DELAY_GLOW, BOOK_DELAY_TITLE = 0.12, 0.28
 
 local function BookElemProgress(p, delay)
@@ -3380,7 +3463,7 @@ end
 local function ApplyBookAnim(b, p)
   local es = BookElemProgress(p, 0)
   local k = 0.35 + 0.65 * es
-  b.shadow:SetAlpha(es); b.shadow2:SetAlpha(es)
+  b.shadow:SetAlpha(es * BOOK_SHADOW_OPACITY); b.shadow2:SetAlpha(es * BOOK_SHADOW_OPACITY)
   b.shadow:ClearAllPoints()
   b.shadow:SetPoint("TOPLEFT", b, "TOPLEFT", BOOK_SHADOW1[1] * k, BOOK_SHADOW1[2] * k)
   b.shadow:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", BOOK_SHADOW1[3] * k, BOOK_SHADOW1[4] * k)

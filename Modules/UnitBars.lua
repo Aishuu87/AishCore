@@ -11,6 +11,19 @@ ns.Modules.UnitBars = UnitBars
 local function BarTex()
     return ns.ResolveBarTexFromKey((ns.GetCfg("unitBars") or {}).barTexture)
 end
+
+-- Texture du FOND de la barre (bgTex). Par defaut la meme que le remplissage : en mode par defaut (couleurs inversees) la
+-- partie coloree EST le fond, la texture choisie doit donc la recouvrir et pas seulement le remplissage sombre.
+local function BgTexPath()
+    local db = ns.GetCfg("unitBars") or {}
+    return ns.ResolveBarTexFromKey(db.bgTexture or db.barTexture)
+end
+
+-- Peint le fond : texture + teinte (a la place d'un aplat SetColorTexture, qui ignorerait toute texture)
+local function PaintBg(tex, c)
+    tex:SetTexture(BgTexPath())
+    tex:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
+end
 local DEFAULT_FONT   = ns.FONT_FALLBACK  -- police du jeu (2002), aucune media pack requise
 -- Couleur "noire" commune (#0e0e0e)
 local DARK         = 14/255
@@ -45,6 +58,8 @@ local function UpdateTankSpec()
     if not idx or idx == 0 then return false end
     local ok, specID = pcall(GetSpecializationInfo, idx)
     if not ok or not specID or specID == 0 then return false end
+    -- spe issue de la seule "spe par defaut" des couleurs : ce n'est pas une vraie spe tank
+    if ns.IsSpecDefaulted and ns.IsSpecDefaulted() then inTankSpec = false; return true end
     inTankSpec = TANK_SPECS[specID] or false
     return true
 end
@@ -106,6 +121,7 @@ local BAR_DEFS = {
         unit      = "player",
         dotsLeft  = true,   -- dots à gauche de la barre
         showText  = true,   -- affiche le % PV
+        nameJustify = "RIGHT",   -- nom au survol (option showPlayerNameHover) : aligne a droite, en miroir de la barre de cible
         defaults  = {
             enabled   = true,
             width     = 200,
@@ -181,6 +197,7 @@ local ubFadeTickers         = {}     -- key → ticker de fade par barre
 local ubPosPending          = {}     -- key → frame dont le snap de position finale a ete saute (combat lockdown)
 local ubLastVisState        = {}     -- key → dernier état de visibilité (true/false)
 local ubHovered             = {}     -- key → true si le curseur est dans la zone tolérante
+local playerNameShown        = false  -- nom du personnage affiche au survol de sa barre (option showPlayerNameHover, hors combat)
 local ubHiddenForSkyriding  = false  -- masquées pour le skyriding
 local ubHiddenForGui        = false  -- onglet Animations 3D : tout masqué
 local ubPreviewMode         = false  -- panneau settings ouvert → forcer affichage
@@ -191,6 +208,18 @@ local inPetBattle           = false
 local function Cfg(key)
     local db = ns.GetCfg("unitBars")
     return db and db.bars and db.bars[key] or {}
+end
+
+-- Nom du joueur (au survol de sa barre) : une seule fois, meme decalage que le nom de la barre de cible, en miroir
+-- (le nom de la cible est decale de X vers la droite pour laisser la place au texte de PV ; celui du joueur, aligne a
+-- droite, de -X vers la gauche). Ne touche pas a un decalage deja regle a la main (different de 0).
+local function EnsurePlayerNameOffset()
+    local db = ns.GetCfg("unitBars")
+    if not db or db.playerNameOffsetDone then return end
+    db.playerNameOffsetDone = true
+    local p = db.bars and db.bars.player
+    local t = db.bars and db.bars.target
+    if p and (p.nameOffX or 0) == 0 then p.nameOffX = -((t and t.nameOffX) or 0) end
 end
 
 -- Tolerance de survol : la zone deborde la frame de `tol` px de chaque cote. Test maison
@@ -216,7 +245,20 @@ end
 -- PNJ / services (reparation...) : ID de monture (Journal des montures), cf. wowhead.com/mount/<ID>.
 local NO_TOL_MOUNTS = { 2237, 1039, 2982 }
 local noTolMount = false
+-- Vehicule, mini-jeu (barre de vehicule / barre de remplacement / possession) ou combat de mascottes : pas de zone
+-- elargie non plus, elle gene le clic sur les elements de l'interface propre a ces modes.
+local function InVehicleOrMinigame()
+    if C_PetBattles and C_PetBattles.IsInBattle and C_PetBattles.IsInBattle() then return true end
+    if UnitInVehicle and UnitInVehicle("player") then return true end
+    if UnitHasVehicleUI and UnitHasVehicleUI("player") then return true end
+    if HasVehicleActionBar and HasVehicleActionBar() then return true end
+    if HasOverrideActionBar and HasOverrideActionBar() then return true end
+    if IsPossessBarVisible and IsPossessBarVisible() then return true end
+    return false
+end
+
 local function ComputeNoTolMount()
+    if InVehicleOrMinigame() then return true end
     if _G.VehicleSeatIndicator and _G.VehicleSeatIndicator:IsShown() then return true end
     if IsMounted() and C_MountJournal and C_MountJournal.GetMountInfoByID then
         for _, id in ipairs(NO_TOL_MOUNTS) do
@@ -379,6 +421,19 @@ end
 local function GetBgColor()
     local db = ns.GetCfg("unitBars")
     return db and db.bgColor or DEFAULT_BG
+end
+
+-- Couleurs thematiques (defaut) : couleurs du module Couleurs (classe / "PV du Familier"...). Decoche : couleur des barres
+-- (barColor) et couleur de l'arriere plan (bgColor) choisies dans les reglages, pour toutes les barres.
+local function IsThemedColors()
+    local db = ns.GetCfg("unitBars")
+    return not db or db.themedColors ~= false
+end
+
+-- Le "noir" des barres (remplissage en mode inverse, filet, 3e dot) : suit la couleur de l'arriere plan hors couleurs thematiques
+local function GetDarkColor()
+    if IsThemedColors() then return DEFAULT_BG end
+    return GetBgColor()
 end
 
 -- Hauteur effective d'une barre : tankHeight si spé tank + option activée
@@ -628,14 +683,15 @@ local function CreateUnitBar(def)
     end
 
     -- Couleurs initiales (UpdateBarColor appliquera le bon mode)
-    bgTex:SetColorTexture(bg[1], bg[2], bg[3], bg[4] or 1)
-    sb:SetStatusBarColor(DARK, DARK, DARK, 1)
+    PaintBg(bgTex, bg)
+    do local dk = GetDarkColor(); sb:SetStatusBarColor(dk[1], dk[2], dk[3], dk[4] or 1) end
 
     -- Filet de bordure (1px noir autour de la barre, sublevel 0 = derrière bgTex)
     local border = frame:CreateTexture(nil, "BACKGROUND", nil, 0)
     border:SetPoint("TOPLEFT",     bgTex, "TOPLEFT",     -1,  1)
     border:SetPoint("BOTTOMRIGHT", bgTex, "BOTTOMRIGHT",  1, -1)
-    border:SetColorTexture(DARK, DARK, DARK, 1)
+    do local dk = GetDarkColor(); border:SetColorTexture(dk[1], dk[2], dk[3], dk[4] or 1) end
+    frame.border = border
 
     -- Glow au survol : BackdropTemplate + GlowTex.tga (même technique qu'ElvUI)
     local GLOW_TEX  = "Interface\\AddOns\\AishCore\\Media\\UI\\GlowTex.tga"
@@ -654,7 +710,7 @@ local function CreateUnitBar(def)
     -- Trois dots décoratifs (absents pour targettarget)
     if not def.noDots then
         local fc_dot     = cfg.fillColor or def.defaults.fillColor
-        local dotColors  = { fc_dot, fc_dot, { DARK, DARK, DARK, 1 } }
+        local dotColors  = { fc_dot, fc_dot, GetDarkColor() }
         local dotYCenter = frameH / 2
 
         for i = 1, 3 do
@@ -728,7 +784,8 @@ local function CreateUnitBar(def)
     end)
 
     -- Texte de nom d'unité (target, focus, pet, targettarget)
-    if def.showName then
+    if def.showName or def.key == "player" then
+        if def.key == "player" then EnsurePlayerNameOffset() end
         local db      = ns.GetCfg("unitBars")
         local cfg2    = Cfg(def.key)
         local nSize   = (db and db.nameSize)     or 14
@@ -747,6 +804,13 @@ local function CreateUnitBar(def)
         nameTxt:SetPoint(anchorS, bgTex, anchorA, nOffX, nOffY)
         nameTxt:SetText("")
         frame.nameTxt = nameTxt
+        -- Forever : icone de satisfaction du familier (chasseur), a gauche du nom (cf. UpdatePetHappiness)
+        if ns.IsForever and def.key == "pet" then
+            local ic = frame:CreateTexture(nil, "OVERLAY")
+            ic:SetPoint("RIGHT", nameTxt, "LEFT", -3, 2)
+            ic:Hide()
+            frame.happyIcon = ic
+        end
         frame._nameAnchorS, frame._nameAnchorA = anchorS, anchorA
         frame._nameOffX, frame._nameOffY = nOffX, nOffY
     end
@@ -887,14 +951,22 @@ local function UpdateBarColor(frame)
         dc = CLR.Get("petdots")
     end
 
+    -- Hors couleurs thematiques : couleur des barres unique (remplissage, dots, textes) ; le "noir" suit l'arriere plan
+    if not IsThemedColors() then
+        local ubdb = ns.GetCfg("unitBars")
+        local bc = ubdb and ubdb.barColor or fc
+        fc, dc = bc, bc
+    end
+    local dark = GetDarkColor()
+
     if IsReversed() then
         -- Mode classique : fond sombre, fill coloré
-        frame.bgTex:SetColorTexture(bg[1], bg[2], bg[3], bg[4] or 1)
+        PaintBg(frame.bgTex, bg)
         frame.bar:SetStatusBarColor(fc[1], fc[2], fc[3], fc[4] or 1)
     else
         -- Mode inversé (défaut) : fond coloré, fill noir
-        frame.bgTex:SetColorTexture(fc[1], fc[2], fc[3], fc[4] or 1)
-        frame.bar:SetStatusBarColor(DARK, DARK, DARK, 1)
+        PaintBg(frame.bgTex, fc)
+        frame.bar:SetStatusBarColor(dark[1], dark[2], dark[3], dark[4] or 1)
     end
 
     -- Couleur des petits dots (1 et 2) = dc, dot 3 reste noir
@@ -904,8 +976,9 @@ local function UpdateBarColor(frame)
                 frame["dot" .. i]:SetVertexColor(dc[1], dc[2], dc[3], 1)
             end
         end
-        if frame.dot3 then frame.dot3:SetVertexColor(DARK, DARK, DARK, 1) end
+        if frame.dot3 then frame.dot3:SetVertexColor(dark[1], dark[2], dark[3], 1) end
     end
+    if frame.border then frame.border:SetColorTexture(dark[1], dark[2], dark[3], dark[4] or 1) end
     -- Couleur du texte = fill color
     if frame.hpText then
         frame.hpText:SetTextColor(fc[1], fc[2], fc[3], 1)
@@ -920,11 +993,79 @@ local function UpdateBarColor(frame)
     end
 end
 
+-- Forever : satisfaction du familier du chasseur (C_PetInfo.GetPetHappiness : 1 = mecontent, 2 = content, 3 = heureux).
+-- Une seule texture (la patte de familier capturable) teintee selon l'etat ; repli sur les visages Blizzard si l'atlas manque.
+local HAPPINESS_ICON  = "WildBattlePetCapturable"
+local HAPPINESS_COLOR = { [1] = { 0.90, 0.20, 0.20 }, [2] = { 1.00, 0.85, 0.10 }, [3] = { 0.20, 0.90, 0.20 } }
+local HAPPINESS_FACE  = { [1] = "UI-PetMad", [2] = "UI-PetNeutral", [3] = "UI-PetHappiness" }
+local function UpdatePetHappiness(frame)
+    local ic = frame.happyIcon
+    if not ic then return end
+    local level
+    if UnitExists("pet") then
+        -- seuls les familiers de chasseur ont une satisfaction (HasPetUI : 2e retour = familier de chasseur)
+        if HasPetUI and C_PetInfo and C_PetInfo.GetPetHappiness then
+            local _, isHunterPet = HasPetUI()
+            if isHunterPet then level = C_PetInfo.GetPetHappiness() end
+        end
+    elseif ubPreviewMode then
+        level = 3
+    end
+    local color = level and HAPPINESS_COLOR[level]
+    if not color then ic:Hide(); return end
+    local size = ((ns.GetCfg("unitBars") or {}).nameSize or 14) + 4
+    ic:SetSize(size, size)
+    if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(HAPPINESS_ICON) then
+        ic:SetAtlas(HAPPINESS_ICON)
+        ic:SetVertexColor(color[1], color[2], color[3], 1)
+    else
+        ic:SetAtlas(HAPPINESS_FACE[level])
+        ic:SetVertexColor(1, 1, 1, 1)
+    end
+    ic:Show()
+end
+
+-- Niveau devant le nom de la barre de cible, comme la Top Target Bar ("7 • Nom", niveau colore selon la difficulte du mob)
+local function SetTargetNameWithLevel(frame, rawName, preview)
+    local TTB = ns.Modules and ns.Modules.TopTargetBar
+    if not (TTB and TTB.GetLevelColor and TTB.GetLevelPrefix) then return false end
+    local ok = pcall(function()
+        local lc, pfx
+        if preview then
+            lc, pfx = { 1.000, 0.000, 0.133 }, "90 \226\128\162 "
+        else
+            lc, pfx = TTB.GetLevelColor("target"), TTB.GetLevelPrefix("target")
+        end
+        -- string.format %s : seul moyen de composer avec une chaine secrete (concatener echoue)
+        frame.nameTxt:SetText(string.format("|cff%02x%02x%02x%s|r%s",
+            math.floor(lc[1] * 255), math.floor(lc[2] * 255), math.floor(lc[3] * 255), pfx, rawName or ""))
+        -- l'anneau SLUG recopie le texte : version sans couleur, sinon il peindrait le niveau a la place du contour noir
+        ns.SetSlugRingText(frame.nameTxtSlug, string.format("%s%s", pfx, rawName or ""))
+    end)
+    return ok
+end
+
 -- Mise à jour du nom d'unité
 local function UpdateBarName(frame)
     if not frame.nameTxt then return end
+    UpdatePetHappiness(frame)
     local unit = frame.unit
+    -- Barre du joueur : le nom n'apparait qu'au survol, hors combat (ticker plus bas)
+    if frame._def.key == "player" then
+        local shown = playerNameShown and UnitExists(unit)
+        local rawName
+        if shown then
+            -- Forever : le nom de famille est porte par la partie "royaume" du nom complet (Prenom-Famille)
+            local nm, fam = UnitFullName(unit)
+            rawName = nm or UnitName(unit)
+            if ns.IsForever and rawName and fam and fam ~= "" then rawName = rawName .. " " .. fam end
+        end
+        frame.nameTxt:SetText(rawName or "")
+        return
+    end
+    local withLevel = frame._def.key == "target" and (ns.GetCfg("unitBars") or {}).showTargetLevel == true
     if UnitExists(unit) then
+        if withLevel and SetTargetNameWithLevel(frame, (UnitName(unit))) then return end   -- parentheses : UnitName renvoie aussi le "royaume" (nom de famille sur Forever), qui serait pris pour l'argument `preview`
         -- Détainter UnitName (secret string en instance/raid) via concaténation avant SetText
         local rawName = UnitName(unit)
         frame.nameTxt:SetText((rawName and ("" .. rawName)) or "")
@@ -936,6 +1077,7 @@ local function UpdateBarName(frame)
             focus        = L["UNITBARS_PREVIEW_FOCUS"],
             pet          = L["UNITBARS_PREVIEW_PET"],
         }
+        if withLevel and SetTargetNameWithLevel(frame, PREVIEW_NAMES[unit] or (unit .. " Name"), true) then return end
         frame.nameTxt:SetText(PREVIEW_NAMES[unit] or (unit .. " Name"))
     else
         frame.nameTxt:SetText("")
@@ -1043,7 +1185,7 @@ local function ApplyBarSettings(frame)
             elseif def.key == "pet" and CLR2 then
                 fc_dot = CLR2.Get("petdots")
             end
-            local dotColors  = { fc_dot, fc_dot, { DARK, DARK, DARK, 1 } }
+            local dotColors  = { fc_dot, fc_dot, GetDarkColor() }
             local dotYCenter = frameH / 2
             for i = 1, 3 do
                 local d  = frame["dot" .. i]
@@ -1361,7 +1503,10 @@ end
 -- Interface publique
 function UnitBars.ApplySettings()
     for _, frame in pairs(bars) do
-        ApplyBarSettings(frame)
+        ApplyBarSettings(frame)   -- en combat : differe (tailles / positions), voir pendingSettingsApply
+        -- Les couleurs, elles, n'ont rien de protege : on les applique tout de suite, sinon un changement de couleur en
+        -- plein combat (condition Furtivite des couleurs thematiques, par exemple) attendait la fin du combat
+        if InCombatLockdown() then pcall(UpdateBarColor, frame) end
     end
     UnitBars.NotifyPlayerBarMoved()
 end
@@ -1519,6 +1664,7 @@ eventFrame:RegisterUnitEvent("UNIT_NAME_UPDATE",              "target", "focus",
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 eventFrame:RegisterEvent("PLAYER_FOCUS_CHANGED")
 eventFrame:RegisterEvent("UNIT_PET")
+if ns.IsForever then pcall(eventFrame.RegisterUnitEvent, eventFrame, "UNIT_HAPPINESS", "pet") end
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -1721,6 +1867,12 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
 
+    if event == "UNIT_HAPPINESS" then
+        local f = bars.pet
+        if f then UpdatePetHappiness(f) end
+        return
+    end
+
     -- Nom du pet/cible parfois "Unknown" à l'invocation : rafraîchir quand le nom est chargé
     if event == "UNIT_NAME_UPDATE" then
         local k = UNIT_KEY[arg1]
@@ -1842,6 +1994,40 @@ C_Timer.NewTicker(0.05, function()
     if changed and reveal then UnitBars.UpdateAllVisibility() end
 end)
 
+
+-- Nom du personnage au survol de sa barre de vie (option showPlayerNameHover), jamais en combat. Meme zone de survol que
+-- la reveal "Au survol" (tolerance comprise).
+C_Timer.NewTicker(0.1, function()
+    local f = bars.player
+    if not f then return end
+    local db = ns.GetCfg("unitBars")
+    local want = false
+    if db and db.showPlayerNameHover == true and not InCombatLockdown() and f:GetAlpha() > 0.05 then
+        want = IsBarHovered(f, EffectiveHoverTol())
+    end
+    if want ~= playerNameShown then
+        playerNameShown = want
+        UpdateBarName(f)
+    end
+end)
+
+-- Forever : survol de la barre du familier -> la barre d'xp passe sur le familier (niveau, xp, loyaute). Detection par
+-- position du curseur, zone tolerante comprise (meme zone que la reveal "Au survol"), et non par OnEnter / OnLeave : la
+-- zone elargie est un autre cadre, et passer de l'un a l'autre ferait clignoter l'affichage.
+local petHoverOn = false
+C_Timer.NewTicker(0.1, function()
+    if not ns.IsForever then return end
+    local f = bars.pet
+    local hovered = false
+    if f and f:GetAlpha() > 0.05 and UnitExists("pet") then
+        hovered = IsBarHovered(f, EffectiveHoverTol())
+    end
+    if hovered ~= petHoverOn then
+        petHoverOn = hovered
+        local XPB = ns.Modules and ns.Modules.XPBar
+        if XPB and XPB.SetPetHover then XPB.SetPetHover(hovered) end
+    end
+end)
 
 -- Ticker 0.5s : targettarget + texte HP% target + masquage si unité disparue
 C_Timer.NewTicker(0.5, function()

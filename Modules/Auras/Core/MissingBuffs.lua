@@ -524,7 +524,8 @@ end
 local function ChoicesFromEntry(entry, targetUnit)
     local out = {}
     if entry.kind then
-        out[1] = { icon = entry.icon }
+        -- key = cle de combo fictive (munitions / fragments faibles) : permet une Animation 3D
+        out[1] = { icon = entry.icon, key = entry.pseudoKey }
         return out
     end
     local useTarget = (entry.clickingUsesTarget and targetUnit and targetUnit ~= "player") and true or false
@@ -620,6 +621,31 @@ local function HasHunterLoneWolfTalent()
     return ok and known == true
 end
 
+-- Chasseur : un familier est-il appelable ? Le sort "Appel du familier" s'apprend avant d'avoir apprivoise quoi que ce
+-- soit (niveau 10) : tant qu'aucun familier n'existe, l'alerte n'a pas lieu d'etre. Les API de l'ecurie (retail :
+-- C_StableInfo, classic : GetStablePetInfo) ne repondent pas forcement hors de l'ecurie, on memorise donc par personnage
+-- (AishUILearnDB.hunterHadPet) qu'un familier a deja ete vu ou liste.
+local function HunterHasCallablePet()
+    AishUILearnDB = AishUILearnDB or { learnedDurations = {}, verbose = false }
+    local db = AishUILearnDB
+    if db.hunterHadPet then return true end
+    local found = UnitExists("pet") and true or false
+    if not found and C_StableInfo and C_StableInfo.GetStablePetInfo then
+        for i = 1, 5 do
+            local ok, info = pcall(C_StableInfo.GetStablePetInfo, i)
+            if ok and info then found = true; break end
+        end
+    end
+    if not found and GetStablePetInfo then
+        for i = 0, 10 do
+            local ok, icon, name = pcall(GetStablePetInfo, i)
+            if ok and (icon or name) then found = true; break end
+        end
+    end
+    if found then db.hunterHadPet = true end
+    return found
+end
+
 -- Renvoie (choix, cle de texte) ou nil : familier a ressusciter, ou tous les familiers/demons invocables.
 local function CheckPetMissing(class)
     if class == "HUNTER" and HasHunterLoneWolfTalent() then
@@ -637,6 +663,9 @@ local function CheckPetMissing(class)
     if class == "WARLOCK" and HasSacrificedPetForGrimoire() then
         return nil
     end
+    if class == "HUNTER" and not HunterHasCallablePet() then
+        return nil
+    end
     local list = (class == "HUNTER") and ns.MISSING_HUNTER_ALL_PETS or ns.MISSING_WARLOCK_ALL_PETS
     local choices = GroupChoices(list)
     if #choices == 0 then return nil end -- aucun familier invocable (bas niveau)
@@ -644,7 +673,21 @@ local function CheckPetMissing(class)
 end
 
 -- Applicabilite d'une entree (spe / combat / ignoree par l'utilisateur)
+-- Le joueur connait-il ce sort, a n'importe quel rang ? Un rang plus eleve remplace le precedent dans le livre de sorts :
+-- l'ID du rang 1 n'est alors plus "connu", on passe donc par le nom pour retrouver le rang actuel.
+local function KnowsSpellAnyRank(spellId)
+    local function known(id)
+        return (IsPlayerSpell and IsPlayerSpell(id)) or (IsSpellKnown and IsSpellKnown(id))
+            or (C_SpellBook and C_SpellBook.IsSpellKnown and select(2, pcall(C_SpellBook.IsSpellKnown, id))) or false
+    end
+    if known(spellId) then return true end
+    local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellId)
+    local id = name and KnownSpellByName(name)
+    return id and known(id) or false
+end
+
 local function EntryApplies(entry)
+    if entry.requiresSpell and not KnowsSpellAnyRank(entry.requiresSpell) then return false end
     if entry.specIds then
         local specID = _addon._specID
         if not specID then return false end
@@ -862,6 +905,16 @@ local function BuildAppearAnimGroup()
         -- Ne relance le rebond/pulse/clignotement qu'une fois le slide-in fini, jamais en meme
         -- temps -- sinon 2 Translation simultanees (parent+enfant) se perturbent et le texte derive.
         ApplyTextAnimations(Cfg())
+        -- Apres un /reload, l'alerte peut apparaitre alors que la geometrie (icones, echelle de l'interface) n'est pas
+        -- finale : l'animation 3D, creee a ce moment, restait decalee / mal dimensionnee par rapport a l'icone.
+        -- Une fois le slide-in termine tout est en place : on la recree, ancree sur l'icone definitive.
+        local SE = _addon.Modules and _addon.Modules.SpellEffects
+        if SE then
+            pcall(function()
+                if SE.ResetMissingBuffCombos then SE.ResetMissingBuffCombos() end
+                if SE.ScanMissingBuffCombos then SE.ScanMissingBuffCombos() end
+            end)
+        end
     end)
     return group
 end
@@ -1060,6 +1113,16 @@ local function PositionFrameIfNeeded()
         frame:SetPoint("CENTER", UIParent, "CENTER", 0, 250)
     end
     frame._positioned = true
+end
+
+-- Cadre de l'alerte cree et place meme sans buff manquant (cadres de reperage de la page Modules, cf.
+-- UI/ModuleHoverOverlay.lua) : il reste cache, seule sa position compte. Hors combat uniquement (bouton securise).
+function MissingBuffs.PrepareHoverAnchor()
+    if not InCombatLockdown() then
+        EnsureFrame()
+        PositionFrameIfNeeded()
+    end
+    return frame
 end
 
 -- Notifie immediatement Modules/SpellEffects.lua (combos "Buffs manquants") du changement d'etat
@@ -1349,6 +1412,11 @@ function MissingBuffs.SetPreview(on, spellId)
                 ns.MISSING_TEXT.PET_PASSIVE)
             return
         end
+        if resolvedId == ns.MISSING_PET_UNHAPPY_KEY then
+            MissingBuffs.ShowAlertChoices({ { key = resolvedId, icon = ns.MISSING_PET_UNHAPPY_ICON } },
+                ns.MISSING_TEXT.PET_UNHAPPY)
+            return
+        end
         if not resolvedId then
             local class = _addon._playerClass or select(2, UnitClass("player"))
             local list = class and ns.MISSING_CLASS_BUFFS[class]
@@ -1557,6 +1625,22 @@ local function PetIsPassive()
 end
 local PASSIVE_ICON = ns.MISSING_PET_PASSIVE_ICON
 
+-- Forever : familier de chasseur mecontent (satisfaction au plus bas)
+local UNHAPPY_ICON = ns.MISSING_PET_UNHAPPY_ICON
+local function PetIsUnhappy()
+    if not _addon.IsForever then return false end
+    if MissingBuffs.IsIgnored(ns.MISSING_PET_UNHAPPY_SETTINGS_ID) then return false end
+    if not (UnitExists("pet") and not UnitIsDead("pet") and HasPetUI and C_PetInfo and C_PetInfo.GetPetHappiness) then
+        return false
+    end
+    local ok, level = pcall(function()
+        local _, isHunterPet = HasPetUI()
+        if not isHunterPet then return nil end
+        return C_PetInfo.GetPetHappiness()
+    end)
+    return ok and level == 1
+end
+
 -- Appelee en combat (evenements + ticker). Renvoie true si une alerte familier est en place (le
 -- frame principal ne doit alors pas etre masque).
 function MissingBuffs.CheckPetInCombat()
@@ -1577,6 +1661,9 @@ function MissingBuffs.CheckPetInCombat()
     elseif PetIsPassive() then
         choices = { { key = ns.MISSING_PET_PASSIVE_KEY, icon = PASSIVE_ICON } }
         text = ns.MISSING_TEXT.PET_PASSIVE
+    elseif PetIsUnhappy() then
+        choices = { { key = ns.MISSING_PET_UNHAPPY_KEY, icon = UNHAPPY_ICON } }
+        text = ns.MISSING_TEXT.PET_UNHAPPY
     end
     if not choices then MissingBuffs.HideCombatPet(); return false end
 
@@ -1752,6 +1839,13 @@ function MissingBuffs.CheckForMissings()
                 ns.MISSING_TEXT.PET_PASSIVE)
             return
         end
+    end
+
+    -- 3b') Familier mecontent (Forever, Chasseur) : a nourrir
+    if not flying and class == "HUNTER" and not cfg.ignoreHunterPets and PetIsUnhappy() then
+        MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_PET_UNHAPPY_KEY, icon = UNHAPPY_ICON } },
+            ns.MISSING_TEXT.PET_UNHAPPY)
+        return
     end
 
     -- 3c) Pierre de soins / pierre d'ame (Demoniste)
@@ -1940,6 +2034,8 @@ function MissingBuffs.Init()
     -- empeche de tout recast en un seul clic (limite de l'API, pas un choix
     -- d'implementation), mais on avance vite au buff suivant a chaque clic.
     pcall(eventFrame.RegisterUnitEvent, eventFrame, "UNIT_SPELLCAST_SUCCEEDED", "player")
+    -- Forever : changement de satisfaction du familier (alerte "familier mecontent")
+    if _addon.IsForever then pcall(eventFrame.RegisterUnitEvent, eventFrame, "UNIT_HAPPINESS", "pet") end
     MissingBuffs.RequestCheck()
 
     -- Familier en combat : la mort / le renvoi du familier ne declenche pas toujours d'evenement exploitable
@@ -2040,6 +2136,8 @@ function MissingBuffs.GetTriggerSpells()
     elseif class == "HUNTER" then
         add(ns.MISSING_HUNTER_PET_DEAD)
         add(ns.MISSING_PET_PASSIVE_KEY)
+        if _addon.IsForever then add(ns.MISSING_PET_UNHAPPY_KEY) end
+        if _addon.IsForever then add(ns.MISSING_LOW_AMMO_KEY) end
         for _, o in ipairs(ns.MISSING_HUNTER_ALL_PETS) do addEntry(o) end
         if ns.MISSING_HUNTER_REVIVE_ENTRY then addEntry(ns.MISSING_HUNTER_REVIVE_ENTRY) end
     elseif class == "WARLOCK" then
@@ -2052,6 +2150,7 @@ function MissingBuffs.GetTriggerSpells()
             add(SPELL_SOULSTONE)
         end
         add(ns.MISSING_PET_PASSIVE_KEY)
+        if _addon.IsForever then add(ns.MISSING_LOW_SHARDS_KEY) end
     elseif class == "ROGUE" then
         for _, o in ipairs(ns.MISSING_ROGUE_POISONS.nonlethal) do addEntry(o) end
         for _, o in ipairs(ns.MISSING_ROGUE_POISONS.lethal) do addEntry(o) end

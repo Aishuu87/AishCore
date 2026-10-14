@@ -268,6 +268,7 @@ local function CreateSpellRow(par,sid,info,y,W,onChg,rebuildFn)
     local SW = ns.SharedWidgets
     local Theme = ns.THEME
     local FONT = ns.Media.font
+    if ns.RefreshAutoColor then ns.RefreshAutoColor(info) end   -- couleur thematique a jour (cf. Defaults.lua)
     local sc = info.color or ns.barColor
     local adminMode = ns._adminMode == true
     local row = CreateFrame("Frame",nil,par); row:SetSize(W,28); row:SetPoint("TOPLEFT",0,-y)
@@ -1004,4 +1005,6 @@ SlashCmdList["AISHADMIN"] = function()
         print(P .. "Mode admin desactive.")
     end
     if ns._tacticsBuildFn then pcall(ns._tacticsBuildFn) end
+    -- Listes de la page Animations 3D : lignes "[ext]" visibles seulement en mode admin
+    if _addon.RefreshAnimLists then pcall(_addon.RefreshAnimLists) end
 end

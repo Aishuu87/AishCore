@@ -118,6 +118,7 @@ local function StartCDMBarMode()
     local RC = GetRC()
     if not (RC and RC.centerArcBarProxy and ns.SubscribeCDMAuraBar) then return end
     StopCDMBarMode()
+    if RC.SetCenterArcColor then pcall(RC.SetCenterArcColor, GetArcColor()) end
     _cdmBarActiveSpellID = activeInfo.spellID
     if RC.SetCenterArcColor then pcall(RC.SetCenterArcColor, GetArcColor()) end
     ns.SubscribeCDMAuraBar(activeInfo.spellID, "centerArc", RC.centerArcBarProxy)
@@ -371,9 +372,10 @@ function CenterArc:Update(auras)
     if not activeInfo or not IsEnabled() or activeInfo.isTotem then return end
     -- Hors mode duree, bar.durationArc appartient a AbsorbTick / StackModeTick.
     if IsStackMode() or GetArcMode() ~= "duration" then return end
-    if activeInfo.useCDMBar then return end  -- canal clone-bar event-driven possède bar.durationArc dans ce mode
-    if ns.db and ns.db.useNativeCDM then return end
     local RC = GetRC()
+    -- Canal clone-bar event-driven (ou veilleur de durObj si l'etendue est < 360 deg) : il possède bar.durationArc
+    if activeInfo.useCDMBar then return end
+    if ns.db and ns.db.useNativeCDM then return end
     if not (RC and RC.SetCenterArcEntry) then return end
     if auras and #auras > 0 then
         _arcFirstMissTime = nil
@@ -440,6 +442,13 @@ local function ResolveActiveArc()
     StartCDMBarMode()
 end
 ns.ResyncCenterArc = ResolveActiveArc
+
+-- Apercu du panneau (ResourceCircle.SetPreview) : l'arc de duree de la spec courante, avec sa couleur reelle
+function ns.GetCenterArcPreview()
+    if not activeInfo or not IsEnabled() then return nil end
+    return { color = GetArcColor() or activeInfo.color,
+             vertical = (activeInfo.useCDMBar and GetArcMode() == "duration") and true or false }
+end
 
 local function OnCenterArcEvent(_, event, arg1, arg2, arg3)
 

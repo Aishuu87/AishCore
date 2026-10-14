@@ -323,7 +323,7 @@ local function ApplyGlowConfig()
     local texSize = size * sc + glowSize * 2
     rhLoopFlipTex:ClearAllPoints()
     rhLoopFlipTex:SetSize(texSize, texSize)
-    rhLoopFlipTex:SetPoint("CENTER", rhGlowContainer, "CENTER", 0, 0)
+    rhLoopFlipTex:SetPoint("CENTER", rhGlowContainer, "CENTER", gt.offX or 0, gt.offY or 0)
     rhLoopFlipTex:SetVertexColor(glowColor[1], glowColor[2], glowColor[3], glowColor[4] or 1)
     rhLoopFlipTex:SetBlendMode("ADD")
     rhLoopFlipAnim:SetFlipBookRows(gt.rows or 6)

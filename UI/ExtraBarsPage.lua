@@ -94,22 +94,27 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
 
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_EXTRA_BARS"], W))
 
+  -- Bloc épinglé en haut de la page (reste visible quand on défile) : sélecteur de barre + aperçu
+  local pin = CreateFrame("Frame", nil, container)
+  local PIN_TOP_H = 26
+
   -- Sélecteur de barre (centré) + interrupteur de la barre ------------------------------------------
-  local top = CreateFrame("Frame", nil, container)
-  top:SetSize(W, 26)
+  local top = CreateFrame("Frame", nil, pin)
+  top:SetPoint("TOPLEFT", pin, "TOPLEFT", 0, 0)
+  top:SetPoint("TOPRIGHT", pin, "TOPRIGHT", 0, 0)
+  top:SetHeight(PIN_TOP_H)
   local barDD = SW.CreateDropdown(top, "", {}, 420)
   barDD:SetPoint("CENTER", top, "CENTER", -32, 0)
   local toggle = SW.CreateToggle(top, 54)
   toggle:SetPoint("LEFT", barDD, "RIGHT", 12, 0)
   barDD.onChanged = function(v) ns._extraBarsSelected = tonumber(v) or 1; RefreshAll() end
   Bind(toggle, "enabled", "bool")
-  ctx:Spacer(4)
-  ctx:Add(top)
 
   -- Aperçu ---------------------------------------------------------------------------------------
-  ctx:Spacer(8)
-  local preview = CreateFrame("Frame", nil, container, "BackdropTemplate")
-  preview:SetSize(W, PREVIEW_H)
+  local preview = CreateFrame("Frame", nil, pin, "BackdropTemplate")
+  preview:SetPoint("TOPLEFT", pin, "TOPLEFT", 0, -(PIN_TOP_H + 6))
+  preview:SetPoint("TOPRIGHT", pin, "TOPRIGHT", 0, -(PIN_TOP_H + 6))
+  preview:SetHeight(PREVIEW_H)
   preview:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
   preview:SetBackdropColor(0.02, 0.02, 0.025, 0.9)
   preview:SetBackdropBorderColor(unpack(Theme.border))
@@ -124,7 +129,11 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
   tagsText:SetJustifyH("LEFT")
   tagsText:SetWordWrap(false)
   local previewButtons = {}
-  ctx:Add(preview)
+  local function PinUp()
+    if ns.SettingsPin then ns.SettingsPin(pin, PIN_TOP_H + 6 + PREVIEW_H) end
+  end
+  container:HookScript("OnShow", PinUp)
+  container:HookScript("OnHide", function() if ns.SettingsUnpin then ns.SettingsUnpin(pin) end end)
 
   -- Placement des barres + copie des réglages
   ctx:Spacer(8)
@@ -474,7 +483,9 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
     -- Réduit l'aperçu s'il dépasse l'encart (le texte des tags garde sa place en bas), fond compris
     local padX = bc.bgEnabled and (bc.bgPadX or 6) or 0
     local padY = bc.bgEnabled and (bc.bgPadY or 6) or 0
-    grid:SetScale(math.min(1, (W - 24) / (gw + 2 * padX), (PREVIEW_H - 34) / (gh + 2 * padY)))
+    local pw = preview:GetWidth()
+    if not pw or pw < 50 then pw = W end
+    grid:SetScale(math.min(1, (pw - 24) / (gw + 2 * padX), (PREVIEW_H - 34) / (gh + 2 * padY)))
     -- Fond de l'encart : couleur d'accent assombrie (pas du noir) pour juger fonds et transparences
     local g = Gold()
     preview:SetBackdropColor(g[1] * 0.13, g[2] * 0.13, g[3] * 0.13, 1)
@@ -527,9 +538,11 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
     RefreshPreview(bc)
     RefreshDragBtn()
   end
+  preview:SetScript("OnSizeChanged", function() RefreshPreview(Bar()) end)
   -- Clic droit sur une barre à l'écran (UI/ModuleHoverOverlay.lua) : sélection de cette barre
   ns.ExtraBarsPageRefresh = function() if container:IsVisible() then RefreshAll() end end
 
   container:HookScript("OnShow", function() RefreshAll() end)
   RefreshAll()
+  if container:IsVisible() then PinUp() end
 end

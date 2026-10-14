@@ -1,4 +1,4 @@
--- Modules/ResourceCircle.lua : Cercle de ressource primaire (dynamique par classe/spec)
+﻿-- Modules/ResourceCircle.lua : Cercle de ressource primaire (dynamique par classe/spec)
 local addonName, ns = ...
 local L = ns.L
 
@@ -51,7 +51,7 @@ local secDotType = nil  -- "RUNES", "COMBO", nil
 local _secDotColorOverride = nil  -- {r, g, b} imposé par SpellEffects, ou nil
 
 -- Animation slide des secondary dots (même esthétique que les orbes Skyriding)
-local SEC_DOT_TEX     = "Interface\\AddOns\\AishCore\\Media\\Skyriding\\Circle_Smooth"
+local SEC_DOT_TEX     = (ns.Media and ns.Media.circle) or "Interface\\AddOns\\AishCore\\Media\\Skyriding\\Circle_Smooth"
 local SEC_SLIDE_SPEED = 9.0    -- vitesse de slide (units/s)
 local SEC_SLIDE_SCALE = 1.55   -- facteur de départ (× plus loin du centre)
 local secDotAnims     = {}     -- [i] = { progress, target }
@@ -390,12 +390,28 @@ local CIRCLE_ANIM = {
     show = { duration = 0.2,  delay = 0.050, ease = "Quint", easeType = "Out", slideX = 0, slideY = -20, scaleX = 0.5, scaleY = 0.5, opacity = 1 },
     hide = { duration = 0.2,  delay = 0.050, ease = "Quint", easeType = "In", slideX = 0, slideY = -20, scaleX = 0.5, scaleY = 0.5, opacity = 0 },
   },
-  arc = { -- arc radial/vertical (vertical ou radial selon radialFillTest)
+  arc = { -- arc radial natif
     show = { duration = 0.8, delay = 0.000, ease = "Quint", easeType = "Out", slideX = 0, slideY = -20, opacity = 1, scale = 0.5 },
     hide = { duration = 0.2, delay = 0.000, ease = "Quint", easeType = "In", slideX = 0, slideY = -20, opacity = 0, scale = 0.5 },
   },
   arcOverlay = { -- masque du centre de l'arc — 100% indépendant de "arc" (délai/durée/ease/scale)
     show = { duration = 0.2, delay = 0.000, ease = "Quint", easeType = "Out", slideX = 0, slideY = 0, opacity = 1, scale = 1 },
+    hide = { duration = 0.4, delay = 0.000, ease = "Quint", easeType = "In", slideX = 0, slideY = -20, opacity = 0, scale = 0.5 },
+  },
+  durationArc = { -- arc de duree (ressource secondaire) : apparait apres les autres elements, part parmi les premiers
+    show = { duration = 0.6, delay = 0.450, ease = "Quint", easeType = "Out", slideX = 0, slideY = -20, opacity = 1, scale = 0.5 },
+    hide = { duration = 0.2, delay = 0.000, ease = "Quint", easeType = "In", slideX = 0, slideY = -20, opacity = 0, scale = 0.5 },
+  },
+  durationArcLive = { -- meme arc, quand c'est la donnee (buff) qui le fait entrer/sortir cercle visible : sans delai
+    show = { duration = 0.35, delay = 0.000, ease = "Quint", easeType = "Out", slideX = 0, slideY = -20, opacity = 1, scale = 0.5 },
+    hide = { duration = 0.20, delay = 0.000, ease = "Quint", easeType = "In", slideX = 0, slideY = -20, opacity = 0, scale = 0.5 },
+  },
+  durationArcOverlayLive = {
+    show = { duration = 0.20, delay = 0.000, ease = "Quint", easeType = "Out", slideX = 0, slideY = 0, opacity = 1, scale = 1 },
+    hide = { duration = 0.30, delay = 0.000, ease = "Quint", easeType = "In", slideX = 0, slideY = -20, opacity = 0, scale = 0.5 },
+  },
+  durationArcOverlay = { -- masque central de l'arc de duree
+    show = { duration = 0.2, delay = 0.450, ease = "Quint", easeType = "Out", slideX = 0, slideY = 0, opacity = 1, scale = 1 },
     hide = { duration = 0.4, delay = 0.000, ease = "Quint", easeType = "In", slideX = 0, slideY = -20, opacity = 0, scale = 0.5 },
   },
   textBackdrop = { -- petit cache sombre sous le texte (même transformations que arcOverlay)
@@ -465,6 +481,12 @@ local fireProcLevel     = 0      -- 0/1/2 dérivé
 
 -- Arc de stagger (Moine Brasseur specID 268)
 local staggerActive         = false
+local durArcVert            = false   -- l'arc de duree affiche est la barre verticale (canal clone-bar, plage secrete)
+local function DurArcEl() return durArcVert and bar.durationArcV or bar.durationArc end
+local previewDurShown, previewStagShown, previewDurEl = false, false, nil   -- arcs secondaires montres par l'apercu du panneau
+local durShown, durBusy = false, false   -- arc de duree : etat affiche (animation terminee) / animation en cours
+local RunDurAnim
+local durArcWanted          = false   -- l'arc de duree a du contenu (independamment de la visibilite du cercle)
 
 -- Warlock Demonologie : Demonic Core (buff 264173, stacks 0-2)
 -- Fallback : glow sur Incantation de la Foudre Démoniaque / Demonbolt (264178)
@@ -486,68 +508,153 @@ local STAGGER_HEAVY    = { 1.00, 0.15, 0.15 }  -- >= 60% : rouge
 local DURATION_ARC_RATIO     = 0.72
 local DURATION_ARC_OVL_RATIO = 0.76
 
--- Crop constant for circle_piecrop.tga (texture pre-croppee, bas transparent supprime)
-local ARC_CROP_H = 0.88
+-- Arcs en rendu radial natif (StatusBar:SetRenderMode(Radial)) sur un disque plein : hauteur = largeur.
+local ARC_CROP_H = 1
+-- Barre verticale de l'arc de duree (sources a plage secrete, canal clone-bar) : texture pre-croppee comme avant
+local ARC_CROP_V = 0.88
 
--- Remplissage radial : jauge en arc de 280° (trou de 80° en bas, centré sur 6h), 1 quartier (RadialWedge.tga) par %
-local RADIAL_FRAG_COUNT = 100
-local RADIAL_ARC_SPAN_DEG  = 280   -- 360 - 80 (trou en bas)
-local RADIAL_ARC_START_DEG = 220   -- bearing (0=midi, horaire) où commence le 0%
+-- Le disque natif est peint pile jusqu'au rayon nominal de l'arc ; le slider d'epaisseur etant regle pour un rayon
+-- peint un peu plus grand (ancien rendu), on retranche cet ecart pour conserver la meme epaisseur visible.
+local ARC_OVERLAY_OFFSET = 0.073
 
--- Geometrie des quartiers radiaux (RadialWedge), en fraction du RAYON de l'arc. L'oversize
--- les fait se chevaucher (anti-aliasing) : leur bord reellement peint depasse donc le rayon
--- nominal, ce dont depend VERTICAL_OVERLAY_OFFSET ci-dessous.
-local RADIAL_FRAG_INNER    = 0.05
-local RADIAL_FRAG_OUTER    = 0.98
-local RADIAL_FRAG_OVERSIZE = 1.2
-
--- Rayon exterieur reellement peint par les quartiers, exprime en fraction du DIAMETRE de
--- l'arc (~0.5365). L'arc vertical, lui, s'arrete pile au rayon nominal (0.5).
-local RADIAL_OUTER_R = ((RADIAL_FRAG_INNER + RADIAL_FRAG_OUTER) / 2
-                        + (RADIAL_FRAG_OUTER - RADIAL_FRAG_INNER) * RADIAL_FRAG_OVERSIZE / 2) / 2
-
--- Les deux visualisations ne peignent donc pas jusqu'au meme rayon : a reglage d'epaisseur
--- identique, l'anneau radial est plus epais que le vertical de (RADIAL_OUTER_R - 0.5) en
--- rayon. On retranche le double au ratio d'overlay en vertical, pour que le meme cran de
--- slider donne la MEME epaisseur visible dans les deux modes -- sinon, passer de l'un a
--- l'autre donne l'impression d'un bug (l'arc vertical devient un filet, voire disparait).
-local VERTICAL_OVERLAY_OFFSET = 2 * (RADIAL_OUTER_R - 0.5)
-
--- Taille du masque central, dans le mode d'affichage courant. Le clamp a 0.99 garde un
--- anneau visible en vertical : le slider d'epaisseur du cercle central monte jusqu'a 1.2,
--- borne prevue pour le radial et son bord debordant.
-local function OverlayPx(cfg, arcPx)
-  local ratio = cfg.overlayRatio or 0.75
-  if not cfg.radialFillTest then
-    ratio = math.min(ratio - VERTICAL_OVERLAY_OFFSET, 0.99)
-  end
-  return arcPx * math.max(0, ratio)
+-- Diametre de l'arc : 1.0 = tout le fond (bgLarge, 1.1 x la taille globale).
+local function ArcPx(cfg)
+  return cfg.size * 1.1 * (cfg.arcSizeRatio or 1.0)
 end
 
--- Recalcule taille/position/rotation des quartiers radiaux (rappelée depuis ApplySettings pour rester synchro avec le GUI)
-local function LayoutRadialFrags()
-  if not bar or not bar.radialFrags then return end
+-- Migration unique des anciens profils : l'ancien ratio d'arc partait de la taille globale (pas du fond) et
+-- "epaisseur" etait en fait la taille du trou (0 = disque plein). Le rendu des profils existants est conserve.
+function ResourceCircle.EnsureArcSettings()
   local cfg = ns.GetCfg("resourceCircle")
-  local arcPx = cfg.size * (cfg.arcSizeRatio or 1.0)
-  -- Quartiers toujours en taille max ; c'est bar.overlay qui masque le centre par-dessus.
-  local fragInnerR = (arcPx / 2) * RADIAL_FRAG_INNER  -- quasi le centre (jamais 0 pile, évite une taille nulle)
-  local fragOuterR = (arcPx / 2) * RADIAL_FRAG_OUTER
-  local fragMidR   = (fragInnerR + fragOuterR) / 2
-  local fragSize = (fragOuterR - fragInnerR) * RADIAL_FRAG_OVERSIZE  -- chevauche les voisins (anti-aliasing)
-  for k = 0, RADIAL_FRAG_COUNT - 1 do
-    local frag = bar.radialFrags[k + 1]
-    if frag then
-      frag:SetSize(fragSize, fragSize)
-      local angleDeg = RADIAL_ARC_START_DEG + (k * RADIAL_ARC_SPAN_DEG / RADIAL_FRAG_COUNT)
-      local angle = angleDeg * math.pi / 180
-      local fx = fragMidR * math.sin(angle)
-      local fy = fragMidR * math.cos(angle)
-      frag:ClearAllPoints()
-      frag:SetPoint("CENTER", bar, "CENTER", fx, fy)
-      local tex = frag:GetStatusBarTexture()
-      if tex then tex:SetRotation(-angle) end  -- signe négatif : SetRotation est anti-horaire, notre bearing est horaire
+  if not cfg then return cfg end
+  if not cfg.arcGeomV2 then
+    cfg.arcSizeRatio = math.floor((cfg.arcSizeRatio or 1.0) / 1.1 * 1000 + 0.5) / 1000
+    cfg.arcThickness = math.max(0.01, math.min(1, 1.073 - (cfg.overlayRatio or 0.75)))
+    cfg.arcGeomV2 = true
+  end
+  -- Arcs secondaires : meme inversion (ancien "ratio d'overlay" = taille du trou, nouvelle epaisseur = 1 - trou).
+  if not cfg.secArcGeomV2 then
+    local function Thick(ratio, default) return math.max(0.01, math.min(1, 1 - (ratio or default))) end
+    cfg.staggerArcThickness = Thick(cfg.staggerOverlayRatio, STAGGER_OVERLAY_RATIO)
+    cfg.durationArcThickness = Thick(cfg.durationArcOverlayRatio, DURATION_ARC_OVL_RATIO)
+    local specKeys = {}
+    for k in pairs(cfg) do
+      if type(k) == "string" and k:match("^secRes_%d+_durationArcOverlayRatio$") then specKeys[#specKeys + 1] = k end
+    end
+    for _, k in ipairs(specKeys) do
+      cfg[k:gsub("durationArcOverlayRatio$", "durationArcThickness")] = Thick(cfg[k], DURATION_ARC_OVL_RATIO)
+    end
+    cfg.secArcGeomV2 = true
+  end
+  return cfg
+end
+
+-- Trou des masques des arcs secondaires, en fraction du diametre de leur arc.
+local function StaggerHole(cfg)
+  return math.max(0, math.min(1 - (cfg.staggerArcThickness or (1 - STAGGER_OVERLAY_RATIO)), 0.995))
+end
+local function DurationHole(specID)
+  local t = ns.GetSecResCfg("durationArcThickness", specID) or (1 - DURATION_ARC_OVL_RATIO)
+  return math.max(0, math.min(1 - t, 0.995))
+end
+
+-- Masque central qui creuse l'anneau : trou = 1 - epaisseur (en fraction du diametre de l'arc).
+local function OverlayPx(cfg, arcPx)
+  local hole = 1 - (cfg.arcThickness or 0.32)
+  return arcPx * math.max(0, math.min(hole, 0.995))
+end
+
+-- Arc en rendu radial natif : disque plein, c'est l'overlay qui creuse l'anneau.
+-- SetMinMaxValues est enveloppe : le maximum est agrandi de 360/etendue pour que 0-100 % ne parcoure que l'arc
+-- (etendue < 360). Maximum secret : laisse tel quel (pas d'arithmetique possible), l'arc va alors jusqu'a 360 deg.
+local function SetupRadialArc(sb)
+  ns.SetSmoothStatusBarTexture(sb, ns.Media.circle)
+  sb:SetRenderMode(Enum.StatusBarRenderMode.Radial)
+  local raw = sb.SetMinMaxValues
+  sb._k = 1
+  sb.SetMinMaxValues = function(self, lo, hi)
+    self._ulo, self._uhi = lo, hi
+    local k, scaled = self._k or 1, hi
+    if k ~= 1 then
+      local ok, v = pcall(function() return hi * k end)
+      if ok then scaled = v end
+    end
+    raw(self, lo, scaled)
+  end
+end
+
+-- Angles (degres, horaire, 0 = midi) : depart et fin de l'arc. Convention du rendu natif : 0 % commence a midi
+-- sans rotation (NATIVE_START), horaire ; la rotation de la texture decale le depart, SetReverseFill inverse le sens.
+-- Sens inverse : l'arc reste au meme endroit, le remplissage part de la fin et revient vers le depart.
+local NATIVE_START = 0
+local function SetArcAngle(sb, startDeg, endDeg, reverse)
+  if not sb then return end
+  local a0, a1 = tonumber(startDeg) or 220, tonumber(endDeg) or 140
+  local span = (a1 - a0) % 360
+  if span < 1 then span = 360 end
+  -- Rendu radial : le sens antihoraire se regle sur la texture geree (SetRadialProgressBarReverse, 12.1) ;
+  -- StatusBar:SetReverseFill ne joue que sur l'axe lineaire. Repli sur ce dernier si l'API est absente.
+  local tex = sb:GetStatusBarTexture()
+  if tex and tex.SetRadialProgressBarReverse then
+    sb:SetReverseFill(false)
+    tex:SetRadialProgressBarReverse(reverse and true or false)
+  else
+    sb:SetReverseFill(reverse and true or false)
+  end
+  if tex then tex:SetRotation(-math.rad((reverse and a1 or a0) - NATIVE_START)) end
+  local k = 360 / span
+  if sb._k ~= k then
+    sb._k = k
+    pcall(sb.SetMinMaxValues, sb, sb._ulo or 0, sb._uhi or 100)
+  end
+end
+
+-- Taille / position / "home" de l'arc de stagger et de son masque central, relus depuis les reglages.
+local function ApplyStaggerGeometry()
+  if not (bar and bar.staggerArc) then return end
+  local cfg = ns.GetCfg("resourceCircle")
+  local stagArcPx = ArcPx(cfg) * (cfg.staggerArcRatio or STAGGER_ARC_RATIO)
+  bar.staggerArc:SetSize(stagArcPx, stagArcPx * ARC_CROP_H)
+  bar.staggerArc:ClearAllPoints()
+  bar.staggerArc:SetPoint("TOP", bar, "CENTER", 0, stagArcPx / 2)
+  RecordHome(bar.staggerArc, "TOP", bar, "CENTER", 0, stagArcPx / 2, stagArcPx, stagArcPx * ARC_CROP_H)
+  if bar.staggerOverlay then
+    local ov = math.max(stagArcPx * StaggerHole(cfg), 0.01)
+    bar.staggerOverlay:SetSize(ov, ov)
+    bar.staggerOverlay:ClearAllPoints()
+    bar.staggerOverlay:SetPoint("CENTER", bar, "CENTER", 0, 0)
+    RecordHome(bar.staggerOverlay, "CENTER", bar, "CENTER", 0, 0, ov, ov)
+  end
+end
+
+-- Reinitialise le rendu radial d'une barre (texture, mode, rotation, plage) : apres un redimensionnement, une barre radiale dont
+-- la valeur ne change plus (stagger au repos) pouvait rester invisible jusqu'au /reload.
+local function ResetRadialArc(sb)
+  if not sb then return end
+  local ok, v = pcall(sb.GetValue, sb)
+  ns.SetSmoothStatusBarTexture(sb, ns.Media.circle)
+  sb:SetRenderMode(Enum.StatusBarRenderMode.Radial)
+  sb._k = nil   -- force la reapplication de la plage et de la rotation par SetArcAngle
+  if ok then pcall(sb.SetValue, sb, v) end
+end
+
+-- Applique angles + sens aux trois arcs (principal, stagger, duree ; ce dernier par spec).
+local function ApplyArcAngles(specID)
+  if not bar then return end
+  local cfg = ns.GetCfg("resourceCircle")
+  -- Spec resolue ici : juste apres un /reload ns._specID est encore nil, et les reglages par spec (arc de duree)
+  -- retombaient alors sur les valeurs plates par defaut.
+  if not specID and GetSpecialization and GetSpecializationInfo then
+    local idx = GetSpecialization()
+    if idx and idx > 0 then
+      local ok, sid = pcall(GetSpecializationInfo, idx)
+      if ok and sid and sid > 0 then specID = sid end
     end
   end
+  SetArcAngle(bar.arc, cfg.arcStartAngle, cfg.arcEndAngle, cfg.arcReverse)
+  SetArcAngle(bar.staggerArc, cfg.staggerArcStartAngle, cfg.staggerArcEndAngle, cfg.staggerArcReverse)
+  SetArcAngle(bar.durationArc, ns.GetSecResCfg("durationArcStartAngle", specID), ns.GetSecResCfg("durationArcEndAngle", specID),
+    ns.GetSecResCfg("durationArcReverse", specID))
 end
 
 -- Verifie si les elements doivent etre visibles (en combat uniquement)
@@ -565,6 +672,383 @@ function ResourceCircle.ShouldShow()
   -- "combat"
   if UnitAffectingCombat("player") then return true end
   return false
+end
+
+-- ═══ Delai Attaque auto (Forever) ═══════════════════════════════════════════════════════════════
+-- Le client Forever fournit un minuteur natif : l'evenement PLAYER_SWING(swingDuration, swingType) part a
+-- chaque attaque du joueur (le journal de combat est interdit aux addons ; meme source qu'EllesmereUI).
+-- Affichage au choix : arc (moteur CircularProgress : rotation, angle, sens, miroir) ou simple barre.
+-- Un OnUpdate ne tourne que pendant un delai en cours.
+local SWING_RING_FMT = "Interface\\AddOns\\AishCore\\Media\\UI\\SwingRing%d.tga"
+local SWING_BAR_TEX  = "Interface\\Buttons\\WHITE8x8"
+local swingArc, swingArcCW, swingArcCCW, swingMask   -- cadre de l'arc, 2 CircularProgress (normal / miroir), masque en anneau
+local swingBar, swingBarFull, swingBarL, swingBarR, swingBarBg
+local swingEvt, swingDriver, swingPreviewTicker
+local swingStart, swingDur
+-- Entree / sortie : fondu + leger glissement vers le haut. swingAlpha = progression 0..1 (lineaire, adoucie a l'affichage)
+local SWING_FADE_IN, SWING_FADE_OUT, SWING_SLIDE = 0.30, 0.30, 8
+local swingAlpha, swingEnded = 0, false
+local swingOpt = {}                            -- reglages utiles au dessin, relus a chaque ApplySwingSettings
+
+-- prefix "swing" (arc) ou "swingBar" (barre) : chaque visualisation a sa couleur / couleur de spe
+local function SwingColor(cfg, prefix)
+  if cfg[prefix .. "UseSpecColor"] then
+    local CLR = ns.Modules and ns.Modules.Colors
+    local c = CLR and CLR.Get and CLR.Get(cfg[prefix .. "SpecColorKey"] or "powercircle")
+    if c then return c[1], c[2], c[3], c[4] or 1 end
+  end
+  local c = cfg[prefix .. "Color"] or { 1, 0.82, 0.2, 1 }
+  return c[1], c[2], c[3], c[4] or 1
+end
+
+-- Une valeur secrete lance une erreur a la comparaison : toute duree illisible est ecartee (cf. EllesmereUI)
+local function Plain(v)
+  return not (issecretvalue and issecretvalue(v))
+end
+
+-- Dessine le secteur [w1, w2] (degres, sens horaire depuis le haut). Le sens antihoraire n'a pas besoin de
+-- miroir : le miroir du moteur ne retourne que la texture (un disque est symetrique), pas le secteur. Il
+-- suffit de placer le secteur du bon cote du point de depart.
+local function SwingWedge(cp, w1, w2)
+  if not cp then return end
+  if w2 - w1 < 0.05 then cp:Hide(); return end
+  local a1 = w1 % 360
+  cp:Show()
+  cp:SetProgress(a1, a1 + (w2 - w1))
+end
+
+-- p = fraction ecoulee du delai (0..1). Memes regles que la barre simple, le point de depart S jouant le role
+-- du centre et le point oppose (S +/- A/2) celui des extremites :
+--   cw / ccw          : un seul sens, l'arc croit (remplissage inverse) ou recule (vidage) depuis S.
+--   miroir "out"      : deux moities partant de S, vers 1h, 2h, 3h... et vers 11h, 10h, 9h... : l'arc GRANDIT
+--                       depuis S ; en remplissage inverse il SE VIDE depuis S (il reste a l'oppose).
+--   miroir "in"       : les bords vont de l'oppose vers S : l'arc SE VIDE vers S ; en remplissage inverse
+--                       il GRANDIT depuis l'oppose.
+local function DrawSwingArc(p)
+  local o = swingOpt
+  local S, A = o.rot, o.angle
+  if o.dir == "mirror_out" or o.dir == "mirror_in" then
+    local h = A / 2
+    local growing   = (o.dir == "mirror_out") ~= o.fillUp
+    local fromStart = not o.fillUp            -- partie visible ancree en S, ou a l'oppose
+    local v = growing and p or (1 - p)
+    if fromStart then
+      SwingWedge(swingArcCW,  S, S + v * h)
+      SwingWedge(swingArcCCW, S - v * h, S)
+    else
+      SwingWedge(swingArcCW,  S + (1 - v) * h, S + h)
+      SwingWedge(swingArcCCW, S - h, S - (1 - v) * h)
+    end
+    return
+  end
+  local v = o.fillUp and p or (1 - p)
+  if o.dir == "ccw" then
+    swingArcCW:Hide()
+    if o.fillUp then SwingWedge(swingArcCCW, S - v * A, S)
+    else SwingWedge(swingArcCCW, S - A, S - (1 - v) * A) end
+  else
+    swingArcCCW:Hide()
+    if o.fillUp then SwingWedge(swingArcCW, S, S + v * A)
+    else SwingWedge(swingArcCW, S + (1 - v) * A, S + A) end
+  end
+end
+
+-- p = fraction ecoulee du delai (0..1)
+local function DrawSwingBar(p)
+  local o = swingOpt
+  if o.barDir == "in" or o.barDir == "out" then
+    -- Deux moities en miroir, positions de 0 (gauche) a 100 (droite), centre = 50.
+    --   "out"            : un bord va de 50 vers 0, l'autre de 50 vers 100 -> la barre GRANDIT depuis le centre
+    --   "out" + inverse  : memes bords, mais la barre SE VIDE depuis le centre (reste aux extremites)
+    --   "in"             : un bord va de 0 vers 50, l'autre de 100 vers 50 -> la barre SE VIDE vers le centre
+    --   "in"  + inverse  : memes bords, mais la barre GRANDIT depuis les extremites
+    local growing    = (o.barDir == "out") ~= o.fillUp
+    local fromCenter = not o.fillUp          -- ancrage de la partie visible : centre, ou extremites
+    local v = growing and p or (1 - p)
+    swingBarFull:Hide(); swingBarL:Show(); swingBarR:Show()
+    swingBarL:SetReverseFill(fromCenter); swingBarR:SetReverseFill(not fromCenter)
+    swingBarL:SetValue(v); swingBarR:SetValue(v)
+  else
+    local v = o.fillUp and p or (1 - p)
+    swingBarL:Hide(); swingBarR:Hide(); swingBarFull:Show()
+    -- ltr : plein a gauche au remplissage, vide a gauche au vidage (reste ancre a droite) ; rtl : l'inverse
+    local anchoredLeft = (o.barDir ~= "rtl") == o.fillUp
+    swingBarFull:SetReverseFill(not anchoredLeft)
+    swingBarFull:SetValue(v)
+  end
+end
+
+-- Barre animee par le MOTEUR : SetTimerDuration avance le remplissage a chaque frame, avec une precision
+-- sub-pixel, la ou un SetValue pose depuis un OnUpdate avancait par a-coups visibles (meme methode
+-- qu'EllesmereUI). Renvoie false si l'API n'existe pas : on retombe alors sur le dessin par OnUpdate.
+local swingBarObjs = {}
+local swingBarTimed = false
+local function ArmSwingBar()
+  swingBarTimed = false
+  if ns._swingNoTimer then return false end   -- diagnostic : /swingdbg notimer
+  if not (C_DurationUtil and C_DurationUtil.CreateDuration and Enum.StatusBarTimerDirection
+          and Enum.StatusBarInterpolation and swingBarFull.SetTimerDuration) then return false end
+  local o = swingOpt
+  local DIR, IMM = Enum.StatusBarTimerDirection, Enum.StatusBarInterpolation.Immediate
+  local function Arm(sb, reverse, growing)
+    sb:SetReverseFill(reverse)
+    local obj = swingBarObjs[sb]
+    if not obj then obj = C_DurationUtil.CreateDuration(); swingBarObjs[sb] = obj end
+    obj:SetTimeFromStart(swingStart, swingDur)
+    sb:SetTimerDuration(obj, IMM, growing and DIR.ElapsedTime or DIR.RemainingTime)
+  end
+  local ok = pcall(function()
+    if o.barDir == "in" or o.barDir == "out" then
+      local growing    = (o.barDir == "out") ~= o.fillUp
+      local fromCenter = not o.fillUp
+      swingBarFull:Hide(); swingBarL:Show(); swingBarR:Show()
+      Arm(swingBarL, fromCenter, growing); Arm(swingBarR, not fromCenter, growing)
+    else
+      swingBarL:Hide(); swingBarR:Hide(); swingBarFull:Show()
+      local anchoredLeft = (o.barDir ~= "rtl") == o.fillUp
+      Arm(swingBarFull, not anchoredLeft, o.fillUp)
+    end
+  end)
+  swingBarTimed = ok
+  return ok
+end
+
+local function StopSwingVisuals()
+  if swingDriver then swingDriver:SetScript("OnUpdate", nil) end
+  swingAlpha = 0
+  if swingArc then swingArc:Hide() end
+  if swingBar then swingBar:Hide() end
+end
+
+-- Applique fondu + glissement sur la visualisation active (arc ou barre)
+local function ApplySwingAnim()
+  local t = swingAlpha
+  local e = 1 - (1 - t) * (1 - t) * (1 - t)        -- ease-out cubique
+  local off = (1 - e) * SWING_SLIDE
+  if swingOpt.barMode then
+    swingBar:SetAlpha(e)
+    swingBar:ClearAllPoints()
+    swingBar:SetPoint("CENTER", bar, "CENTER", swingOpt.barX or 0, (swingOpt.barY or -58) - off)
+  else
+    swingArc:SetAlpha(e)
+    swingArc:ClearAllPoints()
+    swingArc:SetPoint("CENTER", bar, "CENTER", 0, -off)
+  end
+end
+
+local function SwingTick(_, el)
+  el = el or 0
+  if not swingStart or not swingDur then StopSwingVisuals(); return end
+  local p = (GetTime() - swingStart) / swingDur
+  local active = p < 1
+  if active then
+    swingAlpha = math.min(1, swingAlpha + el / SWING_FADE_IN)
+    if p < 0 then p = 0 end
+  else
+    swingAlpha = math.max(0, swingAlpha - el / SWING_FADE_OUT)
+    p = 1
+  end
+  -- Une derniere passe a p = 1 fige l'etat final (barre / arc plein en remplissage) pendant le fondu de sortie
+  if active or not swingEnded then
+    if swingOpt.barMode then
+      if not swingBarTimed then DrawSwingBar(p) end
+    else
+      DrawSwingArc(p)
+    end
+    if not active then swingEnded = true end
+  end
+  ApplySwingAnim()
+  if not active and swingAlpha <= 0 then StopSwingVisuals() end
+end
+
+local function StartSwing(dur)
+  if not swingDriver or type(dur) ~= "number" or not Plain(dur) or dur ~= dur or dur <= 0 or dur == math.huge then return end
+  swingStart, swingDur = GetTime(), dur
+  swingEnded = false
+  if swingOpt.barMode then
+    swingBar:Show(); swingArc:Hide()
+    ArmSwingBar()
+  else
+    swingArc:Show(); swingBar:Hide()
+  end
+  swingDriver:SetScript("OnUpdate", SwingTick)
+  SwingTick()
+end
+
+-- Main droite et tir uniquement : la main gauche garde son propre rythme et ferait doublon
+local function OnSwingEvent(_, event, dur, swingType)
+  if event ~= "PLAYER_SWING" or not (Plain(dur) and Plain(swingType)) then return end
+  local T = Enum.PlayerSwingType
+  if swingType == T.MainHand or swingType == T.Ranged then StartSwing(dur) end
+end
+
+-- Apercu : tant que le panneau d'options est ouvert, un faux delai se relance en boucle
+local function RefreshSwingPreview()
+  local cfg = ns.GetCfg("resourceCircle") or {}
+  if previewMode and cfg.swingEnabled and swingDriver then
+    if not swingPreviewTicker then
+      swingPreviewTicker = C_Timer.NewTicker(2.4, function() StartSwing(2.0) end)
+    end
+    StartSwing(2.0)
+  elseif swingPreviewTicker then
+    swingPreviewTicker:Cancel(); swingPreviewTicker = nil
+  end
+end
+
+local function EnsureSwingFrames()
+  if swingArc then return end
+  swingDriver = CreateFrame("Frame", nil, bar)
+  -- Arc : deux CircularProgress, le second en miroir (sens antihoraire)
+  swingArc = CreateFrame("Frame", nil, bar)
+  swingArc:SetPoint("CENTER", bar, "CENTER", 0, 0)
+  swingArcCW  = ns.CircularProgress.create(swingArc, "ARTWORK", 0)
+  swingArcCCW = ns.CircularProgress.create(swingArc, "ARTWORK", 0)
+  -- Le moteur decoupe des secteurs en deplaçant les coins d'une texture : sur une texture d'ANNEAU, les bords
+  -- degeneres du secteur laissent des filets (une croix au centre). On decoupe donc un DISQUE plein, et c'est
+  -- un masque en anneau qui donne la forme finale.
+  swingMask = swingArc:CreateMaskTexture()
+  swingMask:SetAllPoints(swingArc)
+  for _, cp in ipairs({ swingArcCW, swingArcCCW }) do
+    for i = 1, 3 do cp.textures[i]:AddMaskTexture(swingMask) end
+  end
+  swingArc:Hide()
+  -- Barre : une barre pleine (gauche/droite) et deux moities (vers le centre / l'exterieur)
+  swingBar = CreateFrame("Frame", nil, bar)
+  swingBar:SetPoint("CENTER", bar, "CENTER", 0, 0)
+  swingBarBg = swingBar:CreateTexture(nil, "BACKGROUND")
+  swingBarBg:SetAllPoints()
+  swingBarBg:SetColorTexture(0, 0, 0, 0.45)
+  local function MakeBar()
+    local b = CreateFrame("StatusBar", nil, swingBar)
+    ns.SetSmoothStatusBarTexture(b, SWING_BAR_TEX)
+    -- Sans accrochage a la grille de pixels : la largeur du remplissage avance en continu au lieu de sauter d'1 px
+    local bt = b:GetStatusBarTexture()
+    if bt then bt:SetSnapToPixelGrid(false); bt:SetTexelSnappingBias(0) end
+    b:SetMinMaxValues(0, 1)
+    b:SetValue(0)
+    return b
+  end
+  swingBarFull, swingBarL, swingBarR = MakeBar(), MakeBar(), MakeBar()
+  swingBar:Hide()
+end
+
+-- /swingdbg : etat du delai d'attaque auto (diagnostic) ; "/swingdbg test" lance un faux delai de 3 s
+SLASH_AISHSWINGDBG1 = "/swingdbg"
+SlashCmdList["AISHSWINGDBG"] = function(msg)
+  local P = "|cff33aaff[Swing]|r "
+  local cfg = ns.GetCfg("resourceCircle") or {}
+  print(P .. string.format("forever=%s api=%s enabled=%s barMode=%s dir=%s strata=%s ratio=%s epaisseur=%s angle=%s rot=%s",
+    tostring(ns.IsForever), tostring(C_SwingTimer ~= nil and Enum.PlayerSwingType ~= nil), tostring(cfg.swingEnabled),
+    tostring(cfg.swingBarMode), tostring(cfg.swingDirection), tostring(cfg.swingStrata), tostring(cfg.swingSizeRatio),
+    tostring(cfg.swingThickness), tostring(cfg.swingAngle), tostring(cfg.swingRotation)))
+  if msg == "nomask" and swingMask then
+    for _, cp in ipairs({ swingArcCW, swingArcCCW }) do
+      for i = 1, 3 do cp.textures[i]:RemoveMaskTexture(swingMask) end
+    end
+    print(P .. "masque retire des textures de l'arc")
+  elseif msg == "maskcircle" and swingMask then
+    swingMask:SetTexture(ns.Media.circle, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    print(P .. "masque remplace par le disque plein (ns.Media.circle)")
+  end
+  if msg == "notimer" then ns._swingNoTimer = not ns._swingNoTimer; print(P .. "minuteur du moteur pour la barre : " .. (ns._swingNoTimer and "DESACTIVE (dessin manuel)" or "actif")) end
+  if msg == "test" or msg == "nomask" or msg == "maskcircle" or msg == "notimer" then StartSwing(3.0) end
+  print(P .. string.format("cadres : arc=%s barre=%s driver=%s | arcShown=%s arcVisible=%s", tostring(swingArc ~= nil),
+    tostring(swingBar ~= nil), tostring(swingDriver ~= nil), tostring(swingArc and swingArc:IsShown()),
+    tostring(swingArc and swingArc:IsVisible())))
+  if swingArc then
+    print(P .. string.format("arc : taille=%.0fx%.0f niveau=%s alpha=%.2f masque=%s", swingArc:GetWidth(), swingArc:GetHeight(),
+      tostring(swingArc:GetFrameLevel()), swingArc:GetEffectiveAlpha(), tostring(swingMask and swingMask:GetTexture())))
+    for k, cp in pairs({ CW = swingArcCW, CCW = swingArcCCW }) do
+      local t = {}
+      for i = 1, 3 do t[i] = tostring(cp.textures[i]:IsShown()) end
+      print(P .. string.format("  %s : visible=%s textures=%s angles=%s..%s tex=%s", k, tostring(cp.visible), table.concat(t, "/"),
+        tostring(cp.angle1), tostring(cp.angle2), tostring(cp.textures[1]:GetTexture())))
+    end
+  end
+  print(P .. string.format("delai : debut=%s duree=%s maintenant=%.2f", tostring(swingStart), tostring(swingDur), GetTime()))
+end
+
+function ResourceCircle.ApplySwingSettings()
+  if not ns.IsForever or not bar then return end
+  if not (C_SwingTimer and Enum.PlayerSwingType) then return end  -- minuteur natif absent : rien a afficher
+  local cfg = ns.GetCfg("resourceCircle") or {}
+  if not cfg.swingEnabled then
+    if swingEvt then swingEvt:UnregisterAllEvents() end
+    if swingPreviewTicker then swingPreviewTicker:Cancel(); swingPreviewTicker = nil end
+    StopSwingVisuals()
+    return
+  end
+  EnsureSwingFrames()
+
+  swingOpt.barMode = cfg.swingBarMode and true or false
+  -- Remplissage inverse propre a chaque visualisation (arc / barre)
+  swingOpt.fillUp  = (cfg.swingBarMode and cfg.swingBarFillUp or (not cfg.swingBarMode and cfg.swingFillUp)) and true or false
+  swingOpt.dir     = cfg.swingDirection or "cw"
+  if swingOpt.dir == "mirror" then swingOpt.dir = "mirror_out" end   -- ancien nom du reglage
+  swingOpt.rot     = cfg.swingRotation or 0
+  swingOpt.angle   = math.max(1, math.min(360, cfg.swingAngle or 360))
+  swingOpt.barDir  = cfg.swingBarDirection or "ltr"
+  swingOpt.barX, swingOpt.barY = cfg.swingBarX or 0, cfg.swingBarY or -58
+
+  -- Plan : niveau de frame. bg = derriere le fond de l'anneau central ; mid = niveau des arcs de ressource
+  -- secondaire ; front = au-dessus de tout sauf du texte.
+  local function LevelFor(mode)
+    if mode == "bg" then
+      return math.max(0, bar:GetFrameLevel() - 1)
+    elseif mode == "front" then
+      return (bar.textFrame and bar.textFrame:GetFrameLevel() or (bar:GetFrameLevel() + 200)) - 1
+    end
+    return bar.durationArcFrame and bar.durationArcFrame:GetFrameLevel() or (bar:GetFrameLevel() + 2)
+  end
+  local lvlArc = LevelFor(cfg.swingStrata or "mid")
+  local lvlBar = LevelFor("front")   -- la barre n'a pas de reglage de plan : toujours devant
+  local r, g, b, a = SwingColor(cfg, "swing")
+  local br, bg_, bb, ba = SwingColor(cfg, "swingBar")
+
+  -- Arc
+  local d = (cfg.size or 80) * (cfg.swingSizeRatio or 1.15)
+  swingArc:SetSize(d, d)
+  swingArc:SetFrameLevel(lvlArc)
+  local tex = string.format(SWING_RING_FMT, math.max(1, math.min(8, math.floor((cfg.swingThickness or 3) + 0.5))))
+  swingMask:SetTexture(tex, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+  for _, cp in ipairs({ swingArcCW, swingArcCCW }) do
+    ns.CircularProgress.modify(cp, {
+      texture = ns.Media.circle, blendMode = "BLEND", width = d, height = d, crop_x = 1, crop_y = 1,
+      mirror = false,
+    })
+    cp:SetColor(r, g, b, a)
+  end
+
+  -- Barre
+  local len, thick = cfg.swingBarLength or 120, cfg.swingBarThickness or 8
+  swingBar:SetSize(len, thick)
+  swingBar:ClearAllPoints()
+  swingBar:SetPoint("CENTER", bar, "CENTER", cfg.swingBarX or 0, cfg.swingBarY or -58)
+  swingBar:SetFrameLevel(lvlBar)
+  local bgc = cfg.swingBarBgColor or { 0, 0, 0, 0.45 }
+  swingBarBg:SetColorTexture(bgc[1], bgc[2], bgc[3], bgc[4] or 1)
+  swingBarFull:SetAllPoints(swingBar)
+  swingBarL:ClearAllPoints(); swingBarL:SetPoint("TOPLEFT", swingBar, "TOPLEFT"); swingBarL:SetPoint("BOTTOMRIGHT", swingBar, "BOTTOM")
+  swingBarR:ClearAllPoints(); swingBarR:SetPoint("TOPRIGHT", swingBar, "TOPRIGHT"); swingBarR:SetPoint("BOTTOMLEFT", swingBar, "BOTTOM")
+  for _, sb in ipairs({ swingBarFull, swingBarL, swingBarR }) do
+    sb:SetFrameLevel(lvlBar + 1)
+    sb:SetStatusBarColor(br, bg_, bb, ba)
+  end
+
+  if not swingEvt then
+    swingEvt = CreateFrame("Frame")
+    swingEvt:SetScript("OnEvent", OnSwingEvent)
+  end
+  swingEvt:RegisterEvent("PLAYER_SWING")
+  -- Delai en cours : on le redessine avec les nouveaux reglages
+  if swingStart and swingDur and GetTime() < swingStart + swingDur then
+    if swingOpt.barMode then swingBar:Show(); swingArc:Hide(); ArmSwingBar() else swingArc:Show(); swingBar:Hide() end
+    swingAlpha = 1
+    swingDriver:SetScript("OnUpdate", SwingTick)
+  else
+    StopSwingVisuals()
+  end
+  RefreshSwingPreview()
 end
 
 -- Applique les settings en live (taille, police, etc.)
@@ -586,6 +1070,7 @@ function ResourceCircle.ApplySettings()
   -- Forcer un re-check de visibilite (le module vient peut-etre d'etre reactive)
   lastVisibilityState = nil
 
+  ResourceCircle.EnsureArcSettings()
   local size   = cfg.size
   local bgSize = size * 1.1
   bar:SetSize(size, size)
@@ -617,32 +1102,25 @@ function ResourceCircle.ApplySettings()
     RecordHome(bar.textBackdrop, "CENTER", bar, "CENTER", 0, 0, tbPx, tbPx)
     ns.SizeTextBackdropGlow(bar.textBackdropGlow, tbPx)
   end
-  local arcPx     = size * (cfg.arcSizeRatio or 1.0)
+  local arcPx     = ArcPx(cfg)
   local overlayPx = OverlayPx(cfg, arcPx)
   bar.arc:SetSize(arcPx, arcPx * ARC_CROP_H)
   bar.arc:ClearAllPoints()
   bar.arc:SetPoint("BOTTOM", bar, "CENTER", 0, arcPx / 2 - arcPx * ARC_CROP_H)
   RecordHome(bar.arc, "BOTTOM", bar, "CENTER", 0, arcPx / 2 - arcPx * ARC_CROP_H, arcPx, arcPx * ARC_CROP_H)
-  -- radialFillFrame (mode radial) est ancré via SetAllPoints(bar), pas d'ancrage exploitable pour slide/scale
   if bar.overlay then
     if overlayPx >= 2 then
       bar.overlay:SetSize(overlayPx, overlayPx)
       bar.overlay:Show()
       if bar.overlayFrame then bar.overlayFrame:Show(); bar.overlayFrame:SetAlpha(1); bar.overlayFrame:SetScale(1) end
     else
+      bar.overlay:SetSize(0.01, 0.01)
       bar.overlay:Hide()
     end
     bar.overlay:ClearAllPoints()
     bar.overlay:SetPoint("BOTTOM", bar, "CENTER", 0, -overlayPx / 2)
-    RecordHome(bar.overlay, "BOTTOM", bar, "CENTER", 0, -overlayPx / 2, overlayPx, overlayPx)
-  end
-  -- Recaler les quartiers radiaux (dépend de arcPx/overlayRatio)
-  LayoutRadialFrags()
-  -- Ré-appliquer la valeur de démo (72%) après le recalage, sinon les quartiers restent vides en aperçu.
-  if previewMode and bar.radialFrags then
-    for _, frag in ipairs(bar.radialFrags) do
-      pcall(ns.SmoothSetValue, frag, 72)
-    end
+    local ovHome = math.max(overlayPx, 0.01)
+    RecordHome(bar.overlay, "BOTTOM", bar, "CENTER", 0, -overlayPx / 2, ovHome, ovHome)
   end
   -- Redimensionner l'arc de stagger quand les settings changent
   if bar.staggerArc then
@@ -652,8 +1130,9 @@ function ResourceCircle.ApplySettings()
     bar.staggerArc:SetPoint("TOP", bar, "CENTER", 0, stagArcPx / 2)
     RecordHome(bar.staggerArc, "TOP", bar, "CENTER", 0, stagArcPx / 2, stagArcPx, stagArcPx * ARC_CROP_H)
     if bar.staggerOverlay then
-      local stagOvPx = stagArcPx * (cfg.staggerOverlayRatio or STAGGER_OVERLAY_RATIO)
-      if stagOvPx >= 2 then bar.staggerOverlay:SetSize(stagOvPx, stagOvPx) end
+      local stagOvPx = stagArcPx * StaggerHole(cfg)
+      bar.staggerOverlay:SetSize(math.max(stagOvPx, 0.01), math.max(stagOvPx, 0.01))
+      RecordHome(bar.staggerOverlay, "CENTER", bar, "CENTER", 0, 0, math.max(stagOvPx, 0.01), math.max(stagOvPx, 0.01))
     end
   end
   ns.ApplyFontReliable(bar.text, "RCText",
@@ -693,8 +1172,10 @@ function ResourceCircle.ApplySettings()
   -- Repositionner les secondary dots (runes, combo points)
   ResourceCircle.LayoutSecDots()
 
-  -- Synchronise affichage vertical/radial avec cfg.radialFillTest (bascule réellement l'élément visible)
-  ResourceCircle.ApplyRadialMode()
+  ApplyArcAngles()
+
+  -- Delai Attaque auto (Forever)
+  ResourceCircle.ApplySwingSettings()
 
   -- Forcer la visibilite apres changement de settings
   if previewMode then
@@ -702,6 +1183,15 @@ function ResourceCircle.ApplySettings()
   else
     ResourceCircle.UpdateVisibility()
   end
+end
+
+-- Couleur de l'arriere plan : fond du cercle et tous les masques qui doivent lui ressembler (masque central, masques des
+-- arcs de stagger / de duree, fond du texte, fond des orbes secondaires). Reglage cfg.bgColor.
+local DEFAULT_BG = { 0x0e/255, 0x0e/255, 0x0e/255, 1 }
+local function GetBgColor()
+  local cfg = ns.GetCfg("resourceCircle")
+  if not cfg or cfg.themedColors ~= false then return DEFAULT_BG end   -- couleurs thematiques : fond d'origine
+  return cfg.bgColor or DEFAULT_BG
 end
 
 -- Met a jour les couleurs (arcs, texte, dots) selon la ressource primaire du joueur
@@ -714,6 +1204,19 @@ function ResourceCircle.UpdateResourceColors()
   -- Colors.Get() prend priorité sur les couleurs de ressource (thème par spé)
   local arcC  = (CLR and CLR.Get("powercircle")) or colors.bar
   local textC = (CLR and CLR.Get("powertext"))   or colors.text
+  -- Couleurs thematiques decochees : couleur de l'arc et du texte de ressource choisies dans les reglages
+  local cfgC = ns.GetCfg("resourceCircle")
+  if cfgC and cfgC.themedColors == false then
+    arcC  = cfgC.arcColor  or arcC
+    textC = cfgC.textColor or textC
+  end
+  local bgC = GetBgColor()
+  for _, k in ipairs({ "bgLarge", "overlay", "staggerOverlay", "durationOvl", "textBackdrop" }) do
+    if bar[k] then bar[k]:SetVertexColor(bgC[1], bgC[2], bgC[3], bgC[4] or 1) end
+  end
+  for _, f in pairs(secDots) do
+    if f.bg then f.bg:SetVertexColor(bgC[1], bgC[2], bgC[3], bgC[4] or 1) end
+  end
   -- Outer dots (indices 1,2,4,5) → powerdotsa ; central (3) → powerdotsb
   local dotsA = (CLR and CLR.Get("powerdotsa"))  or colors.bar
   local dotsB = (CLR and CLR.Get("powerdotsb"))  or colors.bar
@@ -727,12 +1230,6 @@ function ResourceCircle.UpdateResourceColors()
   end
   -- Arc
   if bar.arc then bar.arc:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1) end
-  -- Fragments radiaux : même couleur que l'arc vertical (synchronisée pour que /rcradial ne montre jamais une couleur périmée)
-  if bar.radialFrags then
-    for _, frag in ipairs(bar.radialFrags) do
-      frag:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1)
-    end
-  end
   -- Texte
   bar.text:SetTextColor(textC[1], textC[2], textC[3], textC[4] or 1)
   -- Dots
@@ -808,6 +1305,7 @@ function ResourceCircle.Create(parent)
   if bar then return bar end
   local cfg = ns.GetCfg("resourceCircle")
 
+  ResourceCircle.EnsureArcSettings()
   bar = CreateFrame("Frame", "AishCoreRingBar", parent)
   bar:SetSize(cfg.size, cfg.size)
   bar:SetPoint("CENTER", parent, "CENTER", cfg.x, cfg.y)
@@ -834,14 +1332,13 @@ function ResourceCircle.Create(parent)
   bar.bgLarge = bgLarge
   RecordHome(bgLarge, "BOTTOM", bar, "CENTER", 0, -cfg.bgSize / 2, cfg.bgSize, cfg.bgSize)
 
-  -- Arc (remplissage bas -> haut, texture circulaire pre-croppee)
-  local arcPx = cfg.size * (cfg.arcSizeRatio or 1.0)
+  -- Arc (remplissage radial natif sur un disque plein)
+  local arcPx = ArcPx(cfg)
   local arc = CreateFrame("StatusBar", "AishCoreRingBarArc", bar)
   arc:SetFrameLevel(bar:GetFrameLevel() + 1)
   arc:SetSize(arcPx, arcPx * ARC_CROP_H)
   arc:SetPoint("BOTTOM", bar, "CENTER", 0, arcPx / 2 - arcPx * ARC_CROP_H)
-  ns.SetSmoothStatusBarTexture(arc, "Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
-  arc:SetOrientation("VERTICAL")
+  SetupRadialArc(arc)
   arc:SetMinMaxValues(0, 100)
   arc:SetValue(0)
   arc:Show()
@@ -851,39 +1348,16 @@ function ResourceCircle.Create(parent)
   -- Overlay sombre : masque le centre pour simuler un arc en anneau
   local overlayPx = OverlayPx(cfg, arcPx)
   local overlayFrame = CreateFrame("Frame", nil, bar)
-  -- +101 : réserve un niveau distinct à chacun des 100 quartiers radiaux sans dépasser l'overlay.
-  overlayFrame:SetFrameLevel(arc:GetFrameLevel() + 101)
+  overlayFrame:SetFrameLevel(arc:GetFrameLevel() + 1)
   overlayFrame:SetAllPoints(bar)
   local overlay = overlayFrame:CreateTexture(nil, "ARTWORK")
   ns.SetSmoothTexture(overlay, ns.Media.circle)
-  if overlayPx >= 2 then overlay:SetSize(overlayPx, overlayPx) else overlay:Hide() end
+  if overlayPx >= 2 then overlay:SetSize(overlayPx, overlayPx) else overlay:SetSize(0.01, 0.01); overlay:Hide() end
   overlay:SetPoint("BOTTOM", bar, "CENTER", 0, -overlayPx / 2)
   overlay:SetVertexColor(0x0e/255, 0x0e/255, 0x0e/255, 1)
   bar.overlay = overlay
   bar.overlayFrame = overlayFrame
   RecordHome(overlay, "BOTTOM", bar, "CENTER", 0, -overlayPx / 2, overlayPx, overlayPx)
-
-  -- Remplissage radial : 100 StatusBar quartiers, chacune sa plage MinMax, recevant le même pct via ns.SmoothSetValue (toggle : /rcradial)
-  local radialFillFrame = CreateFrame("Frame", nil, bar)
-  radialFillFrame:SetFrameLevel(arc:GetFrameLevel())
-  radialFillFrame:SetAllPoints(bar)
-  local radialFrags = {}
-  for k = 0, RADIAL_FRAG_COUNT - 1 do
-    local frag = CreateFrame("StatusBar", nil, radialFillFrame)
-    -- Niveau explicite et croissant : évite un ordre d'empilement instable entre les quartiers.
-    frag:SetFrameLevel(radialFillFrame:GetFrameLevel() + 1 + k)
-    frag:SetStatusBarTexture("Interface\\AddOns\\AishCore\\Media\\UI\\RadialWedge.tga")
-    frag:SetOrientation("VERTICAL")
-    local lo = (k / RADIAL_FRAG_COUNT) * 100
-    local hi = ((k + 1) / RADIAL_FRAG_COUNT) * 100
-    frag:SetMinMaxValues(lo, hi)
-    frag:SetValue(lo)
-    radialFrags[k + 1] = frag
-  end
-  bar.radialFillFrame = radialFillFrame
-  bar.radialFrags      = radialFrags
-  bar.RADIAL_FRAG_COUNT = RADIAL_FRAG_COUNT
-  LayoutRadialFrags()
 
   -- Arc de stagger (Moine Brasseur) : s'inscrit dans le trou laissé par l'overlay principal
   local staggerFrame = CreateFrame("Frame", nil, bar)
@@ -895,8 +1369,7 @@ function ResourceCircle.Create(parent)
   staggerArc:SetFrameLevel(staggerFrame:GetFrameLevel())
   staggerArc:SetSize(staggerArcPx, staggerArcPx * ARC_CROP_H)
   staggerArc:SetPoint("TOP", bar, "CENTER", 0, staggerArcPx / 2)
-  ns.SetSmoothStatusBarTexture(staggerArc, "Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
-  staggerArc:SetOrientation("VERTICAL")
+  SetupRadialArc(staggerArc)
   staggerArc:SetMinMaxValues(0, 100)
   staggerArc:SetValue(0)
   staggerArc:SetStatusBarColor(STAGGER_LIGHT[1], STAGGER_LIGHT[2], STAGGER_LIGHT[3], 1)
@@ -910,16 +1383,17 @@ function ResourceCircle.Create(parent)
   staggerOverlayFrame:SetAllPoints(bar)
   local staggerOverlay = staggerOverlayFrame:CreateTexture(nil, "ARTWORK")
   ns.SetSmoothTexture(staggerOverlay, ns.Media.circle)
-  local staggerOverlayPx = staggerArcPx * (cfg.staggerOverlayRatio or STAGGER_OVERLAY_RATIO)
-  if staggerOverlayPx >= 2 then staggerOverlay:SetSize(staggerOverlayPx, staggerOverlayPx) end
+  local staggerOverlayPx = staggerArcPx * StaggerHole(cfg)
+  staggerOverlay:SetSize(math.max(staggerOverlayPx, 0.01), math.max(staggerOverlayPx, 0.01))
   staggerOverlay:SetPoint("CENTER", bar, "CENTER", 0, 0)
+  RecordHome(staggerOverlay, "CENTER", bar, "CENTER", 0, 0, math.max(staggerOverlayPx, 0.01), math.max(staggerOverlayPx, 0.01))
   staggerOverlay:SetVertexColor(0x0e/255, 0x0e/255, 0x0e/255, 1)
   staggerOverlayFrame:Hide()
   bar.staggerOverlay      = staggerOverlay
   bar.staggerOverlayFrame = staggerOverlayFrame
 
   -- Arc de durée (Pala Prot / Guerrier Prot / DK Sang) : parallèle au stagger, mutuellement exclusif
-  -- Arc de durée (même approche que stagger : StatusBar + circle_piecrop.tga)
+  -- Arc de durée (même approche que stagger : StatusBar radiale native)
   local durationArcPx = arcPx * (ns.GetSecResCfg("durationArcRatio") or DURATION_ARC_RATIO)
   local durationArcFrame = CreateFrame("Frame", nil, bar)
   durationArcFrame:SetFrameLevel(staggerFrame:GetFrameLevel())
@@ -928,11 +1402,24 @@ function ResourceCircle.Create(parent)
   durationArcBar:SetFrameLevel(durationArcFrame:GetFrameLevel())
   durationArcBar:SetSize(durationArcPx, durationArcPx * ARC_CROP_H)
   durationArcBar:SetPoint("TOP", bar, "CENTER", 0, durationArcPx / 2)
-  ns.SetSmoothStatusBarTexture(durationArcBar, "Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
-  durationArcBar:SetOrientation("VERTICAL")
+  RecordHome(durationArcBar, "TOP", bar, "CENTER", 0, durationArcPx / 2, durationArcPx, durationArcPx * ARC_CROP_H)
+  SetupRadialArc(durationArcBar)
   durationArcBar:SetMinMaxValues(0, 1)
   durationArcBar:SetValue(0)
   durationArcBar:Hide()
+  -- Barre verticale (vide de haut en bas) pour les sources dont la plage est secrete : impossible de la mettre a l'echelle
+  -- d'une etendue d'arc, on garde donc l'ancien rendu pour elles.
+  local durationArcV = CreateFrame("StatusBar", nil, durationArcFrame)
+  durationArcV:SetFrameLevel(durationArcFrame:GetFrameLevel())
+  durationArcV:SetSize(durationArcPx, durationArcPx * ARC_CROP_V)
+  durationArcV:SetPoint("TOP", bar, "CENTER", 0, durationArcPx / 2)
+  ns.SetSmoothStatusBarTexture(durationArcV, "Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
+  durationArcV:SetOrientation("VERTICAL")
+  durationArcV:SetMinMaxValues(0, 1)
+  durationArcV:SetValue(0)
+  durationArcV:Hide()
+  RecordHome(durationArcV, "TOP", bar, "CENTER", 0, durationArcPx / 2, durationArcPx, durationArcPx * ARC_CROP_V)
+  bar.durationArcV     = durationArcV
   bar.durationArc      = durationArcBar
   bar.durationArcFrame = durationArcFrame
 
@@ -941,9 +1428,10 @@ function ResourceCircle.Create(parent)
   durationOvlFrame:SetAllPoints(bar)
   local durationOvl = durationOvlFrame:CreateTexture(nil, "ARTWORK")
   ns.SetSmoothTexture(durationOvl, ns.Media.circle)
-  local durationOvlPx = durationArcPx * (ns.GetSecResCfg("durationArcOverlayRatio") or DURATION_ARC_OVL_RATIO)
-  if durationOvlPx >= 2 then durationOvl:SetSize(durationOvlPx, durationOvlPx) end
+  local durationOvlPx = durationArcPx * DurationHole()
+  durationOvl:SetSize(math.max(durationOvlPx, 0.01), math.max(durationOvlPx, 0.01))
   durationOvl:SetPoint("CENTER", bar, "CENTER", 0, 0)
+  RecordHome(durationOvl, "CENTER", bar, "CENTER", 0, 0, math.max(durationOvlPx, 0.01), math.max(durationOvlPx, 0.01))
   durationOvl:SetVertexColor(0x0e/255, 0x0e/255, 0x0e/255, 1)
   durationOvlFrame:Hide()
   bar.durationOvlFrame = durationOvlFrame
@@ -1158,46 +1646,56 @@ function ResourceCircle.Create(parent)
     _rcAnimElems[14] = { element = nil }  -- secResFrame (conditionnel : seulement si secResDef existe)
   end
 
-  ResourceCircle.ApplyRadialMode()
+  ApplyArcAngles()
+  pcall(ResourceCircle.Update)
 
   return bar
 end
 
--- Bascule entre remplissage vertical (arc) et radial (fragments). Appelé au Create() et par /rcradial.
-function ResourceCircle.ApplyRadialMode()
-  if not bar then return end
-  local cfg = ns.GetCfg("resourceCircle")
-  local radial = cfg.radialFillTest == true
-  -- SetAlpha(1)/SetScale(1) sur l'élément actif : évite qu'il reste bloqué dans un état de transition interrompue.
-  if bar.arc then
-    if radial then bar.arc:Hide() else bar.arc:SetAlpha(1); bar.arc:SetScale(1); bar.arc:Show() end
-  end
-  if bar.radialFillFrame then
-    if radial then bar.radialFillFrame:SetAlpha(1); bar.radialFillFrame:SetScale(1); bar.radialFillFrame:Show() else bar.radialFillFrame:Hide() end
-  end
-  -- Forcer un refresh immédiat pour éviter un flash à l'ancienne valeur.
-  pcall(ResourceCircle.Update)
+-- Applique pct (0-100) a l'arc, interpole nativement (ns.SmoothBarValue).
+local function ApplyArcValue(pct)
+  pcall(ns.SmoothBarValue, bar.arc, pct)
 end
 
--- Applique pct (0-100) à l'arc actif. Vertical : une seule StatusBar, lissée (ns.SmoothBarValue).
--- Radial : le même pct poussé dans chacun des 100 quartiers, en pose directe -- autant
--- d'interpolations simultanées coûteraient cher pour un gain invisible (1 seul quartier est partiel).
-local function ApplyArcValue(pct)
-  local cfg = ns.GetCfg("resourceCircle")
-  if cfg.radialFillTest and bar.radialFrags then
-    for _, frag in ipairs(bar.radialFrags) do
-      pcall(ns.SmoothSetValue, frag, pct)
+-- Apercu du panneau : le remplissage monte progressivement de 50 a 100 %, marque une pause, puis redescend plus vite.
+-- Pose directe a chaque frame (pas d'interpolation native, qui rendrait la montee saccadee).
+local previewAnimFrame
+local PREVIEW_RISE, PREVIEW_HOLD, PREVIEW_FALL = 3.2, 0.4, 1.0
+local function StopPreviewAnim()
+  if previewAnimFrame then previewAnimFrame:SetScript("OnUpdate", nil) end
+end
+local function StartPreviewAnim()
+  if not previewAnimFrame then previewAnimFrame = CreateFrame("Frame") end
+  local t, lastShown = 0, nil
+  local total = PREVIEW_RISE + PREVIEW_HOLD + PREVIEW_FALL + PREVIEW_HOLD
+  previewAnimFrame:SetScript("OnUpdate", function(_, el)
+    if not (bar and previewMode) then StopPreviewAnim(); return end
+    t = (t + el) % total
+    local v
+    if t < PREVIEW_RISE then
+      local p = t / PREVIEW_RISE
+      v = 50 + 50 * (p * p * (3 - 2 * p))                  -- montee douce (smoothstep)
+    elseif t < PREVIEW_RISE + PREVIEW_HOLD then
+      v = 100
+    elseif t < PREVIEW_RISE + PREVIEW_HOLD + PREVIEW_FALL then
+      local p = (t - PREVIEW_RISE - PREVIEW_HOLD) / PREVIEW_FALL
+      v = 100 - 50 * (p * p * (3 - 2 * p))
+    else
+      v = 50
     end
-  else
-    pcall(ns.SmoothBarValue, bar.arc, pct)
-  end
+    pcall(bar.arc.SetValue, bar.arc, v)
+    if previewDurShown and previewDurEl then pcall(previewDurEl.SetValue, previewDurEl, v) end
+    if previewStagShown then pcall(bar.staggerArc.SetValue, bar.staggerArc, v) end
+    local shown = math.floor(v + 0.5)
+    if shown ~= lastShown then lastShown = shown; bar.text:SetText(tostring(shown)) end
+  end)
 end
 
 -- Anime l'arc actif et son overlay indépendamment (chacun son timing) ; l'overlay finit en dernier pour ne pas laisser transparaître le trou central.
 local _arcOverlayTickers = { main = nil, stagger = nil }
 -- Anime une paire arc+overlay avec CIRCLE_ANIM.arc/arcOverlay ; factorisé pour que l'arc de
 -- stagger reçoive exactement la même animation que l'arc principal.
-local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayVisualEl)
+local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayVisualEl, arcKey, overlayKey, onDone)
   if not arcEl or not overlayEl then return end
   -- /rcanimlog : trace chaque appel + si un cycle en cours est interrompu.
   if ns._rcAnimDebug then
@@ -1206,8 +1704,9 @@ local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayV
   end
   if _arcOverlayTickers[key] then _arcOverlayTickers[key]:Cancel(); _arcOverlayTickers[key] = nil end
 
-  local arcSpec     = shouldShow and CIRCLE_ANIM.arc.show        or CIRCLE_ANIM.arc.hide
-  local overlaySpec = shouldShow and CIRCLE_ANIM.arcOverlay.show or CIRCLE_ANIM.arcOverlay.hide
+  local arcAnim, overlayAnim = CIRCLE_ANIM[arcKey or "arc"], CIRCLE_ANIM[overlayKey or "arcOverlay"]
+  local arcSpec     = shouldShow and arcAnim.show     or arcAnim.hide
+  local overlaySpec = shouldShow and overlayAnim.show or overlayAnim.hide
 
   -- opacity = alpha de départ pour show / de fin pour hide (l'autre bout vaut toujours 1), même convention que ns.AnimateStagger.
   local arcOpacity, overlayOpacity = arcSpec.opacity or 0, overlaySpec.opacity or 0
@@ -1367,6 +1866,7 @@ local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayV
     if arcDone and overlayDone then
       _arcOverlayTickers[key]:Cancel()
       _arcOverlayTickers[key] = nil
+      if onDone then onDone() end
     end
   end)
 end
@@ -1375,18 +1875,31 @@ end
 local function AnimateArcOverlay(shouldShow)
   if not bar then return end
 
-  local cfg = ns.GetCfg("resourceCircle")
-  local radial = cfg.radialFillTest == true
-  local arcEl      = radial and bar.radialFillFrame or bar.arc
-  local otherArcEl = radial and bar.arc or bar.radialFillFrame
-  if otherArcEl then otherArcEl:Hide() end
+  local arcEl = bar.arc
 
   -- Slide/scale de l'overlay principal appliqués à la texture bar.overlay (ancrée CENTER), pas à bar.overlayFrame (SetAllPoints, pas de pivot exploitable).
   AnimateArcOverlayPair("main", shouldShow, arcEl, bar.overlayFrame, bar.overlay)
 
+  -- Arc de duree (ressource secondaire) : meme animation, mais calee pour arriver en dernier / partir en premier.
+  if bar.durationArc and bar.durationOvlFrame then
+    -- Le cercle entre / sort avec tout le reste : interrompt une eventuelle animation liee aux donnees.
+    if _arcOverlayTickers.duration then _arcOverlayTickers.duration:Cancel(); _arcOverlayTickers.duration = nil end
+    durBusy = false
+    if shouldShow then
+      if durArcWanted then RunDurAnim(true, false) end
+    elseif durShown then
+      RunDurAnim(false, false)
+    end
+  end
+
   -- Arc de stagger (Moine Brasseur) : structurellement identique à l'arc principal, donc exactement la même animation.
   if bar.staggerArc and bar.staggerOverlayFrame then
     if staggerActive then
+      if shouldShow then
+        ApplyStaggerGeometry()
+        ResetRadialArc(bar.staggerArc)
+        ApplyArcAngles()
+      end
       AnimateArcOverlayPair("stagger", shouldShow, bar.staggerArc, bar.staggerOverlayFrame, bar.staggerOverlay)
     elseif _arcOverlayTickers.stagger then
       _arcOverlayTickers.stagger:Cancel(); _arcOverlayTickers.stagger = nil
@@ -1447,7 +1960,7 @@ function ResourceCircle.AnimateVisibility(shouldShow)
     end
     if not shouldShow then
       bar:Hide()
-      -- (arc / radialFillFrame / overlay : masqués par AnimateArcOverlay,
+      -- (arc / overlay : masqués par AnimateArcOverlay,
       -- sur son propre timing — pas ici, pour ne pas les couper en avance.)
       bar.bgLarge:Hide()
       bar.text:Hide()
@@ -1501,6 +2014,7 @@ end
 function ResourceCircle.SetPreview(on)
   previewMode = on
   if not bar then return end
+  if ns.IsForever then C_Timer.After(0, RefreshSwingPreview) end
   -- Sortie du panneau : le halo n'a plus lieu d'etre.
   if not on and bar.textBackdropGlow then ns.HideTextBackdropGlow(bar.textBackdropGlow) end
 
@@ -1513,6 +2027,14 @@ function ResourceCircle.SetPreview(on)
 
   if on then
     lastVisibilityState = nil
+    for _, k in ipairs({ "main", "stagger", "duration" }) do
+      if _arcOverlayTickers[k] then _arcOverlayTickers[k]:Cancel(); _arcOverlayTickers[k] = nil end
+    end
+    durBusy = false
+    for _, el in ipairs({ bar.arc, bar.overlayFrame, bar.overlay, bar.staggerArc, bar.staggerOverlayFrame, bar.staggerOverlay,
+                          bar.durationArc, bar.durationArcV, bar.durationOvlFrame, bar.durationOvl }) do
+      el._aishAnimAlpha, el._aishAnimScale = nil, nil
+    end
     -- Respecter le toggle : pas d'apercu pour un module desactive (meme garde
     -- que HealthCircle/OutOfCombatResourceCircle). Masquage explicite : avec
     -- previewMode a true, UpdateVisibility est court-circuite et ne le ferait
@@ -1549,6 +2071,7 @@ function ResourceCircle.SetPreview(on)
       local f = secDots[i]
       if f then
         if secDotAnims[i] then secDotAnims[i].progress = 1; secDotAnims[i].target = 1 end
+        if f.radial then f.radial:SetValue(1); f.radial:SetAlpha(1) end
         f:Show()
         f:SetAlpha(1)
         if f.SetScale then f:SetScale(1) end
@@ -1625,25 +2148,52 @@ function ResourceCircle.SetPreview(on)
         bar.staggerArc:SetStatusBarColor(STAGGER_MODERATE[1], STAGGER_MODERATE[2], STAGGER_MODERATE[3], 1)
         bar.staggerArc:SetMinMaxValues(0, 100)
         bar.staggerArc:SetValue(42.5)
-        bar.staggerArc:SetAlpha(1); bar.staggerArc:Show()
-        bar.staggerOverlayFrame:SetAlpha(1); bar.staggerOverlayFrame:Show()
+        bar.staggerArc:SetScale(1); bar.staggerArc:SetAlpha(1); bar.staggerArc:Show()
+        bar.staggerOverlayFrame:SetScale(1); bar.staggerOverlayFrame:SetAlpha(1); bar.staggerOverlayFrame:Show()
+        bar.staggerOverlay:SetAlpha(1); bar.staggerOverlay:Show()
+        previewStagShown = true
       else
+        previewStagShown = false
         bar.staggerArc:Hide()
         bar.staggerOverlayFrame:Hide()
       end
     end
-    -- Respecter le mode radial en preview aussi, sinon l'arc vertical réapparaîtrait par-dessus le disque radial
-    local cfgRadial = ns.GetCfg("resourceCircle")
-    if cfgRadial.radialFillTest and bar.radialFillFrame then
-      bar.arc:Hide()
-      bar.radialFillFrame:Show(); bar.radialFillFrame:SetAlpha(1)
-    elseif bar.radialFillFrame then
-      bar.radialFillFrame:Hide()
+    -- Arc de duree (ressource secondaire des specs tank, etc.) : apercu avec la couleur reelle, anime comme l'arc principal.
+    previewDurShown, previewDurEl = false, nil
+    if bar.durationArc and bar.durationOvlFrame then
+      local info = ns.Auras and ns.Auras.GetCenterArcPreview and ns.Auras.GetCenterArcPreview()
+      if info then
+        -- Source a plage secrete (canal clone-bar) : l'arc reel est la barre verticale, c'est elle qu'on previsualise.
+        durArcVert = info.vertical and true or false
+        local el = durArcVert and bar.durationArcV or bar.durationArc
+        local other = durArcVert and bar.durationArc or bar.durationArcV
+        if other then other:Hide() end
+        local c = info.color or { 1, 1, 1 }
+        el:SetStatusBarColor(c[1], c[2], c[3], 1)
+        el:SetMinMaxValues(0, 100)
+        el:SetValue(75)
+        el:SetScale(1); el:SetAlpha(1); el:Show()
+        bar.durationOvlFrame:SetScale(1); bar.durationOvlFrame:SetAlpha(1); bar.durationOvlFrame:Show()
+        bar.durationOvl:SetAlpha(1); bar.durationOvl:Show()
+        durBusy, durShown = false, true
+        previewDurShown, previewDurEl = true, el
+      end
     end
-    -- Valeur fictive pour visualiser
-    ApplyArcValue(72)
-    bar.text:SetText("72")
+    -- Valeur fictive animee pour visualiser
+    StartPreviewAnim()
   else
+    StopPreviewAnim()
+    if previewStagShown then ResourceCircle.DetectStagger() end
+    previewStagShown = false
+    if previewDurShown then
+      previewDurShown, previewDurEl = false, nil
+      if not durArcWanted then
+        bar.durationArc:Hide()
+        if bar.durationArcV then bar.durationArcV:Hide() end
+        if bar.durationOvlFrame then bar.durationOvlFrame:Hide() end
+        durShown = false
+      end
+    end
     lastVisibilityState = nil
     ResourceCircle.Update()
     ResourceCircle.UpdateVisibility()
@@ -1827,6 +2377,26 @@ local function SetResourceText(txt)
     _rcLastText = nil
   end
   pcall(bar.text.SetText, bar.text, txt)
+end
+
+-- /aishrctext : couleur / alpha du texte de ressource (config, texte reel, selecteur de couleur), pour diagnostiquer l'alpha
+SLASH_AISHRCTEXT1 = "/aishrctext"
+SlashCmdList["AISHRCTEXT"] = function()
+  local P = "|cff33aaff[RCText]|r "
+  local cfg = ns.GetCfg("resourceCircle")
+  local tc = cfg and cfg.textColor
+  print(P .. "themedColors=" .. tostring(cfg and cfg.themedColors) .. " textColor="
+    .. (tc and string.format("%.2f/%.2f/%.2f/%s", tc[1], tc[2], tc[3], tostring(tc[4])) or "nil"))
+  if bar and bar.text then
+    print(P .. "texte reel : GetTextColor=" .. table.concat({ tostring(select(1, bar.text:GetTextColor())),
+      tostring(select(2, bar.text:GetTextColor())), tostring(select(3, bar.text:GetTextColor())),
+      tostring(select(4, bar.text:GetTextColor())) }, "/")
+      .. " alpha=" .. tostring(bar.text:GetAlpha()) .. " effectif=" .. tostring(bar.text:GetEffectiveAlpha()))
+  end
+  local cp = ColorPickerFrame
+  print(P .. "selecteur : GetColorAlpha=" .. tostring(cp and cp.GetColorAlpha ~= nil)
+    .. " OpacitySliderFrame=" .. tostring(_G.OpacitySliderFrame ~= nil)
+    .. (cp and cp.GetColorAlpha and (" alpha=" .. tostring(cp:GetColorAlpha())) or ""))
 end
 
 function ResourceCircle.Update()
@@ -2081,7 +2651,8 @@ function ResourceCircle.EnsureSecDotFrames(count)
       local bg = f:CreateTexture(nil, "BACKGROUND")
       bg:SetTexture(SEC_DOT_TEX)
       bg:SetAllPoints()
-      bg:SetVertexColor(0x0e/255, 0x0e/255, 0x0e/255, 1)
+      local bgc = GetBgColor()
+      bg:SetVertexColor(bgc[1], bgc[2], bgc[3], bgc[4] or 1)
       f.bg = bg
       -- Fill (même texture Circle_Smooth que le Skyriding)
       local fill = f:CreateTexture(nil, "ARTWORK")
@@ -2094,6 +2665,16 @@ function ResourceCircle.EnsureSecDotFrames(count)
       border:SetAllPoints()
       border:SetVertexColor(0.3, 0.3, 0.3, 0.3)
       f.border = border
+      -- Runes : remplissage radial natif (le fill par hauteur reste pour les autres types d'orbes)
+      local radial = CreateFrame("StatusBar", nil, f)
+      radial:SetAllPoints(f)
+      radial:SetFrameLevel(f:GetFrameLevel() + 1)
+      ns.SetSmoothStatusBarTexture(radial, ns.Media.circle)
+      radial:SetRenderMode(Enum.StatusBarRenderMode.Radial)
+      radial:SetMinMaxValues(0, 1)
+      radial:SetValue(1)
+      radial:Hide()
+      f.radial = radial
       f.fillPct = 0
       f._homeX = 0
       f._homeY = 0
@@ -2103,6 +2684,9 @@ function ResourceCircle.EnsureSecDotFrames(count)
     secDotAnims[i] = secDotAnims[i] or {}
     secDotAnims[i].progress = 0
     secDotAnims[i].target   = 0
+    local isRune = (secDotType == "RUNES")
+    secDots[i].fill:SetShown(not isRune)
+    secDots[i].radial:SetShown(isRune)
     -- Masquer pour que le slide-in parte de zéro
     secDots[i]:SetAlpha(0)
     secDots[i]:Hide()
@@ -2177,6 +2761,7 @@ function ResourceCircle.UpdateSecDotColors()
     local f = secDots[i]
     if f and f.fill then
       f.fill:SetVertexColor(activeColor[1], activeColor[2], activeColor[3], 1)
+      if f.radial then f.radial:SetStatusBarColor(activeColor[1], activeColor[2], activeColor[3], 1) end
       f._baseColor = color
     end
   end
@@ -2228,11 +2813,8 @@ function ResourceCircle.UpdateSecDots()
         end
         -- Les runes sont toujours "présentes" (slide-in dès que la case existe)
         if circleVisible then oa.target = 1 end
-        local fullSize = f:GetHeight()
-        if fullSize > 0 then
-          f.fill:SetHeight(math.max(fullSize * pct, 0.01))
-        end
-        f.fill:SetAlpha(pct >= 1 and 1 or (SEC_DIM + (1 - SEC_DIM) * pct))
+        f.radial:SetValue(pct)
+        f.radial:SetAlpha(pct >= 1 and 1 or (SEC_DIM + (1 - SEC_DIM) * pct))
       end
     end
 
@@ -2433,16 +3015,26 @@ end
 function ResourceCircle.RefreshSecResSpecGeometry(specID)
   if not bar then return end
   local cfg = ns.GetCfg("resourceCircle")
-  local arcPx = cfg.size * (cfg.arcSizeRatio or 1.0)
+  local arcPx = ArcPx(cfg)
 
   if bar.durationArc then
     local durArcPx = arcPx * (ns.GetSecResCfg("durationArcRatio", specID) or DURATION_ARC_RATIO)
     bar.durationArc:SetSize(durArcPx, durArcPx * ARC_CROP_H)
     bar.durationArc:ClearAllPoints()
     bar.durationArc:SetPoint("TOP", bar, "CENTER", 0, durArcPx / 2)
+    RecordHome(bar.durationArc, "TOP", bar, "CENTER", 0, durArcPx / 2, durArcPx, durArcPx * ARC_CROP_H)
     if bar.durationOvl then
-      local durOvPx = durArcPx * (ns.GetSecResCfg("durationArcOverlayRatio", specID) or DURATION_ARC_OVL_RATIO)
-      if durOvPx >= 2 then bar.durationOvl:SetSize(durOvPx, durOvPx) end
+      local durOvPx = durArcPx * DurationHole(specID)
+      bar.durationOvl:SetSize(math.max(durOvPx, 0.01), math.max(durOvPx, 0.01))
+      RecordHome(bar.durationOvl, "CENTER", bar, "CENTER", 0, 0, math.max(durOvPx, 0.01), math.max(durOvPx, 0.01))
+    end
+    SetArcAngle(bar.durationArc, ns.GetSecResCfg("durationArcStartAngle", specID), ns.GetSecResCfg("durationArcEndAngle", specID),
+      ns.GetSecResCfg("durationArcReverse", specID))
+    if bar.durationArcV then
+      bar.durationArcV:SetSize(durArcPx, durArcPx * ARC_CROP_V)
+      bar.durationArcV:ClearAllPoints()
+      bar.durationArcV:SetPoint("TOP", bar, "CENTER", 0, durArcPx / 2)
+      RecordHome(bar.durationArcV, "TOP", bar, "CENTER", 0, durArcPx / 2, durArcPx, durArcPx * ARC_CROP_V)
     end
   end
 
@@ -2925,12 +3517,35 @@ function ResourceCircle.UpdateSecondaryResource()
       SetSecResShown(false)
     end
     return
-  elseif secResDef.useItemCount and secResDef.itemID then
-    -- Forever : ressource materialisee par un objet des sacs (fragments d'ame, 6265). Le compte
-    -- d'objets n'est jamais secret : texte pose directement, pop-in/out comme les autres.
-    local count = C_Item.GetItemCount(secResDef.itemID) or 0
+  elseif (secResDef.useItemCount and secResDef.itemID) or secResDef.useAmmo then
+    -- Forever : ressource materialisee par un objet des sacs (fragments d'ame, 6265) ou par les munitions
+    -- equipees du chasseur (emplacement de munitions). Le compte d'objets n'est jamais secret : texte
+    -- pose directement, pop-in/out comme les autres.
+    local count
+    if secResDef.useAmmo then
+      count = (GetInventoryItemCount and GetInventoryItemCount("player", 0)) or 0
+    else
+      count = C_Item.GetItemCount(secResDef.itemID) or 0
+    end
     local applied = count > 0
-    if applied then bar.secResText:SetText(count) end
+    if applied then
+      bar.secResText:SetText(count)
+      if secResDef.useAmmo then
+        -- Couleur selon la quantite : Normal >= seuil haut, Critique < seuil bas, Alerte entre les deux
+        local sid = ResolveSpecID()
+        local hi  = ns.GetSecResCfg("ammoThresholdHigh", sid) or 200
+        local lo  = ns.GetSecResCfg("ammoThresholdLow", sid) or 50
+        local c
+        if count >= hi then
+          c = ns.GetSecResCfg("ammoColorNormal", sid) or { 1, 1, 1, 1 }
+        elseif count < lo then
+          c = ns.GetSecResCfg("ammoColorCritical", sid) or { 1, 0.2, 0.2, 1 }
+        else
+          c = ns.GetSecResCfg("ammoColorAlert", sid) or { 1, 0.6, 0.1, 1 }
+        end
+        bar.secResText:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+      end
+    end
     if applied and not _secResWasApplied then
       StartSecResPop()
     elseif not applied and _secResWasApplied then
@@ -3035,7 +3650,7 @@ function ResourceCircle.DetectStagger()
 end
 
 function ResourceCircle.UpdateStagger()
-  if not bar or not staggerActive then return end
+  if not bar or not staggerActive or previewMode then return end
   -- Cercle central caché : masquer le texte de stagger en même temps, sinon il restait bloqué affiché à "0%" hors combat.
   if not bar:IsShown() then
     if bar.secResFrame and bar.secResFrame:IsShown() then
@@ -3086,78 +3701,171 @@ local INTERP_IMMED = Enum and Enum.StatusBarInterpolation and Enum.StatusBarInte
 local TIMER_DRAIN  = Enum and Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime
 local _lastArcDurRef = nil  -- tostring(durObj) : change à chaque cast/refresh
 
+-- Arc de duree dont l'etendue est < 360 deg : SetTimerDuration impose sa propre plage (l'etendue est alors ignoree), on
+-- pilote donc la barre a la main avec le pourcentage restant du durObj (valeur possiblement secrete, jamais lue).
+local arcDriver, _arcTimerOn
+local _arcDriverOn = false   -- pilotage manuel actif : le canal clone-bar (proxy) ne doit alors plus ecrire dans l'arc
+local function StopArcDriver()
+  _arcDriverOn = false
+  if arcDriver then arcDriver:SetScript("OnUpdate", nil) end
+end
+local function StartArcDriver(durObj)
+  local curve = CurveConstants and CurveConstants.ScaleTo100
+  if not (curve and durObj and durObj.EvaluateRemainingPercent) then return false end
+  if not pcall(durObj.EvaluateRemainingPercent, durObj, curve) then return false end
+  local arc = bar.durationArc
+  arc:SetMinMaxValues(0, 100)
+  if not arcDriver then arcDriver = CreateFrame("Frame") end
+  arcDriver:SetScript("OnUpdate", function()
+    local ok, v = pcall(durObj.EvaluateRemainingPercent, durObj, curve)
+    if ok then pcall(arc.SetValue, arc, v) end
+  end)
+  _arcDriverOn = true
+  return true
+end
+
+-- Affichage de l'arc de duree. Cercle visible + nouvel arc : entree animee ; deja affiche : rien a refaire (une animation
+-- en cours ne doit pas etre ecrasee par les mises a jour de valeur). Cercle masque : on note juste qu'il y a du contenu,
+-- l'animation d'apparition du cercle (AnimateArcOverlay) le fera entrer au bon moment.
+-- Rapproche l'etat affiche (durShown) de l'etat voulu (durArcWanted), une animation a la fois : si une entree/sortie est en
+-- cours, la suivante attend sa fin (sinon l'arc reprenait a mi-course, deforme, quand un proc le refaisait apparaitre).
+local function DurArcReconcile()
+  if durBusy or durArcWanted == durShown then return end
+  if lastVisibilityState ~= true or not bar:IsShown() then return end
+  RunDurAnim(durArcWanted, true)
+end
+
+RunDurAnim = function(show, live)
+  local el = DurArcEl()
+  if not (el and bar.durationOvlFrame) then return end
+  durBusy = true
+  AnimateArcOverlayPair("duration", show, el, bar.durationOvlFrame, bar.durationOvl,
+    live and "durationArcLive" or "durationArc", live and "durationArcOverlayLive" or "durationArcOverlay",
+    function()
+      durBusy = false
+      durShown = show
+      DurArcReconcile()
+    end)
+end
+
+-- Affichage de l'arc de duree. Cercle masque : on note juste qu'il y a du contenu, l'animation d'apparition du cercle
+-- (AnimateArcOverlay) le fera entrer au bon moment.
+local function DurArcShow()
+  durArcWanted = true
+  DurArcReconcile()
+end
+
+local function DurArcHide()
+  if not durArcWanted then return end   -- deja masque (ou sortie en cours) : les appels repetes ne relancent rien
+  durArcWanted = false
+  if lastVisibilityState == true and bar:IsShown() and durShown then
+    DurArcReconcile()
+  else
+    if _arcOverlayTickers.duration then _arcOverlayTickers.duration:Cancel(); _arcOverlayTickers.duration = nil end
+    durBusy, durShown = false, false
+    local el = DurArcEl()
+    el:SetValue(0); el:Hide()
+    if bar.durationOvlFrame then bar.durationOvlFrame:Hide() end
+  end
+end
+
+-- Bascule entre la barre radiale (durObj, valeur, stacks) et la barre verticale (canal clone-bar) : l'autre est masquee.
+local function SetDurArcMode(vertical)
+  if durArcVert == vertical then return end
+  if _arcOverlayTickers.duration then _arcOverlayTickers.duration:Cancel(); _arcOverlayTickers.duration = nil end
+  durBusy, durShown = false, false
+  local old = DurArcEl()
+  durArcVert = vertical
+  old:SetValue(0); old:Hide()
+  durArcWanted = false   -- la prochaine apparition rejoue l'entree animee sur le nouvel element
+end
+
 function ResourceCircle.SetCenterArcEntry(entry)
-  if not bar or not bar.durationArc then return end
+  if not bar or not bar.durationArc or previewDurShown then return end
   if entry and entry.durObj then
     -- Le durObj est recréé à chaque cast (même refresh) → tostring() change toujours ; SetTimerDuration ne tourne que pour un nouveau durObj.
     local durRef = tostring(entry.durObj)
     if durRef == _lastArcDurRef then return end
     _lastArcDurRef = durRef
+    SetDurArcMode(false)
     local color = entry.spellColor
     if color then bar.durationArc:SetStatusBarColor(color[1], color[2], color[3], 1) end
     bar.durationArc:SetMinMaxValues(0, 1)
-    if bar.durationArc.SetTimerDuration and INTERP_IMMED and TIMER_DRAIN then
+    StopArcDriver()
+    local driven = (bar.durationArc._k or 1) ~= 1 and StartArcDriver(entry.durObj)
+    if driven then
+      if _arcTimerOn then
+        _arcTimerOn = false
+        if bar.durationArc.SetTimerDuration then pcall(bar.durationArc.SetTimerDuration, bar.durationArc, nil) end
+      end
+    elseif bar.durationArc.SetTimerDuration and INTERP_IMMED and TIMER_DRAIN then
+      _arcTimerOn = true
       pcall(bar.durationArc.SetTimerDuration, bar.durationArc, entry.durObj, INTERP_IMMED, TIMER_DRAIN)
     end
-    bar.durationArc:SetAlpha(1); bar.durationArc:Show()
-    if bar.durationOvlFrame then bar.durationOvlFrame:SetAlpha(1); bar.durationOvlFrame:Show() end
+    DurArcShow()
   else
     -- Chemin CDM : SetTimerDuration(nil) uniquement si on avait un durObj actif, sinon ça peut corrompre l'état de la StatusBar.
+    StopArcDriver()
     if _lastArcDurRef then
       _lastArcDurRef = nil
-      if bar.durationArc.SetTimerDuration then
+      if _arcTimerOn and bar.durationArc.SetTimerDuration then
         pcall(bar.durationArc.SetTimerDuration, bar.durationArc, nil)
       end
+      _arcTimerOn = false
     end
     -- Toujours cacher l'arc visuellement (couvre chemin totem + chemin CDM).
-    bar.durationArc:SetValue(0); bar.durationArc:Hide()
-    if bar.durationOvlFrame then bar.durationOvlFrame:Hide() end
+    DurArcHide()
   end
 end
 
 -- Cas totem (Consécration) : pas de durObj, ticker manuel à 60fps côté CenterArc
 function ResourceCircle.SetCenterArcColor(color)
   if not bar or not bar.durationArc then return end
-  if color then bar.durationArc:SetStatusBarColor(color[1], color[2], color[3], 1) end
+  if color then
+    bar.durationArc:SetStatusBarColor(color[1], color[2], color[3], 1)
+    if bar.durationArcV then bar.durationArcV:SetStatusBarColor(color[1], color[2], color[3], 1) end
+  end
 end
 
 function ResourceCircle.SetCenterArcValue(fraction, color)
-  if not bar or not bar.durationArc then return end
+  if not bar or not bar.durationArc or previewDurShown then return end
+  SetDurArcMode(false)
+  StopArcDriver()
   if color then bar.durationArc:SetStatusBarColor(color[1], color[2], color[3], 1) end
   bar.durationArc:SetMinMaxValues(0, 1)
   ns.SmoothSetValue(bar.durationArc, math.max(0, math.min(1, fraction)))
-  bar.durationArc:SetAlpha(1); bar.durationArc:Show()
-  if bar.durationOvlFrame then bar.durationOvlFrame:SetAlpha(1); bar.durationOvlFrame:Show() end
+  DurArcShow()
 end
 
 -- Mode "absorb" de l'arc de durée (Dur Au Mal, cfg.ignorePainArcAbsorb) : remplissage proportionnel à une valeur/max génériques plutôt qu'au temps restant. `value` peut être secret : aucune arithmétique, passé brut à SetValue (même pattern que UpdateAbsorb dans UnitBars.lua).
 function ResourceCircle.SetCenterArcFill(value, maxValue, color)
-  if not bar or not bar.durationArc then return end
+  if not bar or not bar.durationArc or previewDurShown then return end
+  SetDurArcMode(false)
+  StopArcDriver()
   if not maxValue or maxValue <= 0 then return end
   if color then bar.durationArc:SetStatusBarColor(color[1], color[2], color[3], 1) end
   bar.durationArc:SetMinMaxValues(0, maxValue)
   ns.SmoothSetValue(bar.durationArc, value)
-  bar.durationArc:SetAlpha(1); bar.durationArc:Show()
-  if bar.durationOvlFrame then bar.durationOvlFrame:SetAlpha(1); bar.durationOvlFrame:Show() end
+  DurArcShow()
 end
 
 -- Mode "cdmbar" (durée combat-safe, CDMHooks.lua) : relais brut vers bar.durationArc, sans comparaison sur lo/hi/value (hi peut être secret en combat), sauf hi==0 (envoyé en clair à l'expiration du buff).
 function ResourceCircle.SetCenterArcBarMinMax(lo, hi)
-  if not bar or not bar.durationArc then return end
+  if not bar or not bar.durationArcV or previewDurShown then return end
+  SetDurArcMode(true)
+  StopArcDriver()
   local okZero, isZero = pcall(function() return hi == 0 end)
   if okZero and isZero then
-    bar.durationArc:SetValue(0); bar.durationArc:Hide()
-    if bar.durationOvlFrame then bar.durationOvlFrame:Hide() end
+    DurArcHide()
     return
   end
-  pcall(bar.durationArc.SetMinMaxValues, bar.durationArc, lo, hi)
-  bar.durationArc:SetAlpha(1); bar.durationArc:Show()
-  if bar.durationOvlFrame then bar.durationOvlFrame:SetAlpha(1); bar.durationOvlFrame:Show() end
+  pcall(bar.durationArcV.SetMinMaxValues, bar.durationArcV, lo, hi)
+  DurArcShow()
 end
 
 function ResourceCircle.SetCenterArcBarValue(value)
-  if not bar or not bar.durationArc then return end
-  pcall(bar.durationArc.SetValue, bar.durationArc, value)
+  if not bar or not bar.durationArcV or previewDurShown then return end
+  pcall(bar.durationArcV.SetValue, bar.durationArcV, value)
 end
 
 -- Proxy "clone-bar" : expose l'interface StatusBar attendue par ns.SubscribeCDMAuraBar sans être une vraie StatusBar, redirige vers bar.durationArc (ResourceCircle garde la main sur son widget).
@@ -3169,13 +3877,14 @@ ResourceCircle.centerArcBarProxy = {
 
 -- Remplit l'arc secondaire central depuis une aura stackable, en réutilisant la même chaîne CDM + fallbacks que le texte de ressource secondaire (specs à arc "stacks" lues via une aura, ex DH Dévoreur).
 function ResourceCircle.ApplyStacksToCenterArc(spellID, maxValue, color, dbg)
-  if not bar or not bar.durationArc then return false end
+  if not bar or not bar.durationArc or previewDurShown then return false end
   if not maxValue or maxValue <= 0 then return false end
+  SetDurArcMode(false)
   -- SetMinMaxValues doit preceder SetValue, mais rien ne garantit que les stacks
   -- s'appliqueront : on memorise la plage courante pour la restaurer en cas d'echec.
   -- Sans ca, un simple appel exploratoire (ex. la sonde de /rcarc) reglait l'arc sur
   -- la plage demandee et le laissait fausse -- il sautait a 100% en mode absorb.
-  local okPrev, prevMin, prevMax = pcall(bar.durationArc.GetMinMaxValues, bar.durationArc)
+  local okPrev, prevMin, prevMax = true, bar.durationArc._ulo or 0, bar.durationArc._uhi or 1
   bar.durationArc:SetMinMaxValues(0, maxValue)
   local applied = ApplyStacksTo(function(v)
     return pcall(ns.SmoothSetValue, bar.durationArc, v)
@@ -3195,8 +3904,7 @@ function ResourceCircle.ApplyStacksToCenterArc(spellID, maxValue, color, dbg)
   end
   if applied then
     if color then bar.durationArc:SetStatusBarColor(color[1], color[2], color[3], 1) end
-    bar.durationArc:SetAlpha(1); bar.durationArc:Show()
-    if bar.durationOvlFrame then bar.durationOvlFrame:SetAlpha(1); bar.durationOvlFrame:Show() end
+    DurArcShow()
   end
   return applied
 end
@@ -3267,17 +3975,6 @@ SlashCmdList["RCANIMLOG"] = function()
     .. " -- reproduire (atterrir + combat), puis /aishdebug sky pour la sequence Skyriding correspondante.")
 end
 
--- /rcradial — bascule à chaud entre remplissage vertical et radial, persiste dans le profil (cfg.radialFillTest)
-SLASH_RCRADIAL1 = "/rcradial"
-SlashCmdList["RCRADIAL"] = function()
-  local cfg = ns.GetCfg("resourceCircle")
-  cfg.radialFillTest = not cfg.radialFillTest
-  -- ApplySettings() (pas juste ApplyRadialMode()) : re-synchronise aussi SetSize/SetPoint de bar.arc, qu'ApplyRadialMode seule ne corrige pas (Show/Hide/alpha/scale uniquement).
-  ResourceCircle.ApplySettings()
-  local state = cfg.radialFillTest and "|cff00ff00RADIAL|r" or "|cff88ccffVERTICAL (défaut)|r"
-  DEFAULT_CHAT_FRAME:AddMessage("|cff88ffff[ResourceCircle]|r Remplissage : " .. state)
-end
-
 -- Debug : dump complet de l'état de bar.arc, appelable à tout moment.
 SLASH_RCARCDBG1 = "/rcarcdbg"
 SlashCmdList["RCARCDBG"] = function()
@@ -3298,8 +3995,6 @@ SlashCmdList["RCARCDBG"] = function()
   local okMM, lo, hi = pcall(a.GetMinMaxValues, a)
   print(string.format("[AishDbg] arc: GetValue ok=%s val=%s | GetMinMax ok=%s lo=%s hi=%s",
     tostring(okV), tostring(val), tostring(okMM), tostring(lo), tostring(hi)))
-  print(string.format("[AishDbg] cfg.radialFillTest=%s bar.radialFillFrame:IsShown=%s",
-    tostring(ns.GetCfg("resourceCircle").radialFillTest), tostring(bar.radialFillFrame and bar.radialFillFrame:IsShown())))
   local okC, r, g, b, cAlpha = pcall(a.GetStatusBarColor, a)
   print(string.format("[AishDbg] arc: StatusBarColor ok=%s r=%s g=%s b=%s a=%s",
     tostring(okC), tostring(r), tostring(g), tostring(b), tostring(cAlpha)))

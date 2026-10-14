@@ -841,18 +841,11 @@ end
 -- l'ancien pipeline Lua (hasGlow = aura.spellGlow and glIdx and glIdx > 1).
 local function ApplySpellGlow(glowAnchor, cfg, si, w, h)
     if not (glowAnchor and ns.ShowGlow and cfg.glowEnabled ~= false) then return end
-    -- Override render desactive via `false and` (jamais supprime) : "Auras a tracker" reste la seule
-    -- source de verite pour le glow, meme si glowOverrideIdx est deja stocke en DB (cf. Render.lua).
-    if false and cfg.glowOverrideIdx and cfg.glowOverrideIdx > 1 then
-        local color = cfg.glowOverrideR ~= nil
-            and { cfg.glowOverrideR, cfg.glowOverrideG or 0.5, cfg.glowOverrideB or 0.5 }
-            or nil
-        pcall(ns.ShowGlow, glowAnchor, cfg.glowOverrideIdx, color, cfg.glowOverrideAlpha, cfg.glowOverrideScale, w, h)
-    elseif si and si.glow and si.glowIdx and si.glowIdx > 1 then
+    if si and si.glow and si.glowIdx and si.glowIdx > 1 then
         -- Meme chaine de repli que l'apercu du picker (Tactics.lua) : sans le repli sur si.color, un
         -- glow active sans couleur explicite retombait sur ns.barColor au lieu de la couleur du sort.
-        local color = si.glowColor or si.color
-        pcall(ns.ShowGlow, glowAnchor, si.glowIdx, color, si.glowAlpha, si.glowScale, w, h)
+        local idx, scale, color, alpha = ns.ModeGlow(cfg, si.glowIdx, si.glowScale, si.glowColor or si.color, si.glowAlpha, si._glowCustom == true)
+        pcall(ns.ShowGlow, glowAnchor, idx, color, alpha, scale, w, h)
     end
 end
 
@@ -4689,6 +4682,7 @@ end)
 -- /reload (le champ "layout" est fige a la creation), meme limitation que Free Bars.
 local iconListFlowContainer
 local iconListFlowGroupAdded = false
+local IL = {}   -- helpers Liste d'icones (cf. IL.Sync plus bas)
 iconListFlowButtons = {} -- forward-declaree plus haut (ProcGlowTick)
 local iconListDualCounter = 0
 -- [spellID] = true des qu'un AddAuraGroup dedie a ete cree (couleur/glow par sort, meme mecanique que
@@ -4784,8 +4778,19 @@ local function EnsureIconListFlowContainer()
         -- une vraie aura ; pcall : abandon silencieux plutot que planter.
         if cx and cy and ns.db and ns.db.iconlist then
             pcall(function()
-                ns.db.iconlist.x = cx*sc - sx
-                ns.db.iconlist.y = cy*sc - sy
+                local lcfg = ns.db.iconlist
+                if (lcfg.layout or "center_mirror") == "center_dual" then
+                    -- Double icone : axe de la paire (bord droit de la colonne gauche + pg/2) et bord haut (bas en
+                    -- UP), soit exactement le point que relit RepositionIconListNativeGrid.
+                    local _, _, _, _, _, lpg = IconListGeom(lcfg)
+                    local edgeY = (lcfg.growth == "UP") and s:GetBottom() or s:GetTop()
+                    ns.db.iconlist.x = s:GetRight() * sc - sx + lpg / 2
+                    ns.db.iconlist.y = edgeY * sc - sy
+                    pcall(ns.RepositionIconListNativeGrid)
+                else
+                    ns.db.iconlist.x = cx*sc - sx
+                    ns.db.iconlist.y = cy*sc - sy
+                end
             end)
         end
     end)
@@ -4801,9 +4806,7 @@ function ns.RepositionIconListNativeGrid()
     local bw, bh, iw, ih, gp, pg, rg, layout, isDual, maxBars, a, b = IconListGeom(cfg)
     local growth = cfg.growth or "DOWN"
 
-    if isDual then
-        pcall(c.SetSize, c, a * 2 + pg, b * (ih + rg))
-    else
+    if not isDual then
         local isH = (growth == "LEFT" or growth == "RIGHT")
         if isH then pcall(c.SetSize, c, maxBars * (a + rg), b)
         else pcall(c.SetSize, c, a, maxBars * (b + rg)) end
@@ -4811,23 +4814,26 @@ function ns.RepositionIconListNativeGrid()
 
     c:ClearAllPoints()
     local x, y = cfg.x or 0, cfg.y or -290
-    if growth == "UP" then c:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
+    -- Double icone : colonne gauche ancree par son coin interieur a pg/2 a gauche de l'axe x, la droite a pg/2 a droite
+    if isDual then x, y = IL.Snap(x), IL.Snap(y) end
+    if isDual and growth == "UP" then c:SetPoint("BOTTOMRIGHT", UIParent, "CENTER", x - IL.Snap(pg / 2), y)
+    elseif isDual then c:SetPoint("TOPRIGHT", UIParent, "CENTER", x - IL.Snap(pg / 2), y)
+    elseif growth == "UP" then c:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
     elseif growth == "LEFT" then c:SetPoint("RIGHT", UIParent, "CENTER", x, y)
     elseif growth == "RIGHT" then c:SetPoint("LEFT", UIParent, "CENTER", x, y)
     else c:SetPoint("TOP", UIParent, "CENTER", x, y) end
 
     local okA, okX, okG, okM, errA, errX, errG, errM
     if isDual then
-        -- Paires horizontales fixes (axe 0), empilement vertical (LEFT/RIGHT traites comme DOWN).
-        if growth == "UP" then
-            okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, "BOTTOMLEFT")
-            okG, errG = pcall(c.SetFlowLayoutGrowthDirection, c, 1, 1)
-        else
-            okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, "TOPLEFT")
-            okG, errG = pcall(c.SetFlowLayoutGrowthDirection, c, 1, -1)
+        IL.ColumnFlow(c, growth, "RIGHT", a, b, ih, rg)
+        local r = c._aishColR
+        if r then
+            IL.ColumnFlow(r, growth, "LEFT", a, b, ih, rg)
+            r:ClearAllPoints()
+            if growth == "UP" then r:SetPoint("BOTTOMLEFT", UIParent, "CENTER", x + IL.Snap(pg / 2), y)
+            else r:SetPoint("TOPLEFT", UIParent, "CENTER", x + IL.Snap(pg / 2), y) end
         end
-        okX, errX = pcall(c.SetFlowLayoutAxis, c, 0)
-        okM, errM = pcall(c.SetFlowLayoutMaximumLineSize, c, a * 2 + pg + 2)
+        okA, okX, okG, okM = true, true, true, true
     else
         local anchorPoint, hDir, vDir, isHFlow = GrowthToFlowParams(growth)
         okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, anchorPoint)
@@ -4890,6 +4896,262 @@ end
 
 -- Cree (une seule fois par sort) un AddAuraGroup dedie pour chaque spellID de "Liste d'icones", au
 -- lieu d'un groupe unique partage -- permet une couleur/glow fixe par sort.
+-- Helpers partages Liste d'icones joueur / cible (une seule locale de fichier : IL).
+-- "Double icone" : deux colonnes (conteneurs) au lieu d'un flow de paires. Dans un flow unique, la moitie
+-- gauche/droite d'un bouton etait fixee a sa creation alors que sa place dependait des auras visibles : des
+-- qu'une aura manquait, les suivantes changeaient de cote et leur barre partait vers l'interieur. Chaque sort
+-- recoit desormais un cote fixe (1er, 3e... a gauche ; 2e, 4e... a droite), chaque colonne s'empile seule.
+-- (IL est declare plus haut, avant EnsureIconListFlowContainer qui s'en sert au glisser-deposer.)
+
+-- DOUBLE ICONE -- deux colonnes par unite : sorts 1, 3, 5... de la liste a gauche (barre vers la gauche), 2, 4, 6...
+-- a droite (barre vers la droite). Chaque colonne est un conteneur natif qui s'empile seul : une icone ne change
+-- jamais de cote, et quand une aura disparait seule sa colonne se recompacte. La colonne droite est enfant de la
+-- gauche (meme fondu), placee contre l'axe de la paire.
+function IL.ColR(c, unit)
+    if c._aishColR then return c._aishColR end
+    if InCombatLockdown and InCombatLockdown() then return nil end
+    local ok, r = pcall(CreateFrame, "AuraContainer", nil, c, "CustomAuraContainerTemplate")
+    if not ok or not r then
+        ILDBG("|cffff4444IL.ColR: CreateFrame AuraContainer a echoue|r")
+        return nil
+    end
+    pcall(r.SetEnabled, r, true)
+    pcall(r.SetUnit, r, unit)
+    r:Show()
+    c._aishColR = r
+    return r
+end
+
+-- Arrondi au pixel physique (UI scale) : avec des tailles / positions fractionnaires, deux colonnes ancrees pareil
+-- pouvaient tomber sur des pixels differents (1 px d'ecart en hauteur).
+function IL.Snap(v)
+    local f = (PixelUtil and PixelUtil.GetPixelToUIUnitFactor and PixelUtil.GetPixelToUIUnitFactor()) or 1
+    local u = f / (UIParent:GetEffectiveScale() or 1)
+    if not u or u <= 0 then return v end
+    return math.floor(v / u + 0.5) * u
+end
+
+-- Cote de chaque sort sur toute la liste "Liste d'icones" : 1er, 3e... a gauche ; 2e, 4e... a droite. Une variante
+-- de tier (meme slot de cap) suit son sort. Les auras du familier ont leur propre grille et ne comptent pas.
+function IL.DualSides()
+    local order = ns.slotOrderByDest and ns.slotOrderByDest.iconlist
+    local wl = ns.whitelistByDest and ns.whitelistByDest.iconlist
+    local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
+    local _, _, _, _, _, _, _, _, _, _, _, b = IconListGeom(cfg)
+    local sides, seenInfo, capState = {}, {}, { count = 0 }
+    for _, spellID in ipairs(order or {}) do
+        if not (ns.GetPetAuraUnit and ns.GetPetAuraUnit(spellID)) then
+            if not AllowNextCapSlot(wl, spellID, 4 * b, seenInfo, capState) then break end
+            sides[spellID] = (capState.count % 2 == 1) and "L" or "R"
+        end
+    end
+    IL.dualSide = sides
+end
+
+-- Flow d'une colonne : empilement vertical depuis son coin INTERIEUR (cote axe), qui reste fixe quelle que soit
+-- la taille que le conteneur natif prend selon le nombre d'icones.
+function IL.ColumnFlow(c, growth, inner, a, b, ih, rg)
+    local up = (growth == "UP")
+    local h = b * IL.Snap(ih + rg)   -- cases de ih + rg (arrondi au pixel), espacement 0 (cf. IL.Sync)
+    pcall(c.SetSize, c, a, h)
+    -- Meme reglage de flow pour les 2 colonnes (des reglages differents decalaient les hauteurs de quelques px) ;
+    -- le coin interieur reste fixe par l'ancrage externe du conteneur.
+    pcall(c.SetFlowLayoutAnchorPoint, c, up and "BOTTOMLEFT" or "TOPLEFT")
+    pcall(c.SetFlowLayoutAxis, c, 1)
+    pcall(c.SetFlowLayoutGrowthDirection, c, 1, up and 1 or -1)
+    pcall(c.SetFlowLayoutMaximumLineSize, c, h + 1)
+end
+
+-- Contenu d'un bouton (icone, cooldown, stacks, barre(s), glow). isLeft : moitie gauche en "Double icone".
+function IL.Build(auraButton, spellID, isLeft, elemW, elemH, pool, isTarget)
+    local liveCfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
+    local liveSi = ns.GetStyleInfo(spellID)
+    auraButton._aishSpellID = spellID
+    local lbw, lbh, liw, lih, lgp, lpg, lrg, llayout, lisDual = IconListGeom(liveCfg)
+    auraButton:SetSize(elemW, elemH)
+
+    local icon = auraButton:CreateTexture(nil, "ARTWORK")
+    auraButton._aishIcon = icon  -- ref pour /aishdebug iconlistrows (comparer texture reelle vs spellID attendu)
+    icon:SetSize(liw, lih)
+    if lisDual then
+        -- Double icone : la case fait icone + espacement (cf. IL.Sync) ; icone collee au bord de depart de la pile
+        local vEdge = (liveCfg.growth == "UP") and "BOTTOM" or "TOP"
+        icon:SetPoint(vEdge .. (isLeft and "RIGHT" or "LEFT"), auraButton, vEdge .. (isLeft and "RIGHT" or "LEFT"), 0, 0)
+    else
+        icon:SetPoint("CENTER", auraButton, "CENTER", 0, 0)
+    end
+    -- Emplacement libre (iconW x iconH) ; l'image est rognee sur les cotes, jamais etiree (crop selon le ratio)
+    do
+        local TC = 0.07
+        local usable = 1 - 2 * TC
+        if liw > lih then
+            local vSpan = (lih / liw) * usable
+            icon:SetTexCoord(TC, 1 - TC, 0.5 - vSpan * 0.5, 0.5 + vSpan * 0.5)
+        elseif lih > liw then
+            local uSpan = (liw / lih) * usable
+            icon:SetTexCoord(0.5 - uSpan * 0.5, 0.5 + uSpan * 0.5, TC, 1 - TC)
+        else
+            icon:SetTexCoord(TC, 1 - TC, TC, 1 - TC)
+        end
+    end
+    auraButton:SetIcon(icon)
+
+    local border = auraButton:CreateTexture(nil, "BACKGROUND")
+    border:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
+    border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
+    border:SetColorTexture(14/255, 14/255, 14/255, 1)
+
+    -- Frame dediee pour le glow, calee sur l'icone (jamais sur auraButton).
+    local glowAnchor = CreateFrame("Frame", nil, auraButton)
+    glowAnchor:SetAllPoints(icon)
+    auraButton._aishGlowAnchor = glowAnchor
+
+    local cd = CreateFrame("Cooldown", nil, auraButton, "CooldownFrameTemplate")
+    cd:SetAllPoints(icon)
+    cd:SetReverse(true)
+    auraButton:SetDurationCooldown(cd)
+    auraButton._aishCD = cd
+
+    local stackFS = auraButton:CreateFontString(nil, "OVERLAY", nil, 7)
+    -- Font AVANT SetApplicationCount (lecon Icons/Circle Bars/Free Bars).
+    ns.ApplyFont(stackFS, liveCfg.stackFont or ns.Media.font, liveCfg.stackSize or 10, "OUTLINE")
+    stackFS:SetPoint(liveCfg.stackPos or "BOTTOMRIGHT", icon, liveCfg.stackPos or "BOTTOMRIGHT", liveCfg.stackOffX or 0, liveCfg.stackOffY or 0)
+    stackFS:SetJustifyH("RIGHT")
+    stackFS:SetTextColor(liveCfg.stackColorR or 1, liveCfg.stackColorG or 1, liveCfg.stackColorB or 1)
+    auraButton:SetApplicationCount(stackFS, {})
+    auraButton._aishStackFS = stackFS
+
+    -- Barre(s) de duree, couleur par sort.
+    local barTex = ns.ResolveBarTexFromKey(liveCfg.texture)
+    local barCR, barCG, barCB = SpellBarColorRGB(liveCfg, liveSi)
+    local bgR = liveCfg.barBgR or 0; local bgG = liveCfg.barBgG or 0
+    local bgB = liveCfg.barBgB or 0; local bgA = liveCfg.barBgAlpha or 0
+    local durOpts = { direction = Enum.StatusBarTimerDirection.RemainingTime }
+
+    local function MakeNativeBar(anchorFrom, relTo, relPoint, offX, offY, rev, parent)
+        local bar = CreateFrame("StatusBar", nil, parent or auraButton)
+        bar:SetSize(lbw, lbh)
+        bar:SetPoint(anchorFrom, relTo, relPoint, offX, offY)
+        bar:SetStatusBarTexture(barTex)
+        bar:SetStatusBarColor(barCR, barCG, barCB)
+        if rev then bar:SetReverseFill(true) end
+        local bg = bar:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints(); bg:SetColorTexture(bgR, bgG, bgB, bgA)
+        local okBar, errBar = pcall(auraButton.SetDurationBar, auraButton, bar, durOpts)
+        if not okBar then ILDBG(string.format("|cffff4444initializeFrame%s (Icon List, sort %d): SetDurationBar a echoue -- err=%s|r", isTarget and " cible" or "", spellID, tostring(errBar))) end
+        -- Spark : bord mobile oppose au cote d'origine du remplissage.
+        local spark = MakeNativeBarSpark(bar, liveCfg, rev and "LEFT" or "RIGHT", {barCR, barCG, barCB})
+        return bar, spark
+    end
+
+    if lisDual then
+        -- Double icone : 1 barre du cote EXTERIEUR de l'icone (loin du centre de la paire).
+        if isLeft then
+            auraButton._aishBar, auraButton._aishSpark = MakeNativeBar("RIGHT", icon, "LEFT", -lgp, 0, true)
+        else
+            auraButton._aishBar, auraButton._aishSpark = MakeNativeBar("LEFT", icon, "RIGHT", lgp, 0, false)
+        end
+    else
+        -- Icone centree, 2 barres miroir.
+        auraButton._aishBarL, auraButton._aishSparkL = MakeNativeBar("RIGHT", icon, "LEFT", -lgp, 0, true)
+        auraButton._aishBarR, auraButton._aishSparkR = MakeNativeBar("LEFT", icon, "RIGHT", lgp, 0, false)
+    end
+
+    -- Swipe + texte de duree natif.
+    cd:SetDrawSwipe(liveCfg.swipeEnabled == true)
+    cd:SetDrawEdge(liveCfg.swipeEnabled == true)
+    cd:SetHideCountdownNumbers(liveCfg.timerIconEnabled ~= true)
+    if liveCfg.timerIconEnabled then
+        ApplyNativeCountdownStyle(cd, liveCfg, icon)
+    end
+
+    ApplySpellGlow(auraButton._aishGlowAnchor, liveCfg, liveSi, liw, lih)
+    PlayProcStartOnce(auraButton._aishGlowAnchor, liveSi, spellID)
+
+    -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton.
+    if not auraButton._aishPooled then
+        auraButton._aishPooled = true
+        pool[#pool + 1] = auraButton
+    end
+end
+
+-- Un AddAuraGroup dedie (un sort, un bouton) dans le conteneur donne.
+function IL.AddGroup(container, groupKey, filter, spellID, isLeft, elemW, elemH, rg, pool, isTarget, elemSpacing)
+    local okAdd, errAdd = pcall(function()
+        container:AddAuraGroup(groupKey, filter, {
+            maxFrameCount = 1,
+            candidateFilters = { includeSpellIDs = { [spellID] = true } },
+            layout = { elementSpacing = elemSpacing or rg, lineSpacing = rg, elementWidth = elemW, elementHeight = elemH, layoutIndex = 1 },
+            initializeFrame = function(auraButton)
+                local okCheck, canAccess = pcall(function()
+                    return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
+                end)
+                if not (okCheck and canAccess) then return end
+                local okBuild, errBuild = pcall(IL.Build, auraButton, spellID, isLeft, elemW, elemH, pool, isTarget)
+                if not okBuild then
+                    ILDBG(string.format("|cffff4444initializeFrame%s (Icon List, sort %d): creation des widgets a echoue -- err=%s|r", isTarget and " cible" or "", spellID, tostring(errBuild)))
+                end
+            end,
+        })
+    end)
+    if not okAdd then
+        ILDBG(string.format("|cffff4444AddAuraGroup DEDIE%s (Icon List, sort %d) a echoue -- err=%s|r", isTarget and " cible" or "", spellID, tostring(errAdd)))
+    end
+    if container.UpdateAllAuras then pcall(container.UpdateAllAuras, container) end
+end
+
+-- Repartit les sorts entre colonne gauche (main) et droite, cree / restaure / neutralise les groupes.
+-- accept(spellID) -> true si le sort releve de ce conteneur (joueur : tous ; cible : debuffs).
+function IL.Sync(main, groupsL, unit, filter, keyPrefix, accept, pool, isTarget, column)
+    local order = ns.slotOrderByDest and ns.slotOrderByDest.iconlist
+    if not order or #order == 0 then return end
+    local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
+    local bw, bh, iw, ih, gp, pg, rg, layout, isDual, maxBars, a, b = IconListGeom(cfg)
+    -- Double icone : chaque case inclut l'espacement de rangee (hauteur ih + rg, espacement 0). Un bloc vide fait
+    -- alors 0 de haut et un bloc de n icones n * (ih + rg) : le bloc des debuffs s'accroche sans ecart sous celui des
+    -- buffs et toutes les rangees tombent sur la meme grille, qu'il y ait des buffs de ce cote ou non.
+    local elemW, elemH = a, (column and IL.Snap(ih + rg) or ih)
+    -- Double icone : chaque groupe est une moitie de paire, le cap total reste 2*numPairs.
+    local groupCap = isDual and (2 * b) or maxBars
+    -- Double icone : flow natif (1 2 / 3 4...) dans le conteneur de l'unite -- remplissage dans l'ordre et
+    -- recompactage geres par le jeu. La visibilite des boutons etant secrete, l'addon ne peut pas placer les
+    -- icones lui-meme ; seule limite : l'orientation d'une moitie (barre a gauche / a droite) est fixee d'apres
+    -- l'ordre de la liste et peut etre fausse quand des auras de la liste sont absentes.
+
+    -- Cape a groupCap buffs (pas spellID) : une variante de tier (linkedSpellIDs) ne consomme qu'une place.
+    local wl = ns.whitelistByDest and ns.whitelistByDest.iconlist
+    local seenInfo, capState = {}, { count = 0 }
+    local sideOf = {}
+    for _, spellID in ipairs(order) do
+        if accept(spellID) then
+            if not AllowNextCapSlot(wl, spellID, groupCap, seenInfo, capState) then break end
+            -- Double icone : cote decide sur la liste ENTIERE (buffs et debuffs confondus, cf. IL.DualSides)
+            local col = (IL.dualSide and IL.dualSide[spellID]) or ((capState.count % 2 == 1) and "L" or "R")
+            if not column or col == column then
+                sideOf[spellID] = "L"
+                local container, groups = main, groupsL
+                local isLeft = (column ~= "R")
+                local groupKey = keyPrefix .. tostring(spellID)
+                if not groups[spellID] then
+                    IL.AddGroup(container, groupKey, filter, spellID, isLeft, elemW, elemH, rg, pool, isTarget, column and 0 or rg)
+                    groups[spellID] = true
+                    iconListFlowGroupAdded = true
+                else
+                    -- Restaure le filtre si ce groupe avait ete neutralise (de-trace, ou change de cote).
+                    pcall(container.SetAuraGroupCandidateFilters, container, groupKey, { includeSpellIDs = { [spellID] = true } })
+                end
+            end
+        end
+    end
+
+    -- Sorts de-traques (ou passes dans l'autre colonne) : neutralisation par spellID bidon (jamais {}).
+    for spellID in pairs(groupsL) do
+        if sideOf[spellID] ~= "L" then
+            pcall(main.SetAuraGroupCandidateFilters, main, keyPrefix .. tostring(spellID), { includeSpellIDs = { [0] = true } })
+        end
+    end
+end
+
 function ns.EnsureIconListNativeGrid()
     if InCombatLockdown and InCombatLockdown() then return end
     local c = EnsureIconListFlowContainer()
@@ -4897,187 +5159,22 @@ function ns.EnsureIconListNativeGrid()
         ILDBG("|cffff4444EnsureIconListNativeGrid: pas de conteneur|r")
         return
     end
-
-    local order = ns.slotOrderByDest and ns.slotOrderByDest.iconlist
-    if not order or #order == 0 then return end
-
-    local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
-    local bw, bh, iw, ih, gp, pg, rg, layout, isDual, maxBars, a, b = IconListGeom(cfg)
-    local elemW, elemH = a, ih
-    -- Cape en nombre de groupes : en mode "center_dual" (Berserk), chaque groupe ne represente qu'une
-    -- moitie de paire, le cap total reste 2*numPairs.
-    local groupCap = isDual and (2 * b) or maxBars
+    -- Buffs uniquement : un debuff (cible) ou une aura du familier ne s'afficheront jamais ici, ils fausseraient
+    -- l'alternance gauche / droite de "Double icone".
     local spells = ns.GetSpecSpells()
-
-    -- Cape a groupCap buffs (pas spellID) : une variante de tier (linkedSpellIDs) ne consomme qu'une place.
-    local wl = ns.whitelistByDest and ns.whitelistByDest.iconlist
-    local seenInfo, capState = {}, { count = 0 }
-    local currentSet = {}
-    for i, spellID in ipairs(order) do
-        if not AllowNextCapSlot(wl, spellID, groupCap, seenInfo, capState) then break end
-        currentSet[spellID] = true
-        if not iconListPerSpellGroups[spellID] then
-            local groupKey = "aishIconListFlow_" .. tostring(spellID)
-            local si = ns.GetStyleInfo(spellID)
-            local okAdd, errAdd = pcall(function()
-                c:AddAuraGroup(groupKey, "HELPFUL", {
-                    maxFrameCount = 1,
-                    candidateFilters = { includeSpellIDs = { [spellID] = true } },
-                    layout = { elementSpacing = (isDual and pg or rg), lineSpacing = rg, elementWidth = elemW, elementHeight = elemH, layoutIndex = 1 },
-                    initializeFrame = function(auraButton)
-                        local okCheck, canAccess = pcall(function()
-                            return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
-                        end)
-                        if not (okCheck and canAccess) then return end
-                        local okBuild, errBuild = pcall(function()
-                            local liveCfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
-                            local liveSpells = ns.GetSpecSpells()
-                            local liveSi = ns.GetStyleInfo(spellID)
-                            auraButton._aishSpellID = spellID
-                            local lbw, lbh, liw, lih, lgp, lpg, lrg, llayout, lisDual = IconListGeom(liveCfg)
-                            auraButton:SetSize(elemW, elemH)
-
-                            local isLeft = true
-                            if lisDual then
-                                iconListDualCounter = iconListDualCounter + 1
-                                isLeft = (iconListDualCounter % 2 == 1)
-                            end
-
-                            -- Icone
-                            local icon = auraButton:CreateTexture(nil, "ARTWORK")
-                            icon:SetSize(liw, lih)
-                            if lisDual then
-                                icon:SetPoint(isLeft and "RIGHT" or "LEFT", auraButton, isLeft and "RIGHT" or "LEFT", 0, 0)
-                            else
-                                icon:SetPoint("CENTER", auraButton, "CENTER", 0, 0)
-                            end
-                            -- Crop conscient du ratio (meme recette que Free Bars) : sans ca, un slot
-                            -- non-carre (liw ~= lih) etirait l'image visiblement.
-                            do
-                                local TC = 0.07
-                                local usable = 1 - 2 * TC
-                                if liw > lih then
-                                    local vSpan = (lih / liw) * usable
-                                    icon:SetTexCoord(TC, 1 - TC, 0.5 - vSpan * 0.5, 0.5 + vSpan * 0.5)
-                                elseif lih > liw then
-                                    local uSpan = (liw / lih) * usable
-                                    icon:SetTexCoord(0.5 - uSpan * 0.5, 0.5 + uSpan * 0.5, TC, 1 - TC)
-                                else
-                                    icon:SetTexCoord(TC, 1 - TC, TC, 1 - TC)
-                                end
-                            end
-                            auraButton:SetIcon(icon)
-
-                            local border = auraButton:CreateTexture(nil, "BACKGROUND")
-                            border:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
-                            border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
-                            border:SetColorTexture(14/255, 14/255, 14/255, 1)
-
-                            -- Frame dediee pour le glow, calee sur l'icone (jamais sur auraButton).
-                            local glowAnchor = CreateFrame("Frame", nil, auraButton)
-                            glowAnchor:SetAllPoints(icon)
-                            auraButton._aishGlowAnchor = glowAnchor
-
-                            local cd = CreateFrame("Cooldown", nil, auraButton, "CooldownFrameTemplate")
-                            cd:SetAllPoints(icon)
-                            cd:SetReverse(true)
-                            auraButton:SetDurationCooldown(cd)
-                            auraButton._aishCD = cd
-
-                            local stackFS = auraButton:CreateFontString(nil, "OVERLAY", nil, 7)
-                            -- Font AVANT SetApplicationCount (lecon Icons/Circle Bars/Free Bars).
-                            ns.ApplyFont(stackFS, liveCfg.stackFont or ns.Media.font, liveCfg.stackSize or 10, "OUTLINE")
-                            stackFS:SetPoint(liveCfg.stackPos or "BOTTOMRIGHT", icon, liveCfg.stackPos or "BOTTOMRIGHT", liveCfg.stackOffX or 0, liveCfg.stackOffY or 0)
-                            stackFS:SetJustifyH("RIGHT")
-                            stackFS:SetTextColor(liveCfg.stackColorR or 1, liveCfg.stackColorG or 1, liveCfg.stackColorB or 1)
-                            auraButton:SetApplicationCount(stackFS, {})
-                            auraButton._aishStackFS = stackFS
-
-                            -- Barre(s) de duree, couleur par sort.
-                            local barTex = ns.ResolveBarTexFromKey(liveCfg.texture)
-                            local barCR, barCG, barCB = SpellBarColorRGB(liveCfg, liveSi)
-                            local bgR = liveCfg.barBgR or 0; local bgG = liveCfg.barBgG or 0
-                            local bgB = liveCfg.barBgB or 0; local bgA = liveCfg.barBgAlpha or 0
-                            local durOpts = { direction = Enum.StatusBarTimerDirection.RemainingTime }
-
-                            local function MakeNativeBar(anchorFrom, relTo, relPoint, offX, offY, rev)
-                                local bar = CreateFrame("StatusBar", nil, auraButton)
-                                bar:SetSize(lbw, lbh)
-                                bar:SetPoint(anchorFrom, relTo, relPoint, offX, offY)
-                                bar:SetStatusBarTexture(barTex)
-                                bar:SetStatusBarColor(barCR, barCG, barCB)
-                                if rev then bar:SetReverseFill(true) end
-                                local bg = bar:CreateTexture(nil, "BACKGROUND")
-                                bg:SetAllPoints(); bg:SetColorTexture(bgR, bgG, bgB, bgA)
-                                local okBar, errBar = pcall(auraButton.SetDurationBar, auraButton, bar, durOpts)
-                                if not okBar then ILDBG(string.format("|cffff4444initializeFrame (Icon List, sort %d): SetDurationBar a echoue -- err=%s|r", spellID, tostring(errBar))) end
-                                -- Spark : bord mobile oppose au cote d'origine du remplissage ; la
-                                -- reference est stockee pour pouvoir le recolorer plus tard.
-                                local spark = MakeNativeBarSpark(bar, liveCfg, rev and "LEFT" or "RIGHT", {barCR, barCG, barCB})
-                                return bar, spark
-                            end
-
-                            if lisDual then
-                                -- Berserk : 1 barre du cote EXTERIEUR de l'icone
-                                -- (loin du centre de la paire).
-                                if isLeft then
-                                    auraButton._aishBar, auraButton._aishSpark = MakeNativeBar("RIGHT", icon, "LEFT", -lgp, 0, true)
-                                else
-                                    auraButton._aishBar, auraButton._aishSpark = MakeNativeBar("LEFT", icon, "RIGHT", lgp, 0, false)
-                                end
-                            else
-                                -- Aegis : icone centree, 2 barres miroir.
-                                auraButton._aishBarL, auraButton._aishSparkL = MakeNativeBar("RIGHT", icon, "LEFT", -lgp, 0, true)
-                                auraButton._aishBarR, auraButton._aishSparkR = MakeNativeBar("LEFT", icon, "RIGHT", lgp, 0, false)
-                            end
-
-                            -- Swipe + texte de duree natif.
-                            cd:SetDrawSwipe(liveCfg.swipeEnabled == true)
-                            cd:SetDrawEdge(liveCfg.swipeEnabled == true)
-                            cd:SetHideCountdownNumbers(liveCfg.timerIconEnabled ~= true)
-                            if liveCfg.timerIconEnabled then
-                                ApplyNativeCountdownStyle(cd, liveCfg, icon)
-                            end
-
-                            -- Glow par sort.
-                            ApplySpellGlow(auraButton._aishGlowAnchor, liveCfg, liveSi, liw, lih)
-                            -- Animation d'entree, jouee une seule fois.
-                            PlayProcStartOnce(auraButton._aishGlowAnchor, liveSi, spellID)
-
-                            -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
-                            -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
-                            -- redondants). No-op dans le cas nominal.
-                            if not auraButton._aishPooled then
-                                auraButton._aishPooled = true
-                                iconListFlowButtons[#iconListFlowButtons + 1] = auraButton
-                            end
-                        end)
-                        if not okBuild then
-                            ILDBG(string.format("|cffff4444initializeFrame (Icon List, sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
-                        end
-                    end,
-                })
-            end)
-            if not okAdd then
-                ILDBG(string.format("|cffff4444AddAuraGroup DEDIE (Icon List, sort %d) a echoue -- err=%s|r", spellID, tostring(errAdd)))
-            end
-            iconListPerSpellGroups[spellID] = true
-            iconListFlowGroupAdded = true
-            if c.UpdateAllAuras then
-                local okUpd, errUpd = pcall(c.UpdateAllAuras, c)
-                if not okUpd then ILDBG(string.format("|cffff4444UpdateAllAuras (Icon List, sort %d) a echoue -- err=%s|r", spellID, tostring(errUpd))) end
-            end
-        else
-            -- Restaure le filtre correct si ce groupe avait ete de-trace puis re-trace (cf. Icons plus haut).
-            pcall(c.SetAuraGroupCandidateFilters, c, "aishIconListFlow_" .. tostring(spellID), { includeSpellIDs = { [spellID] = true } })
-        end
+    local function acceptBuff(spellID)
+        local info = spells and spells[spellID]
+        if info and info.source == "debuff" then return false end
+        return not (ns.GetPetAuraUnit and ns.GetPetAuraUnit(spellID))
     end
-
-    -- Sorts de-traques : meme neutralisation par spellID bidon que Icons plus haut (jamais {}).
-    for spellID in pairs(iconListPerSpellGroups) do
-        if not currentSet[spellID] then
-            local groupKey = "aishIconListFlow_" .. tostring(spellID)
-            pcall(c.SetAuraGroupCandidateFilters, c, groupKey, { includeSpellIDs = { [0] = true } })
+    local dual = (ns.db and ns.db.iconlist or ns.Defaults.iconlist).layout == "center_dual"
+    if dual then IL.DualSides() end
+    IL.Sync(c, iconListPerSpellGroups, "player", "HELPFUL", "aishIconListFlow_", acceptBuff, iconListFlowButtons, false, dual and "L" or nil)
+    if dual then
+        local r = IL.ColR(c, "player")
+        if r then
+            IL.groupsColRP = IL.groupsColRP or {}
+            IL.Sync(r, IL.groupsColRP, "player", "HELPFUL", "aishIconListFlow_", acceptBuff, iconListFlowButtons, false, "R")
         end
     end
 end
@@ -5176,6 +5273,7 @@ function ns.RefreshIconListNativeGridStyleTarget()
     end
 end
 
+
 function ns.RepositionIconListNativeGridTarget()
     local c = iconListFlowContainerTarget or EnsureIconListFlowContainerTarget()
     if not c then return end
@@ -5183,9 +5281,7 @@ function ns.RepositionIconListNativeGridTarget()
     local bw, bh, iw, ih, gp, pg, rg, layout, isDual, maxBars, a, b = IconListGeom(cfg)
     local growth = cfg.growth or "DOWN"
 
-    if isDual then
-        pcall(c.SetSize, c, a * 2 + pg, b * (ih + rg))
-    else
+    if not isDual then
         local isH = (growth == "LEFT" or growth == "RIGHT")
         if isH then pcall(c.SetSize, c, maxBars * (a + rg), b)
         else pcall(c.SetSize, c, a, maxBars * (b + rg)) end
@@ -5193,14 +5289,19 @@ function ns.RepositionIconListNativeGridTarget()
 
     c:ClearAllPoints()
     if iconListFlowContainer then
-        if growth == "UP" then c:SetPoint("BOTTOM", iconListFlowContainer, "TOP", 0, rg)
+        -- Double icone : colonne gauche cible sous la colonne gauche joueur
+        if isDual and growth == "UP" then c:SetPoint("BOTTOMRIGHT", iconListFlowContainer, "TOPRIGHT", 0, 0)
+        elseif isDual then c:SetPoint("TOPRIGHT", iconListFlowContainer, "BOTTOMRIGHT", 0, 0)
+        elseif growth == "UP" then c:SetPoint("BOTTOM", iconListFlowContainer, "TOP", 0, rg)
         elseif growth == "LEFT" then c:SetPoint("RIGHT", iconListFlowContainer, "LEFT", -rg, 0)
         elseif growth == "RIGHT" then c:SetPoint("LEFT", iconListFlowContainer, "RIGHT", rg, 0)
         else c:SetPoint("TOP", iconListFlowContainer, "BOTTOM", 0, -rg) end
     else
         local x, y = cfg.x or 0, cfg.y or -290
         local fallbackH = isDual and (b * (ih + rg)) or ((growth == "LEFT" or growth == "RIGHT") and bh or (maxBars * (b + rg)))
-        if growth == "UP" then c:SetPoint("BOTTOM", UIParent, "CENTER", x, y + fallbackH)
+        if isDual and growth == "UP" then c:SetPoint("BOTTOMRIGHT", UIParent, "CENTER", x - pg / 2, y + fallbackH)
+        elseif isDual then c:SetPoint("TOPRIGHT", UIParent, "CENTER", x - pg / 2, y - fallbackH)
+        elseif growth == "UP" then c:SetPoint("BOTTOM", UIParent, "CENTER", x, y + fallbackH)
         elseif growth == "LEFT" then c:SetPoint("RIGHT", UIParent, "CENTER", x - fallbackH, y)
         elseif growth == "RIGHT" then c:SetPoint("LEFT", UIParent, "CENTER", x + fallbackH, y)
         else c:SetPoint("TOP", UIParent, "CENTER", x, y - fallbackH) end
@@ -5208,15 +5309,18 @@ function ns.RepositionIconListNativeGridTarget()
 
     local okA, okX, okG, okM, errA, errX, errG, errM
     if isDual then
-        if growth == "UP" then
-            okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, "BOTTOMLEFT")
-            okG, errG = pcall(c.SetFlowLayoutGrowthDirection, c, 1, 1)
-        else
-            okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, "TOPLEFT")
-            okG, errG = pcall(c.SetFlowLayoutGrowthDirection, c, 1, -1)
+        IL.ColumnFlow(c, growth, "RIGHT", a, b, ih, rg)
+        local r, pr = c._aishColR, iconListFlowContainer and iconListFlowContainer._aishColR
+        if r then
+            IL.ColumnFlow(r, growth, "LEFT", a, b, ih, rg)
+            r:ClearAllPoints()
+            -- Colonne droite cible sous la colonne droite joueur (chaque colonne reste continue)
+            if pr and growth == "UP" then r:SetPoint("BOTTOMLEFT", pr, "TOPLEFT", 0, 0)
+            elseif pr then r:SetPoint("TOPLEFT", pr, "BOTTOMLEFT", 0, 0)
+            elseif growth == "UP" then r:SetPoint("BOTTOMLEFT", c, "BOTTOMRIGHT", pg, 0)
+            else r:SetPoint("TOPLEFT", c, "TOPRIGHT", pg, 0) end
         end
-        okX, errX = pcall(c.SetFlowLayoutAxis, c, 0)
-        okM, errM = pcall(c.SetFlowLayoutMaximumLineSize, c, a * 2 + pg + 2)
+        okA, okX, okG, okM = true, true, true, true
     else
         local anchorPoint, hDir, vDir, isHFlow = GrowthToFlowParams(growth)
         okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, anchorPoint)
@@ -5245,175 +5349,20 @@ function ns.EnsureIconListNativeGridTarget()
     if InCombatLockdown and InCombatLockdown() then return end
     local c = EnsureIconListFlowContainerTarget()
     if not c then return end
-
-    local order = ns.slotOrderByDest and ns.slotOrderByDest.iconlist
-    if not order or #order == 0 then return end
-
-    local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
-    local bw, bh, iw, ih, gp, pg, rg, layout, isDual, maxBars, a, b = IconListGeom(cfg)
-    local elemW, elemH = a, ih
-    local groupCap = isDual and (2 * b) or maxBars
     local spells = ns.GetSpecSpells()
-
-    local wl = ns.whitelistByDest and ns.whitelistByDest.iconlist
-    local seenInfo, capState = {}, { count = 0 }
-    local currentSet = {}
-    for _, spellID in ipairs(order) do
+    -- "HARMFUL|PLAYER" (pas juste "HARMFUL") : restreint aux auras dont le joueur est la source (cf. TargetAuras.lua
+    -- "onlyPlayer"). Sans ca, un debuff ennemi etranger pouvait se lier au slot ("debuff parasite").
+    local function acceptDebuff(spellID)
         local info = spells and spells[spellID]
-        if info and info.source == "debuff" then
-            if not AllowNextCapSlot(wl, spellID, groupCap, seenInfo, capState) then break end
-            currentSet[spellID] = true
-            if not iconListPerSpellGroupsTarget[spellID] then
-                local groupKey = "aishIconListFlowTarget_" .. tostring(spellID)
-                local si = ns.GetStyleInfo(spellID)
-                local okAdd, errAdd = pcall(function()
-                    -- "HARMFUL|PLAYER" (pas juste "HARMFUL") : filtre standard Blizzard restreignant
-                    -- aux auras dont le joueur est la source (cf. TargetAuras.lua "onlyPlayer"). Sans
-                    -- ca, candidateFilters seul etait insuffisant : un debuff ennemi etranger pouvait
-                    -- se lier au slot (bug "debuff parasite dans Liste d'icones").
-                    c:AddAuraGroup(groupKey, "HARMFUL|PLAYER", {
-                        maxFrameCount = 1,
-                        candidateFilters = { includeSpellIDs = { [spellID] = true } },
-                        layout = { elementSpacing = (isDual and pg or rg), lineSpacing = rg, elementWidth = elemW, elementHeight = elemH, layoutIndex = 1 },
-                        initializeFrame = function(auraButton)
-                            local okCheck, canAccess = pcall(function()
-                                return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
-                            end)
-                            if not (okCheck and canAccess) then return end
-                            local okBuild, errBuild = pcall(function()
-                                local liveCfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
-                                local liveSpells = ns.GetSpecSpells()
-                                local liveSi = ns.GetStyleInfo(spellID)
-                                auraButton._aishSpellID = spellID
-                                local lbw, lbh, liw, lih, lgp, lpg, lrg, llayout, lisDual = IconListGeom(liveCfg)
-                                auraButton:SetSize(elemW, elemH)
-
-                                local isLeft = true
-                                if lisDual then
-                                    iconListDualCounterTarget = iconListDualCounterTarget + 1
-                                    isLeft = (iconListDualCounterTarget % 2 == 1)
-                                end
-
-                                local icon = auraButton:CreateTexture(nil, "ARTWORK")
-                                auraButton._aishIcon = icon  -- ref pour /aishdebug iconlistrows (comparer texture reelle vs spellID attendu)
-                                icon:SetSize(liw, lih)
-                                if lisDual then
-                                    icon:SetPoint(isLeft and "RIGHT" or "LEFT", auraButton, isLeft and "RIGHT" or "LEFT", 0, 0)
-                                else
-                                    icon:SetPoint("CENTER", auraButton, "CENTER", 0, 0)
-                                end
-                                do
-                                    local TC = 0.07
-                                    local usable = 1 - 2 * TC
-                                    if liw > lih then
-                                        local vSpan = (lih / liw) * usable
-                                        icon:SetTexCoord(TC, 1 - TC, 0.5 - vSpan * 0.5, 0.5 + vSpan * 0.5)
-                                    elseif lih > liw then
-                                        local uSpan = (liw / lih) * usable
-                                        icon:SetTexCoord(0.5 - uSpan * 0.5, 0.5 + uSpan * 0.5, TC, 1 - TC)
-                                    else
-                                        icon:SetTexCoord(TC, 1 - TC, TC, 1 - TC)
-                                    end
-                                end
-                                auraButton:SetIcon(icon)
-
-                                local border = auraButton:CreateTexture(nil, "BACKGROUND")
-                                border:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
-                                border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
-                                border:SetColorTexture(14/255, 14/255, 14/255, 1)
-
-                                local glowAnchor = CreateFrame("Frame", nil, auraButton)
-                                glowAnchor:SetAllPoints(icon)
-                                auraButton._aishGlowAnchor = glowAnchor
-
-                                local cd = CreateFrame("Cooldown", nil, auraButton, "CooldownFrameTemplate")
-                                cd:SetAllPoints(icon)
-                                cd:SetReverse(true)
-                                auraButton:SetDurationCooldown(cd)
-                                auraButton._aishCD = cd
-
-                                local stackFS = auraButton:CreateFontString(nil, "OVERLAY", nil, 7)
-                                ns.ApplyFont(stackFS, liveCfg.stackFont or ns.Media.font, liveCfg.stackSize or 10, "OUTLINE")
-                                stackFS:SetPoint(liveCfg.stackPos or "BOTTOMRIGHT", icon, liveCfg.stackPos or "BOTTOMRIGHT", liveCfg.stackOffX or 0, liveCfg.stackOffY or 0)
-                                stackFS:SetJustifyH("RIGHT")
-                                stackFS:SetTextColor(liveCfg.stackColorR or 1, liveCfg.stackColorG or 1, liveCfg.stackColorB or 1)
-                                auraButton:SetApplicationCount(stackFS, {})
-                                auraButton._aishStackFS = stackFS
-
-                                local barTex = ns.ResolveBarTexFromKey(liveCfg.texture)
-                                local barCR, barCG, barCB = SpellBarColorRGB(liveCfg, liveSi)
-                                local bgR = liveCfg.barBgR or 0; local bgG = liveCfg.barBgG or 0
-                                local bgB = liveCfg.barBgB or 0; local bgA = liveCfg.barBgAlpha or 0
-                                local durOpts = { direction = Enum.StatusBarTimerDirection.RemainingTime }
-
-                                local function MakeNativeBar(anchorFrom, relTo, relPoint, offX, offY, rev)
-                                    local bar = CreateFrame("StatusBar", nil, auraButton)
-                                    bar:SetSize(lbw, lbh)
-                                    bar:SetPoint(anchorFrom, relTo, relPoint, offX, offY)
-                                    bar:SetStatusBarTexture(barTex)
-                                    bar:SetStatusBarColor(barCR, barCG, barCB)
-                                    if rev then bar:SetReverseFill(true) end
-                                    local bg = bar:CreateTexture(nil, "BACKGROUND")
-                                    bg:SetAllPoints(); bg:SetColorTexture(bgR, bgG, bgB, bgA)
-                                    local okBar, errBar = pcall(auraButton.SetDurationBar, auraButton, bar, durOpts)
-                                    if not okBar then ILDBG(string.format("|cffff4444initializeFrame cible (Icon List, sort %d): SetDurationBar a echoue -- err=%s|r", spellID, tostring(errBar))) end
-                                    local spark = MakeNativeBarSpark(bar, liveCfg, rev and "LEFT" or "RIGHT", {barCR, barCG, barCB})
-                                    return bar, spark
-                                end
-
-                                if lisDual then
-                                    if isLeft then
-                                        auraButton._aishBar, auraButton._aishSpark = MakeNativeBar("RIGHT", icon, "LEFT", -lgp, 0, true)
-                                    else
-                                        auraButton._aishBar, auraButton._aishSpark = MakeNativeBar("LEFT", icon, "RIGHT", lgp, 0, false)
-                                    end
-                                else
-                                    auraButton._aishBarL, auraButton._aishSparkL = MakeNativeBar("RIGHT", icon, "LEFT", -lgp, 0, true)
-                                    auraButton._aishBarR, auraButton._aishSparkR = MakeNativeBar("LEFT", icon, "RIGHT", lgp, 0, false)
-                                end
-
-                                cd:SetDrawSwipe(liveCfg.swipeEnabled == true)
-                                cd:SetDrawEdge(liveCfg.swipeEnabled == true)
-                                cd:SetHideCountdownNumbers(liveCfg.timerIconEnabled ~= true)
-                                if liveCfg.timerIconEnabled then
-                                    ApplyNativeCountdownStyle(cd, liveCfg, icon)
-                                end
-
-                                ApplySpellGlow(auraButton._aishGlowAnchor, liveCfg, liveSi, liw, lih)
-                                PlayProcStartOnce(auraButton._aishGlowAnchor, liveSi, spellID)
-
-                                -- Garde anti-doublon : initializeFrame n'est cense passer qu'une fois par bouton, mais un
-                                -- rappel sur un bouton recycle ajouterait un doublon pur au pool (et autant de restylages
-                                -- redondants). No-op dans le cas nominal.
-                                if not auraButton._aishPooled then
-                                    auraButton._aishPooled = true
-                                    iconListFlowButtonsTarget[#iconListFlowButtonsTarget + 1] = auraButton
-                                end
-                            end)
-                            if not okBuild then
-                                ILDBG(string.format("|cffff4444initializeFrame cible (Icon List, sort %d): creation des widgets a echoue -- err=%s|r", spellID, tostring(errBuild)))
-                            end
-                        end,
-                    })
-                end)
-                if not okAdd then
-                    ILDBG(string.format("|cffff4444AddAuraGroup DEDIE cible (Icon List, sort %d) a echoue -- err=%s|r", spellID, tostring(errAdd)))
-                end
-                iconListPerSpellGroupsTarget[spellID] = true
-                if c.UpdateAllAuras then
-                    local okUpd, errUpd = pcall(c.UpdateAllAuras, c)
-                    if not okUpd then ILDBG(string.format("|cffff4444UpdateAllAuras cible (Icon List, sort %d) a echoue -- err=%s|r", spellID, tostring(errUpd))) end
-                end
-            else
-                pcall(c.SetAuraGroupCandidateFilters, c, "aishIconListFlowTarget_" .. tostring(spellID), { includeSpellIDs = { [spellID] = true } })
-            end
-        end
+        return info ~= nil and info.source == "debuff"
     end
-
-    for spellID in pairs(iconListPerSpellGroupsTarget) do
-        if not currentSet[spellID] then
-            local groupKey = "aishIconListFlowTarget_" .. tostring(spellID)
-            pcall(c.SetAuraGroupCandidateFilters, c, groupKey, { includeSpellIDs = { [0] = true } })
+    local dual = (ns.db and ns.db.iconlist or ns.Defaults.iconlist).layout == "center_dual"
+    IL.Sync(c, iconListPerSpellGroupsTarget, "target", "HARMFUL|PLAYER", "aishIconListFlowTarget_", acceptDebuff, iconListFlowButtonsTarget, true, dual and "L" or nil)
+    if dual then
+        local r = IL.ColR(c, "target")
+        if r then
+            IL.groupsColRT = IL.groupsColRT or {}
+            IL.Sync(r, IL.groupsColRT, "target", "HARMFUL|PLAYER", "aishIconListFlowTarget_", acceptDebuff, iconListFlowButtonsTarget, true, "R")
         end
     end
 end
@@ -5423,7 +5372,10 @@ iconListTargetChangeFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 iconListTargetChangeFrame:SetScript("OnEvent", function()
     if iconListFlowContainerTarget and iconListFlowContainerTarget.UpdateAllAuras then
         pcall(iconListFlowContainerTarget.UpdateAllAuras, iconListFlowContainerTarget)
+        local r = iconListFlowContainerTarget._aishColR   -- colonne droite "Double icone"
+        if r and r.UpdateAllAuras then pcall(r.UpdateAllAuras, r) end
     end
+
 end)
 
 -- Grille native familier pour "Liste d'icones" -- declinaison du miroir cible ci-dessus. Un AuraContainer
@@ -5697,6 +5649,7 @@ function ns.EnsureIconListNativeGridPet()
                                 else
                                     icon:SetPoint("CENTER", auraButton, "CENTER", 0, 0)
                                 end
+                                -- Emplacement libre (iconW x iconH) ; l'image est rognee sur les cotes, jamais etiree (crop selon le ratio)
                                 do
                                     local TC = 0.07
                                     local usable = 1 - 2 * TC

@@ -424,5 +424,10 @@ ns.SecondaryResourceDefs = {
 if ns.IsForever then
   -- Seule exception : Demoniste (3 specs), fragments d'ame = objet 6265 dans les sacs (useItemCount)
   local shards = { itemID = 6265, useItemCount = true, color = { 0.60, 0.35, 0.85, 1 } }
-  ns.SecondaryResourceDefs = { [265] = shards, [266] = shards, [267] = shards }
+  -- Chasseur (3 specs) : nombre de fleches / balles de l'emplacement de munitions equipe
+  local ammo = { useAmmo = true, color = { 0.78, 0.62, 0.30, 1 } }
+  ns.SecondaryResourceDefs = {
+    [265] = shards, [266] = shards, [267] = shards,
+    [253] = ammo, [254] = ammo, [255] = ammo,
+  }
 end

@@ -339,6 +339,7 @@ local function _BuildOutputEntry(e, sid, si, dest, poolIdx)
     t.glowIdx        = si and si.glowIdx or 1
     t.glowAlpha      = si and si.glowAlpha or 0.7
     t.glowScale      = si and si.glowScale or 1.0
+    t.glowCustom     = (si ~= nil and si._glowCustom == true)   -- priorite au sort sur le glow du mode (cf. ns.ModeGlow)
     t.desat          = si and si.desat or false
     t.procGlowIdx    = si and si.procGlowIdx or 1
     t.procGlowScale  = si and si.procGlowScale or 1.0

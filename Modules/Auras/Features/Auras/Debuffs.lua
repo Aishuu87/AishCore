@@ -21,12 +21,24 @@ local function MakeIcon(parent, w, h)
     ib:SetScript("OnEnter", ns.AuraIconOnEnter)
     ib:SetScript("OnLeave", ns.AuraIconOnLeave)
 
+    -- Emplacement w x h libre ; l'image est rognee selon le ratio, jamais etiree (meme regle que IL.Build)
     local icon = ib:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
-    icon:SetTexCoord(TEXCOORD, 1 - TEXCOORD, TEXCOORD, 1 - TEXCOORD)
+    do
+        local usable = 1 - 2 * TEXCOORD
+        if w > h then
+            local vSpan = (h / w) * usable
+            icon:SetTexCoord(TEXCOORD, 1 - TEXCOORD, 0.5 - vSpan * 0.5, 0.5 + vSpan * 0.5)
+        elseif h > w then
+            local uSpan = (w / h) * usable
+            icon:SetTexCoord(0.5 - uSpan * 0.5, 0.5 + uSpan * 0.5, TEXCOORD, 1 - TEXCOORD)
+        else
+            icon:SetTexCoord(TEXCOORD, 1 - TEXCOORD, TEXCOORD, 1 - TEXCOORD)
+        end
+    end
 
     local cd = CreateFrame("Cooldown", nil, ib, "CooldownFrameTemplate")
-    cd:SetAllPoints(ib)
+    cd:SetAllPoints(icon)
     cd:EnableMouse(false) -- purement visuel (swipe) : ne doit jamais intercepter le survol de ib
     cd:SetHideCountdownNumbers(true); cd:SetReverse(true)
     cd:SetDrawSwipe(cfg.swipeEnabled == true); cd:SetDrawEdge(cfg.swipeEnabled == true)
@@ -36,10 +48,10 @@ local function MakeIcon(parent, w, h)
         for _, side in ipairs({"TOP", "BOTTOM", "LEFT", "RIGHT"}) do
             local b = parent:CreateTexture(nil, "OVERLAY", nil, 7)
             b:SetColorTexture(DARK, DARK, DARK, 1)
-            if side == "TOP" then b:SetHeight(1); b:SetPoint("TOPLEFT", ib, -1, 1); b:SetPoint("TOPRIGHT", ib, 1, 1)
-            elseif side == "BOTTOM" then b:SetHeight(1); b:SetPoint("BOTTOMLEFT", ib, -1, -1); b:SetPoint("BOTTOMRIGHT", ib, 1, -1)
-            elseif side == "LEFT" then b:SetWidth(1); b:SetPoint("TOPLEFT", ib, -1, 1); b:SetPoint("BOTTOMLEFT", ib, -1, -1)
-            else b:SetWidth(1); b:SetPoint("TOPRIGHT", ib, 1, 1); b:SetPoint("BOTTOMRIGHT", ib, 1, -1) end
+            if side == "TOP" then b:SetHeight(1); b:SetPoint("TOPLEFT", icon, -1, 1); b:SetPoint("TOPRIGHT", icon, 1, 1)
+            elseif side == "BOTTOM" then b:SetHeight(1); b:SetPoint("BOTTOMLEFT", icon, -1, -1); b:SetPoint("BOTTOMRIGHT", icon, 1, -1)
+            elseif side == "LEFT" then b:SetWidth(1); b:SetPoint("TOPLEFT", icon, -1, 1); b:SetPoint("BOTTOMLEFT", icon, -1, -1)
+            else b:SetWidth(1); b:SetPoint("TOPRIGHT", icon, 1, 1); b:SetPoint("BOTTOMRIGHT", icon, 1, -1) end
         end
     end
 
@@ -513,12 +525,8 @@ local function ApplyAura(ib, icon, cd, aura, glowOn)
     local glAlpha = aura.glowAlpha
     local glScale = aura.glowScale or 1.0
     local hasGlow = aura.spellGlow and glIdx and glIdx > 1
-    -- Override render desactive via `false and`, cf. AuraTrackerContainer.lua::ApplySpellGlow
-    if false and cfg.glowOverrideIdx and cfg.glowOverrideIdx > 1 then
-        glIdx = cfg.glowOverrideIdx; hasGlow = true
-        if cfg.glowOverrideR then glColor = {cfg.glowOverrideR, cfg.glowOverrideG or 0.5, cfg.glowOverrideB or 0.5} end
-        glScale = cfg.glowOverrideScale or glScale; glAlpha = cfg.glowOverrideAlpha or glAlpha
-    end
+    -- Section "Glow" du mode : type / taille (cf. ns.ModeGlow)
+    if hasGlow then glIdx, glScale, glColor, glAlpha = ns.ModeGlow(cfg, glIdx, glScale, glColor, glAlpha, aura.glowCustom) end
     if glowOn and hasGlow then
         ShowGlow(ib, glIdx, glColor, glAlpha, glScale)
     else HideGlow(ib) end

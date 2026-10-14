@@ -534,6 +534,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     SafeCall("ResourceCircle",            "Create", UIParent)
     SafeCall("HealthCircle",              "Create", UIParent)
     SafeCall("OutOfCombatResourceCircle", "Create", UIParent)
+    SafeCall("WellFedCircle",             "Create", UIParent)
     SafeCall("SpellEffects",              "Init")
     SafeCall("RotationHelper",            "Init")
     SafeCall("PriorityBar",               "Init")
@@ -547,6 +548,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     SafeCall("CharacterArmory",           "Create")
     SafeCall("AFKMode",                   "Create", UIParent)
     SafeCall("Location",                  "Create", UIParent)
+    SafeCall("MenuBar",                   "Create", UIParent)
 
     -- Appliquer les settings (recalcule tailles/positions proportionnellement)
     SafeCall("ResourceCircle",            "ApplySettings")
@@ -565,6 +567,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     SafeCall("CharacterArmory",           "ApplySettings")
     SafeCall("AFKMode",                   "ApplySettings")
     SafeCall("Location",                  "ApplySettings")
+    SafeCall("MinimapNodes",              "ApplySettings")
 
     -- Bouton minimap
     if ns.MinimapButton then

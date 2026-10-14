@@ -162,6 +162,8 @@ function ns.BuildWhitelist()
         return
     end
     ns._whitelistBuilt = true
+    -- Couleurs automatiques recalees sur le theme (cf. ns.RefreshAutoColors)
+    if ns.RefreshAutoColors then pcall(ns.RefreshAutoColors, spells) end
 
     -- SANITY CHECK : détecte les spellIDs invalides (orphelins de patch ou DB stale).
     -- Un spellID est considéré invalide si GetSpellInfo retourne nil.
@@ -263,10 +265,12 @@ function ns.BuildWhitelist()
     -- entree separee n'existe pour lui -- plus fiable que le nom pour ce
     -- cas precis, garde les deux mecanismes en parallele (defense en
     -- profondeur, aucun des deux ne depend de l'autre).
+    -- Auras a scinder (buff et debuff lies par Blizzard, cf. CDMHooks.lua) : jamais d'heritage par ce lien
+    local split = ns.SPLIT_LINKED_SPELLS or {}
     for id, info in pairs(spells) do
         if info.enabled and not info._invalid and type(info.linkedSpellIDs) == "table" and info.destinations then
             for _, linkedID in ipairs(info.linkedSpellIDs) do
-                if linkedID ~= id then
+                if linkedID ~= id and not split[linkedID] and not split[id] then
                     local ld = linkedDest[linkedID]
                     if not ld then ld = {}; linkedDest[linkedID] = ld end
                     for dest, active in pairs(info.destinations) do

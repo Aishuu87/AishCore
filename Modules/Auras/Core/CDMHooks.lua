@@ -59,12 +59,39 @@ ns.cdmCDData = cdmCDData
 local cdmChargeData = {}
 ns.cdmChargeData = cdmChargeData
 
+-- Auras que Blizzard lie dans une meme case CDM (linkedSpellIDs) alors qu'il s'agit de deux auras distinctes,
+-- a suivre separement. Ex. Plaie des rois (voleur) : buff 394095 sur le joueur, debuff 385627 sur la cible.
+-- Ces IDs ne sont jamais fusionnes : une entree chacun dans "Auras a tracker", avec sa source imposee.
+ns.SPLIT_LINKED_SPELLS = {
+    [394095] = "buff",    -- Plaie des rois (buff)
+    [385627] = "debuff",  -- Plaie des rois (debuff)
+}
+local SPLIT_LINKED = ns.SPLIT_LINKED_SPELLS
+
+-- ID a retenir pour une case CDM qui contient des auras a scinder : celle qui correspond a l'unite
+-- (cible -> debuff, sinon buff). nil si la case n'en contient aucune.
+local function SplitPick(lids, unit)
+    if type(lids) ~= "table" then return nil end
+    local want = (unit == "target") and "debuff" or "buff"
+    local any
+    for _, l in ipairs(lids) do
+        local s = SPLIT_LINKED[l]
+        if s then
+            if s == want then return l end
+            any = any or l
+        end
+    end
+    return any
+end
+
 -- Doit etre defini avant HookCDMCooldownChild (variable locale, doit etre en scope a la compilation).
 local function GetCDMFrameSpellID(frame)
     if not frame.cooldownInfo or not frame.cooldownID then return nil end
     local info = frame.cooldownInfo
     local ret = info.spellID
-    if info.linkedSpellIDs and info.linkedSpellIDs[1] then ret = info.linkedSpellIDs[1] end
+    if info.linkedSpellIDs and info.linkedSpellIDs[1] then
+        ret = SplitPick(info.linkedSpellIDs, frame.auraDataUnit) or info.linkedSpellIDs[1]
+    end
     return ret
 end
 
@@ -76,7 +103,7 @@ local function GetScanSpellID(frame)
     local info = frame.cooldownInfo
     if not info then return nil end
     local lids = info.linkedSpellIDs
-    local sid = (type(lids) == "table" and lids[1])
+    local sid = (type(lids) == "table" and (SplitPick(lids, frame.auraDataUnit) or lids[1]))
              or info.overrideTooltipSpellID or info.linkedSpellID
              or info.overrideSpellID or info.spellID
     if type(sid) ~= "number" or sid <= 0 then return nil end
@@ -514,6 +541,49 @@ local function AutoDiscoverSpell(spellID, name, unit, frame, linkedSpellIDs)
     if not spells then
         return
     end
+    -- Auras a scinder (cf. SPLIT_LINKED_SPELLS) : une entree par ID, source imposee, sans aucun lien. Corrige
+    -- aussi une entree deja fusionnee par une version precedente (liens retires, source remise d'aplomb).
+    local splitHit = SPLIT_LINKED[spellID] ~= nil
+    if not splitHit and type(linkedSpellIDs) == "table" then
+        for _, l in ipairs(linkedSpellIDs) do
+            if SPLIT_LINKED[l] then splitHit = true; break end
+        end
+    end
+    if splitHit then
+        local ids = {}
+        if SPLIT_LINKED[spellID] then ids[#ids + 1] = spellID end
+        if type(linkedSpellIDs) == "table" then
+            for _, l in ipairs(linkedSpellIDs) do
+                if SPLIT_LINKED[l] and l ~= spellID then ids[#ids + 1] = l end
+            end
+        end
+        for _, id in ipairs(ids) do
+            local e = spells[id]
+            if e then
+                e.linkedSpellIDs = nil
+                e.spellIDs, e.styleAnchorID = nil, nil   -- restes d'une ancienne fusion
+                e.source = SPLIT_LINKED[id]
+            else
+                local n = GetSpellName and GetSpellName(id)
+                if n then
+                    local d = ns.NewSpellEntry()
+                    d.name = n
+                    ns.ApplyAutoColor(d, AishUIAuraDB and AishUIAuraDB.activeProfile, id)
+                    d.priority = id
+                    d.source = SPLIT_LINKED[id]
+                    d.destinations = { iconlist=false, circlebars=false, icons=false, freebars=false, totems=false }
+                    spells[id] = d
+                end
+            end
+        end
+        if SPLIT_LINKED[spellID] then return end
+        -- La case lie aussi d'autres variantes : on continue pour elles seules
+        local rest = {}
+        for _, l in ipairs(linkedSpellIDs) do
+            if not SPLIT_LINKED[l] then rest[#rest + 1] = l end
+        end
+        linkedSpellIDs = rest
+    end
     local hasLinks = type(linkedSpellIDs) == "table" and #linkedSpellIDs > 1
     if spells[spellID] then
         -- Sort deja dans la liste : on rafraichit juste linkedSpellIDs si on
@@ -724,7 +794,7 @@ local function HookCDMFrame(frame, canMask, source, alwaysMask)
         if unit == "player" then
             local spells = ns.GetSpecSpells()
             local info = spells and spells[spellID]
-            if info and info.source == "debuff" then
+            if info and info.source == "debuff" and not SPLIT_LINKED[spellID] then
                 info.source = "buff"
             end
         end
@@ -1285,6 +1355,12 @@ local function FindCooldownIDForSpell(spellID)
                                 or info.overrideTooltipSpellID or info.linkedSpellID
                                 or info.overrideSpellID or info.spellID
                     if sid == spellID then return cooldownID end
+                    -- Aura scindee : elle n'est pas forcement en tete de linkedSpellIDs
+                    if SPLIT_LINKED[spellID] and type(lids) == "table" then
+                        for _, l in ipairs(lids) do
+                            if l == spellID then return cooldownID end
+                        end
+                    end
                 end
             end
         end
@@ -1414,6 +1490,11 @@ local function GetAlreadyBarTrackedSpellSet()
                             or info.overrideTooltipSpellID or info.linkedSpellID
                             or info.overrideSpellID or info.spellID
                 if type(sid) == "number" then set[sid] = true end
+                if type(lids) == "table" then
+                    for _, l in ipairs(lids) do
+                        if SPLIT_LINKED[l] then set[l] = true end
+                    end
+                end
             end
         end
     end

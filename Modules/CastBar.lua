@@ -278,6 +278,115 @@ local function ShowTicksByPercent(stages)
     for i = n + 1, #frame.tickLines do frame.tickLines[i]:Hide() end
 end
 
+-- Entree : glissement du bas vers le haut + fondu d'opacite. Sortie : fondu seul (pas de glissement).
+-- animP : 0 = cache, 1 = affiche ; animTo : cible ; animSlide : avancement du glissement (fige pendant la sortie).
+-- Stagger a l'entree seulement : la barre apparait en premier, les textes (nom, temps) la suivent. A la sortie, tout s'efface ensemble.
+local ANIM_SLIDE, ANIM_IN, ANIM_OUT, ANIM_STAGGER = 14, 0.35, 0.50, 0.5
+local animP, animTo, animSlide = 0, 0, 1
+local animDriver = CreateFrame("Frame")
+
+local function PlaceFrame(offsetY)
+    local cfg = Cfg()
+    frame:ClearAllPoints()
+    frame:SetPoint(cfg.point or DEFAULTS.point, UIParent, cfg.relativePoint or DEFAULTS.relativePoint,
+        cfg.x or DEFAULTS.x, (cfg.y or DEFAULTS.y) + (offsetY or 0))
+end
+
+local function Ease(v)
+    if v < 0 then v = 0 elseif v > 1 then v = 1 end
+    return 1 - (1 - v) * (1 - v)   -- ease-out
+end
+
+-- Opacite par groupe : barre (fond, filet, barre, etincelle, ticks) / textes (nom, temps, et leur anneau SLUG)
+local function SetGroupAlpha(eBar, eTxt)
+    frame:SetAlpha(1)
+    for _, r in ipairs({ frame.bgTex, frame.border, frame.bar, frame.spark }) do r:SetAlpha(eBar) end
+    for _, r in ipairs({ frame.nameTxt, frame.timerTxt }) do r:SetAlpha(eTxt) end
+    for _, ring in ipairs({ frame.nameTxtSlug or {}, frame.timerTxtSlug or {} }) do
+        for _, fs in ipairs(ring) do fs:SetAlpha(eTxt) end
+    end
+end
+
+-- Fondu d'apparition du nom (texte "Interrompu") quand la barre est deja entierement affichee : sans lui le texte
+-- changeait d'un coup. L'animation globale reprend la main des qu'une sortie demarre.
+local nameFadeDrv = CreateFrame("Frame")
+local function SetNameAlpha(a)
+    frame.nameTxt:SetAlpha(a)
+    for _, fs in ipairs(frame.nameTxtSlug or {}) do fs:SetAlpha(a) end
+end
+
+local function FadeNameIn()
+    if not frame or not (animTo == 1 and animP >= 1) then return end
+    local t = 0
+    SetNameAlpha(0)
+    nameFadeDrv:SetScript("OnUpdate", function(self, el)
+        if animTo ~= 1 or animP < 1 then self:SetScript("OnUpdate", nil); return end
+        t = t + el
+        SetNameAlpha(Ease(t / 0.25))
+        if t >= 0.25 then self:SetScript("OnUpdate", nil) end
+    end)
+end
+
+local function ApplyAnim()
+    local eBar, eTxt
+    if animTo == 1 then
+        eBar = Ease(animP / (1 - ANIM_STAGGER))
+        eTxt = Ease((animP - ANIM_STAGGER) / (1 - ANIM_STAGGER))
+    else
+        eBar = Ease(animP)
+        eTxt = eBar
+    end
+    SetGroupAlpha(eBar, eTxt)
+    if animTo == 1 then animSlide = eBar end
+    PlaceFrame(-ANIM_SLIDE * (1 - animSlide))
+end
+
+local function AnimStep(_, el)
+    if not frame then animDriver:SetScript("OnUpdate", nil); return end
+    if animTo == 1 then animP = math.min(1, animP + el / ANIM_IN) else animP = math.max(0, animP - el / ANIM_OUT) end
+    ApplyAnim()
+    if animP == animTo then
+        animDriver:SetScript("OnUpdate", nil)
+        if animTo == 0 then
+            frame:Hide()
+            SetGroupAlpha(1, 1)
+            PlaceFrame(0)
+        end
+    end
+end
+
+-- Affichage anime (rien a faire si deja entierement affiche ; reprend la ou il en est si une sortie est en cours)
+local function ShowAnimated()
+    if not frame then return end
+    nameFadeDrv:SetScript("OnUpdate", nil)
+    if animP >= 1 then SetNameAlpha(1) end   -- un fondu de nom interrompu par un nouveau cast ne doit pas laisser le texte pale
+    if not frame:IsShown() then
+        animP, animSlide = 0, 0
+        SetGroupAlpha(0, 0)
+        frame:Show()
+    end
+    animTo = 1
+    if animP < 1 then animDriver:SetScript("OnUpdate", AnimStep) end
+end
+
+local function HideAnimated()
+    if not frame or not frame:IsShown() then return end
+    if animTo == 1 and animP >= 1 then animP = 1 end
+    animTo = 0
+    animDriver:SetScript("OnUpdate", AnimStep)
+end
+
+-- Affichage / masquage immediats (reglages, preview rafraichi) : l'etat de l'animation suit
+local function SnapAnim(shown)
+    animDriver:SetScript("OnUpdate", nil)
+    animP, animTo, animSlide = shown and 1 or 0, shown and 1 or 0, 1
+    if frame then
+        SetGroupAlpha(1, 1)
+        PlaceFrame(0)
+        if shown then frame:Show() else frame:Hide() end
+    end
+end
+
 -- Mise à jour du progrès (appelée chaque frame via OnUpdate)
 local function UpdateProgress()
     if not frame then return end
@@ -320,7 +429,8 @@ local function UpdateProgress()
                 state.endTime   = now + dur
             else
                 state.active = false
-                frame:Hide()
+                state.completed = not state.channeling   -- cast termine : la barre reste pleine pendant le fondu
+                HideAnimated()
             end
         end
     end
@@ -341,6 +451,7 @@ local function StartCast(name, startTimeMS, endTimeMS, spellId, spellIcon, castG
     state.spellId    = spellId
     state.spellIcon  = spellIcon
     state.castGUID   = castGUID
+    state.completed  = false
 
     -- Restaurer couleurs normales (au cas où un interrupt était en cours)
     frame.nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
@@ -349,7 +460,7 @@ local function StartCast(name, startTimeMS, endTimeMS, spellId, spellIcon, castG
     HideTicks()
 
     frame.nameTxt:SetText(state.name)
-    frame:Show()
+    ShowAnimated()
     UpdateProgress()
 end
 
@@ -367,6 +478,7 @@ local function StartChannel(name, startTimeMS, endTimeMS, spellId, spellIcon, ca
     state.spellId    = spellId
     state.spellIcon  = spellIcon
     state.castGUID   = castGUID
+    state.completed  = false
 
     -- Restaurer couleurs normales
     frame.nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
@@ -375,7 +487,7 @@ local function StartChannel(name, startTimeMS, endTimeMS, spellId, spellIcon, ca
     ShowTicks(CHANNEL_TICKS[spellId])
 
     frame.nameTxt:SetText(state.name)
-    frame:Show()
+    ShowAnimated()
     UpdateProgress()
 end
 
@@ -395,6 +507,8 @@ local function StopCast(castGUID, delay)
     -- Capturer l'endTime courant : si un nouveau cast démarre, StartChannel/StartCast
     -- le modifiera, et le callback détectera qu'il est obsolète.
     local capturedEndTime = state.endTime
+    -- Cast arrive a son terme (pas une canalisation) : la barre reste pleine jusqu'a la fin du fondu
+    local keepFull = state.completed or (not state.channeling and state.active and (state.endTime - GetTime()) <= 0.2)
     C_Timer.After(delay or 0, function()
         if not frame then return end
         if pendingGUID   then return end   -- PollStart en cours
@@ -407,14 +521,16 @@ local function StopCast(castGUID, delay)
         -- Vrai arrêt
         state.active   = false
         state.castGUID = nil
-        frame.bar:SetValue(0)
+        if not keepFull then frame.bar:SetValue(0) end
         frame.spark:Hide()
         frame.timerTxt:SetText("")
         HideTicks()
-        frame:Hide()
+        HideAnimated()
     end)
 end
 
+local interruptGen = 0
+local FillToFull   -- definie plus bas (partagee avec FinishCast)
 local function InterruptCast()
     if not frame then return end
     if state.preview then return end  -- ne pas afficher en preview
@@ -427,20 +543,83 @@ local function InterruptCast()
     frame.bar:SetStatusBarColor(0.85, 0.15, 0.10, 1)
     frame.nameTxt:SetText(L["CASTBAR_INTERRUPTED"])
     frame.nameTxt:SetTextColor(0.90, 0.25, 0.15, 1)
-    frame:Show()
+    ShowAnimated()
+    FadeNameIn()
+    FillToFull(0.2, true)   -- la barre rouge se remplit vite, de gauche a droite, avec amorti (comme un cast tres court)
 
-    -- Masquer apres 0.9s et restaurer les couleurs
+    -- Masquer apres 0.9s : la barre rouge et "Interrompu" s'effacent ENSEMBLE (meme duree de fondu), puis seulement
+    -- les couleurs / le texte sont restaures (avant, le texte etait vide d'un coup alors que la barre s'effacait encore).
+    interruptGen = interruptGen + 1
+    local gen = interruptGen
     C_Timer.After(0.9, function()
-        if not frame then return end
+        if not frame or gen ~= interruptGen then return end
         if state.active then return end  -- un nouveau cast a demarre
-        frame.bar:SetValue(0)
-        ResetBarGradient()
-        local bc2 = ResolveBarColor()
-        frame.bar:SetStatusBarColor(bc2[1], bc2[2], bc2[3], bc2[4] or 1)
-        frame.nameTxt:SetText("")
-        frame.nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
-        frame:Hide()
+        HideAnimated()
+        C_Timer.After(ANIM_OUT + 0.05, function()
+            if not frame or gen ~= interruptGen or state.active then return end
+            frame.bar:SetValue(0)
+            ResetBarGradient()
+            local bc2 = ResolveBarColor()
+            frame.bar:SetStatusBarColor(bc2[1], bc2[2], bc2[3], bc2[4] or 1)
+            frame.nameTxt:SetText("")
+            frame.nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
+        end)
     end)
+end
+
+-- Cast reussi : la barre n'atteint jamais tout a fait 100 % (le sort part un peu avant la fin de la barre, tolerance de
+-- latence) et restait figee a ~95 % pendant le fondu. On la remplit jusqu'au bout, puis le fondu demarre.
+local fillDrv = CreateFrame("Frame")
+-- dur : duree du remplissage ; eased : amorti (rapide au depart, ralentit en fin), sinon lineaire
+FillToFull = function(dur, eased)
+    dur = dur or 0.12
+    local v0 = frame.bar:GetValue() or 0
+    if v0 >= 1 then return end
+    local t = 0
+    fillDrv:SetScript("OnUpdate", function(self, el)
+        if state.active then self:SetScript("OnUpdate", nil); return end   -- un nouveau cast a pris la barre
+        t = t + el
+        local k = math.min(1, t / dur)
+        if eased then k = 1 - (1 - k) * (1 - k) end
+        frame.bar:SetValue(v0 + (1 - v0) * k)
+        if t >= dur then frame.bar:SetValue(1); self:SetScript("OnUpdate", nil) end
+    end)
+end
+
+local function FinishCast(castGUID)
+    if not frame or state.preview or not state.active or state.channeling then return end
+    if castGUID and state.castGUID and castGUID ~= state.castGUID then return end   -- sort instantane lance pendant ce cast
+    state.active    = false
+    state.completed = true
+    frame.spark:Hide()
+    frame.timerTxt:SetText("")
+    HideTicks()
+    FillToFull()
+    C_Timer.After(0.12, function()
+        if state.active then return end
+        HideAnimated()
+    end)
+end
+
+-- Etincelle : texture, taille (% de la taille de base de la texture) et couleur reglables (reglages de la barre de cast)
+local SPARK_TEXTURES = {
+    default = { path = "Interface\\CastingBar\\UI-CastingBar-Spark", w = 14, h = 12 },
+    line    = { path = "Interface\\Buttons\\WHITE8X8",               w = 2,  h = 12 },
+    star    = { path = "Interface\\Cooldown\\star4",                 w = 24, h = 24 },
+    burst   = { path = "Interface\\Cooldown\\starburst",             w = 24, h = 24 },
+    dot     = { path = nil,                                          w = 8,  h = 8  },   -- nil : disque de l'addon (ns.Media.circle)
+}
+CastBar.SPARK_KEYS = { "default", "line", "star", "burst", "dot" }
+
+local function ApplySpark()
+    if not frame or not frame.spark then return end
+    local cfg = Cfg()
+    local t = SPARK_TEXTURES[cfg.sparkTexture or "default"] or SPARK_TEXTURES.default
+    local k = (tonumber(cfg.sparkSize) or 100) / 100
+    frame.spark:SetTexture(t.path or ns.Media.circle)
+    frame.spark:SetSize(t.w * k, t.h * k)
+    local c = cfg.sparkColor or { 1, 0.867, 0.710, 1 }
+    frame.spark:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
 end
 
 -- Création de la barre
@@ -502,6 +681,7 @@ function CastBar.Create(parent)
     border:SetPoint("TOPLEFT",     bgTex, "TOPLEFT",     -1,  1)
     border:SetPoint("BOTTOMRIGHT", bgTex, "BOTTOMRIGHT",  1, -1)
     border:SetColorTexture(DARK, DARK, DARK, 1)
+    frame.border = border
 
     -- StatusBar de remplissage
     local sb = CreateFrame("StatusBar", nil, frame)
@@ -514,7 +694,13 @@ function CastBar.Create(parent)
     frame.bar = sb
 
     -- Spark
-    local spark = frame:CreateTexture(nil, "OVERLAY")
+    -- L'etincelle vit dans un cadre au-dessus de la barre : une texture posee directement sur le cadre racine est dessinee
+    -- derriere ses cadres enfants, donc derriere le remplissage (StatusBar), quelle que soit sa couche.
+    local sparkFrame = CreateFrame("Frame", nil, frame)
+    sparkFrame:SetAllPoints(frame)
+    sparkFrame:SetFrameLevel(sb:GetFrameLevel() + 5)
+    frame.sparkFrame = sparkFrame
+    local spark = sparkFrame:CreateTexture(nil, "OVERLAY")
     spark:SetSize(14, 12)
     spark:SetTexture("Interface\\CastingBar\\UI-CastingBar-Spark")
     spark:SetBlendMode("ADD")
@@ -522,6 +708,7 @@ function CastBar.Create(parent)
     spark:SetPoint("CENTER", bgTex, "LEFT", 0, 0)
     spark:Hide()
     frame.spark = spark
+    ApplySpark()
 
     -- Pool de ticks (sorts canalisés / étapes empower)
     frame.tickLines = {}
@@ -567,6 +754,7 @@ function CastBar.Create(parent)
     ev:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
     ev:RegisterEvent("UNIT_SPELLCAST_EMPOWER_START")
     ev:RegisterEvent("UNIT_SPELLCAST_STOP")
+    ev:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     ev:RegisterEvent("UNIT_SPELLCAST_FAILED")
     ev:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
     ev:RegisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
@@ -660,6 +848,9 @@ function CastBar.Create(parent)
                 C_Timer.After(0, function() PollStart(g, si) end)
             end
 
+        elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+            FinishCast(castGUID)
+
         elseif event == "UNIT_SPELLCAST_INTERRUPTED" then
             InterruptCast()
 
@@ -685,6 +876,7 @@ end
 -- ApplySettings : remet à jour dimensions/position/couleurs
 function CastBar.ApplySettings()
     if not frame then return end
+    ApplySpark()
 
     local cfg = Cfg()
     local w   = cfg.width    or DEFAULTS.width
@@ -738,9 +930,9 @@ function CastBar.ApplySettings()
     -- state.preview n'est pas remis a false : re-cocher "Activer" doit la refaire apparaitre
     if state.preview then
         if cfg.enabled == false then
-            frame:Hide()
+            SnapAnim(false)
         else
-            frame:Show()
+            if not frame:IsShown() then SnapAnim(true) end
             -- Forcer le texte pour que les changements d'ancre/justify soient visibles
             frame.nameTxt:SetText(state.name or L["CASTBAR_PREVIEW_SPELL_NAME"])
             frame.timerTxt:SetText(FormatTime(math.max(0, state.endTime - GetTime())))
@@ -767,7 +959,7 @@ function CastBar.SetPreview(on)
         frame.timerTxt:SetText("2.1")
         frame.bar:SetValue(0.3)
         frame.spark:Show()
-        frame:Show()
+        ShowAnimated()
     else
         -- ne cacher que si aucun vrai cast en cours
         state.spellId   = nil
@@ -778,7 +970,7 @@ function CastBar.SetPreview(on)
             frame.spark:Hide()
             frame.nameTxt:SetText("")
             frame.timerTxt:SetText("")
-            frame:Hide()
+            HideAnimated()
         end
     end
 end

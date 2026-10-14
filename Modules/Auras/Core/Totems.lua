@@ -315,16 +315,12 @@ local function StyleTotemTimerText(f, cfg)
         pos, f.icon or f.cd, pos, cfg.timerIconOffX or 0, cfg.timerIconOffY or 0)
 end
 
--- Glow par sort : override du render (cfg.glowOverride*) prioritaire, sinon glow propre au sort.
+-- Glow par sort, type et taille eventuellement remplaces par la section "Glow" du mode (cf. ns.ModeGlow).
 local function ApplyTotemGlow(glowAnchor, cfg, info, iw, ih)
     if ns.HideGlow then pcall(ns.HideGlow, glowAnchor) end
     if cfg.glowEnabled == false then return end
-    local idx = cfg.glowOverrideIdx or (info and info.glowIdx)
-    if not (idx and idx > 1) then return end
-    local color = (cfg.glowOverrideR and { cfg.glowOverrideR, cfg.glowOverrideG, cfg.glowOverrideB })
-        or (info and info.glowColor) or (info and info.color)
-    local alpha = cfg.glowOverrideAlpha or (info and info.glowAlpha)
-    local scale = cfg.glowOverrideScale or (info and info.glowScale)
+    if not (info and info.glowIdx and info.glowIdx > 1) then return end
+    local idx, scale, color, alpha = ns.ModeGlow(cfg, info.glowIdx, info.glowScale, info.glowColor or info.color, info.glowAlpha, info._glowCustom == true)
     if ns.ShowGlow then pcall(ns.ShowGlow, glowAnchor, idx, color, alpha, scale, iw, ih) end
 end
 

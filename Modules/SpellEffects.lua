@@ -223,8 +223,19 @@ end
 
 -- Base 500x500 pour "Buffs manquants" (vs 200x200 ailleurs) : partagee par ApplyAnimConfig
 -- et les tickers de refresh live, pour eviter un retrecissement brutal au 1er tick.
+-- Cercle Bien Nourri : les animations suivent la taille du cercle. Reference = taille du cercle quand les animations
+-- ont ete reglees (memorisee a la premiere lecture), de sorte que redimensionner garde les memes proportions.
+local function WellFedScale(anchor)
+  local cfg = ns.GetCfg("wellFedCircle")
+  local w = anchor.GetWidth and anchor:GetWidth() or 0
+  if not cfg or w <= 0 then return 1 end
+  if not cfg.animRefSize then cfg.animRefSize = w end
+  return w / cfg.animRefSize
+end
+
 local function GetBaseSizeForAnchor(anchor)
   local anchorName = anchor and anchor.GetName and anchor:GetName() or ""
+  if anchorName == "AishCoreWellFedRing" then return 200 * WellFedScale(anchor) end
   if anchorName:find("^AishCoreMissingBuff") then return 500 end
   -- Logos : un seul combo sert deux logos de tailles differentes (en-tete du panneau,
   -- 74 px fixes / mode AFK, dimensions configurables). La base suit donc la taille de
@@ -249,6 +260,7 @@ local function GetAnchorOffsetScale(anchor)
   if anchorName == "AishCoreGuiLogoAnchor" or anchorName == "AishCoreAFKLogoAnchor" then
     return GetBaseSizeForAnchor(anchor) / 200
   end
+  if anchorName == "AishCoreWellFedRing" then return WellFedScale(anchor) end
   return 1
 end
 
@@ -290,6 +302,7 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor, skipModel)
   local isOrb = anchorName:find("^AishCoreSecDot") or anchorName:find("^AishCoreOCSecDot")
   local isMissingBuff = anchorName:find("^AishCoreMissingBuff") ~= nil  -- frame global ou icone de proposition
   local isLogo = (anchorName == "AishCoreGuiLogoAnchor" or anchorName == "AishCoreAFKLogoAnchor")
+  local isWellFed = (anchorName == "AishCoreWellFedRing")
 
   local baseSize = GetBaseSizeForAnchor(pAnchor)
   local sz = (anim.scale or 1) * baseSize * reportScale
@@ -326,6 +339,17 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor, skipModel)
       local targetLevel = tf and (tf:GetFrameLevel() - 1) or (anchor:GetFrameLevel() + 4)
       f:SetFrameStrata(anchor:GetFrameStrata())
       f:SetFrameLevel(targetLevel)
+    else
+      f:SetFrameStrata("BACKGROUND")
+    end
+  elseif isWellFed then
+    -- Cercle Bien Nourri : meme logique 3 niveaux, relative au cercle (arc +1, masque +2, texte +3)
+    if strata == "FOREGROUND" then
+      f:SetFrameStrata("MEDIUM")
+      f:SetFrameLevel(anchor:GetFrameLevel() + 10)
+    elseif strata == "HIGH" or strata == "MEDIUM" then
+      f:SetFrameStrata("MEDIUM")
+      f:SetFrameLevel(anchor:GetFrameLevel() + 1)
     else
       f:SetFrameStrata("BACKGROUND")
     end
@@ -624,6 +648,35 @@ function SpellEffects.TagCombosWithOwner()
     end
   end
   return tagged, named
+end
+
+--- Memorise le NOM de chaque sort configure des qu'il est lisible sur ce client (sans toucher aux tags de classe,
+--- contrairement a TagCombosWithOwner). Lance tout seul apres la connexion : les noms voyagent ainsi avec les
+--- SavedVariables, et la liste des animations les affiche sur un client ou ces sorts n'existent pas (Forever).
+function SpellEffects.RememberNames()
+  local cfg = ns.GetCfg("spellEffects")
+  if not (cfg and cfg.combos and C_Spell and C_Spell.GetSpellName) then return 0 end
+  if not cfg.combosMeta then cfg.combosMeta = {} end
+  local added = 0
+  for sid in pairs(cfg.combos) do
+    if type(sid) == "number" and not cfg.combosMeta[sid] then
+      local ok, nm = pcall(C_Spell.GetSpellName, sid)
+      if ok and type(nm) == "string" and nm ~= "" then
+        cfg.combosMeta[sid] = nm
+        added = added + 1
+      end
+    end
+  end
+  return added
+end
+
+do
+  local f = CreateFrame("Frame")
+  f:RegisterEvent("PLAYER_ENTERING_WORLD")
+  f:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+    C_Timer.After(6, function() pcall(SpellEffects.RememberNames) end)
+  end)
 end
 
 -- /setag : attribue les animations configurees au personnage courant (classe + nom du sort).
@@ -1258,7 +1311,17 @@ function SpellEffects.PreviewLoop(anim, overrideAnchors)
       local isOoc = (anchorName == "AishCoreHealthRing")
       local isOrb = anchorName:find("^AishCoreSecDot") or anchorName:find("^AishCoreOCSecDot")
 
-      if isOrb then
+      if anchorName == "AishCoreWellFedRing" then
+        if strata == "FOREGROUND" then
+          ef:SetFrameStrata("MEDIUM")
+          ef:SetFrameLevel(anchor:GetFrameLevel() + 10)
+        elseif strata == "HIGH" or strata == "MEDIUM" then
+          ef:SetFrameStrata("MEDIUM")
+          ef:SetFrameLevel(anchor:GetFrameLevel() + 1)
+        else
+          ef:SetFrameStrata("BACKGROUND")
+        end
+      elseif isOrb then
         if strata == "FOREGROUND" then
           ef:SetFrameStrata(anchor:GetFrameStrata())
           ef:SetFrameLevel(anchor:GetFrameLevel() + 3)
@@ -1577,6 +1640,13 @@ end
 -- État des décorations actives
 local decoOocActive = false   -- déco OOC en cours
 local decoOrbActive = false   -- déco orbes en cours
+
+-- Journal de diagnostic des orbes (/seorbs) : derniers evenements qui demarrent / coupent les animations d'orbes
+local orbLog = {}
+local function LogOrb(msg)
+  orbLog[#orbLog + 1] = string.format("%.1f  %s", GetTime() % 1000, msg)
+  if #orbLog > 30 then table.remove(orbLog, 1) end
+end
 local _lastOrbDotSnapshot  = 0
 local _lastRuneReadyStates = {}  -- [i] = bool, état prêt de chaque rune DK
 local _lastEssenceBurst    = false -- dernier état Essence Burst Evoker
@@ -1800,8 +1870,10 @@ end
 local function IsInStealth()
   if IsStealthed and IsStealthed() then return true end
   -- La barre bonus change quand le rogue passe en stealth/shadow dance
+  -- (hors monture / vehicule / barre de remplacement : la barre "bonus" y change aussi, sans rapport avec la furtivite)
   local bi = GetBonusBarIndex and GetBonusBarIndex()
-  if bi and bi ~= 0 then
+  if bi and bi ~= 0 and not (IsMounted and IsMounted()) and not (HasVehicleActionBar and HasVehicleActionBar())
+     and not (HasOverrideActionBar and HasOverrideActionBar()) then
     local _, cls = UnitClass("player")
     if cls == "ROGUE" then return true end
   end
@@ -2059,12 +2131,16 @@ end
 --- Les clés orbCombos sont qualifiées par classe : "combo_ROGUE", "rune_frost_DEATHKNIGHT", etc.
 function SpellEffects.StartOrbDeco()
   if decoOrbActive then return end
-  if guiSuppressDeco or #decoPreviewEntries > 0 then return end
+  if guiSuppressDeco or #decoPreviewEntries > 0 then LogOrb("Start REFUSE : panneau Animations 3D / apercu ouvert"); return end
   local cfg = ns.GetCfg("spellEffects")
-  if not cfg or not cfg.enabled then return end
-  if AnimationsBlockedByGroupState() then return end
+  if not cfg or not cfg.enabled then LogOrb("Start REFUSE : animations desactivees"); return end
+  if AnimationsBlockedByGroupState() then LogOrb("Start REFUSE : bloque en groupe / raid"); return end
   local validKeys, orbCombos = GetValidOrbKeys()
-  if not orbCombos or #validKeys == 0 then return end
+  if not orbCombos or #validKeys == 0 then
+    LogOrb("Start REFUSE : aucune cle valide (stealth=" .. tostring(IsInStealth()) .. ", dots visibles=" .. GetVisibleDotCount() .. ")")
+    return
+  end
+  LogOrb("Start OK : " .. #validKeys .. " cle(s), dots visibles=" .. GetVisibleDotCount())
   decoOrbActive = true
   for i = 1, 10 do
     local dot = _G["AishCoreSecDot" .. i] or _G["AishCoreOCSecDot" .. i]
@@ -2113,6 +2189,7 @@ _startOrbDecoRef = SpellEffects.StartOrbDeco
 --- Stoppe les décorations orbes.
 function SpellEffects.StopOrbDeco()
   if not decoOrbActive then return end
+  LogOrb("Stop")
   decoOrbActive = false
   if _orbRefreshTicker then _orbRefreshTicker:Cancel(); _orbRefreshTicker = nil end
   for i = 1, decoPoolSize do
@@ -2125,27 +2202,82 @@ function SpellEffects.StopOrbDeco()
   if RC and RC.ClearSecDotColorOverride then RC.ClearSecDotColorOverride() end
 end
 
+-- Cercle Bien Nourri : un combo par etat ("eating" / "fed", cf. WellFedCircle.lua), joue en boucle sur le cercle.
+local wellFedState  = nil
+local wellFedActive = false
+
+function SpellEffects.StopWellFedDeco()
+  wellFedActive = false
+  ReleaseDecoByTag("wellfed")
+end
+
+function SpellEffects.StartWellFedDeco()
+  if wellFedActive or not wellFedState then return end
+  if guiSuppressDeco or #decoPreviewEntries > 0 then return end
+  if AnimationsBlockedByGroupState() then return end
+  local cfg = ns.GetCfg("spellEffects")
+  if not cfg or not cfg.enabled or cfg.wellFedEnabled == false then return end
+  local combo = cfg.wellFedCombos and cfg.wellFedCombos[wellFedState]
+  local anchor = _G["AishCoreWellFedRing"]
+  if not (combo and #combo > 0 and anchor) then return end
+  wellFedActive = true
+  StartDecoLoop(combo, anchor, "wellfed")
+end
+
+--- Relance les modeles du cercle Bien Nourri (apres un redimensionnement du cercle).
+function SpellEffects.RefreshWellFedDeco()
+  if not wellFedActive then return end
+  SpellEffects.StopWellFedDeco()
+  SpellEffects.StartWellFedDeco()
+end
+
+--- Appele par WellFedCircle : "eating", "fed" ou nil (cercle masque).
+function SpellEffects.SetWellFedState(state)
+  SpellEffects.StopWellFedDeco()
+  wellFedState = state
+  SpellEffects.StartWellFedDeco()
+end
+
 --- Stoppe toutes les décorations.
 function SpellEffects.StopAllDeco()
   SpellEffects.StopOocDeco()
   SpellEffects.StopOrbDeco()
   SpellEffects.StopLogoDeco()
+  SpellEffects.StopWellFedDeco()
+end
+
+-- Les globes d'un cercle qui vient d'apparaitre (sortie de furtivite + entree en combat, par exemple) sont affiches par
+-- l'animation d'entree, un peu APRES le rafraichissement : sans nouvel essai, ils n'etaient jamais animes (le rafraichissement
+-- avait deja coupe les decos et le ticker). On reessaie donc quelques fois, jusqu'a ce qu'un globe soit visible.
+local function EnsureOrbDecoRetry(n)
+  C_Timer.After(0.4, function()
+    if decoOrbActive or guiSuppressDeco then return end
+    if GetVisibleDotCount() > 0 then
+      SpellEffects.StartOrbDeco()
+    elseif n > 1 then
+      EnsureOrbDecoRetry(n - 1)
+    end
+  end)
 end
 
 --- Rafraîchit les décorations (stop + restart si frames visibles).
 function SpellEffects.RefreshDecorations()
+  LogOrb("Refresh (dots visibles=" .. GetVisibleDotCount() .. ", actif avant=" .. tostring(decoOrbActive) .. ")")
   SpellEffects.StopAllDeco()
   -- OOC
   local oocRing = _G["AishCoreHealthRing"]
   if oocRing and oocRing:IsShown() then
     SpellEffects.StartOocDeco()
   end
-  -- Orbes : relancer si au moins un secDot est visible
+  -- Orbes : relancer si au moins un secDot est visible, sinon reessayer un moment
   if GetVisibleDotCount() > 0 then
     SpellEffects.StartOrbDeco()
+  else
+    EnsureOrbDecoRetry(6)
   end
   -- Logos : StartLogoDeco ne retient que les ancres reellement visibles
   SpellEffects.StartLogoDeco()
+  SpellEffects.StartWellFedDeco()
 end
 
 -- Deco Preview : modèles persistants 30 fps pour la preview OOC/Orbes du panneau Settings.
@@ -2230,7 +2362,17 @@ function SpellEffects.StartDecoPreview(combo, overrideAnchors)
       local isOoc = (anchorName == "AishCoreHealthRing")
       local isOrb = anchorName:find("^AishCoreSecDot") or anchorName:find("^AishCoreOCSecDot")
 
-      if isOrb then
+      if anchorName == "AishCoreWellFedRing" then
+        if strata == "FOREGROUND" then
+          ef:SetFrameStrata("MEDIUM")
+          ef:SetFrameLevel(anchor:GetFrameLevel() + 10)
+        elseif strata == "HIGH" or strata == "MEDIUM" then
+          ef:SetFrameStrata("MEDIUM")
+          ef:SetFrameLevel(anchor:GetFrameLevel() + 1)
+        else
+          ef:SetFrameStrata("BACKGROUND")
+        end
+      elseif isOrb then
         if strata == "FOREGROUND" then
           ef:SetFrameStrata(anchor:GetFrameStrata())
           ef:SetFrameLevel(anchor:GetFrameLevel() + 3)
@@ -2276,6 +2418,7 @@ function SpellEffects.StopDecoPreview()
   -- La preview bloquait les decos de logo (StartLogoDeco) : les reprendre tout de suite,
   -- sans attendre la sortie du mode GUI.
   SpellEffects.StartLogoDeco()
+  SpellEffects.StartWellFedDeco()
 end
 
 --- Retourne true si une preview décorative est active.
@@ -2641,6 +2784,39 @@ function SpellEffects.DebugDumpAuraCombos()
   end
 end
 
+-- /seorbs : etat des animations d'orbes + journal des derniers demarrages / arrets (a coller pour diagnostiquer)
+SLASH_SEORBS1 = "/seorbs"
+SlashCmdList["SEORBS"] = function()
+  local P = "|cff33aaff[SEorbs]|r "
+  local cfg = ns.GetCfg("spellEffects") or {}
+  local _, cls = UnitClass("player")
+  print(P .. string.format("classe=%s actif=%s gui=%s apercus=%d anims=%s orbes=%s bloque=%s combat=%s furtif=%s",
+    tostring(cls), tostring(decoOrbActive), tostring(guiSuppressDeco), #decoPreviewEntries, tostring(cfg.enabled),
+    tostring(cfg.orbsEnabled), tostring(AnimationsBlockedByGroupState()), tostring(UnitAffectingCombat("player")),
+    tostring(IsInStealth())))
+  local ring = _G[RING_FRAME]
+  local ooc = _G[OOC_RING_FRAME]
+  print(P .. string.format("cercle central visible=%s | cercle de vie hors combat visible=%s",
+    tostring(ring and ring:IsVisible()), tostring(ooc and ooc:IsVisible())))
+  local parts = {}
+  for i = 1, 10 do
+    local a, b = _G["AishCoreSecDot" .. i], _G["AishCoreOCSecDot" .. i]
+    if a or b then
+      parts[#parts + 1] = string.format("%d:%s%s", i, a and (a:IsShown() and "RC+" or "RC-") or "", b and (b:IsShown() and "OC+" or "OC-") or "")
+    end
+  end
+  print(P .. "globes (RC = cercle central, OC = hors combat ; + visible / - cache) : " .. (#parts > 0 and table.concat(parts, " ") or "aucun"))
+  local validKeys = GetValidOrbKeys()
+  print(P .. "cles valides : " .. (validKeys and #validKeys > 0 and table.concat(validKeys, ", ") or "aucune"))
+  local inUse = 0
+  for i = 1, decoPoolSize do
+    if decoPool[i].inUse and decoPool[i].tag and decoPool[i].tag:find("^orb_") then inUse = inUse + 1 end
+  end
+  print(P .. "modeles d'orbes en cours : " .. inUse)
+  print(P .. "journal (le plus ancien en premier) :")
+  for _, line in ipairs(orbLog) do print("   " .. line) end
+end
+
 SLASH_SEDEBUGCOMBOS1 = "/sedebugcombos"
 SlashCmdList["SEDEBUGCOMBOS"] = function() SpellEffects.DebugDumpAuraCombos() end
 
@@ -2728,6 +2904,14 @@ function SpellEffects.Init()
   if _initialized then return end
   _initialized = true
   MigrateOocLegacyKeys()
+  -- Reglages laisses par les essais de rendu Forever (commande /sefx, retiree : sans effet) : retour au defaut
+  do
+    local c = ns.DB and ns.DB.spellEffects
+    if c and not c._fxTestCleared then
+      c.modelLight, c.modelFog, c.modelFrameAlpha = nil, nil, nil
+      c._fxTestCleared = true
+    end
+  end
 
   -- Recuperation des animations configurees sous un autre identifiant (cf.
   -- AutoLinkCombosByName). Differee : le grimoire n'est pas encore lisible a l'initialisation,
@@ -2853,10 +3037,12 @@ function SpellEffects.Init()
     local ring = _G[RING_FRAME]
     if ring then
       ring:HookScript("OnHide", function()
+        LogOrb("Cercle central : OnHide")
         SpellEffects.StopAll()
         SpellEffects.StopOrbDeco()
       end)
       ring:HookScript("OnShow", function()
+        LogOrb("Cercle central : OnShow")
         SpellEffects.StartOrbDeco()
       end)
     end
@@ -2881,6 +3067,17 @@ function SpellEffects.Init()
     end
   end)
 
+  -- Contexte pour /seorbs : entree / sortie de combat et de furtivite
+  do
+    local ctxFrame = CreateFrame("Frame")
+    ctxFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    ctxFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    ctxFrame:RegisterEvent("UPDATE_STEALTH")
+    ctxFrame:SetScript("OnEvent", function(_, event)
+      LogOrb(event .. " (furtif=" .. tostring(IsInStealth()) .. ", dots visibles=" .. GetVisibleDotCount() .. ")")
+    end)
+  end
+
   -- Changement de spé : rafraîchir les décorations (OOC combo peut changer)
   local specFrame = CreateFrame("Frame")
   ns.TrackSpecFrame(specFrame)
@@ -2896,8 +3093,21 @@ function SpellEffects.Init()
   -- Changement de puissance : rafraîchir les décors orbes si l'état « max » change
   local powerFrame = CreateFrame("Frame")
   powerFrame:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
+  -- Aucune animation d'orbes en cours alors que des globes sont visibles : cas d'un cercle central DEJA affiche (donc pas
+  -- d'OnShow) dont les globes apparaissent apres coup, par exemple au premier point de combo d'un combat. Rien d'autre ne
+  -- relancait alors les animations. Essai limite a un toutes les 0,5 s.
+  local _lastOrbTry = 0
+  local function TryStartOrbsIfDots()
+    if decoOrbActive or guiSuppressDeco then return end
+    local now = GetTime()
+    if now - _lastOrbTry < 0.5 then return end
+    _lastOrbTry = now
+    if GetVisibleDotCount() > 0 then SpellEffects.StartOrbDeco() end
+  end
+  C_Timer.NewTicker(1, TryStartOrbsIfDots)
+
   powerFrame:SetScript("OnEvent", function()
-    if not decoOrbActive then return end
+    if not decoOrbActive then TryStartOrbsIfDots(); return end
     local changed = false
     -- Vérifier le changement d'état stealth (rattrapage Shadow Dance / Subterfuge)
     local nowStealth = IsInStealth()

@@ -369,12 +369,8 @@ function Inst:Update(auras)
         local glIdx = a.glowIdx; local glColor = a.glowColor or a.spellColor; local glAlpha = a.glowAlpha
         local glScale = a.glowScale or 1.0
         local hasGlow = a.spellGlow and glIdx and glIdx > 1
-        -- Override render desactive via `false and`, cf. AuraTrackerContainer.lua::ApplySpellGlow
-        if false and cfg.glowOverrideIdx and cfg.glowOverrideIdx > 1 then
-            glIdx = cfg.glowOverrideIdx; hasGlow = true
-            if cfg.glowOverrideR ~= nil then glColor = {cfg.glowOverrideR, cfg.glowOverrideG or 0.5, cfg.glowOverrideB or 0.5} end
-            glScale = cfg.glowOverrideScale or glScale; glAlpha = cfg.glowOverrideAlpha or glAlpha
-        end
+        -- Section "Glow" du mode : type / taille (cf. ns.ModeGlow)
+        if hasGlow then glIdx, glScale, glColor, glAlpha = ns.ModeGlow(cfg, glIdx, glScale, glColor, glAlpha, a.glowCustom) end
         if cfg.glowEnabled ~= false and hasGlow then
             if ns.ShowGlow then ns.ShowGlow(row.iconBtn, glIdx, glColor, glAlpha, glScale) end
         else if ns.HideGlow then ns.HideGlow(row.iconBtn) end end

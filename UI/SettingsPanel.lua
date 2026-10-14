@@ -23,6 +23,7 @@ local CONTENT_W     = 680
 
 -- Table des fonctions "BuildXxx" (une par section/page) : champs de Build.Xxx plutot que "local function" pour eviter la limite Lua de 200 locales de haut niveau par chunk.
 local Build = {}
+ns.SettingsBuild = Build   -- acces depuis les grosses fonctions proches de la limite de 60 upvalues
 
 -- Frame principal
 local MainFrame = CreateFrame("Frame", "AishCoreSettingsPanel", UIParent)
@@ -40,7 +41,7 @@ MainFrame:Hide()
 SW.ApplyPanelBackground(MainFrame)
 
 -- Logo sticker AishUI (badge épinglé, déborde au-dessus du coin gauche)
-local LOGO_SZ = 74
+local LOGO_SZ = 96  -- 74 +30 %
 -- Nom global : sert d'ancre aux animations 3D de la section "Logos" (cf. SpellEffects).
 local _headerLogo = CreateFrame("Frame", "AishCoreGuiLogoAnchor", MainFrame)
 _headerLogo:SetSize(LOGO_SZ, LOGO_SZ)
@@ -209,6 +210,32 @@ local content = CreateFrame("Frame", nil, scrollFrame)
 content:SetWidth(CONTENT_W)
 content:SetHeight(1)
 scrollFrame:SetScrollChild(content)
+
+-- Zone epinglee en haut du contenu : un cadre (ex. apercu) qui reste visible quand la page defile. La zone de
+-- defilement est repoussee sous lui ; ns.SettingsUnpin la rend. Utilise par la page Barre de menu.
+do
+  local pinned
+  local LEFT, TOP = SIDEBAR_W + 1 + PADDING, -(TITLE_H + PADDING)
+  local function Unpin()
+    if pinned then pinned:Hide(); pinned = nil end
+    scrollFrame:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", LEFT, TOP)
+  end
+  function ns.SettingsPin(frame, height)
+    if pinned and pinned ~= frame then pinned:Hide() end
+    pinned = frame
+    frame:SetParent(MainFrame)
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", LEFT, TOP)
+    frame:SetPoint("TOPRIGHT", MainFrame, "TOPRIGHT", -18, TOP)
+    frame:SetHeight(height)
+    frame:SetFrameLevel(scrollFrame:GetFrameLevel() + 5)
+    frame:Show()
+    scrollFrame:SetPoint("TOPLEFT", MainFrame, "TOPLEFT", LEFT, TOP - height - 6)
+  end
+  function ns.SettingsUnpin(frame)
+    if pinned == frame then Unpin() end
+  end
+end
 
 -- Mise à jour immédiate de la largeur du contenu au redimensionnement
 -- (le rebuild des widgets est déclenché plus bas, après que toutes les
@@ -667,6 +694,7 @@ local function GetModKey(dbKey)
     resourceCircle             = "ResourceCircle",
     healthCircle               = "HealthCircle",
     outOfCombatResourceCircle  = "OutOfCombatResourceCircle",
+    wellFedCircle              = "WellFedCircle",
     priorityBar                = "PriorityBar",
     rotationHelper             = "RotationHelper",
     spellEffects               = "SpellEffects",
@@ -686,6 +714,9 @@ local function GetModKey(dbKey)
     characterArmory            = "CharacterArmory",
     afkMode                    = "AFKMode",
     bigCursor                  = "BigCursor",
+    stealthMode                = "StealthMode",
+    menuBar                    = "MenuBar",
+    minimapNodes               = "MinimapNodes",
     comfort                    = "Comfort",
     location                   = "Location",
     extraBars                  = "ExtraBars",
@@ -704,6 +735,7 @@ local CIRCLE_DRAG_MODULES = {
   resourceCircle            = "ResourceCircle",
   healthCircle              = "HealthCircle",
   outOfCombatResourceCircle = "OutOfCombatResourceCircle",
+  wellFedCircle             = "WellFedCircle",
 }
 
 local function LiveApply(dbKey)
@@ -722,6 +754,7 @@ end
 local DBKEY_TO_CATEGORY = {
   healthCircle              = "outOfCombat",
   outOfCombatResourceCircle = "outOfCombat",
+  wellFedCircle             = "outOfCombat",
   groupNumber               = "visibility",   -- section de la page Integration
   bigCursor                 = "comfortQoL",   -- section de la page QoL
 }
@@ -910,13 +943,13 @@ function Build.ResourceCircle(container)
   -- Taille / taille d'arc / epaisseur d'arc sur une seule ligne : les trois se reglent
   -- ensemble en pratique, les separer obligeait a faire l'aller-retour en scrollant.
   local _rcSL3 = math.floor((W - 24) / 4)
-  local slSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 20, 200, 1, _rcSL3)
+  do local RCm = ns.Modules and ns.Modules.ResourceCircle; if RCm and RCm.EnsureArcSettings then RCm.EnsureArcSettings() end end
+  local slSize = SW.CreateSlider(container, L["SETTINGS_RC_GLOBAL_SIZE"], 20, 200, 1, _rcSL3)
   BindSlider(slSize, "resourceCircle", "size")
-  local slRCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE_RATIO"], 0.5, 1.0, 0.05, _rcSL3)
+  local slRCArcSize = SW.CreateSlider(container, L["SETTINGS_RC_ARC_SIZE"], 0.5, 1.0, 0.005, _rcSL3)
   BindSlider(slRCArcSize, "resourceCircle", "arcSizeRatio")
-  -- Max étendu à 1.2 (au lieu de 0.99) : les quartiers radiaux sont surdimensionnés de 20%, leur bord déborde donc un peu au-delà du rayon nominal.
-  local slRCThick = SW.CreateSlider(container, L["SETTINGS_ARC_THICKNESS"], 0.0, 1.2, 0.01, _rcSL3)
-  BindSlider(slRCThick, "resourceCircle", "overlayRatio")
+  local slRCThick = SW.CreateSlider(container, L["SETTINGS_RC_ARC_THICKNESS"], 0.01, 1.0, 0.005, _rcSL3)
+  BindSlider(slRCThick, "resourceCircle", "arcThickness")
   -- Fond de texte : cache noir sur un arc noir, donc invisible au repos. Chaque reglage
   -- allume un halo derriere lui le temps de le situer (cf. ns.FlashTextBackdropGlow).
   local slRCTextBd = SW.CreateSlider(container, L["SETTINGS_TEXT_BACKDROP"], 1, 120, 1, _rcSL3)
@@ -931,12 +964,14 @@ function Build.ResourceCircle(container)
   end
   ctx:AddRow(8, slSize, slRCArcSize, slRCThick, slRCTextBd)
 
-  -- Bascule remplissage vertical / radial
-  local cbRCRadial = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_RC_RADIAL_FILL"] or "Radial fill",
-    L["SETTINGS_RC_RADIAL_FILL_TT"] or "Switches between the vertical fill (default) and a radial gauge-arc fill.",
-    W))
-  BindCheckbox(cbRCRadial, "resourceCircle", "radialFillTest")
+  -- Angle de départ + sens du remplissage radial
+  local slRCStart = SW.CreateSlider(container, L["SETTINGS_ARC_START_ANGLE"], 0, 359, 1, _rcSL3)
+  BindSlider(slRCStart, "resourceCircle", "arcStartAngle")
+  local slRCEnd = SW.CreateSlider(container, L["SETTINGS_ARC_END_ANGLE"], 0, 359, 1, _rcSL3)
+  BindSlider(slRCEnd, "resourceCircle", "arcEndAngle")
+  local cbRCRev = SW.CreateCheckbox(container, L["SETTINGS_ARC_REVERSE"], L["SETTINGS_ARC_REVERSE_TT"], _rcSL3)
+  BindCheckbox(cbRCRev, "resourceCircle", "arcReverse")
+  ctx:AddRow(8, slRCStart, slRCEnd, cbRCRev)
 
   -- Police du texte central : choix + taille sur la meme ligne.
   local ddFont = SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), SL_W2)
@@ -944,6 +979,41 @@ function Build.ResourceCircle(container)
   local slFont = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 30, 1, SL_W2)
   BindSlider(slFont, "resourceCircle", "fontSize")
   ctx:AddRow(8, ddFont, slFont)
+
+  -- Couleurs : thematiques (module Couleurs) ou libres pour l'arc et le texte de ressource, plus la couleur de l'arriere
+  -- plan (fond du cercle, masques, fond du texte). Arc et texte sont grises tant que les couleurs thematiques sont cochees.
+  ctx:Spacer(4)
+  local cbRCThemed = SW.CreateCheckbox(container, L["SETTINGS_RC_THEMED_COLORS"], L["SETTINGS_RC_THEMED_COLORS_TT"], _rcSL3)
+  BindCheckbox(cbRCThemed, "resourceCircle", "themedColors")
+  if DBGet("resourceCircle", "themedColors") == nil then cbRCThemed:SetChecked(true) end
+  local colRCArc  = SW.CreateColorButton(container, L["SETTINGS_RC_ARC_COLOR"], _rcSL3)
+  BindColorButton(colRCArc, "resourceCircle", "arcColor")
+  local colRCText = SW.CreateColorButton(container, L["SETTINGS_RC_TEXT_COLOR"], _rcSL3)
+  BindColorButton(colRCText, "resourceCircle", "textColor")
+  local colRCBg   = SW.CreateColorButton(container, L["SETTINGS_RC_BG_COLOR"], _rcSL3)
+  BindColorButton(colRCBg, "resourceCircle", "bgColor")
+  for _, b in ipairs({ colRCArc, colRCText, colRCBg }) do
+    local blocker = CreateFrame("Frame", nil, b)
+    blocker:SetAllPoints(b)
+    blocker:SetFrameLevel(b:GetFrameLevel() + 20)
+    blocker:EnableMouse(true)
+    b._blocker = blocker
+  end
+  local function ApplyRCThemedState(themed)
+    for _, b in ipairs({ colRCArc, colRCText, colRCBg }) do
+      b:SetAlpha(themed and 0.4 or 1)
+      b._blocker:SetShown(themed)
+    end
+  end
+  ApplyRCThemedState(DBGet("resourceCircle", "themedColors") ~= false)
+  do
+    local orig = cbRCThemed.onChanged
+    cbRCThemed.onChanged = function(val)
+      if orig then orig(val) end
+      ApplyRCThemedState(val and true or false)
+    end
+  end
+  ctx:AddRow(8, cbRCThemed, colRCArc, colRCText, colRCBg)
 
   ctx:Spacer(6)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_BG_GLOW"], W))
@@ -1015,11 +1085,20 @@ function Build.ResourceCircle(container)
     ctx:Spacer(6)
     ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_STAGGER_ARC"], W))
 
-    local slStagArc = SW.CreateSlider(container, L["SETTINGS_STAGGER_ARC_SIZE"], 0.3, 0.99, 0.01, SL_W2)
+    local slStagArc = SW.CreateSlider(container, L["SETTINGS_STAGGER_ARC_SIZE"], 0.3, 0.99, 0.005, SL_W2)
     BindSlider(slStagArc, "resourceCircle", "staggerArcRatio")
-    local slStagThick = SW.CreateSlider(container, L["SETTINGS_STAGGER_ARC_THICKNESS"], 0.0, 0.99, 0.01, SL_W2)
-    BindSlider(slStagThick, "resourceCircle", "staggerOverlayRatio")
+    local slStagThick = SW.CreateSlider(container, L["SETTINGS_STAGGER_ARC_THICKNESS"], 0.01, 1.0, 0.005, SL_W2)
+    BindSlider(slStagThick, "resourceCircle", "staggerArcThickness")
     ctx:AddRow(8, slStagArc, slStagThick)
+
+    local _w3 = math.floor((W - 16) / 3)
+    local slStagStart = SW.CreateSlider(container, L["SETTINGS_ARC_START_ANGLE"], 0, 359, 1, _w3)
+    BindSlider(slStagStart, "resourceCircle", "staggerArcStartAngle")
+    local slStagEnd = SW.CreateSlider(container, L["SETTINGS_ARC_END_ANGLE"], 0, 359, 1, _w3)
+    BindSlider(slStagEnd, "resourceCircle", "staggerArcEndAngle")
+    local cbStagRev = SW.CreateCheckbox(container, L["SETTINGS_ARC_REVERSE"], L["SETTINGS_ARC_REVERSE_TT"], _w3)
+    BindCheckbox(cbStagRev, "resourceCircle", "staggerArcReverse")
+    ctx:AddRow(8, slStagStart, slStagEnd, cbStagRev)
 
     local cbStagPct = ctx:Add(SW.CreateCheckbox(container,
       L["SETTINGS_STAGGER_SHOW_PCT"],
@@ -1094,11 +1173,19 @@ function Build.ResourceCircle(container)
     -- Taille/epaisseur specifiques a la spec active (cf. ns.SecResSpecKey),
     -- meme raison que la couleur ci-dessous : un guerrier et un moine
     -- Mistweaver n'ont aucune raison de partager le meme reglage visuel.
-    local slDurArc = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.3, 0.99, 0.01, SL_W2)
+    local slDurArc = SW.CreateSlider(container, L["SETTINGS_STAGGER_ARC_SIZE"], 0.3, 0.99, 0.005, SL_W2)
     BindSlider(slDurArc, "resourceCircle", ns.SecResSpecKey("durationArcRatio"), "durationArcRatio")
-    local slDurThick = SW.CreateSlider(container, L["SETTINGS_THICKNESS"], 0.0, 0.99, 0.01, SL_W2)
-    BindSlider(slDurThick, "resourceCircle", ns.SecResSpecKey("durationArcOverlayRatio"), "durationArcOverlayRatio")
+    local slDurThick = SW.CreateSlider(container, L["SETTINGS_STAGGER_ARC_THICKNESS"], 0.01, 1.0, 0.005, SL_W2)
+    BindSlider(slDurThick, "resourceCircle", ns.SecResSpecKey("durationArcThickness"), "durationArcThickness")
     ctx:AddRow(8, slDurArc, slDurThick)
+    local _w3d = math.floor((W - 16) / 3)
+    local slDurStart = SW.CreateSlider(container, L["SETTINGS_ARC_START_ANGLE"], 0, 359, 1, _w3d)
+    BindSlider(slDurStart, "resourceCircle", ns.SecResSpecKey("durationArcStartAngle"), "durationArcStartAngle")
+    local slDurEnd = SW.CreateSlider(container, L["SETTINGS_ARC_END_ANGLE"], 0, 359, 1, _w3d)
+    BindSlider(slDurEnd, "resourceCircle", ns.SecResSpecKey("durationArcEndAngle"), "durationArcEndAngle")
+    local cbDurRev = SW.CreateCheckbox(container, L["SETTINGS_ARC_REVERSE"], L["SETTINGS_ARC_REVERSE_TT"], _w3d)
+    BindCheckbox(cbDurRev, "resourceCircle", ns.SecResSpecKey("durationArcReverse"), "durationArcReverse")
+    ctx:AddRow(8, slDurStart, slDurEnd, cbDurRev)
     -- Color swatch (specifique a la spec active, cf. ns.SecResSpecKey)
     local durColorRKey = ns.SecResSpecKey("durationArcColorR")
     local durColorGKey = ns.SecResSpecKey("durationArcColorG")
@@ -1175,7 +1262,12 @@ function Build.ResourceCircle(container)
     [265]  = ns.IsForever and L["SETTINGS_SEC_RES_LABEL_SOUL_SHARDS"] or nil,
     [266]  = ns.IsForever and L["SETTINGS_SEC_RES_LABEL_SOUL_SHARDS"] or nil,
     [267]  = ns.IsForever and L["SETTINGS_SEC_RES_LABEL_SOUL_SHARDS"] or nil,
+    [253]  = ns.IsForever and L["SETTINGS_SEC_RES_LABEL_AMMO"] or nil,
+    [254]  = ns.IsForever and L["SETTINGS_SEC_RES_LABEL_AMMO"] or nil,
+    [255]  = ns.IsForever and L["SETTINGS_SEC_RES_LABEL_AMMO"] or nil,
   }
+  -- Forever, Chasseur : la couleur du texte depend de la quantite de munitions (seuils), pas d'un reglage unique
+  local isAmmoSpec = ns.IsForever and (ns._specID == 253 or ns._specID == 254 or ns._specID == 255)
   local secResLabel = SEC_RES_LABELS[ns._specID]
   local secResHeaderText = secResLabel
     and string.format(L["SETTINGS_SEC_SECONDARY_RES_TEXT_NAMED"], secResLabel)
@@ -1197,7 +1289,7 @@ function Build.ResourceCircle(container)
   ctx:AddRow(8, ddSecResFont, slSecResSize, slSecResX, slSecResY)
 
   -- Couleur du texte : 3 sous-cles R/G/B, meme convention que le swatch de l'arc de duree. Appel explicite a LiveApply car ce texte n'a pas de ticker de rafraichissement.
-  do
+  if not isAmmoSpec then
     local secColorRKey = ns.SecResSpecKey("secResColorR")
     local secColorGKey = ns.SecResSpecKey("secResColorG")
     local secColorBKey = ns.SecResSpecKey("secResColorB")
@@ -1255,6 +1347,55 @@ function Build.ResourceCircle(container)
   local slSecResDecoSpacing = SW.CreateSlider(container, L["SETTINGS_DECO_SPACING"], 0, 20, 1, decoSpacingW)
   BindSlider(slSecResDecoSpacing, "resourceCircle", ns.SecResSpecKey("secResDecoSpacing"), "secResDecoSpacing")
   ctx:AddRow(8, ddSecResDeco, ddSecResDecoFont, slSecResDecoSpacing)
+
+  -- Munitions (Chasseur, Forever) : une couleur par palier de quantite. Normal a partir du seuil haut, Critique
+  -- sous le seuil bas, Alerte entre les deux (pas de seuil propre). Le seuil bas ne depasse jamais le haut :
+  -- monter le bas pousse le haut, descendre le haut ramene le bas.
+  if isAmmoSpec then
+    ctx:Spacer(2)
+    -- Rangee basse et texte colle en bas : les widgets suivants portent deja leur propre marge haute
+    local thrRow = CreateFrame("Frame", nil, container); thrRow:SetSize(W, 14)
+    local thrLbl = thrRow:CreateFontString(nil, "OVERLAY")
+    thrLbl:SetFont(ns.Media.fontGui, 12); thrLbl:SetPoint("BOTTOMLEFT", 0, 0)
+    thrLbl:SetTextColor(0.8, 0.8, 0.8, 1); thrLbl:SetText(L["SETTINGS_SEC_AMMO_THRESHOLD"])
+    ctx:Add(thrRow)
+    local halfW = math.floor((W - 8) / 2)
+    local highKey, lowKey = ns.SecResSpecKey("ammoThresholdHigh"), ns.SecResSpecKey("ammoThresholdLow")
+    -- Bouton de couleur etroit : le curseur vient juste a cote au lieu de la moitie de la page
+    local AMMO_CB_W = 130
+    local function MakeColor(labelKey, colorKey, def)
+      local cb = SW.CreateColorButton(container, L[labelKey], AMMO_CB_W)
+      cb:SetColor(def[1], def[2], def[3], def[4])
+      BindColorButton(cb, "resourceCircle", ns.SecResSpecKey(colorKey))
+      return cb
+    end
+    local cbNormal   = MakeColor("SETTINGS_SEC_AMMO_NORMAL",   "ammoColorNormal",   { 1, 1, 1, 1 })
+    local cbAlert    = MakeColor("SETTINGS_SEC_AMMO_ALERT",    "ammoColorAlert",    { 1, 0.6, 0.1, 1 })
+    local cbCritical = MakeColor("SETTINGS_SEC_AMMO_CRITICAL", "ammoColorCritical", { 1, 0.2, 0.2, 1 })
+    local slHigh = SW.CreateSlider(container, L["SETTINGS_SEC_AMMO_FROM"],  0, 1000, 1, halfW)
+    local slLow  = SW.CreateSlider(container, L["SETTINGS_SEC_AMMO_BELOW"], 0, 1000, 1, halfW)
+    local high = DBGet("resourceCircle", highKey) or DBGet("resourceCircle", "ammoThresholdHigh") or 200
+    local low  = DBGet("resourceCircle", lowKey)  or DBGet("resourceCircle", "ammoThresholdLow")  or 50
+    if low > high then low = high end
+    slHigh:SetValue(high); slLow:SetValue(low)
+    slHigh.onChanged = function(v)
+      DBSet("resourceCircle", highKey, v)
+      if (DBGet("resourceCircle", lowKey) or low) > v then
+        DBSet("resourceCircle", lowKey, v); slLow:SetValue(v)
+      end
+      LiveApply("resourceCircle")
+    end
+    slLow.onChanged = function(v)
+      DBSet("resourceCircle", lowKey, v)
+      if (DBGet("resourceCircle", highKey) or high) < v then
+        DBSet("resourceCircle", highKey, v); slHigh:SetValue(v)
+      end
+      LiveApply("resourceCircle")
+    end
+    ctx:AddRowCentered(8, cbNormal, slHigh)
+    ctx:Add(cbAlert)
+    ctx:AddRowCentered(8, cbCritical, slLow)
+  end
 
 
   -- Barre de duree : reservee aux specs dont CenterArc.lua suit une duree de buff
@@ -1332,6 +1473,164 @@ function Build.ResourceCircle(container)
     end
   end
 
+  -- Delai Attaque auto (Forever uniquement) : arc ou barre qui se vide entre deux attaques automatiques
+  if ns.IsForever then
+    ctx:Spacer(4)
+    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SWING"], W))
+    local swHalf = math.floor((W - 8) / 2)
+    local ddW = math.floor(swHalf * 0.85)                 -- menus deroulants courts
+    local cbSwing = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_SWING_ENABLE"], L["SETTINGS_SWING_ENABLE_TT"], W))
+    BindCheckbox(cbSwing, "resourceCircle", "swingEnabled")
+    local cbSwingBar = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_SWING_BAR_MODE"], L["SETTINGS_SWING_BAR_MODE_TT"], W))
+    BindCheckbox(cbSwingBar, "resourceCircle", "swingBarMode")
+
+    local function SwingLabel(text)
+      local row = CreateFrame("Frame", nil, container); row:SetSize(W, 14)
+      local fs = row:CreateFontString(nil, "OVERLAY")
+      fs:SetFont(ns.Media.fontGui, 12); fs:SetPoint("BOTTOMLEFT", 0, 0)
+      fs:SetTextColor(0.8, 0.8, 0.8, 1); fs:SetText(text)
+      ctx:Add(row)
+    end
+    local function StrataDD(key)
+      local dd = SW.CreateDropdown(container, L["SETTINGS_SWING_STRATA"], {
+        { value = "bg",    text = L["SETTINGS_SWING_STRATA_BG"] },
+        { value = "mid",   text = L["SETTINGS_SWING_STRATA_MID"] },
+        { value = "front", text = L["SETTINGS_SWING_STRATA_FRONT"] },
+      }, ddW)
+      BindDropdown(dd, "resourceCircle", key)
+      return dd
+    end
+    -- Ligne unique : couleur + "couleur de spe" + element de couleur du module Couleurs
+    local function ColorRow(prefix, withBg)
+      local colW  = 120
+      local bgW   = withBg and 120 or 0
+      local gaps  = withBg and 24 or 16
+      local specW = math.floor((W - colW - bgW - gaps) * 0.42)
+      local accW  = W - colW - bgW - specW - gaps
+      local col = SW.CreateColorButton(container, L["SETTINGS_SWING_COLOR"], colW)
+      col:SetColor(1, 0.82, 0.2, 1)
+      BindColorButton(col, "resourceCircle", prefix .. "Color")
+      local colBg
+      if withBg then
+        colBg = SW.CreateColorButton(container, L["SETTINGS_SWING_BAR_BG"], bgW)
+        colBg:SetColor(0, 0, 0, 0.45)
+        BindColorButton(colBg, "resourceCircle", prefix .. "BgColor")
+      end
+      local cbSpec = SW.CreateCheckbox(container, L["SETTINGS_USE_SPEC_COLOR"], L["SETTINGS_USE_SPEC_COLOR_TT"], specW)
+      BindCheckbox(cbSpec, "resourceCircle", prefix .. "UseSpecColor")
+      local dd = SW.CreateDropdown(container, L["SETTINGS_SPEC_COLOR_ELEMENT"], (function()
+        local CLR = ns.Modules and ns.Modules.Colors
+        if not (CLR and CLR.ELEMENT_KEYS) then return {} end
+        local list = {}
+        for _, k in ipairs(CLR.ELEMENT_KEYS) do
+          list[#list + 1] = { value = k, text = (CLR.ELEMENT_LABELS and CLR.ELEMENT_LABELS[k]) or k }
+        end
+        return list
+      end)(), accW)
+      BindDropdown(dd, "resourceCircle", prefix .. "SpecColorKey")
+      if colBg then ctx:AddRowCentered(8, col, colBg, cbSpec, dd)
+      else ctx:AddRowCentered(8, col, cbSpec, dd) end
+      return { col, colBg, cbSpec, dd }
+    end
+    local function SliderPair(l1, a1, b1, st1, k1, l2, a2, b2, st2, k2)
+      local s1 = SW.CreateSlider(container, l1, a1, b1, st1, swHalf)
+      BindSlider(s1, "resourceCircle", k1)
+      local s2 = SW.CreateSlider(container, l2, a2, b2, st2, swHalf)
+      BindSlider(s2, "resourceCircle", k2)
+      ctx:AddRowCentered(8, s1, s2)
+      return s1, s2
+    end
+    -- Ligne "Sens" + "Remplissage Inverse" propre a chaque visualisation
+    local function DirRow(dd, fillKey)
+      local cb = SW.CreateCheckbox(container, L["SETTINGS_SWING_FILL"], L["SETTINGS_SWING_FILL_TT"], swHalf)
+      BindCheckbox(cb, "resourceCircle", fillKey)
+      ctx:AddRowCentered(8, dd, cb)
+      return cb
+    end
+
+    -- Arc
+    ctx:Spacer(2)
+    SwingLabel(L["SETTINGS_SWING_ARC_LABEL"])
+    local arcWidgets = {}
+    local ddArcStrata = StrataDD("swingStrata"); ctx:Add(ddArcStrata)
+    arcWidgets[#arcWidgets + 1] = ddArcStrata
+    for _, w in pairs(ColorRow("swing")) do arcWidgets[#arcWidgets + 1] = w end
+    local s1, s2 = SliderPair(L["SETTINGS_SWING_SIZE"], 0.5, 2.5, 0.05, "swingSizeRatio",
+                              L["SETTINGS_SWING_THICKNESS"], 1, 8, 1, "swingThickness")
+    arcWidgets[#arcWidgets + 1] = s1; arcWidgets[#arcWidgets + 1] = s2
+    s1, s2 = SliderPair(L["SETTINGS_SWING_ROTATION"], -180, 180, 1, "swingRotation",
+                        L["SETTINGS_SWING_ANGLE"], 10, 360, 1, "swingAngle")
+    arcWidgets[#arcWidgets + 1] = s1; arcWidgets[#arcWidgets + 1] = s2
+    local ddSwingDir = SW.CreateDropdown(container, L["SETTINGS_SWING_DIRECTION"], {
+      { value = "cw",     text = L["SETTINGS_SWING_DIR_CW"] },
+      { value = "ccw",    text = L["SETTINGS_SWING_DIR_CCW"] },
+      { value = "mirror_out", text = L["SETTINGS_SWING_DIR_MIRROR_OUT"] },
+      { value = "mirror_in",  text = L["SETTINGS_SWING_DIR_MIRROR_IN"] },
+    }, ddW)
+    -- ancien reglage "mirror" -> "mirror_out" (le menu n'afficherait rien sinon)
+    if DBGet("resourceCircle", "swingDirection") == "mirror" then DBSet("resourceCircle", "swingDirection", "mirror_out") end
+    BindDropdown(ddSwingDir, "resourceCircle", "swingDirection")
+    arcWidgets[#arcWidgets + 1] = ddSwingDir
+    arcWidgets[#arcWidgets + 1] = DirRow(ddSwingDir, "swingFillUp")
+
+    -- Barre
+    ctx:Spacer(2)
+    SwingLabel(L["SETTINGS_SWING_BAR_LABEL"])
+    local barWidgets = {}
+    for _, w in pairs(ColorRow("swingBar", true)) do barWidgets[#barWidgets + 1] = w end
+    s1, s2 = SliderPair(L["SETTINGS_POSITION_X"], -400, 400, 1, "swingBarX",
+                        L["SETTINGS_POSITION_Y"], -400, 400, 1, "swingBarY")
+    barWidgets[#barWidgets + 1] = s1; barWidgets[#barWidgets + 1] = s2
+    s1, s2 = SliderPair(L["SETTINGS_SWING_LENGTH"], 20, 400, 1, "swingBarLength",
+                        L["SETTINGS_SWING_THICKNESS"], 2, 40, 1, "swingBarThickness")
+    barWidgets[#barWidgets + 1] = s1; barWidgets[#barWidgets + 1] = s2
+    local ddBarDir = SW.CreateDropdown(container, L["SETTINGS_SWING_DIRECTION"], {
+      { value = "ltr", text = L["SETTINGS_SWING_BAR_LTR"] },
+      { value = "rtl", text = L["SETTINGS_SWING_BAR_RTL"] },
+      { value = "in",  text = L["SETTINGS_SWING_BAR_IN"] },
+      { value = "out", text = L["SETTINGS_SWING_BAR_OUT"] },
+    }, ddW)
+    BindDropdown(ddBarDir, "resourceCircle", "swingBarDirection")
+    barWidgets[#barWidgets + 1] = ddBarDir
+    barWidgets[#barWidgets + 1] = DirRow(ddBarDir, "swingBarFillUp")
+
+    -- Grisage : attenue + plus aucun clic. Les curseurs gardent leur champ texte et leur curseur reels
+    -- (SetEnabled), le reste passe par EnableMouse sur toute la descendance.
+    local function GraySwing(w, gray)
+      w:SetAlpha(gray and 0.35 or 1)
+      if w.SetEnabled and w.GetObjectType and w:GetObjectType() ~= "Frame" then w:SetEnabled(not gray) end
+      if w.slider and w.slider.SetEnabled then w.slider:SetEnabled(not gray) end
+      if w.editBox and w.editBox.SetEnabled then w.editBox:SetEnabled(not gray) end
+      -- On memorise l'etat souris d'origine de chaque frame et on le restitue tel quel : reactiver la souris sur
+      -- TOUT (cadres decoratifs inclus, ex. la bordure posee sur le champ texte) leur faisait avaler les clics
+      -- et rendait les champs texte des curseurs non editables.
+      local function Rec(f)
+        if f.EnableMouse and f.IsMouseEnabled then
+          if gray then
+            if f._swingMouse == nil then f._swingMouse = f:IsMouseEnabled() end
+            f:EnableMouse(false)
+          elseif f._swingMouse ~= nil then
+            f:EnableMouse(f._swingMouse)
+            f._swingMouse = nil
+          end
+        end
+        for _, c in ipairs({ f:GetChildren() }) do Rec(c) end
+      end
+      Rec(w)
+    end
+    local function UpdateSwingGray()
+      local barMode = DBGet("resourceCircle", "swingBarMode") == true
+      for _, w in ipairs(arcWidgets) do GraySwing(w, barMode) end
+      for _, w in ipairs(barWidgets) do GraySwing(w, not barMode) end
+    end
+    local origBarChanged = cbSwingBar.onChanged
+    cbSwingBar.onChanged = function(val)
+      if origBarChanged then origBarChanged(val) end
+      UpdateSwingGray()
+    end
+    UpdateSwingGray()
+  end
+
   ctx:Spacer(4)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_POSITION"], W))
 
@@ -1358,211 +1657,421 @@ function Build.OutOfCombat(container)
   local SL_W2 = math.floor((W - 8) / 2)
   local SL_W3 = math.floor((W - 16) / 3)
 
-  -- Cercle de Vie
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_HEALTH_CIRCLE"], W))
+  -- Titre de la page puis les deux interrupteurs ; chaque cercle a ensuite son en-tete depliant.
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_OOC_CIRCLES"], W))
+
+  -- Reconstruit la page (en-tetes grises / depliees) en gardant la position de defilement.
+  local function RebuildKeepScroll()
+    local savedScroll = scrollFrame and scrollFrame:GetVerticalScroll()
+    if _invalidateCategory then _invalidateCategory("outOfCombat") end
+    if savedScroll then
+      C_Timer.After(0, function()
+        if scrollFrame then scrollFrame:SetVerticalScroll(savedScroll) end
+      end)
+    end
+  end
 
   local cbHC = ctx:Add(SW.CreateCheckbox(container,
     L["SETTINGS_HC_ENABLE"],
     L["SETTINGS_HC_ENABLE_TT"], W))
   BindCheckbox(cbHC, "healthCircle", "enabled")
-
-  -- Verrouiller la position : le glisser-deposer est actif des l'ouverture du panneau (cf. OnShow),
-  -- cette case est le seul frein -- meme modele que "unitBars"/locked. Lue a chaud par
-  -- SetDraggable/OnDragStart, donc pas besoin de re-appliquer quoi que ce soit au clic.
-  local cbHCLock = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_LOCK_POSITION"],
-    L["SETTINGS_LOCK_POSITION_TT"], W))
-  BindCheckbox(cbHCLock, "healthCircle", "locked")
-
-  local _hcSL4 = math.floor((W - 24) / 4)
-  local slHCSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, _hcSL4)
-  BindSlider(slHCSize, "healthCircle", "size")
-  local slHCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.5, 1.0, 0.05, _hcSL4)
-  BindSlider(slHCArcSize, "healthCircle", "arcSizeRatio")
-  local slHCThick = SW.CreateSlider(container, L["SETTINGS_THICKNESS"], 0.0, 0.99, 0.01, _hcSL4)
-  BindSlider(slHCThick, "healthCircle", "overlayRatio")
-  -- Fond de texte : meme reglage et meme halo de reperage que le cercle central.
-  local slHCTextBd = SW.CreateSlider(container, L["SETTINGS_TEXT_BACKDROP"], 1, 80, 1, _hcSL4)
-  BindSlider(slHCTextBd, "healthCircle", "textBackdropSize")
-  do
-    local orig = slHCTextBd.onChanged
-    slHCTextBd.onChanged = function(v)
-      if orig then orig(v) end
-      local HC = ns.Modules and ns.Modules.HealthCircle
-      if HC and HC.FlashTextBackdrop then HC.FlashTextBackdrop() end
-    end
-  end
-  ctx:AddRow(8, slHCSize, slHCArcSize, slHCThick, slHCTextBd)
-
-  local slHCDelay = SW.CreateSlider(container, L["SETTINGS_HIDE_DELAY_S"], 0.5, 10, 0.5, SL_W2)
-  BindSlider(slHCDelay, "healthCircle", "hideDelay")
-  local slHCFont = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 4, 20, 1, SL_W2)
-  BindSlider(slHCFont, "healthCircle", "fontSize")
-  ctx:AddRow(8, slHCDelay, slHCFont)
-  local ddHCFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
-  BindDropdown(ddHCFont, "healthCircle", "font")
-
-  -- Soins previsionnels : second arc rempli a (vie + soins), cf. Modules/HealthCircle.lua
-  local cbHCHealPred = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_HC_HEALPRED"], L["SETTINGS_HC_HEALPRED_TT"], W))
-  BindCheckbox(cbHCHealPred, "healthCircle", "showHealPrediction")
-  local colHCHealPred = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_HC_HEALPRED_COLOR"], math.min(220, W)))
-  BindColorButton(colHCHealPred, "healthCircle", "healPredColor")
-
-  ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_HC_VISIBILITY"], W))
-  MakeModeRadio(container, ctx, W, "healthCircle", {
-    { "always",    L["SETTINGS_VIS_ALWAYS"],    L["SETTINGS_HC_VIS_ALWAYS_TT"] },
-    { "important", L["SETTINGS_VIS_IMPORTANT"], L["SETTINGS_HC_VIS_IMPORTANT_TT"] },
-  }, "important")
-  MakeAlwaysInInstanceToggle(container, ctx, W, "healthCircle")
-
-  -- Zone de clic securisee : cf. HealthCircle.ApplyClickable (desarmee tant que ce
-  -- panneau est ouvert, sinon elle mangerait le glisser-deposer du cercle).
-  ctx:Spacer(4)
-  local cbHCClick = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_HC_CLICKABLE"],
-    L["SETTINGS_HC_CLICKABLE_TT"], W))
-  BindCheckbox(cbHCClick, "healthCircle", "clickable")
-
-  -- Heartbeat pulse toggle
-  ctx:Spacer(4)
-  local cbHCPulse = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_HC_HEARTBEAT_PULSE"],
-    L["SETTINGS_HC_HEARTBEAT_PULSE_TT"], W))
-  BindCheckbox(cbHCPulse, "healthCircle", "heartbeatPulse")
-
-
-  ctx:Spacer(10)
-
-  -- Cercle de Ressource Hors Combat
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_OCRC"], W))
-
   local cbOCRC = ctx:Add(SW.CreateCheckbox(container,
     L["SETTINGS_OCRC_ENABLE"],
     L["SETTINGS_OCRC_ENABLE_TT"], W))
   BindCheckbox(cbOCRC, "outOfCombatResourceCircle", "enabled")
-
-  -- Verrouiller la position : le glisser-deposer est actif des l'ouverture du panneau (cf. OnShow),
-  -- cette case est le seul frein -- meme modele que "unitBars"/locked. Lue a chaud par
-  -- SetDraggable/OnDragStart, donc pas besoin de re-appliquer quoi que ce soit au clic.
-  local cbOCRCLock = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_LOCK_POSITION"],
-    L["SETTINGS_LOCK_POSITION_TT"], W))
-  BindCheckbox(cbOCRCLock, "outOfCombatResourceCircle", "locked")
-
-  local slOCRCSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, SL_W3)
-  BindSlider(slOCRCSize, "outOfCombatResourceCircle", "size")
-  local slOCRCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.5, 1.0, 0.05, SL_W3)
-  BindSlider(slOCRCArcSize, "outOfCombatResourceCircle", "arcSizeRatio")
-  local slOCRCThick = SW.CreateSlider(container, L["SETTINGS_THICKNESS"], 0.0, 0.99, 0.01, SL_W3)
-  BindSlider(slOCRCThick, "outOfCombatResourceCircle", "overlayRatio")
-  ctx:AddRow(8, slOCRCSize, slOCRCArcSize, slOCRCThick)
-
-  local slOCRCFont = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 4, 20, 1, SL_W2))
-  BindSlider(slOCRCFont, "outOfCombatResourceCircle", "fontSize")
-  local ddOCRCFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
-  BindDropdown(ddOCRCFont, "outOfCombatResourceCircle", "font")
-
-  -- Bascule remplissage vertical / radial (même système que le cercle principal)
-  local cbOCRCRadial = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_RC_RADIAL_FILL"] or "Radial fill",
-    L["SETTINGS_RC_RADIAL_FILL_TT"] or "Switches between the vertical fill (default) and a radial gauge-arc fill.",
-    W))
-  BindCheckbox(cbOCRCRadial, "outOfCombatResourceCircle", "radialFillTest")
-
-  -- Section dots secondaires hors combat : titre dynamique, masquée si aucun dot
-  -- Option Paladin : Puissance Sacrée en spé Protection / Vindicte
-  if ns._playerClass == "PALADIN" and (ns._specID == 66 or ns._specID == 70) then
-    ctx:Spacer(4)
-    local cbOCRCHPAllSpecs = ctx:Add(SW.CreateCheckbox(container,
-      L["SETTINGS_RC_HOLY_POWER_ORBS"],
-      L["SETTINGS_OCRC_HOLY_POWER_ORBS_TT"], W))
-    BindCheckbox(cbOCRCHPAllSpecs, "outOfCombatResourceCircle", "holyPowerAllSpecs")
-    cbOCRCHPAllSpecs.onChanged = function(val)
-      DBSet("outOfCombatResourceCircle", "holyPowerAllSpecs", val)
-      LiveApply("outOfCombatResourceCircle")
-      if _invalidateCategory then _invalidateCategory("outOfCombat") end
+  for _, cb in ipairs({ cbHC, cbOCRC }) do
+    local orig = cb.onChanged
+    cb.onChanged = function(v)
+      if orig then orig(v) end
+      RebuildKeepScroll()
     end
   end
-  -- Option Evoker : Essence en spé Dévastation / Augmentation
-  if ns._playerClass == "EVOKER" and (ns._specID == 1473 or ns._specID == 1467) then
-    ctx:Spacer(4)
-    local cbOCRCEssAllSpecs = ctx:Add(SW.CreateCheckbox(container,
-      L["SETTINGS_RC_ESSENCE_ORBS"],
-      L["SETTINGS_OCRC_ESSENCE_ORBS_TT"], W))
-    BindCheckbox(cbOCRCEssAllSpecs, "outOfCombatResourceCircle", "essenceAllSpecs")
-    cbOCRCEssAllSpecs.onChanged = function(val)
-      DBSet("outOfCombatResourceCircle", "essenceAllSpecs", val)
-      LiveApply("outOfCombatResourceCircle")
-      if _invalidateCategory then _invalidateCategory("outOfCombat") end
+
+  -- En-tete d'un cercle. Desactive : grise, non repliable ni cliquable, tooltip explicite.
+  -- Renvoie l'en-tete et vrai si le contenu ne doit pas etre construit (cercle desactive).
+  local function CircleHeader(label, dbKey)
+    if DBGet(dbKey, "enabled") == false then
+      local header = SW.CreateSectionHeader(container, label, W, Theme.textDisabled)
+      header._isSectionHeader = nil   -- ni repliable ni section : grise et inerte
+      local hitbox = CreateFrame("Frame", nil, header)
+      hitbox:SetAllPoints(header)
+      hitbox:SetFrameLevel(header:GetFrameLevel() + 1)
+      hitbox:EnableMouse(true)
+      hitbox:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
+        GameTooltip:SetText(label, 1, 1, 1)
+        GameTooltip:AddLine(L["SETTINGS_OOC_CIRCLE_DISABLED_TT"], unpack(Theme.textDim))
+        GameTooltip:Show()
+      end)
+      hitbox:SetScript("OnLeave", function() GameTooltip:Hide() end)
+      return header, true
     end
-  end
-  local ocrcDotType   = GetActiveDotType()
-  local ocrcDotsLabel = ocrcDotType and (DOT_TYPE_LABELS[ocrcDotType] or L["SETTINGS_DOT_EXTERNAL"]) or nil
-  if ocrcDotsLabel then
-    ctx:Spacer(4)
-    ctx:Add(SW.CreateSectionHeader(container, ocrcDotsLabel, W))
-    local odp = "secondaryDots_" .. ocrcDotType .. "_"  -- préfixe clé per-type
-
-    local slOCRCRot = SW.CreateSlider(container, L["SETTINGS_ORB_ROTATION"], 0, 360, 1, SL_W2)
-    BindSlider(slOCRCRot, "outOfCombatResourceCircle", odp.."rotation", "secondaryDotsRotation")
-    local slOCRCSpread = SW.CreateSlider(container, L["SETTINGS_SPREAD"], 5, 60, 1, SL_W2)
-    BindSlider(slOCRCSpread, "outOfCombatResourceCircle", odp.."spread", "secondaryDotsSpread")
-    ctx:AddRow(8, slOCRCRot, slOCRCSpread)
-
-    local slOCRCSecSize = SW.CreateSlider(container, L["SETTINGS_ORB_SIZE"], 0.05, 0.5, 0.01, SL_W2)
-    BindSlider(slOCRCSecSize, "outOfCombatResourceCircle", odp.."size", "secondaryDotsSize")
-    local slOCRCSecRadius = SW.CreateSlider(container, L["SETTINGS_RADIUS"], 0.2, 1.2, 0.01, SL_W2)
-    BindSlider(slOCRCSecRadius, "outOfCombatResourceCircle", odp.."radius", "secondaryDotsRadius")
-    ctx:AddRow(8, slOCRCSecSize, slOCRCSecRadius)
-
-    local cbOCRCReversed = ctx:Add(SW.CreateCheckbox(container,
-      L["SETTINGS_ORB_REVERSED_ORDER"],
-      L["SETTINGS_ORB_REVERSED_ORDER_TT"], W))
-    BindCheckbox(cbOCRCReversed, "outOfCombatResourceCircle", odp.."reversed", "secondaryDotsReversed")
+    -- Actif : en-tete de section normal, repliable par le mecanisme de page (cf. ctx:Finalize).
+    return SW.CreateSectionHeader(container, label, W), false
   end
 
+  -- Cercle de Vie
   ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_BG_GLOW_OOC"], W))
+  local hcHeader, hcCollapsed = CircleHeader(L["SETTINGS_SEC_HEALTH_CIRCLE"], "healthCircle")
+  ctx:Add(hcHeader)
+  if not hcCollapsed then
+    -- Verrouiller la position : le glisser-deposer est actif des l'ouverture du panneau (cf. OnShow),
+    -- cette case est le seul frein -- meme modele que "unitBars"/locked. Lue a chaud par
+    -- SetDraggable/OnDragStart, donc pas besoin de re-appliquer quoi que ce soit au clic.
+    local cbHCLock = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_LOCK_POSITION"],
+      L["SETTINGS_LOCK_POSITION_TT"], W))
+    BindCheckbox(cbHCLock, "healthCircle", "locked")
 
-  local cbOCRCGlow = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_GLOW_ENABLE"],
-    L["SETTINGS_OCRC_GLOW_ENABLE_TT"], W))
-  BindCheckbox(cbOCRCGlow, "outOfCombatResourceCircle", "glowEnabled")
-
-  local slOCRCGlowSize = SW.CreateSlider(container, L["SETTINGS_GLOW_SIZE"], 0.3, 8.0, 0.1, SL_W2)
-  BindSlider(slOCRCGlowSize, "outOfCombatResourceCircle", "glowSize")
-  local slOCRCGlowOpacity = SW.CreateSlider(container, L["SETTINGS_GLOW_OPACITY"], 0, 1, 0.05, SL_W2)
-  BindSlider(slOCRCGlowOpacity, "outOfCombatResourceCircle", "glowOpacity")
-  ctx:AddRow(8, slOCRCGlowSize, slOCRCGlowOpacity)
-
-  ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_OCRC_VISIBILITY"], W))
-  MakeModeRadio(container, ctx, W, "outOfCombatResourceCircle", {
-    { "always",    L["SETTINGS_VIS_ALWAYS"],    L["SETTINGS_OCRC_VIS_ALWAYS_TT"] },
-    { "important", L["SETTINGS_VIS_IMPORTANT"], L["SETTINGS_OCRC_VIS_IMPORTANT_TT"] },
-  }, "important")
-  -- Pas de toggle "Toujours actif en instance" ici : le cercle hors-combat
-  -- n'a pas besoin de cette option (demande explicite -- contrairement aux
-  -- 4 autres modules qui l'ont juste au-dessus de MakeModeRadio).
-
-  ctx:Spacer(4)
-
-
-  ctx:Spacer(4)
-
-  -- Bouton reset position OCRC
-  local resetOCRC = SW.CreateActionBtn(container, L["SETTINGS_OCRC_RESET_POSITION"], W,
-    nil, Theme.gold, Theme.accentText)
-  resetOCRC:SetScript("OnClick", function()
-    local OCRC = ns.Modules.OutOfCombatResourceCircle
-    if OCRC and OCRC.ResetPosition then
-      OCRC.ResetPosition()
-      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    local _hcSL4 = math.floor((W - 24) / 4)
+    do local HCm = ns.Modules and ns.Modules.HealthCircle; if HCm and HCm.EnsureArcSettings then HCm.EnsureArcSettings() end end
+    local slHCSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, _hcSL4)
+    BindSlider(slHCSize, "healthCircle", "size")
+    local slHCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.5, 1.0, 0.005, _hcSL4)
+    BindSlider(slHCArcSize, "healthCircle", "arcSizeRatio")
+    local slHCThick = SW.CreateSlider(container, L["SETTINGS_RC_ARC_THICKNESS"], 0.01, 1.0, 0.005, _hcSL4)
+    BindSlider(slHCThick, "healthCircle", "arcThickness")
+    -- Fond de texte : meme reglage et meme halo de reperage que le cercle central.
+    local slHCTextBd = SW.CreateSlider(container, L["SETTINGS_TEXT_BACKDROP"], 1, 80, 1, _hcSL4)
+    BindSlider(slHCTextBd, "healthCircle", "textBackdropSize")
+    do
+      local orig = slHCTextBd.onChanged
+      slHCTextBd.onChanged = function(v)
+        if orig then orig(v) end
+        local HC = ns.Modules and ns.Modules.HealthCircle
+        if HC and HC.FlashTextBackdrop then HC.FlashTextBackdrop() end
+      end
     end
-  end)
-  ctx:Add(resetOCRC)
+    ctx:AddRow(8, slHCSize, slHCArcSize, slHCThick, slHCTextBd)
+
+    -- Angles de depart / fin et remplissage de l'arc
+    local _hcSL3 = math.floor((W - 16) / 3)
+    local slHCStart = SW.CreateSlider(container, L["SETTINGS_ARC_START_ANGLE"], 0, 359, 1, _hcSL3)
+    BindSlider(slHCStart, "healthCircle", "arcStartAngle")
+    local slHCEnd = SW.CreateSlider(container, L["SETTINGS_ARC_END_ANGLE"], 0, 359, 1, _hcSL3)
+    BindSlider(slHCEnd, "healthCircle", "arcEndAngle")
+    local ddHCFill = SW.CreateDropdown(container, L["SETTINGS_FILL_MODE"], {
+      { value = "vertical",   text = L["SETTINGS_FILL_VERTICAL"] },
+      { value = "cw",         text = L["SETTINGS_SWING_DIR_CW"] },
+      { value = "ccw",        text = L["SETTINGS_SWING_DIR_CCW"] },
+      { value = "mirror_out", text = L["SETTINGS_SWING_DIR_MIRROR_OUT"] },
+      { value = "mirror_in",  text = L["SETTINGS_SWING_DIR_MIRROR_IN"] },
+    }, _hcSL3)
+    BindDropdown(ddHCFill, "healthCircle", "arcFillMode")
+    ctx:AddRow(8, slHCStart, slHCEnd, ddHCFill)
+    local cbHCInv = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_FILL_INVERTED"], L["SETTINGS_FILL_INVERTED_TT"], W))
+    BindCheckbox(cbHCInv, "healthCircle", "arcFillInverted")
+
+    local slHCFont = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 4, 20, 1, SL_W2)
+    BindSlider(slHCFont, "healthCircle", "fontSize")
+    local ddHCFont = SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), SL_W2)
+    BindDropdown(ddHCFont, "healthCircle", "font")
+    ctx:AddRow(8, slHCFont, ddHCFont)
+
+    -- Soins previsionnels : second arc rempli a (vie + soins), cf. Modules/HealthCircle.lua
+    local cbHCHealPred = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_HC_HEALPRED"], L["SETTINGS_HC_HEALPRED_TT"], W))
+    BindCheckbox(cbHCHealPred, "healthCircle", "showHealPrediction")
+    local colHCHealPred = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_HC_HEALPRED_COLOR"], math.min(220, W)))
+    BindColorButton(colHCHealPred, "healthCircle", "healPredColor")
+
+    ctx:Spacer(4)
+    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_HC_VISIBILITY"], W))
+    MakeModeRadio(container, ctx, W, "healthCircle", {
+      { "always",    L["SETTINGS_VIS_ALWAYS"],    L["SETTINGS_HC_VIS_ALWAYS_TT"] },
+      { "important", L["SETTINGS_VIS_IMPORTANT"], L["SETTINGS_HC_VIS_IMPORTANT_TT"] },
+    }, "important")
+    MakeAlwaysInInstanceToggle(container, ctx, W, "healthCircle")
+
+    -- Zone de clic securisee : cf. HealthCircle.ApplyClickable (desarmee tant que ce
+    -- panneau est ouvert, sinon elle mangerait le glisser-deposer du cercle).
+    ctx:Spacer(4)
+    local cbHCClick = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_HC_CLICKABLE"],
+      L["SETTINGS_HC_CLICKABLE_TT"], W))
+    BindCheckbox(cbHCClick, "healthCircle", "clickable")
+
+    -- Heartbeat pulse toggle
+    ctx:Spacer(4)
+    local cbHCPulse = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_HC_HEARTBEAT_PULSE"],
+      L["SETTINGS_HC_HEARTBEAT_PULSE_TT"], W))
+    BindCheckbox(cbHCPulse, "healthCircle", "heartbeatPulse")
+  end
+
+  ctx:Spacer(10)
+
+  -- Cercle de Ressource Hors Combat
+  local ocHeader, ocCollapsed = CircleHeader(L["SETTINGS_SEC_OCRC"], "outOfCombatResourceCircle")
+  ctx:Add(ocHeader)
+  if not ocCollapsed then
+    -- Verrouiller la position : le glisser-deposer est actif des l'ouverture du panneau (cf. OnShow),
+    -- cette case est le seul frein -- meme modele que "unitBars"/locked. Lue a chaud par
+    -- SetDraggable/OnDragStart, donc pas besoin de re-appliquer quoi que ce soit au clic.
+    local cbOCRCLock = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_LOCK_POSITION"],
+      L["SETTINGS_LOCK_POSITION_TT"], W))
+    BindCheckbox(cbOCRCLock, "outOfCombatResourceCircle", "locked")
+
+    do local OCm = ns.Modules and ns.Modules.OutOfCombatResourceCircle; if OCm and OCm.EnsureArcSettings then OCm.EnsureArcSettings() end end
+    local slOCRCSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, SL_W3)
+    BindSlider(slOCRCSize, "outOfCombatResourceCircle", "size")
+    local slOCRCArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.5, 1.0, 0.005, SL_W3)
+    BindSlider(slOCRCArcSize, "outOfCombatResourceCircle", "arcSizeRatio")
+    local slOCRCThick = SW.CreateSlider(container, L["SETTINGS_RC_ARC_THICKNESS"], 0.01, 1.0, 0.005, SL_W3)
+    BindSlider(slOCRCThick, "outOfCombatResourceCircle", "arcThickness")
+    ctx:AddRow(8, slOCRCSize, slOCRCArcSize, slOCRCThick)
+
+    -- Angles de depart / fin et sens du remplissage radial
+    local slOCRCStart = SW.CreateSlider(container, L["SETTINGS_ARC_START_ANGLE"], 0, 359, 1, SL_W3)
+    BindSlider(slOCRCStart, "outOfCombatResourceCircle", "arcStartAngle")
+    local slOCRCEnd = SW.CreateSlider(container, L["SETTINGS_ARC_END_ANGLE"], 0, 359, 1, SL_W3)
+    BindSlider(slOCRCEnd, "outOfCombatResourceCircle", "arcEndAngle")
+    local ddOCRCFill = SW.CreateDropdown(container, L["SETTINGS_FILL_MODE"], {
+      { value = "cw",         text = L["SETTINGS_SWING_DIR_CW"] },
+      { value = "ccw",        text = L["SETTINGS_SWING_DIR_CCW"] },
+      { value = "mirror_out", text = L["SETTINGS_SWING_DIR_MIRROR_OUT"] },
+      { value = "mirror_in",  text = L["SETTINGS_SWING_DIR_MIRROR_IN"] },
+      { value = "vertical",   text = L["SETTINGS_FILL_VERTICAL"] },
+    }, SL_W3)
+    BindDropdown(ddOCRCFill, "outOfCombatResourceCircle", "arcFillMode")
+    ctx:AddRow(8, slOCRCStart, slOCRCEnd, ddOCRCFill)
+    local cbOCRCInv = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_FILL_INVERTED"], L["SETTINGS_FILL_INVERTED_TT"], W))
+    BindCheckbox(cbOCRCInv, "outOfCombatResourceCircle", "arcFillInverted")
+
+    local slOCRCFont = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 4, 20, 1, SL_W2))
+    BindSlider(slOCRCFont, "outOfCombatResourceCircle", "fontSize")
+    local ddOCRCFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
+    BindDropdown(ddOCRCFont, "outOfCombatResourceCircle", "font")
+
+    -- Section dots secondaires hors combat : titre dynamique, masquée si aucun dot
+    -- Option Paladin : Puissance Sacrée en spé Protection / Vindicte
+    if ns._playerClass == "PALADIN" and (ns._specID == 66 or ns._specID == 70) then
+      ctx:Spacer(4)
+      local cbOCRCHPAllSpecs = ctx:Add(SW.CreateCheckbox(container,
+        L["SETTINGS_RC_HOLY_POWER_ORBS"],
+        L["SETTINGS_OCRC_HOLY_POWER_ORBS_TT"], W))
+      BindCheckbox(cbOCRCHPAllSpecs, "outOfCombatResourceCircle", "holyPowerAllSpecs")
+      cbOCRCHPAllSpecs.onChanged = function(val)
+        DBSet("outOfCombatResourceCircle", "holyPowerAllSpecs", val)
+        LiveApply("outOfCombatResourceCircle")
+        if _invalidateCategory then _invalidateCategory("outOfCombat") end
+      end
+    end
+    -- Option Evoker : Essence en spé Dévastation / Augmentation
+    if ns._playerClass == "EVOKER" and (ns._specID == 1473 or ns._specID == 1467) then
+      ctx:Spacer(4)
+      local cbOCRCEssAllSpecs = ctx:Add(SW.CreateCheckbox(container,
+        L["SETTINGS_RC_ESSENCE_ORBS"],
+        L["SETTINGS_OCRC_ESSENCE_ORBS_TT"], W))
+      BindCheckbox(cbOCRCEssAllSpecs, "outOfCombatResourceCircle", "essenceAllSpecs")
+      cbOCRCEssAllSpecs.onChanged = function(val)
+        DBSet("outOfCombatResourceCircle", "essenceAllSpecs", val)
+        LiveApply("outOfCombatResourceCircle")
+        if _invalidateCategory then _invalidateCategory("outOfCombat") end
+      end
+    end
+    local ocrcDotType   = GetActiveDotType()
+    local ocrcDotsLabel = ocrcDotType and (DOT_TYPE_LABELS[ocrcDotType] or L["SETTINGS_DOT_EXTERNAL"]) or nil
+    if ocrcDotsLabel then
+      ctx:Spacer(4)
+      ctx:Add(SW.CreateSectionHeader(container, ocrcDotsLabel, W))
+      local odp = "secondaryDots_" .. ocrcDotType .. "_"  -- préfixe clé per-type
+
+      local slOCRCRot = SW.CreateSlider(container, L["SETTINGS_ORB_ROTATION"], 0, 360, 1, SL_W2)
+      BindSlider(slOCRCRot, "outOfCombatResourceCircle", odp.."rotation", "secondaryDotsRotation")
+      local slOCRCSpread = SW.CreateSlider(container, L["SETTINGS_SPREAD"], 5, 60, 1, SL_W2)
+      BindSlider(slOCRCSpread, "outOfCombatResourceCircle", odp.."spread", "secondaryDotsSpread")
+      ctx:AddRow(8, slOCRCRot, slOCRCSpread)
+
+      local slOCRCSecSize = SW.CreateSlider(container, L["SETTINGS_ORB_SIZE"], 0.05, 0.5, 0.01, SL_W2)
+      BindSlider(slOCRCSecSize, "outOfCombatResourceCircle", odp.."size", "secondaryDotsSize")
+      local slOCRCSecRadius = SW.CreateSlider(container, L["SETTINGS_RADIUS"], 0.2, 1.2, 0.01, SL_W2)
+      BindSlider(slOCRCSecRadius, "outOfCombatResourceCircle", odp.."radius", "secondaryDotsRadius")
+      ctx:AddRow(8, slOCRCSecSize, slOCRCSecRadius)
+
+      local cbOCRCReversed = ctx:Add(SW.CreateCheckbox(container,
+        L["SETTINGS_ORB_REVERSED_ORDER"],
+        L["SETTINGS_ORB_REVERSED_ORDER_TT"], W))
+      BindCheckbox(cbOCRCReversed, "outOfCombatResourceCircle", odp.."reversed", "secondaryDotsReversed")
+    end
+
+    ctx:Spacer(6)
+    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_BG_GLOW_OOC"], W))
+
+    local cbOCRCGlow = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_GLOW_ENABLE"],
+      L["SETTINGS_OCRC_GLOW_ENABLE_TT"], W))
+    BindCheckbox(cbOCRCGlow, "outOfCombatResourceCircle", "glowEnabled")
+
+    local slOCRCGlowSize = SW.CreateSlider(container, L["SETTINGS_GLOW_SIZE"], 0.3, 8.0, 0.1, SL_W2)
+    BindSlider(slOCRCGlowSize, "outOfCombatResourceCircle", "glowSize")
+    local slOCRCGlowOpacity = SW.CreateSlider(container, L["SETTINGS_GLOW_OPACITY"], 0, 1, 0.05, SL_W2)
+    BindSlider(slOCRCGlowOpacity, "outOfCombatResourceCircle", "glowOpacity")
+    ctx:AddRow(8, slOCRCGlowSize, slOCRCGlowOpacity)
+
+    ctx:Spacer(4)
+    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_OCRC_VISIBILITY"], W))
+    MakeModeRadio(container, ctx, W, "outOfCombatResourceCircle", {
+      { "always",    L["SETTINGS_VIS_ALWAYS"],    L["SETTINGS_OCRC_VIS_ALWAYS_TT"] },
+      { "important", L["SETTINGS_VIS_IMPORTANT"], L["SETTINGS_OCRC_VIS_IMPORTANT_TT"] },
+    }, "important")
+    -- Pas de toggle "Toujours actif en instance" ici : le cercle hors-combat
+    -- n'a pas besoin de cette option (demande explicite -- contrairement aux
+    -- 4 autres modules qui l'ont juste au-dessus de MakeModeRadio).
+
+    ctx:Spacer(4)
+
+
+    ctx:Spacer(4)
+
+    -- Bouton reset position OCRC
+    local resetOCRC = SW.CreateActionBtn(container, L["SETTINGS_OCRC_RESET_POSITION"], W,
+      nil, Theme.gold, Theme.accentText)
+    resetOCRC:SetScript("OnClick", function()
+      local OCRC = ns.Modules.OutOfCombatResourceCircle
+      if OCRC and OCRC.ResetPosition then
+        OCRC.ResetPosition()
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+      end
+    end)
+    ctx:Add(resetOCRC)
+  end
+
+  ctx:Spacer(10)
+
+  -- Cercle Bien Nourri : se vide pendant le repas, change de couleur a l'obtention du buff (cf. Modules/WellFedCircle.lua)
+  -- Son interrupteur est dans la section (jamais grisee) : l'en-tete reste donc toujours depliable
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_WELLFED"], W))
+  do
+    local cbWFEnable = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_WF_ENABLE"],
+      L["SETTINGS_WF_ENABLE_TT"], W))
+    BindCheckbox(cbWFEnable, "wellFedCircle", "enabled")
+    local wfFirst = #ctx.widgets   -- tout ce qui suit est grise quand le module est coche off
+    local cbWFNoBuff = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_WF_SHOW_NOBUFF"], L["SETTINGS_WF_SHOW_NOBUFF_TT"], W))
+    BindCheckbox(cbWFNoBuff, "wellFedCircle", "showWithoutBuff")
+    local cbWFLock = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_LOCK_POSITION"],
+      L["SETTINGS_LOCK_POSITION_TT"], W))
+    BindCheckbox(cbWFLock, "wellFedCircle", "locked")
+
+    local slWFSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, SL_W3)
+    BindSlider(slWFSize, "wellFedCircle", "size")
+    local slWFArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.5, 1.0, 0.005, SL_W3)
+    BindSlider(slWFArcSize, "wellFedCircle", "arcSizeRatio")
+    local slWFThick = SW.CreateSlider(container, L["SETTINGS_RC_ARC_THICKNESS"], 0.01, 1.0, 0.005, SL_W3)
+    BindSlider(slWFThick, "wellFedCircle", "arcThickness")
+    ctx:AddRow(8, slWFSize, slWFArcSize, slWFThick)
+
+    local slWFStart = SW.CreateSlider(container, L["SETTINGS_ARC_START_ANGLE"], 0, 359, 1, SL_W3)
+    BindSlider(slWFStart, "wellFedCircle", "arcStartAngle")
+    local slWFEnd = SW.CreateSlider(container, L["SETTINGS_ARC_END_ANGLE"], 0, 359, 1, SL_W3)
+    BindSlider(slWFEnd, "wellFedCircle", "arcEndAngle")
+    local ddWFFill = SW.CreateDropdown(container, L["SETTINGS_FILL_MODE"], {
+      { value = "cw",         text = L["SETTINGS_SWING_DIR_CW"] },
+      { value = "ccw",        text = L["SETTINGS_SWING_DIR_CCW"] },
+      { value = "mirror_out", text = L["SETTINGS_SWING_DIR_MIRROR_OUT"] },
+      { value = "mirror_in",  text = L["SETTINGS_SWING_DIR_MIRROR_IN"] },
+      { value = "vertical",   text = L["SETTINGS_FILL_VERTICAL"] },
+    }, SL_W3)
+    BindDropdown(ddWFFill, "wellFedCircle", "arcFillMode")
+    ctx:AddRow(8, slWFStart, slWFEnd, ddWFFill)
+    local cbWFInv = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_FILL_INVERTED"], L["SETTINGS_FILL_INVERTED_TT"], W))
+    BindCheckbox(cbWFInv, "wellFedCircle", "arcFillInverted")
+
+    -- Couleurs (meme ligne), icone de la nourriture (toggle + taille, meme ligne)
+    local _wfCW = math.min(270, SL_W2)   -- 2 colonnes serrees (pas la demi-largeur de la page, qui creusait un grand vide au milieu)
+    local colWFEat = SW.CreateColorButton(container, L["SETTINGS_WF_EATING_COLOR"], _wfCW)
+    BindColorButton(colWFEat, "wellFedCircle", "eatingColor")
+    local colWFFed = SW.CreateColorButton(container, L["SETTINGS_WF_FED_COLOR"], _wfCW)
+    BindColorButton(colWFFed, "wellFedCircle", "fedColor")
+    ctx:AddRow(8, colWFEat, colWFFed)
+    local cbWFFood = SW.CreateCheckbox(container, L["SETTINGS_WF_FOOD_ICON"], L["SETTINGS_WF_FOOD_ICON_TT"], _wfCW)
+    BindCheckbox(cbWFFood, "wellFedCircle", "showFoodIcon")
+    local slWFFood = SW.CreateSlider(container, L["SETTINGS_WF_FOOD_ICON_SIZE"], 0.2, 1.0, 0.01, _wfCW)
+    BindSlider(slWFFood, "wellFedCircle", "foodIconScale")
+    ctx:AddRowCentered(8, cbWFFood, slWFFood)
+
+    -- "+" et icone du buff
+    ctx:Spacer(4)
+    local _wfSL4 = math.floor((W - 24) / 4)   -- grille a 4 colonnes pour toute la zone "+" / stats : memes largeurs partout
+    local cbWFPlus = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_WF_SHOW_PLUS"], L["SETTINGS_WF_SHOW_PLUS_TT"], W))
+    BindCheckbox(cbWFPlus, "wellFedCircle", "showPlus")
+    local slWFPlusSize = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 8, 60, 1, _wfSL4)
+    BindSlider(slWFPlusSize, "wellFedCircle", "plusSize")
+    local slWFPlusIcon = SW.CreateSlider(container, L["SETTINGS_WF_PLUS_ICON_SIZE"], 8, 80, 1, _wfSL4)
+    BindSlider(slWFPlusIcon, "wellFedCircle", "plusIconSize")
+    local slWFPlusX = SW.CreateSlider(container, L["SETTINGS_WF_PLUS_X"], -100, 100, 1, _wfSL4)
+    BindSlider(slWFPlusX, "wellFedCircle", "plusX")
+    local slWFPlusY = SW.CreateSlider(container, L["SETTINGS_WF_PLUS_Y"], -100, 100, 1, _wfSL4)
+    BindSlider(slWFPlusY, "wellFedCircle", "plusY")
+    ctx:AddRow(8, slWFPlusSize, slWFPlusIcon, slWFPlusX, slWFPlusY)
+    local wfOutlines = {
+      { value = "NONE",         text = L["SETTINGS_WF_OUTLINE_NONE"] },
+      { value = "OUTLINE",      text = L["TEXT_OUTLINE_THIN"] },
+      { value = "THICKOUTLINE", text = L["TEXT_OUTLINE_THICK"] },
+      { value = "SLUG",         text = L["TEXT_OUTLINE_SLUG"] },
+    }
+    local slWFPlusDur = SW.CreateSlider(container, L["SETTINGS_WF_PLUS_DURATION"], 1, 8, 0.5, _wfSL4)
+    BindSlider(slWFPlusDur, "wellFedCircle", "plusDuration")
+    local ddWFPlusFont = SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), _wfSL4)
+    BindDropdown(ddWFPlusFont, "wellFedCircle", "plusFont")
+    local ddWFPlusOutline = SW.CreateDropdown(container, L["SETTINGS_TEXT_OUTLINE"], wfOutlines, _wfSL4)
+    BindDropdown(ddWFPlusOutline, "wellFedCircle", "plusOutline")
+    ctx:AddRow(8, slWFPlusDur, ddWFPlusFont, ddWFPlusOutline)
+    local cbWFStats = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_WF_SHOW_STATS"], L["SETTINGS_WF_SHOW_STATS_TT"], W))
+    BindCheckbox(cbWFStats, "wellFedCircle", "showStats")
+    local cbWFShort = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_WF_STATS_SHORT"], L["SETTINGS_WF_STATS_SHORT_TT"], W))
+    BindCheckbox(cbWFShort, "wellFedCircle", "statsShort")
+    local slWFStatsSize = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 30, 1, _wfSL4)
+    BindSlider(slWFStatsSize, "wellFedCircle", "statsSize")
+    local ddWFStatsFont = SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), _wfSL4)
+    BindDropdown(ddWFStatsFont, "wellFedCircle", "statsFont")
+    local ddWFStatsOutline = SW.CreateDropdown(container, L["SETTINGS_TEXT_OUTLINE"], wfOutlines, _wfSL4)
+    BindDropdown(ddWFStatsOutline, "wellFedCircle", "statsOutline")
+    local colWFStats = SW.CreateColorButton(container, L["SETTINGS_WF_STATS_COLOR"], _wfSL4)
+    BindColorButton(colWFStats, "wellFedCircle", "statsColor")
+    ctx:AddRow(8, slWFStatsSize, ddWFStatsFont, ddWFStatsOutline, colWFStats)
+    -- Toucher ces reglages fait apparaitre le "+", l'icone et les stats (cf. WellFedCircle.PinPlus)
+    for _, w in ipairs({ cbWFPlus, slWFPlusSize, slWFPlusIcon, slWFPlusX, slWFPlusY, slWFPlusDur, ddWFPlusFont, ddWFPlusOutline, cbWFStats, slWFStatsSize, ddWFStatsFont, ddWFStatsOutline, colWFStats, cbWFShort }) do
+      local orig = w.onChanged
+      w.onChanged = function(...)
+        if orig then orig(...) end
+        local WFm = ns.Modules.WellFedCircle
+        if WFm and WFm.PinPlus then WFm.PinPlus() end
+      end
+    end
+    local btnWFPrev = SW.CreateActionBtn(container, L["SETTINGS_WF_PREVIEW_BUFF"], W, nil, Theme.gold, Theme.accentText)
+    btnWFPrev:SetScript("OnClick", function()
+      local WFm = ns.Modules.WellFedCircle
+      if WFm and WFm.PreviewBuff then WFm.PreviewBuff() end
+    end)
+    ctx:Add(btnWFPrev)
+
+    ctx:Spacer(6)
+    local resetWF = SW.CreateActionBtn(container, L["SETTINGS_WF_RESET_POSITION"], W,
+      nil, Theme.gold, Theme.accentText)
+    resetWF:SetScript("OnClick", function()
+      local WFm = ns.Modules.WellFedCircle
+      if WFm and WFm.ResetPosition then
+        WFm.ResetPosition()
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+      end
+    end)
+    ctx:Add(resetWF)
+
+    local function UpdateWFGray()
+      local gray = DBGet("wellFedCircle", "enabled") == false
+      for i = wfFirst + 1, #ctx.widgets do Build.GrayWidget(ctx.widgets[i], gray) end
+    end
+    local origEnable = cbWFEnable.onChanged
+    cbWFEnable.onChanged = function(val)
+      if origEnable then origEnable(val) end
+      UpdateWFGray()
+    end
+    UpdateWFGray()
+  end
 
   ctx:Finalize()
   return ctx.widgets
@@ -1881,6 +2390,12 @@ function Build.UnitBars(container)
   slName:SetValue(UBGlobal("nameSize") or 14)
   slName.onChanged = function(val) UBGlobalSet("nameSize", val) end
   ctx:AddRow(8, ddUBNameFont, ddUBNameOutline, slName)
+  local cbUBTargetLevel = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_UB_TARGET_LEVEL"], L["SETTINGS_UB_TARGET_LEVEL_TT"], W))
+  cbUBTargetLevel:SetChecked(UBGlobal("showTargetLevel") == true)
+  cbUBTargetLevel.onChanged = function(val) UBGlobalSet("showTargetLevel", val) end
+  local cbUBPlayerName = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_UB_PLAYER_NAME_HOVER"], L["SETTINGS_UB_PLAYER_NAME_HOVER_TT"], W))
+  cbUBPlayerName:SetChecked(UBGlobal("showPlayerNameHover") == true)
+  cbUBPlayerName.onChanged = function(val) UBGlobalSet("showPlayerNameHover", val) end
 
   -- Texte de la vie (anciennement "Texte HP") : police/contour/taille sur
   -- une seule rangee, mode d'affichage pourcentage/valeur reste en dessous
@@ -2018,9 +2533,16 @@ function Build.UnitBars(container)
     preBars:SetWidth(preBarsW)
     local pctx = NewLayout(preBars)
 
-    local ddUBTex = pctx:Add(SW.CreateDropdown(preBars, L["SETTINGS_BAR_TEXTURE"], ns.GetBarTextureList(), preBarsW))
+    -- Deux textures : le fond (la partie coloree en mode par defaut) et le remplissage. Sans choix explicite pour le fond,
+    -- il suit la texture du remplissage.
+    local ubTexW = math.floor((preBarsW - 8) / 2)
+    local ddUBBgTex = SW.CreateDropdown(preBars, L["SETTINGS_UB_BG_TEXTURE"], ns.GetBarTextureList(), ubTexW)
+    ddUBBgTex:SetValue(UBGlobal("bgTexture") or UBGlobal("barTexture") or ns.BAR_TEXTURE_DEFAULT)
+    ddUBBgTex.onChanged = function(val) UBGlobalSet("bgTexture", val) end
+    local ddUBTex = SW.CreateDropdown(preBars, L["SETTINGS_UB_FILL_TEXTURE"], ns.GetBarTextureList(), ubTexW)
     ddUBTex:SetValue(UBGlobal("barTexture") or ns.BAR_TEXTURE_DEFAULT)
     ddUBTex.onChanged = function(val) UBGlobalSet("barTexture", val) end
+    pctx:AddRow(8, ddUBBgTex, ddUBTex)
 
     local cbColorInvert = pctx:Add(SW.CreateCheckbox(preBars,
       L["SETTINGS_UB_COLOR_INVERTED"],
@@ -2028,6 +2550,38 @@ function Build.UnitBars(container)
     -- Champ DB "reversed" : sens inverse de l'ancien libelle "Mode classique" (coche = reversed false).
     cbColorInvert:SetChecked(UBGlobal("reversed") ~= true)
     cbColorInvert.onChanged = function(val) UBGlobalSet("reversed", not val) end
+
+    -- Couleurs thematiques (couleurs du module Couleurs) ou couleurs libres : barres de vie + arriere plan.
+    -- Les deux selecteurs sont grises tant que les couleurs thematiques sont cochees.
+    pctx:Spacer(4)
+    local cbThemed = SW.CreateCheckbox(preBars, L["SETTINGS_UB_THEMED_COLORS"], L["SETTINGS_UB_THEMED_COLORS_TT"], preBarsSL3)
+    cbThemed:SetChecked(UBGlobal("themedColors") ~= false)
+    local function CustomColorSwatch(label, tt, key)
+      local sw = SW.CreateColorSwatch(preBars, label, tt, preBarsSL3)
+      local c = UBGlobal(key) or { 1, 1, 1, 1 }
+      sw:SetColor(c[1], c[2], c[3], c[4] or 1)
+      sw.onChanged = function(r, g, b, a) UBGlobalSet(key, { r, g, b, a or 1 }) end
+      local blocker = CreateFrame("Frame", nil, sw)
+      blocker:SetAllPoints(sw)
+      blocker:SetFrameLevel(sw:GetFrameLevel() + 20)
+      blocker:EnableMouse(true)
+      sw._blocker = blocker
+      return sw
+    end
+    local swBarColor = CustomColorSwatch(L["SETTINGS_UB_BAR_COLOR"], L["SETTINGS_UB_BAR_COLOR_TT"], "barColor")
+    local swBgColor  = CustomColorSwatch(L["SETTINGS_UB_BG_COLOR"], L["SETTINGS_UB_BG_COLOR_TT"], "bgColor")
+    local function ApplyThemedState(themed)
+      for _, sw in ipairs({ swBarColor, swBgColor }) do
+        sw:SetAlpha(themed and 0.4 or 1)
+        sw._blocker:SetShown(themed)
+      end
+    end
+    ApplyThemedState(cbThemed:GetChecked() and true or false)
+    cbThemed.onChanged = function(val)
+      UBGlobalSet("themedColors", val)
+      ApplyThemedState(val)
+    end
+    pctx:AddRow(8, cbThemed, swBarColor, swBgColor)
 
     pctx:Spacer(6)
     local cbTank = pctx:Add(SW.CreateCheckbox(preBars,
@@ -2121,6 +2675,8 @@ function Build.UnitBars(container)
     local headerW = W - UB_SECTION_INDENT
     local header, collapsed = UBCollapsibleHeader(container, headerW, entry.label, bk, barOff)
     ctx:Manual(header, UB_SECTION_INDENT)
+    Build.ubHeaders = Build.ubHeaders or {}
+    Build.ubHeaders[bk] = header   -- cible de defilement (survol d'une barre d'unite, cf. ModuleHoverOverlay)
 
     if not collapsed then
       local detailW = W - UB_SECTION_INDENT
@@ -2449,6 +3005,28 @@ function Build.CastBar(container)
     if type(c) == "table" then colCBBar:SetColor(c[1], c[2], c[3], c[4] or 1) end
   end
   colCBBar.onChanged = function(val) CBSet("barColor", val) end
+
+  -- Etincelle : texture, taille et couleur sur une ligne
+  local _cbSL3 = math.floor((W - 16) / 3)
+  local sparkNames = { default = L["SETTINGS_CB_SPARK_DEFAULT"], line = L["SETTINGS_CB_SPARK_LINE"],
+                       star = L["SETTINGS_CB_SPARK_STAR"], burst = L["SETTINGS_CB_SPARK_BURST"], dot = L["SETTINGS_CB_SPARK_DOT"] }
+  local sparkItems = {}
+  for _, k in ipairs((ns.Modules.CastBar and ns.Modules.CastBar.SPARK_KEYS) or { "default" }) do
+    sparkItems[#sparkItems + 1] = { value = k, text = sparkNames[k] or k }
+  end
+  local ddCBSpark = SW.CreateDropdown(container, L["SETTINGS_CB_SPARK_TEXTURE"], sparkItems, _cbSL3)
+  ddCBSpark:SetValue(CBGet("sparkTexture") or "default")
+  ddCBSpark.onChanged = function(val) CBSet("sparkTexture", val) end
+  local slCBSpark = SW.CreateSlider(container, L["SETTINGS_CB_SPARK_SIZE"], 25, 400, 5, _cbSL3)
+  slCBSpark:SetValue(CBGet("sparkSize") or 100)
+  slCBSpark.onChanged = function(val) CBSet("sparkSize", val) end
+  local colCBSpark = SW.CreateColorButton(container, L["SETTINGS_CB_SPARK_COLOR"], _cbSL3)
+  do
+    local c = CBGet("sparkColor")
+    if type(c) == "table" then colCBSpark:SetColor(c[1], c[2], c[3], c[4] or 1) end
+  end
+  colCBSpark.onChanged = function(val) CBSet("sparkColor", val) end
+  ctx:AddRow(8, ddCBSpark, slCBSpark, colCBSpark)
 
   local cbCBSpecColor = SW.CreateCheckbox(container,
     L["SETTINGS_CB_USE_SPEC_COLOR"], L["SETTINGS_CB_USE_SPEC_COLOR_TT"], W)
@@ -2893,6 +3471,11 @@ local PSEUDO_SPELLS_3D = {
   [9000006] = { name = L["SETTINGS_PSEUDO_MAELSTROM_10"],  icon = 136063,  specID = 263  },
   -- Alerte "Buffs manquants" : familier en Passif (specID nil = jamais dans la liste des sorts de spe)
   [9000010] = { name = L["SETTINGS_PSEUDO_PET_PASSIVE"], icon = "Interface\\Icons\\Ability_Seal" },
+  -- Forever : familier mecontent (cf. ns.MISSING_PET_UNHAPPY_KEY)
+  [9000013] = { name = L["SETTINGS_PSEUDO_PET_UNHAPPY"], icon = "Interface\\Icons\\Ability_Hunter_BeastTraining" },
+  -- Forever : alertes de quantite (cf. ns.MISSING_LOW_AMMO_KEY / MISSING_LOW_SHARDS_KEY)
+  [9000011] = { name = L["SETTINGS_PSEUDO_LOW_AMMO"],   icon = "Interface\\Icons\\INV_Ammo_Arrow_02" },
+  [9000012] = { name = L["SETTINGS_PSEUDO_LOW_SHARDS"], icon = "Interface\\Icons\\INV_Misc_Gem_Amethyst_02" },
 }
 
 -- Utilitaire : résout le nom et l'icône d'un spellID
@@ -2909,6 +3492,11 @@ local function GetSpellInfo3D(spellID)
   -- call a nil value" des que C_Spell.GetSpellInfo echouait (spellID pas
   -- encore mis en cache cote client, ex. 363405). Repli propre sur le nom
   -- generique plutot que sur une API qui n'existe plus.
+  -- Sort inconnu de ce client (ex. identifiant retail sur Forever) : le nom memorise sur le client d'origine
+  -- (combosMeta, cf. SpellEffects.RememberNames) vaut mieux que "Sort 12345".
+  local meta = ns.DB and ns.DB.spellEffects and ns.DB.spellEffects.combosMeta
+  local remembered = meta and meta[spellID]
+  if type(remembered) == "string" and remembered ~= "" then return remembered, 134400 end
   return string.format(L["SETTINGS_SPELL_FALLBACK_NAME"], spellID), 134400
 end
 
@@ -3037,6 +3625,40 @@ local function GetLogoCombosDB()
   return ns.DB.spellEffects.logoCombos
 end
 
+-- Cercle Bien Nourri : deux entrees fixes, "eating" (pendant le repas) et "fed" (buff obtenu).
+-- Champs de Build et non des locales : le chunk est tout pres de la limite des 200 locales.
+function Build.WellFedDB()
+  if not ns.DB then ns.DB = {} end
+  if not ns.DB.spellEffects then ns.DB.spellEffects = {} end
+  if not ns.DB.spellEffects.wellFedCombos then ns.DB.spellEffects.wellFedCombos = {} end
+  return ns.DB.spellEffects.wellFedCombos
+end
+-- Grisage d'un widget : attenue, plus de clic. Meme principe que GraySwing (Skyriding) : l'etat souris d'origine de chaque
+-- frame est memorise puis restitue tel quel (reactiver la souris sur tout ferait avaler les clics aux cadres decoratifs).
+function Build.GrayWidget(w, gray)
+  w:SetAlpha(gray and 0.35 or 1)
+  if w.SetEnabled and w.GetObjectType and w:GetObjectType() ~= "Frame" then w:SetEnabled(not gray) end
+  if w.slider and w.slider.SetEnabled then w.slider:SetEnabled(not gray) end
+  if w.editBox and w.editBox.SetEnabled then w.editBox:SetEnabled(not gray) end
+  local function Rec(f)
+    if f.EnableMouse and f.IsMouseEnabled then
+      if gray then
+        if f._grayMouse == nil then f._grayMouse = f:IsMouseEnabled() end
+        f:EnableMouse(false)
+      elseif f._grayMouse ~= nil then
+        f:EnableMouse(f._grayMouse)
+        f._grayMouse = nil
+      end
+    end
+    for _, c in ipairs({ f:GetChildren() }) do Rec(c) end
+  end
+  Rec(w)
+end
+Build.WELLFED_TRIGGERS = {
+  { key = "eating", label = L["SETTINGS_TRIGGER_WF_EATING"] },
+  { key = "fed",    label = L["SETTINGS_TRIGGER_WF_FED"] },
+}
+
 -- Accesseur combos d'auras (déclenchés par la présence d'une aura, joueur ou cible)
 local function GetAuraCombosDB()
   if not ns.DB then ns.DB = {} end
@@ -3072,6 +3694,8 @@ local function GetActiveComboTable()
     return GetOocCombosDB(), seSelectedTriggerKey
   elseif seActiveSection == "logos" and seSelectedTriggerKey then
     return GetLogoCombosDB(), seSelectedTriggerKey
+  elseif seActiveSection == "wellFed" and seSelectedTriggerKey then
+    return Build.WellFedDB(), seSelectedTriggerKey
   elseif seActiveSection == "spells" and seSelectedSpellID then
     return GetCombosDB(), seSelectedSpellID
   elseif seActiveSection == "auras" and seSelectedAuraID then
@@ -3097,6 +3721,8 @@ local function GetPreviewAnchor()
       or _G["AishCoreMissingBuffFrame"]
   elseif seActiveSection == "ooc" then
     return _G["AishCoreHealthRing"]
+  elseif seActiveSection == "wellFed" then
+    return _G["AishCoreWellFedRing"]
   elseif seActiveSection == "logos" then
     -- Le logo du mode AFK n'est pas affiche pendant la config : preview sur celui de
     -- l'en-tete du panneau, toujours present.
@@ -3177,6 +3803,13 @@ end
 -- Forward declarations
 local RefreshSpellList, RefreshAnimList, RefreshAnimEditor, RefreshAliasRow
 local RefreshOrbList, RefreshOocList, RefreshAuraList, RefreshMissingBuffsList, RelayoutSections
+
+-- Mode admin (/aishadmin) active ou coupe : les listes de sorts / auras de la page Animations 3D montrent ou non les
+-- lignes "[ext]" -- on les reconstruit tout de suite (rien si la page n'a jamais ete ouverte).
+function ns.RefreshAnimLists()
+  if RefreshSpellList then RefreshSpellList() end
+  if RefreshAuraList then RefreshAuraList() end
+end
 local RefreshLogoList
 
 -- Lookup : FileID -> nom de modèle via ns.GetModelName (Data\ModelPaths.lua)
@@ -4810,6 +5443,14 @@ local function ShowAnimRowContextMenu(animIdx)
   })
 end
 
+-- Sort (ou aura) inconnu de ce client, typiquement une configuration venue d'un autre client : ligne "[ext]".
+-- Masquee des listes sauf en mode admin (/aishadmin).
+-- (champ de ns : un upvalue de plus ferait depasser la limite de 60 a la grosse fonction de la page Animations 3D)
+function ns.IsForeignSpell(spellID)
+  if PSEUDO_SPELLS_3D[spellID] then return false end
+  return ns.SpellIdentityKey ~= nil and ns.SpellIdentityKey(spellID) == nil
+end
+
 -- Spell List (panneau gauche : liste des sorts configurEs)
 local function BuildSpellListRow(parent, spellID, width, onClick, combosDB)
   local row = CreateFrame("Button", nil, parent)
@@ -5154,6 +5795,8 @@ local function BuildTriggerRow(parent, triggerDef, width, sectionType, onClick)
       db = GetOrbCombosDB()
     elseif sectionType == "logos" then
       db = GetLogoCombosDB()
+    elseif sectionType == "wellFed" then
+      db = Build.WellFedDB()
     else
       db = GetOocCombosDB()
     end
@@ -5230,7 +5873,35 @@ local function BuildTriggerRow(parent, triggerDef, width, sectionType, onClick)
   local hover = row:CreateTexture(nil, "HIGHLIGHT")
   hover:SetAllPoints(); hover:SetColorTexture(Theme.accent[1], Theme.accent[2], Theme.accent[3], 0.12)
 
-  row:SetScript("OnClick", function()
+  -- Clic droit : copier / coller les animations de cette entree (orbes, cercle de vie hors combat, logos), comme pour
+  -- les sorts et les auras, sans avoir a la selectionner.
+  row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  row:SetScript("OnClick", function(_, button)
+    if button == "RightButton" then
+      local function DB()
+        if sectionType == "orbs" then return GetOrbCombosDB()
+        elseif sectionType == "logos" then return GetLogoCombosDB()
+        elseif sectionType == "wellFed" then return Build.WellFedDB() end
+        return GetOocCombosDB()
+      end
+      local dbKey = (sectionType == "orbs") and OrbKeyForClass(triggerDef.key) or triggerDef.key
+      ShowEntryContextMenu(triggerDef.label,
+        function() return DB()[dbKey] end,
+        function(list) DB()[dbKey] = list end,
+        function()
+          UpdateFxCount()
+          if RefreshAnimList then RefreshAnimList() end
+          local SE = ns.Modules and ns.Modules.SpellEffects
+          if SE then
+            if sectionType == "logos" then
+              if SE.RefreshLogoDeco then SE.RefreshLogoDeco() end
+            elseif SE.RefreshDecorations then
+              SE.RefreshDecorations()
+            end
+          end
+        end)
+      return
+    end
     if onClick then onClick(triggerDef.key) end
   end)
   ForwardMouseWheelToScrollParent(row)
@@ -5571,19 +6242,40 @@ function Build.SpellEffects(container)
   local logoTriggers = GetLogoTriggers()
   secLogos.body:SetHeight(math.max(60, #logoTriggers * 28 + 4))
 
-  -- Sections ordonnées : OOC, Sorts, Orbes, Auras, Buffs manquants, Logos
+  -- Section Cercle Bien Nourri : 2 entrees fixes (repas / buff obtenu). Liste rafraichie via RefreshLogoList (cf. plus bas).
+  local secWF = { expanded = false, id = "wellFed" }
+  secWF.header = CreateSectionHdr(leftContent, L["SETTINGS_SEC_WELLFED"])
+  secWF.body = CreateFrame("Frame", nil, leftContent)
+  secWF.body:SetWidth(LEFT_W - 20)
+  secWF.body:Hide()
+  secWF.body:SetHeight(#ns.SettingsBuild.WELLFED_TRIGGERS * 28 + 4)
+  do
+    local wfScroll = CreateFrame("ScrollFrame", nil, secWF.body, "UIPanelScrollFrameTemplate")
+    wfScroll:SetPoint("TOPLEFT", secWF.body, "TOPLEFT", 0, 0)
+    wfScroll:SetPoint("BOTTOMRIGHT", secWF.body, "BOTTOMRIGHT", -18, 0)
+    local wfContent = CreateFrame("Frame", nil, wfScroll)
+    wfContent:SetSize(LEFT_W - 38, 10)
+    wfScroll:SetScrollChild(wfContent)
+    wfContent._rows = {}
+    ns.SettingsBuild.seWellFedList = wfContent
+    SetupModernScroll(wfScroll)
+  end
+
+  -- Sections ordonnées : OOC, Sorts, Orbes, Auras, Buffs manquants, Logos, Bien Nourri
   seSections[1] = secOoc
   seSections[2] = secSpells
   seSections[3] = secOrbs
   seSections[4] = secAuras
   seSections[5] = secMissingBuffs
   seSections[6] = secLogos
+  seSections[7] = secWF
 
   secOoc.divider    = CreateSectionDivider(leftContent)
   secSpells.divider = CreateSectionDivider(leftContent)
   secOrbs.divider   = CreateSectionDivider(leftContent)
   secAuras.divider  = CreateSectionDivider(leftContent)
   secMissingBuffs.divider = CreateSectionDivider(leftContent)
+  secLogos.divider = CreateSectionDivider(leftContent)
   -- pas de divider après la dernière section
 
   for _, sec in ipairs(seSections) do UpdateArrow(sec) end
@@ -5670,6 +6362,7 @@ function Build.SpellEffects(container)
   secAuras.header:SetScript("OnClick",  function() ToggleSection(4) end)
   secMissingBuffs.header:SetScript("OnClick", function() ToggleSection(5) end)
   secLogos.header:SetScript("OnClick", function() ToggleSection(6) end)
+  secWF.header:SetScript("OnClick", function() ToggleSection(7) end)
 
   -- Aucune section ouverte par défaut (l'utilisateur choisit) -- les flèches
   -- sont déjà à jour (cf. boucle UpdateArrow plus haut).
@@ -6116,10 +6809,14 @@ function Build.SpellEffects(container)
         local okList, list = pcall(PB.GetSpecSpells)
         if okList and type(list) == "table" then
           for _, e in ipairs(list) do
-            if e.id and not seenSid[e.id] then
-              sorted[#sorted + 1] = e.id
-              seenSid[e.id] = true
+            if e.id then
+              -- Un sort du grimoire reste "du personnage" meme quand il porte deja un combo (ex. animations copiees
+              -- depuis un sort [ext]) : il ne doit jamais disparaitre de la liste
               fromSpellbook[e.id] = true
+              if not seenSid[e.id] then
+                sorted[#sorted + 1] = e.id
+                seenSid[e.id] = true
+              end
             end
           end
         end
@@ -6167,14 +6864,16 @@ function Build.SpellEffects(container)
         local tag = manualSpells[sid]
         if tag and tag ~= true then
           local _, clsA = UnitClass("player")
-          return tag == clsA
+          if tag == clsA then return true end
+          -- (une autre classe : on laisse les regles normales ci-dessous trancher, au lieu de masquer d'office)
         end
         -- Pas de tag de classe : on accepte quand meme l'entree si son nom a ete memorise sur le
         -- client d'origine. Elle reste identifiable et donc copiable, ce qui est tout l'objectif --
         -- la masquer reviendrait a perdre definitivement ce travail de configuration.
         local metaC = ns.DB and ns.DB.spellEffects and ns.DB.spellEffects.combosMeta
         if metaC and metaC[sid] then return true end
-        return false
+        -- Sinon : regles normales (un sort de ce client avec un combo, sans tag ni nom memorise, doit rester visible
+        -- en mode admin comme il l'est hors mode admin)
       end
       local ps = PSEUDO_SPELLS_3D[sid]
       if ps then
@@ -6200,7 +6899,7 @@ function Build.SpellEffects(container)
     end
     local filtered = {}
     for _, sid in ipairs(sorted) do
-      if IsCurrentClassSpell(sid) then filtered[#filtered + 1] = sid end
+      if IsCurrentClassSpell(sid) and (adminMode or not ns.IsForeignSpell(sid)) then filtered[#filtered + 1] = sid end
     end
     -- Une entree par sort, pas une par rang. La preference est capitale : on garde en priorite
     -- l'identifiant qui porte DEJA un combo, et seulement a defaut le rang le plus eleve.
@@ -6331,6 +7030,7 @@ function Build.SpellEffects(container)
   end
 
   RefreshAnimList = function()
+    ns.SettingsBuild.UpdateWellFedGui()   -- cercle Bien Nourri : apercu fige sur l'etat selectionne
     -- Logos : toute edition passe par un rebuild de cette liste (ajout, retrait, couche,
     -- modele) -- on relance la deco reelle, seul "apercu" de cette section.
     if seActiveSection == "logos" then
@@ -6378,6 +7078,10 @@ function Build.SpellEffects(container)
     elseif seActiveSection == "logos" then
       local triggers = GetLogoTriggers()
       for _, t in ipairs(triggers) do
+        if t.key == key then titleText = string.format(L["SETTINGS_COMBO_TITLE"], t.label); break end
+      end
+    elseif seActiveSection == "wellFed" then
+      for _, t in ipairs(ns.SettingsBuild.WELLFED_TRIGGERS) do
         if t.key == key then titleText = string.format(L["SETTINGS_COMBO_TITLE"], t.label); break end
       end
     elseif seActiveSection == "auras" or seActiveSection == "missingBuffs" then
@@ -6596,6 +7300,45 @@ function Build.SpellEffects(container)
     seLogoList:SetHeight(math.max(10, yy))
   end
 
+  -- Liste Bien Nourri : greffee sur RefreshLogoList, deja appelee par tous les sites de selection
+  do
+    local refreshLogosOnly = RefreshLogoList
+    RefreshLogoList = function()
+      refreshLogosOnly()
+      local list = ns.SettingsBuild.seWellFedList
+      if not list then return end
+      for _, row in ipairs(list._rows) do row:Hide() end
+      wipe(list._rows)
+      local rowW = LEFT_W - 38
+      local yy = 0
+      for _, tDef in ipairs(ns.SettingsBuild.WELLFED_TRIGGERS) do
+        local row = BuildTriggerRow(list, tDef, rowW, "wellFed", function(clickedKey)
+          seActiveSection = "wellFed"
+          do local MB = ns.Auras and ns.Auras.MissingBuffs; if MB and MB.SetPreview then MB.SetPreview(false) end end
+          seSelectedTriggerKey = clickedKey
+          seSelectedSpellID = nil
+          seSelectedAuraID = nil
+          seSelectedAnimIdx = nil
+          local db = ns.SettingsBuild.WellFedDB()
+          if not db[clickedKey] then db[clickedKey] = {} end
+          RefreshSpellList()
+          RefreshOrbList()
+          RefreshOocList()
+          RefreshLogoList()
+          if RefreshAuraList then RefreshAuraList() end
+          if RefreshMissingBuffsList then RefreshMissingBuffsList() end
+          RefreshAnimList()
+          RefreshAnimEditor()
+        end)
+        row:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -yy)
+        row:SetSelected(seActiveSection == "wellFed" and seSelectedTriggerKey == tDef.key)
+        list._rows[#list._rows + 1] = row
+        yy = yy + 28
+      end
+      list:SetHeight(math.max(10, yy))
+    end
+  end
+
   RefreshAuraList = function()
     for _, row in ipairs(seAuraList._rows) do row:Hide() end
     wipe(seAuraList._rows)
@@ -6624,6 +7367,14 @@ function Build.SpellEffects(container)
     sortGroup(buffs)
     sortGroup(debuffs)
     sortGroup(totems)
+    -- Auras "[ext]" (inconnues de ce client) : seulement en mode admin
+    if not (ns.Auras and ns.Auras._adminMode == true) then
+      for _, group in ipairs({ buffs, debuffs, totems }) do
+        for i = #group, 1, -1 do
+          if ns.IsForeignSpell(group[i].id) then table.remove(group, i) end
+        end
+      end
+    end
 
     local auraCombos = GetAuraCombosDB()
     local rowW = LEFT_W - 38
@@ -7084,7 +7835,7 @@ function Build.SpellEffects(container)
     local SE = ns.Modules.SpellEffects
     if not SE then return end
 
-    local isDeco = (seActiveSection == "orbs" or seActiveSection == "ooc")
+    local isDeco = (seActiveSection == "orbs" or seActiveSection == "ooc" or seActiveSection == "wellFed")
 
     -- Arrêter la preview en cours
     if isDeco then
@@ -7137,7 +7888,7 @@ function Build.SpellEffects(container)
     local SE = ns.Modules.SpellEffects
     if not SE then return end
 
-    local isDeco = (seActiveSection == "orbs" or seActiveSection == "ooc")
+    local isDeco = (seActiveSection == "orbs" or seActiveSection == "ooc" or seActiveSection == "wellFed")
 
     -- Arrêter la preview en cours
     if isDeco then
@@ -7320,6 +8071,8 @@ function Build.XPBar(container)
     L["SETTINGS_XP_ALWAYS_VISIBLE"],
     L["SETTINGS_XP_ALWAYS_VISIBLE_TT"], W))
   BindCheckbox(cbAlways, "xpBar", "alwaysVisible")
+  local cbNextLevel = ctx:Add(SW.CreateCheckbox(container, L["XP_NEXTLEVEL_OPT"], L["XP_NEXTLEVEL_OPT_TT"], W))
+  BindCheckbox(cbNextLevel, "xpBar", "nextLevelPreview")
 
   local cbRest = ctx:Add(SW.CreateCheckbox(container,
     L["SETTINGS_XP_REST_INDICATOR"],
@@ -7768,182 +8521,194 @@ function Build.PriorityBar(container)
   -- Glow
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_GLOW"], W))
 
-  -- Single-icon glow preview
-  local pvFrame = CreateFrame("Frame", nil, container)
-  pvFrame:SetSize(W, 70)
-  local pvBg = pvFrame:CreateTexture(nil, "BACKGROUND")
-  pvBg:SetAllPoints(); pvBg:SetColorTexture(0.04, 0.04, 0.06, 0.6)
+  -- Apercu d'une surbrillance (icone + glow) ; K = noms des cles de config et de la fonction de refresh
+  local function BuildGlowPreview(K)
+    -- Single-icon glow preview
+    local pvFrame = CreateFrame("Frame", nil, container)
+    pvFrame:SetSize(W, 70)
+    local pvBg = pvFrame:CreateTexture(nil, "BACKGROUND")
+    pvBg:SetColorTexture(0.42, 0.42, 0.44, 1)
 
-  local pIcon = CreateFrame("Frame", nil, pvFrame)
-  pIcon:SetSize(40, 40)
-  pIcon:SetPoint("CENTER", pvFrame, "CENTER", 0, 0)
-  pIcon.icon = pIcon:CreateTexture(nil, "ARTWORK")
-  pIcon.icon:SetAllPoints()
-  pIcon.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-  pIcon.icon:SetTexture(134154)
-  pIcon.borderLines = {}
-  for _, side in ipairs({"TOP","BOTTOM","LEFT","RIGHT"}) do
-    pIcon.borderLines[side] = pIcon:CreateTexture(nil, "OVERLAY", nil, 0)
-  end
-  -- Legacy pulse glow
-  pIcon.glow = pIcon:CreateTexture(nil, "OVERLAY", nil, 1)
-  pIcon.glow:SetBlendMode("ADD"); pIcon.glow:SetAlpha(0); pIcon.glow:Hide()
-  pIcon.glowAG = pIcon.glow:CreateAnimationGroup()
-  pIcon.glowAG:SetLooping("BOUNCE")
-  pIcon.glowPulse = pIcon.glowAG:CreateAnimation("Alpha")
-  pIcon.glowPulse:SetSmoothing("IN_OUT")
-  -- Flipbook loop glow
-  pIcon.loopFlipTex = pIcon:CreateTexture(nil, "OVERLAY", nil, 2)
-  pIcon.loopFlipTex:SetAlpha(0); pIcon.loopFlipTex:Hide()
-  pIcon.loopFlipAG = pIcon.loopFlipTex:CreateAnimationGroup()
-  pIcon.loopFlipAG:SetLooping("REPEAT")
-  pIcon.loopFlipAnim = pIcon.loopFlipAG:CreateAnimation("FlipBook")
-  pIcon.loopFlipAnim:SetOrder(1)
-  -- Flipbook proc start (one-shot)
-  pIcon.procStartTex = pIcon:CreateTexture(nil, "OVERLAY", nil, 3)
-  pIcon.procStartTex:SetAlpha(0); pIcon.procStartTex:Hide()
-  pIcon.procStartAG = pIcon.procStartTex:CreateAnimationGroup()
-  pIcon.procStartAG:SetLooping("NONE")
-  pIcon.procStartFlip = pIcon.procStartAG:CreateAnimation("FlipBook")
-  pIcon.procStartFlip:SetOrder(1)
-  pIcon.procStartAG:SetScript("OnFinished", function()
+    local pIcon = CreateFrame("Frame", nil, pvFrame)
+    pIcon:SetSize(40, 40)
+    pIcon:SetPoint("CENTER", pvFrame, "CENTER", 0, 0)
+    -- Fond gris limite au voisinage de l'icone (pas toute la largeur), pour bien voir son contour
+    pvBg:SetPoint("TOPLEFT", pIcon, "TOPLEFT", -14, 14)
+    pvBg:SetPoint("BOTTOMRIGHT", pIcon, "BOTTOMRIGHT", 14, -14)
+    pIcon.icon = pIcon:CreateTexture(nil, "ARTWORK")
+    pIcon.icon:SetAllPoints()
+    pIcon.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    pIcon.icon:SetTexture(134154)
+    pIcon.borderLines = {}
+    for _, side in ipairs({"TOP","BOTTOM","LEFT","RIGHT"}) do
+      pIcon.borderLines[side] = pIcon:CreateTexture(nil, "OVERLAY", nil, 0)
+    end
+    -- Legacy pulse glow
+    pIcon.glow = pIcon:CreateTexture(nil, "OVERLAY", nil, 1)
+    pIcon.glow:SetBlendMode("ADD"); pIcon.glow:SetAlpha(0); pIcon.glow:Hide()
+    pIcon.glowAG = pIcon.glow:CreateAnimationGroup()
+    pIcon.glowAG:SetLooping("BOUNCE")
+    pIcon.glowPulse = pIcon.glowAG:CreateAnimation("Alpha")
+    pIcon.glowPulse:SetSmoothing("IN_OUT")
+    -- Flipbook loop glow
+    pIcon.loopFlipTex = pIcon:CreateTexture(nil, "OVERLAY", nil, 2)
+    pIcon.loopFlipTex:SetAlpha(0); pIcon.loopFlipTex:Hide()
+    pIcon.loopFlipAG = pIcon.loopFlipTex:CreateAnimationGroup()
+    pIcon.loopFlipAG:SetLooping("REPEAT")
+    pIcon.loopFlipAnim = pIcon.loopFlipAG:CreateAnimation("FlipBook")
+    pIcon.loopFlipAnim:SetOrder(1)
+    -- Flipbook proc start (one-shot)
+    pIcon.procStartTex = pIcon:CreateTexture(nil, "OVERLAY", nil, 3)
     pIcon.procStartTex:SetAlpha(0); pIcon.procStartTex:Hide()
-  end)
-
-  -- Auto-loop timer for proc start preview
-  local pvTicker
-  pvFrame:SetScript("OnShow", function()
-    if pvTicker then pvTicker:Cancel() end
-    pvTicker = C_Timer.NewTicker(1.5, function()
-      if not pvFrame:IsVisible() then return end
-      if container._refreshPreview then container._refreshPreview() end
+    pIcon.procStartAG = pIcon.procStartTex:CreateAnimationGroup()
+    pIcon.procStartAG:SetLooping("NONE")
+    pIcon.procStartFlip = pIcon.procStartAG:CreateAnimation("FlipBook")
+    pIcon.procStartFlip:SetOrder(1)
+    pIcon.procStartAG:SetScript("OnFinished", function()
+      pIcon.procStartTex:SetAlpha(0); pIcon.procStartTex:Hide()
     end)
-  end)
-  pvFrame:SetScript("OnHide", function()
-    if pvTicker then pvTicker:Cancel(); pvTicker = nil end
-  end)
 
-  local function RefreshPreview()
-    local c = ns.DB and ns.DB.priorityBar or {}
-    local sz        = c.iconSize    or 34
-    local showB     = c.showBorder  ~= false
-    local bStyle    = c.borderStyle or "solid"
-    local bSize     = c.borderSize  or 2
-    local bc        = c.borderColor or { 0.15, 0.15, 0.15, 0.9 }
-    local glowColor = c.glowColor   or { 1, 0.85, 0, 0.8 }
-    local glowSz    = c.glowSize    or 4
-    local loopIdx   = c.loopGlowIndex or 1
-    local psIdx     = c.procStartIndex or 1
-    if c.useSpecGlowColor then
-      local Clr = ns.Modules and ns.Modules.Colors
-      if Clr and Clr.Get then
-        local specC = Clr.Get("glow")
-        if specC then glowColor = specC end
-      end
-    end
-    local PB = ns.Modules.PriorityBar
-    local LOOP = PB and PB.LOOP_GLOW_TYPES
-    local PROC = PB and PB.PROC_START_TYPES
-    local gt = LOOP and LOOP[loopIdx] or (LOOP and LOOP[1])
-    local ps = PROC and PROC[psIdx]
+    -- Auto-loop timer for proc start preview
+    local pvTicker
+    pvFrame:SetScript("OnShow", function()
+      if pvTicker then pvTicker:Cancel() end
+      pvTicker = C_Timer.NewTicker(1.5, function()
+        if not pvFrame:IsVisible() then return end
+        if container[K.refresh] then container[K.refresh]() end
+      end)
+    end)
+    pvFrame:SetScript("OnHide", function()
+      if pvTicker then pvTicker:Cancel(); pvTicker = nil end
+    end)
 
-    pIcon:SetSize(sz, sz)
-
-    -- Border
-    local blend = (bStyle == "glow") and "ADD" or "BLEND"
-    local lines = pIcon.borderLines
-    if showB then
-      lines.TOP:ClearAllPoints();lines.TOP:SetHeight(bSize)
-      lines.TOP:SetPoint("TOPLEFT",pIcon,"TOPLEFT",-bSize,bSize);lines.TOP:SetPoint("TOPRIGHT",pIcon,"TOPRIGHT",bSize,bSize)
-      lines.TOP:SetColorTexture(bc[1],bc[2],bc[3],bc[4]);lines.TOP:SetBlendMode(blend);lines.TOP:Show()
-      lines.BOTTOM:ClearAllPoints();lines.BOTTOM:SetHeight(bSize)
-      lines.BOTTOM:SetPoint("BOTTOMLEFT",pIcon,"BOTTOMLEFT",-bSize,-bSize);lines.BOTTOM:SetPoint("BOTTOMRIGHT",pIcon,"BOTTOMRIGHT",bSize,-bSize)
-      lines.BOTTOM:SetColorTexture(bc[1],bc[2],bc[3],bc[4]);lines.BOTTOM:SetBlendMode(blend);lines.BOTTOM:Show()
-      lines.LEFT:ClearAllPoints();lines.LEFT:SetWidth(bSize)
-      lines.LEFT:SetPoint("TOPLEFT",pIcon,"TOPLEFT",-bSize,bSize);lines.LEFT:SetPoint("BOTTOMLEFT",pIcon,"BOTTOMLEFT",-bSize,-bSize)
-      lines.LEFT:SetColorTexture(bc[1],bc[2],bc[3],bc[4]);lines.LEFT:SetBlendMode(blend);lines.LEFT:Show()
-      lines.RIGHT:ClearAllPoints();lines.RIGHT:SetWidth(bSize)
-      lines.RIGHT:SetPoint("TOPRIGHT",pIcon,"TOPRIGHT",bSize,bSize);lines.RIGHT:SetPoint("BOTTOMRIGHT",pIcon,"BOTTOMRIGHT",bSize,-bSize)
-      lines.RIGHT:SetColorTexture(bc[1],bc[2],bc[3],bc[4]);lines.RIGHT:SetBlendMode(blend);lines.RIGHT:Show()
-    else
-      for _, line in pairs(lines) do line:Hide() end
-    end
-
-    -- Stop all animations
-    pIcon.glowAG:Stop(); pIcon.glow:SetAlpha(0); pIcon.glow:Hide()
-    pIcon.loopFlipAG:Stop(); pIcon.loopFlipTex:SetAlpha(0); pIcon.loopFlipTex:Hide()
-    pIcon.procStartAG:Stop(); pIcon.procStartTex:SetAlpha(0); pIcon.procStartTex:Hide()
-
-    if gt then
-      if gt.useAlphaPulse then
-        -- Pulse mode
-        if gt.atlas then
-          pIcon.glow:SetTexture(nil);pIcon.glow:SetAtlas(gt.atlas);pIcon.glow:SetTexCoord(0,1,0,1)
-        else
-          pIcon.glow:SetTexture(gt.texture)
-          if gt.texCoord then pIcon.glow:SetTexCoord(unpack(gt.texCoord)) else pIcon.glow:SetTexCoord(0,1,0,1) end
+    local function RefreshPreview()
+      local c = ns.DB and ns.DB.priorityBar or {}
+      local sz        = c.iconSize    or 34
+      local showB     = c.showBorder  ~= false
+      local bStyle    = c.borderStyle or "solid"
+      local bSize     = c.borderSize  or 2
+      local bc        = c.borderColor or { 0.15, 0.15, 0.15, 0.9 }
+      local glowColor = c[K.color]   or { 1, 0.85, 0, 0.8 }
+      local glowSz    = c[K.size]    or 4
+      local loopIdx   = c[K.loop] or 1
+      local psIdx     = c[K.start] or 1
+      if c[K.spec] then
+        local Clr = ns.Modules and ns.Modules.Colors
+        if Clr and Clr.Get then
+          local specC = Clr.Get("glow")
+          if specC then glowColor = specC end
         end
-        pIcon.glow:SetBlendMode(gt.blendMode or "ADD")
-        pIcon.glow:SetVertexColor(glowColor[1],glowColor[2],glowColor[3],glowColor[4] or 1)
-        pIcon.glow:ClearAllPoints()
-        pIcon.glow:SetPoint("TOPLEFT",pIcon,"TOPLEFT",-glowSz,glowSz)
-        pIcon.glow:SetPoint("BOTTOMRIGHT",pIcon,"BOTTOMRIGHT",glowSz,-glowSz)
-        pIcon.glowPulse:SetFromAlpha(gt.fromAlpha or 0.4)
-        pIcon.glowPulse:SetToAlpha(gt.toAlpha or 0.8)
-        pIcon.glowPulse:SetDuration(gt.duration or 0.8)
-        pIcon.glow:SetAlpha(0.6);pIcon.glow:Show();pIcon.glowAG:Play()
+      end
+      local PB = ns.Modules.PriorityBar
+      local LOOP = PB and PB.LOOP_GLOW_TYPES
+      local PROC = PB and PB.PROC_START_TYPES
+      local gt = LOOP and LOOP[loopIdx] or (LOOP and LOOP[1])
+      local ps = PROC and PROC[psIdx]
+
+      pIcon:SetSize(sz, sz)
+
+      -- Border
+      local blend = (bStyle == "glow") and "ADD" or "BLEND"
+      local lines = pIcon.borderLines
+      if showB then
+        lines.TOP:ClearAllPoints();lines.TOP:SetHeight(bSize)
+        lines.TOP:SetPoint("TOPLEFT",pIcon,"TOPLEFT",-bSize,bSize);lines.TOP:SetPoint("TOPRIGHT",pIcon,"TOPRIGHT",bSize,bSize)
+        lines.TOP:SetColorTexture(bc[1],bc[2],bc[3],bc[4]);lines.TOP:SetBlendMode(blend);lines.TOP:Show()
+        lines.BOTTOM:ClearAllPoints();lines.BOTTOM:SetHeight(bSize)
+        lines.BOTTOM:SetPoint("BOTTOMLEFT",pIcon,"BOTTOMLEFT",-bSize,-bSize);lines.BOTTOM:SetPoint("BOTTOMRIGHT",pIcon,"BOTTOMRIGHT",bSize,-bSize)
+        lines.BOTTOM:SetColorTexture(bc[1],bc[2],bc[3],bc[4]);lines.BOTTOM:SetBlendMode(blend);lines.BOTTOM:Show()
+        lines.LEFT:ClearAllPoints();lines.LEFT:SetWidth(bSize)
+        lines.LEFT:SetPoint("TOPLEFT",pIcon,"TOPLEFT",-bSize,bSize);lines.LEFT:SetPoint("BOTTOMLEFT",pIcon,"BOTTOMLEFT",-bSize,-bSize)
+        lines.LEFT:SetColorTexture(bc[1],bc[2],bc[3],bc[4]);lines.LEFT:SetBlendMode(blend);lines.LEFT:Show()
+        lines.RIGHT:ClearAllPoints();lines.RIGHT:SetWidth(bSize)
+        lines.RIGHT:SetPoint("TOPRIGHT",pIcon,"TOPRIGHT",bSize,bSize);lines.RIGHT:SetPoint("BOTTOMRIGHT",pIcon,"BOTTOMRIGHT",bSize,-bSize)
+        lines.RIGHT:SetColorTexture(bc[1],bc[2],bc[3],bc[4]);lines.RIGHT:SetBlendMode(blend);lines.RIGHT:Show()
       else
-        -- Flipbook mode
-        if gt.atlas then
-          pIcon.loopFlipTex:SetTexture(nil); pIcon.loopFlipTex:SetAtlas(gt.atlas)
-        elseif gt.texture then
-          pIcon.loopFlipTex:SetTexture(gt.texture)
-        end
-        local sc = gt.scale or 1
-        local texSz = sz * sc + glowSz * 2
-        pIcon.loopFlipTex:ClearAllPoints()
-        pIcon.loopFlipTex:SetSize(texSz, texSz)
-        pIcon.loopFlipTex:SetPoint("CENTER", pIcon, "CENTER", 0, 0)
-        pIcon.loopFlipTex:SetVertexColor(glowColor[1],glowColor[2],glowColor[3],glowColor[4] or 1)
-        pIcon.loopFlipTex:SetBlendMode("ADD")
-        pIcon.loopFlipAnim:SetFlipBookRows(gt.rows or 6)
-        pIcon.loopFlipAnim:SetFlipBookColumns(gt.columns or 5)
-        pIcon.loopFlipAnim:SetFlipBookFrames(gt.frames or 30)
-        pIcon.loopFlipAnim:SetDuration(gt.duration or 1.0)
-        pIcon.loopFlipAnim:SetFlipBookFrameWidth(gt.frameW or 0)
-        pIcon.loopFlipAnim:SetFlipBookFrameHeight(gt.frameH or 0)
-        pIcon.loopFlipTex:SetAlpha(1); pIcon.loopFlipTex:Show()
-        pIcon.loopFlipAG:Play()
+        for _, line in pairs(lines) do line:Hide() end
       end
-    end
 
-    -- Proc start (one-shot)
-    if ps and psIdx > 1 then
-      if ps.atlas then
-        pIcon.procStartTex:SetTexture(nil); pIcon.procStartTex:SetAtlas(ps.atlas)
-      elseif ps.texture then
-        pIcon.procStartTex:SetTexture(ps.texture)
+      -- Stop all animations
+      pIcon.glowAG:Stop(); pIcon.glow:SetAlpha(0); pIcon.glow:Hide()
+      pIcon.loopFlipAG:Stop(); pIcon.loopFlipTex:SetAlpha(0); pIcon.loopFlipTex:Hide()
+      pIcon.procStartAG:Stop(); pIcon.procStartTex:SetAlpha(0); pIcon.procStartTex:Hide()
+
+      if gt then
+        if gt.useAlphaPulse then
+          -- Pulse mode
+          if gt.atlas then
+            pIcon.glow:SetTexture(nil);pIcon.glow:SetAtlas(gt.atlas);pIcon.glow:SetTexCoord(0,1,0,1)
+          else
+            pIcon.glow:SetTexture(gt.texture)
+            if gt.texCoord then pIcon.glow:SetTexCoord(unpack(gt.texCoord)) else pIcon.glow:SetTexCoord(0,1,0,1) end
+          end
+          pIcon.glow:SetBlendMode(gt.blendMode or "ADD")
+          pIcon.glow:SetVertexColor(glowColor[1],glowColor[2],glowColor[3],1)
+          pIcon.glow:ClearAllPoints()
+          pIcon.glow:SetPoint("TOPLEFT",pIcon,"TOPLEFT",-glowSz,glowSz)
+          pIcon.glow:SetPoint("BOTTOMRIGHT",pIcon,"BOTTOMRIGHT",glowSz,-glowSz)
+          local pa = glowColor[4] or 1
+          pIcon.glowPulse:SetFromAlpha((gt.fromAlpha or 0.4) * pa)
+          pIcon.glowPulse:SetToAlpha((gt.toAlpha or 0.8) * pa)
+          pIcon.glowPulse:SetDuration(gt.duration or 0.8)
+          pIcon.glow:SetAlpha(0.6 * pa);pIcon.glow:Show();pIcon.glowAG:Play()
+        else
+          -- Flipbook mode
+          if gt.atlas then
+            pIcon.loopFlipTex:SetTexture(nil); pIcon.loopFlipTex:SetAtlas(gt.atlas)
+          elseif gt.texture then
+            pIcon.loopFlipTex:SetTexture(gt.texture)
+          end
+          local sc = gt.scale or 1
+          local texSz = sz * sc + glowSz * 2
+          pIcon.loopFlipTex:ClearAllPoints()
+          pIcon.loopFlipTex:SetSize(texSz, texSz)
+          pIcon.loopFlipTex:SetPoint("CENTER", pIcon, "CENTER", gt.offX or 0, gt.offY or 0)
+          pIcon.loopFlipTex:SetVertexColor(glowColor[1],glowColor[2],glowColor[3],glowColor[4] or 1)
+          pIcon.loopFlipTex:SetBlendMode("ADD")
+          pIcon.loopFlipAnim:SetFlipBookRows(gt.rows or 6)
+          pIcon.loopFlipAnim:SetFlipBookColumns(gt.columns or 5)
+          pIcon.loopFlipAnim:SetFlipBookFrames(gt.frames or 30)
+          pIcon.loopFlipAnim:SetDuration(gt.duration or 1.0)
+          pIcon.loopFlipAnim:SetFlipBookFrameWidth(gt.frameW or 0)
+          pIcon.loopFlipAnim:SetFlipBookFrameHeight(gt.frameH or 0)
+          pIcon.loopFlipTex:SetAlpha(1); pIcon.loopFlipTex:Show()
+          pIcon.loopFlipAG:Play()
+        end
       end
-      local psc = ps.scale or 1
-      local psScale = psc * (sz / 42)
-      pIcon.procStartTex:ClearAllPoints()
-      pIcon.procStartTex:SetSize(150, 150)
-      pIcon.procStartTex:SetScale(psScale)
-      pIcon.procStartTex:SetPoint("CENTER", pIcon, "CENTER", 0, 0)
-      pIcon.procStartTex:SetVertexColor(glowColor[1],glowColor[2],glowColor[3],glowColor[4] or 1)
-      pIcon.procStartTex:SetBlendMode("ADD")
-      pIcon.procStartFlip:SetFlipBookRows(ps.rows or 6)
-      pIcon.procStartFlip:SetFlipBookColumns(ps.columns or 5)
-      pIcon.procStartFlip:SetFlipBookFrames(ps.frames or 30)
-      pIcon.procStartFlip:SetDuration(ps.duration or 0.7)
-      pIcon.procStartFlip:SetFlipBookFrameWidth(ps.frameW or 0)
-      pIcon.procStartFlip:SetFlipBookFrameHeight(ps.frameH or 0)
-      pIcon.procStartTex:SetAlpha(1); pIcon.procStartTex:Show()
-      pIcon.procStartAG:Stop(); pIcon.procStartAG:Play()
+
+      -- Proc start (one-shot)
+      if ps and psIdx > 1 then
+        if ps.atlas then
+          pIcon.procStartTex:SetTexture(nil); pIcon.procStartTex:SetAtlas(ps.atlas)
+        elseif ps.texture then
+          pIcon.procStartTex:SetTexture(ps.texture)
+        end
+        local psc = ps.scale or 1
+        local psScale = psc * (sz / 42)
+        pIcon.procStartTex:ClearAllPoints()
+        pIcon.procStartTex:SetSize(150, 150)
+        pIcon.procStartTex:SetScale(psScale)
+        pIcon.procStartTex:SetPoint("CENTER", pIcon, "CENTER", 0, 0)
+        pIcon.procStartTex:SetVertexColor(glowColor[1],glowColor[2],glowColor[3],glowColor[4] or 1)
+        pIcon.procStartTex:SetBlendMode("ADD")
+        pIcon.procStartFlip:SetFlipBookRows(ps.rows or 6)
+        pIcon.procStartFlip:SetFlipBookColumns(ps.columns or 5)
+        pIcon.procStartFlip:SetFlipBookFrames(ps.frames or 30)
+        pIcon.procStartFlip:SetDuration(ps.duration or 0.7)
+        pIcon.procStartFlip:SetFlipBookFrameWidth(ps.frameW or 0)
+        pIcon.procStartFlip:SetFlipBookFrameHeight(ps.frameH or 0)
+        pIcon.procStartTex:SetAlpha(1); pIcon.procStartTex:Show()
+        pIcon.procStartAG:Stop(); pIcon.procStartAG:Play()
+      end
     end
+    container[K.refresh] = RefreshPreview
+    ctx:Add(pvFrame)
   end
-  container._refreshPreview = RefreshPreview
-  ctx:Add(pvFrame)
+  local ROT_PREVIEW  = { color = "glowColor",     size = "glowSize",     loop = "loopGlowIndex",
+                         start = "procStartIndex", spec = "useSpecGlowColor", refresh = "_refreshPreview" }
+  local PROC_PREVIEW = { color = "procGlowColor", size = "procGlowSize", loop = "procGlowLoopIndex",
+                         start = "procGlowStartIndex", spec = "procGlowUseSpecColor", refresh = "_refreshPreviewProc" }
+  BuildGlowPreview(ROT_PREVIEW)
 
   -- Build loop glow dropdown items dynamically from PB.LOOP_GLOW_TYPES
   local loopGlowItems = {}
@@ -7979,16 +8744,27 @@ function Build.PriorityBar(container)
     L["SETTINGS_PB_USE_SPEC_COLOR_TT"], W))
   BindCheckbox(cbSpecColor, "priorityBar", "useSpecGlowColor")
 
+  -- Surbrillance (Procs) : surbrillances de proc Blizzard des barres d'action (hors Assistant de rotation)
   ctx:Spacer(4)
-
-  -- Bouton reset
-  local resetBtn = SW.CreateActionBtn(container, L["SETTINGS_PB_RESET_POSITIONS"], W,
-    nil, Theme.gold, Theme.accentText)
-  resetBtn:SetScript("OnClick", function()
-    local PB = ns.Modules.PriorityBar
-    if PB and PB.ResetPositions then PB.ResetPositions(); PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end
-  end)
-  ctx:Add(resetBtn)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_GLOW_PROCS"], W))
+  BuildGlowPreview(PROC_PREVIEW)
+  local cbProcGlow = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_PROC_GLOW_ENABLE"],
+    L["SETTINGS_PB_PROC_GLOW_ENABLE_TT"], W))
+  BindCheckbox(cbProcGlow, "priorityBar", "procGlowEnabled")
+  local cbProcRole = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_PROC_GLOW_ROLE"],
+    L["SETTINGS_PB_PROC_GLOW_ROLE_TT"], W))
+  BindCheckbox(cbProcRole, "priorityBar", "procGlowRoleOnly")
+  local ddProcLoop = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_PB_LOOP_GLOW_TYPE"], loopGlowItems, W))
+  BindDropdown(ddProcLoop, "priorityBar", "procGlowLoopIndex")
+  local ddProcStartAnim = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_PB_PROC_START_ANIM"], procStartItems, W))
+  BindDropdown(ddProcStartAnim, "priorityBar", "procGlowStartIndex")
+  local colProcGlow = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_GLOW_COLOR"], W))
+  BindColorButton(colProcGlow, "priorityBar", "procGlowColor")
+  local slProcGlowSize = ctx:Add(SW.CreateSlider(container, L["SETTINGS_GLOW_SIZE"], 0, 16, 1, W))
+  BindSlider(slProcGlowSize, "priorityBar", "procGlowSize")
+  local cbProcSpec = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_PB_USE_SPEC_COLOR"],
+    L["SETTINGS_PB_USE_SPEC_COLOR_TT"], W))
+  BindCheckbox(cbProcSpec, "priorityBar", "procGlowUseSpecColor")
 
   -- Raccorder le preview
   local function WP(w)
@@ -7997,14 +8773,17 @@ function Build.PriorityBar(container)
       w.onChanged = function(val)
         orig(val)
         if container._refreshPreview then container._refreshPreview() end
+        if container._refreshPreviewProc then container._refreshPreviewProc() end
       end
     end
   end
   WP(slPBSize); WP(cbBorder); WP(ddBorderStyle); WP(slBorderSize); WP(colBorder)
   WP(ddLoopGlow); WP(ddProcStart); WP(colGlow); WP(slGlowSize); WP(cbSpecColor)
+  WP(ddProcLoop); WP(ddProcStartAnim); WP(colProcGlow); WP(slProcGlowSize); WP(cbProcSpec)
 
   C_Timer.After(0, function()
     if container._refreshPreview then container._refreshPreview() end
+    if container._refreshPreviewProc then container._refreshPreviewProc() end
   end)
 
   -- Section editeur de slots (par spec)
@@ -8687,6 +9466,8 @@ function Build.TargetAuras(container)
 
     local collapsed = TACollapsed(group)
     local header = SW.CreateSectionHeader(container, (collapsed and "+ " or "- ") .. title, W)
+    Build.taHeaders = Build.taHeaders or {}
+    Build.taHeaders[group] = header   -- cible de defilement (survol de la ligne buffs / debuffs, cf. ModuleHoverOverlay)
     local hitbox = CreateFrame("Button", nil, header)
     hitbox:SetAllPoints(header)
     hitbox:SetFrameLevel(header:GetFrameLevel() + 1)
@@ -9135,6 +9916,120 @@ function Build.Colors(container)
       -- que son point/hairline), donc la largeur disponible est réduite d'autant.
       local cols = math.max(1, math.floor((CONTENT_W - SPEC_INDENT + GAP_X) / CELL_STRIDE))
 
+      -- Grille de couleurs d'une ligne (spe ou condition) : posee dans `parent` a partir de y0, renvoie le y final
+      local function BuildGrid(parent, y0, specID)
+        local gy = y0
+        -- Grille de couleurs : rectangles + libellé (2 lignes max) en dessous,
+        -- indentée à SPEC_INDENT pour s'aligner avec l'en-tête de spé ci-dessus.
+        local col = 0
+        for _, ek in ipairs(ELEM_KEYS) do
+          local cx = SPEC_INDENT + col * CELL_STRIDE
+
+          local cell = CreateFrame("Frame", nil, parent)
+          cell:SetSize(SWATCH_W, SWATCH_H + 4 + LABEL_H)
+          cell:SetPoint("TOPLEFT", parent, "TOPLEFT", cx, -gy)
+
+          -- Swatch
+          local sw = CreateFrame("Button", nil, cell)
+          sw:SetSize(SWATCH_W, SWATCH_H)
+          sw:SetPoint("TOP", cell, "TOP", 0, 0)
+          sw:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+          local swBg = sw:CreateTexture(nil, "BACKGROUND")
+          swBg:SetAllPoints()
+          swBg:SetColorTexture(0.06, 0.06, 0.06, 1)
+
+          local swTex = sw:CreateTexture(nil, "ARTWORK")
+          swTex:SetPoint("TOPLEFT",     sw, "TOPLEFT",     1, -1)
+          swTex:SetPoint("BOTTOMRIGHT", sw, "BOTTOMRIGHT", -1, 1)
+
+          local swBorder = sw:CreateTexture(nil, "BORDER")
+          swBorder:SetPoint("TOPLEFT",     sw, "TOPLEFT",     -1,  1)
+          swBorder:SetPoint("BOTTOMRIGHT", sw, "BOTTOMRIGHT",  1, -1)
+          swBorder:SetColorTexture(unpack(ns.Theme.border))
+
+          -- Appliquer couleur initiale
+          local function RefreshSwatch()
+            local c = Colors.GetForSpec(cd.key, specID, ek)
+            swTex:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
+          end
+          RefreshSwatch()
+
+          -- Label élément, sous le rectangle, centré, 2 lignes max
+          local cellLbl = cell:CreateFontString(nil, "OVERLAY")
+          cellLbl:SetFont(ns.Media.fontGui, 8)
+          cellLbl:SetPoint("TOP", sw, "BOTTOM", 0, -4)
+          cellLbl:SetSize(SWATCH_W, LABEL_H)
+          cellLbl:SetWordWrap(true)
+          cellLbl:SetJustifyH("CENTER")
+          cellLbl:SetJustifyV("TOP")
+          cellLbl:SetTextColor(0.8, 0.8, 0.8, 1)
+          cellLbl:SetText(ELEM_LABELS[ek] or ek)
+
+          -- Clic gauche ? ColorPickerFrame
+          sw:SetScript("OnClick", function(_, btn)
+            if btn == "LeftButton" then
+              local c = Colors.GetForSpec(cd.key, specID, ek)
+              local info = {}
+              info.r          = c[1]
+              info.g          = c[2]
+              info.b          = c[3]
+              info.opacity    = c[4] or 1
+              info.hasOpacity = true
+              info.swatchFunc = function()
+                local nr, ng, nb = ColorPickerFrame:GetColorRGB()
+                local na = 1
+                if ColorPickerFrame.GetColorAlpha then
+                  na = ColorPickerFrame:GetColorAlpha()
+                end
+                swTex:SetColorTexture(nr, ng, nb, na)
+                Colors.SetOverride(cd.key, specID, ek, {nr, ng, nb, na})
+              end
+              info.opacityFunc = info.swatchFunc
+              info.cancelFunc  = function(prev)
+                if prev then
+                  local pr = prev.r or c[1]
+                  local pg = prev.g or c[2]
+                  local pb = prev.b or c[3]
+                  local pa = prev.opacity or c[4] or 1
+                  swTex:SetColorTexture(pr, pg, pb, pa)
+                  Colors.SetOverride(cd.key, specID, ek, {pr, pg, pb, pa})
+                end
+              end
+              ColorPickerFrame:SetupColorPickerAndShow(info)
+            elseif btn == "RightButton" then
+              -- Réinitialiser au dEfaut
+              Colors.ResetOverride(cd.key, specID, ek)
+              RefreshSwatch()
+            end
+          end)
+
+          sw:SetScript("OnEnter", function(self)
+            swBorder:SetColorTexture(1, 1, 1, 0.6)
+            GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
+            GameTooltip:SetText(ELEM_LABELS[ek] or ek, 1, 1, 1)
+            GameTooltip:AddLine(L["SETTINGS_TT_LEFT_CLICK_EDIT"], 0.8, 0.8, 0.8)
+            GameTooltip:AddLine(L["SETTINGS_TT_RIGHT_CLICK_RESET_DEFAULT"], 0.8, 0.8, 0.8)
+            GameTooltip:Show()
+          end)
+          sw:SetScript("OnLeave", function(self)
+            swBorder:SetColorTexture(unpack(ns.Theme.border))
+            GameTooltip:Hide()
+          end)
+
+          col = col + 1
+          if col >= cols then
+            col = 0
+            gy  = gy + ROW_STRIDE
+          end
+        end
+        -- Fin de la dernière ligne (incomplète)
+        if col > 0 then
+          gy = gy + ROW_STRIDE
+        end
+        return gy
+      end
+
       for _, spec in ipairs(cd.specs) do
         -- En-tête de spé -- même habillage point/hairline que l'en-tête de
         -- classe, juste indenté et non pliable (pas de fond plein). Couleur =
@@ -9178,118 +10073,55 @@ function Build.Colors(container)
 
         fy = fy + specHeader:GetHeight() + 6
 
-        -- Grille de couleurs : rectangles + libellé (2 lignes max) en dessous,
-        -- indentée à SPEC_INDENT pour s'aligner avec l'en-tête de spé ci-dessus.
-        local col = 0
-        for _, ek in ipairs(ELEM_KEYS) do
-          local cx = SPEC_INDENT + col * CELL_STRIDE
-
-          local cell = CreateFrame("Frame", nil, cFrame)
-          cell:SetSize(SWATCH_W, SWATCH_H + 4 + LABEL_H)
-          cell:SetPoint("TOPLEFT", cFrame, "TOPLEFT", cx, -fy)
-
-          -- Swatch
-          local sw = CreateFrame("Button", nil, cell)
-          sw:SetSize(SWATCH_W, SWATCH_H)
-          sw:SetPoint("TOP", cell, "TOP", 0, 0)
-          sw:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-
-          local swBg = sw:CreateTexture(nil, "BACKGROUND")
-          swBg:SetAllPoints()
-          swBg:SetColorTexture(0.06, 0.06, 0.06, 1)
-
-          local swTex = sw:CreateTexture(nil, "ARTWORK")
-          swTex:SetPoint("TOPLEFT",     sw, "TOPLEFT",     1, -1)
-          swTex:SetPoint("BOTTOMRIGHT", sw, "BOTTOMRIGHT", -1, 1)
-
-          local swBorder = sw:CreateTexture(nil, "BORDER")
-          swBorder:SetPoint("TOPLEFT",     sw, "TOPLEFT",     -1,  1)
-          swBorder:SetPoint("BOTTOMRIGHT", sw, "BOTTOMRIGHT",  1, -1)
-          swBorder:SetColorTexture(unpack(ns.Theme.border))
-
-          -- Appliquer couleur initiale
-          local function RefreshSwatch()
-            local c = Colors.GetForSpec(cd.key, spec.id, ek)
-            swTex:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
-          end
-          RefreshSwatch()
-
-          -- Label élément, sous le rectangle, centré, 2 lignes max
-          local cellLbl = cell:CreateFontString(nil, "OVERLAY")
-          cellLbl:SetFont(ns.Media.fontGui, 8)
-          cellLbl:SetPoint("TOP", sw, "BOTTOM", 0, -4)
-          cellLbl:SetSize(SWATCH_W, LABEL_H)
-          cellLbl:SetWordWrap(true)
-          cellLbl:SetJustifyH("CENTER")
-          cellLbl:SetJustifyV("TOP")
-          cellLbl:SetTextColor(0.8, 0.8, 0.8, 1)
-          cellLbl:SetText(ELEM_LABELS[ek] or ek)
-
-          -- Clic gauche ? ColorPickerFrame
-          sw:SetScript("OnClick", function(_, btn)
-            if btn == "LeftButton" then
-              local c = Colors.GetForSpec(cd.key, spec.id, ek)
-              local info = {}
-              info.r          = c[1]
-              info.g          = c[2]
-              info.b          = c[3]
-              info.opacity    = c[4] or 1
-              info.hasOpacity = true
-              info.swatchFunc = function()
-                local nr, ng, nb = ColorPickerFrame:GetColorRGB()
-                local na = 1
-                if ColorPickerFrame.GetColorAlpha then
-                  na = ColorPickerFrame:GetColorAlpha()
-                end
-                swTex:SetColorTexture(nr, ng, nb, na)
-                Colors.SetOverride(cd.key, spec.id, ek, {nr, ng, nb, na})
-              end
-              info.opacityFunc = info.swatchFunc
-              info.cancelFunc  = function(prev)
-                if prev then
-                  local pr = prev.r or c[1]
-                  local pg = prev.g or c[2]
-                  local pb = prev.b or c[3]
-                  local pa = prev.opacity or c[4] or 1
-                  swTex:SetColorTexture(pr, pg, pb, pa)
-                  Colors.SetOverride(cd.key, spec.id, ek, {pr, pg, pb, pa})
-                end
-              end
-              ColorPickerFrame:SetupColorPickerAndShow(info)
-            elseif btn == "RightButton" then
-              -- Réinitialiser au dEfaut
-              Colors.ResetOverride(cd.key, spec.id, ek)
-              RefreshSwatch()
-            end
-          end)
-
-          sw:SetScript("OnEnter", function(self)
-            swBorder:SetColorTexture(1, 1, 1, 0.6)
-            GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
-            GameTooltip:SetText(ELEM_LABELS[ek] or ek, 1, 1, 1)
-            GameTooltip:AddLine(L["SETTINGS_TT_LEFT_CLICK_EDIT"], 0.8, 0.8, 0.8)
-            GameTooltip:AddLine(L["SETTINGS_TT_RIGHT_CLICK_RESET_DEFAULT"], 0.8, 0.8, 0.8)
-            GameTooltip:Show()
-          end)
-          sw:SetScript("OnLeave", function(self)
-            swBorder:SetColorTexture(unpack(ns.Theme.border))
-            GameTooltip:Hide()
-          end)
-
-          col = col + 1
-          if col >= cols then
-            col = 0
-            fy  = fy + ROW_STRIDE
-          end
-        end
-        -- Fin de la dernière ligne (incomplète)
-        if col > 0 then
-          fy = fy + ROW_STRIDE
-        end
+        fy = BuildGrid(cFrame, fy, spec.id)
         fy = fy + SPEC_GAP
       end
 
-      cFrame:SetHeight(fy)
+      -- Conditions (Furtivite...) : une ligne par condition, avec sa case a cocher. Decochee : grisee et repliee
+      -- (plus de selecteurs). Le contenu de la ligne est reconstruit a chaque bascule, la classe reste dans son etat.
+      if cd.conditions then
+        local condTop = fy
+        sec.condFrames = sec.condFrames or {}
+        local BuildConditions
+        BuildConditions = function()
+          for _, f in ipairs(sec.condFrames) do f:Hide(); f:SetParent(nil) end
+          wipe(sec.condFrames)
+          local cy = condTop
+          for _, cond in ipairs(cd.conditions) do
+            local on = Colors.IsConditionEnabled(cd.key, cond.id)
+            local blk = CreateFrame("Frame", nil, cFrame)
+            blk:SetWidth(CONTENT_W)
+            blk:SetPoint("TOPLEFT", cFrame, "TOPLEFT", 0, -cy)
+            sec.condFrames[#sec.condFrames + 1] = blk
+            local hdrColor = on and (Colors.GetForSpec(cd.key, cond.id, "powercircle") or fc) or { 0.45, 0.45, 0.45, 1 }
+            local CB_W = 30
+            local hdr = SW.CreateSectionHeader(blk, cond.name, CONTENT_W - SPEC_INDENT - CB_W, hdrColor)
+            hdr:SetPoint("TOPLEFT", blk, "TOPLEFT", SPEC_INDENT + CB_W, 0)
+            local cb = SW.CreateCheckbox(blk, "", nil, CB_W)
+            cb:SetPoint("TOPLEFT", blk, "TOPLEFT", SPEC_INDENT, 0)
+            cb:SetChecked(on)
+            cb.onChanged = function(val)
+              Colors.SetConditionEnabled(cd.key, cond.id, val)
+              BuildConditions()
+              local frames = {}
+              for _, s2 in ipairs(classSections) do
+                frames[#frames + 1] = s2.headerBtn
+                frames[#frames + 1] = s2.contentFrame
+              end
+              SW.AnimateLayout("colorsLayout", frames, RebuildLayout)
+            end
+            local by = hdr:GetHeight() + 6
+            if on then by = BuildGrid(blk, by, cond.id) end
+            by = by + SPEC_GAP
+            blk:SetHeight(by)
+            cy = cy + by
+          end
+          cFrame:SetHeight(cy)
+        end
+        BuildConditions()
+      else
+        cFrame:SetHeight(fy)
+      end
       sec.built = true
     end
 
@@ -10457,6 +11289,26 @@ end
 -- SetScripts définis plus bas (SelectCategory, OnSizeChanged, etc.).
 local categoryContainers = {}
 local activeCategory     = nil
+
+-- Apercu du cercle Bien Nourri : cycle repas -> buff sur la page des cercles hors combat, fige sur l'etat selectionne
+-- dans Animations 3D (section Bien Nourri), eteint partout ailleurs. Memorise le dernier etat applique (Build._wfSig).
+function Build.UpdateWellFedGui()
+  local WF = ns.Modules.WellFedCircle
+  if not WF then return end
+  local want, forced = false, nil
+  if MainFrame:IsShown() then
+    if activeCategory == "outOfCombat" then
+      want = true
+    elseif activeCategory == "spellEffects" and seActiveSection == "wellFed" then
+      want, forced = true, seSelectedTriggerKey or "eating"
+    end
+  end
+  local sig = want and (forced or "cycle") or "off"
+  if Build._wfSig == sig then return end
+  Build._wfSig = sig
+  WF.SetPreview(want, forced)
+  WF.SetDraggable(want and activeCategory == "outOfCombat")
+end
 -- Définition de _invalidateCategory (forward-déclarée plus haut pour Build.ResourceCircle etc.)
 _invalidateCategory = function(catId)
   if not categoryContainers or not categoryContainers[catId] then return end
@@ -11063,6 +11915,15 @@ end
 function Build.ExtraBars(container)
   if ns.BuildExtraBarsPage then ns.BuildExtraBarsPage(container, CONTENT_W, NewLayout) end
 end
+-- Barre de menu : page dans UI/MenuBarPage.lua (hors du chunk principal), apercu epingle en haut
+-- Patch Notes : page dans UI/PatchNotesPage.lua (donnees Data/PatchNotes.lua)
+function Build.PatchNotes(container)
+  if ns.BuildPatchNotesPage then ns.BuildPatchNotesPage(container, CONTENT_W, NewLayout) end
+end
+
+function Build.MenuBar(container)
+  if ns.BuildMenuBarPage then ns.BuildMenuBarPage(container, CONTENT_W, NewLayout) end
+end
 -- Gestionnaire de temps de recharge : page dans UI/CDMLayoutPage.lua (hors du chunk principal)
 function Build.CDMLayout(container)
   if ns.BuildCDMLayoutPage then ns.BuildCDMLayoutPage(container, CONTENT_W) end
@@ -11113,7 +11974,8 @@ Build.MODULE_PAGE = {
   animOoc = "spellEffects", animSpells = "spellEffects", animAuras = "spellEffects",
   animMissing = "spellEffects", animLogos = "spellEffects", orbs = "spellEffects",
   aurasTracking = "aurasTracked",
-  healthCircle = "outOfCombat", outOfCombatResourceCircle = "outOfCombat",
+  healthCircle = "outOfCombat", outOfCombatResourceCircle = "outOfCombat", wellFedCircle = "outOfCombat",
+  animWellFed = "spellEffects",
 }
 
 -- Entrée "barre d'unité" : délègue à UBGet/UBSet (unitBars.bars.<barKey>.enabled),
@@ -11216,11 +12078,11 @@ local MODULE_CATEGORIES = {
     modules = {
       ModEntry("healthCircle",              L["SETTINGS_MOD_HEALTH_CIRCLE"], "healthCircle",              "enabled"),
       ModEntry("outOfCombatResourceCircle", L["SETTINGS_SEC_OCRC"],          "outOfCombatResourceCircle", "enabled"),
+      ModEntry("wellFedCircle",             L["SETTINGS_SEC_WELLFED"],       "wellFedCircle",             "enabled"),
       ModEntry("xpBar",     L["SETTINGS_CAT_XP_BAR"],    "xpBar",     "enabled"),
       ModEntry("skyriding", L["SETTINGS_CAT_SKYRIDING"], "skyriding", "enabled"),
-      ModEntry("location",  L["SETTINGS_CAT_LOCATION"],  "location",  "enabled", L["SETTINGS_LOC_ENABLE_TT"]),
       ModEntry("extraBars", L["SETTINGS_CAT_EXTRA_BARS"], "extraBars", "enabled", L["SETTINGS_CAT_EXTRA_BARS_TT"]),
-      ModEntry("afkMode",   L["SETTINGS_CAT_AFK_MODE"],  "afkMode",   "enabled"),
+      ModEntry("stealthMode", L["SETTINGS_CAT_STEALTH_MODE"], "stealthMode", "enabled"),
       ModEntry("characterArmory", L["SETTINGS_CAT_CHARACTER_ARMORY"], "characterArmory", "enabled"),
     },
   },
@@ -11233,6 +12095,7 @@ local MODULE_CATEGORIES = {
       ModEntry("animAuras",   L["SETTINGS_MOD_ANIM_AURAS"],   "spellEffects", "aurasEnabled"),
       ModEntry("animMissing", L["SETTINGS_MOD_ANIM_MISSING"], "spellEffects", "missingBuffsEnabled"),
       ModEntry("animLogos",   L["SETTINGS_MOD_ANIM_LOGOS"],   "spellEffects", "logosEnabled"),
+      ModEntry("animWellFed", L["SETTINGS_SEC_WELLFED"],      "spellEffects", "wellFedEnabled"),
       ModEntry("orbs",        L["SETTINGS_MOD_ANIM_ORBS"],    "spellEffects", "orbsEnabled", L["SETTINGS_MOD_ORBS_TT"]),
     },
   },
@@ -11255,6 +12118,14 @@ local MODULE_CATEGORIES = {
           InvalidateOwnPage("aurasMissingBuffs")
         end,
       },
+    },
+  },
+  {
+    key = "extras", label = L["SETTINGS_GROUP_COMFORT"],
+    modules = {
+      ModEntry("location",    L["SETTINGS_CAT_LOCATION"],     "location",    "enabled", L["SETTINGS_LOC_ENABLE_TT"]),
+      ModEntry("afkMode",     L["SETTINGS_CAT_AFK_MODE"],     "afkMode",     "enabled"),
+      ModEntry("menuBar",     L["SETTINGS_CAT_MENU_BAR"],     "menuBar",     "enabled"),
     },
   },
 }
@@ -11360,8 +12231,14 @@ local function MakeModuleRow(container, entry, indent, width)
       Paint(v)
     end)
   end
-  cb:HookScript("OnEnter", function() HoverTo(1) end)
-  cb:HookScript("OnLeave", function() HoverTo(0) end)
+  cb:HookScript("OnEnter", function()
+    HoverTo(1)
+    if ns.ModuleHoverFocus then ns.ModuleHoverFocus(entry.id) end   -- son cadre brille a l'ecran
+  end)
+  cb:HookScript("OnLeave", function()
+    HoverTo(0)
+    if ns.ModuleHoverFocus then ns.ModuleHoverFocus(nil) end
+  end)
   return cb
 end
 
@@ -11488,9 +12365,9 @@ function Build.CategoryColumn(container, catKeys, x, colW, yOffset)
   return y
 end
 
--- 3 colonnes : Cadres d'unités / Combat + Animations 3D / le reste (Monde, Auras & Procs, Divers).
+-- 3 colonnes : Cadres d'unités + Extras / Combat + Animations 3D / le reste (Monde, Auras & Procs, Divers).
 local MOD_COLUMNS = {
-  { "unitFrames" },
+  { "unitFrames", "extras" },
   { "combat", "animations" },
   { "world", "auras", "misc" },
 }
@@ -12202,6 +13079,8 @@ function Build.ComfortQoL(container)
   BindSlider(slMer, "comfort", "merchantPages")
   local cbHor = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_HORIZON"], L["SETTINGS_COMFORT_HORIZON_TT"], W))
   BindCheckbox(cbHor, "comfort", "horizonOffWithRXP")
+  local cbMmTrack = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_MINIMAP_TRACKING"], L["SETTINGS_COMFORT_MINIMAP_TRACKING_TT"], W))
+  BindCheckbox(cbMmTrack, "comfort", "minimapTracking")
 
   -- spellID dans l'infobulle des auras : case + touche requise sur la meme ligne
   local halfW = math.floor((W - 8) / 2)
@@ -12216,9 +13095,69 @@ function Build.ComfortQoL(container)
   BindDropdown(ddMod, "comfort", "spellIDModifier")
   ctx:AddRowCentered(8, cbSid, ddMod)
 
+  -- Herbes et minerais sur la minimap (si le client sait sonder la minimap)
+  local MMN = ns.Modules and ns.Modules.MinimapNodes
+  if MMN and MMN.Available and MMN.Available() then
+    ctx:Spacer(6)
+    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_MMN_TITLE"], W))
+    local cbMmn = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_MMN_ENABLE"], L["SETTINGS_MMN_ENABLE_TT"], W))
+    BindCheckbox(cbMmn, "minimapNodes", "enabled")
+    local mmnStyles = {}
+    for _, st in ipairs(MMN.STYLES) do
+      mmnStyles[#mmnStyles + 1] = { value = st.id, text = L["SETTINGS_MMN_STYLE_" .. st.id:upper()] }
+    end
+    local ddMmn = SW.CreateDropdown(container, L["SETTINGS_MMN_STYLE"], mmnStyles, halfW)
+    BindDropdown(ddMmn, "minimapNodes", "style")
+    local slMmn = SW.CreateSlider(container, L["SETTINGS_MMN_SIZE"], 8, 28, 1, halfW)
+    BindSlider(slMmn, "minimapNodes", "size")
+    ctx:AddRow(8, ddMmn, slMmn)
+    local slDots = SW.CreateSlider(container, L["SETTINGS_MMN_DOTS"], 10, 100, 5, halfW)
+    BindSlider(slDots, "minimapNodes", "dotScale")
+    local slFrame = SW.CreateSlider(container, L["SETTINGS_MMN_FRAME_SCALE"], 50, 200, 5, halfW)
+    BindSlider(slFrame, "minimapNodes", "frameScale")
+    ctx:AddRow(8, slDots, slFrame)
+  end
+
   -- Curseur en combat (ex-page a part)
   ctx:Spacer(6)
   Build.BigCursorSection(ctx, container, W)
+  ctx:Finalize()
+  return ctx.widgets
+end
+
+-- BUILD : Mode furtif (EXTRAS) -- vignettage qui assombrit l'ecran en furtivite, cf. Modules/StealthMode.lua.
+-- L'apercu est actif tant que la page est ouverte (cf. SelectCategory).
+function Build.StealthMode(container)
+  local ctx = NewLayout(container)
+  local W = CONTENT_W
+  local SL3 = math.floor((W - 16) / 3)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_STEALTH_MODE"], W))
+
+  local cbEn = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_STEALTH_ENABLE"], L["SETTINGS_STEALTH_ENABLE_TT"], W))
+  BindCheckbox(cbEn, "stealthMode", "enabled")
+  local cbNoCombat = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_STEALTH_NO_COMBAT"], L["SETTINGS_STEALTH_NO_COMBAT_TT"], W))
+  BindCheckbox(cbNoCombat, "stealthMode", "disableInCombat")
+
+  ctx:Spacer(4)
+  local slDark = SW.CreateSlider(container, L["SETTINGS_STEALTH_DARKNESS"], 0, 1, 0.05, SL3)
+  BindSlider(slDark, "stealthMode", "darkness")
+  local slSize = SW.CreateSlider(container, L["SETTINGS_STEALTH_SIZE"], 0.3, 3, 0.05, SL3)
+  BindSlider(slSize, "stealthMode", "size")
+  local slRatio = SW.CreateSlider(container, L["SETTINGS_STEALTH_RATIO"], 0.3, 2, 0.05, SL3)
+  BindSlider(slRatio, "stealthMode", "ratio")
+  ctx:AddRow(8, slDark, slSize, slRatio)
+
+  local slFeather = SW.CreateSlider(container, L["SETTINGS_STEALTH_FEATHER"], 1, 5, 1, SL3)
+  BindSlider(slFeather, "stealthMode", "feather")
+  local slIn = SW.CreateSlider(container, L["SETTINGS_STEALTH_FADE_IN"], 0.1, 3, 0.1, SL3)
+  BindSlider(slIn, "stealthMode", "fadeIn")
+  local slOut = SW.CreateSlider(container, L["SETTINGS_STEALTH_FADE_OUT"], 0.1, 3, 0.1, SL3)
+  BindSlider(slOut, "stealthMode", "fadeOut")
+  ctx:AddRow(8, slFeather, slIn, slOut)
+
+  local colStealth = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_STEALTH_COLOR"], SL3))
+  BindColorButton(colStealth, "stealthMode", "color")
+
   ctx:Finalize()
   return ctx.widgets
 end
@@ -12568,6 +13507,12 @@ local CATEGORIES = {
     build = Build.HeroicSupport,
   },
   {
+    id    = "patchNotes",
+    label = L["SETTINGS_CAT_PATCH_NOTES"],
+    icon  = "Interface\\Icons\\INV_Misc_Note_01",
+    build = Build.PatchNotes,
+  },
+  {
     id    = "castBar",
     label = L["SETTINGS_SEC_CAST_BAR"],
     icon  = "Interface\\Icons\\spell_holy_borrowedtime",
@@ -12670,6 +13615,18 @@ local CATEGORIES = {
     build = Build.Colors,
   },
   {
+    id    = "stealthMode",
+    label = L["SETTINGS_CAT_STEALTH_MODE"],
+    icon  = "Interface\\Icons\\Ability_Stealth",
+    build = Build.StealthMode,
+  },
+  {
+    id    = "menuBar",
+    label = L["SETTINGS_CAT_MENU_BAR"],
+    icon  = "Interface\\Icons\\INV_Misc_Book_09",
+    build = Build.MenuBar,
+  },
+  {
     id    = "visibility",
     label = L["SETTINGS_CAT_VISIBILITY"],
     icon  = "Interface\\Icons\\inv_misc_eye_01",
@@ -12761,14 +13718,14 @@ ns.PruneUnavailable(CATEGORIES)
 
 -- Groupes de la sidebar (style AishUI : headers parchemin + sections cliquables)
 local SIDEBAR_GROUPS = {
-  { label = L["SETTINGS_GROUP_GLOBAL"],      ids = { "modulesOverview", "colors", "profiles", "heroicSupport" } },
+  { label = L["SETTINGS_GROUP_GLOBAL"],      ids = { "modulesOverview", "colors", "profiles", "heroicSupport", "patchNotes" } },
   { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "castBar", "targetCastBar", "topTargetBar", "targetAuras" } },
   { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "rotationHelper", "cdmEssential", "cdmUtility", "cdmLayout" } },
-  { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "xpBar", "skyriding", "location", "extraBars", "afkMode", "characterArmory" } },
+  { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "xpBar", "skyriding", "extraBars", "stealthMode", "characterArmory" } },
   { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasMissingBuffs" } },
   -- Groupes sans sous-section : le clic sur le header ouvre directement la page (single)
   { label = L["SETTINGS_GROUP_ANIMATIONS"],  ids = { "spellEffects" }, single = true },
-  { label = L["SETTINGS_GROUP_COMFORT"],     ids = { "visibility", "comfortRender", "comfortQoL" } },
+  { label = L["SETTINGS_GROUP_COMFORT"],     ids = { "visibility", "comfortRender", "comfortQoL", "location", "afkMode", "menuBar" } },
 }
 for _, grp in ipairs(SIDEBAR_GROUPS) do ns.PruneUnavailable(grp.ids) end
 
@@ -13336,6 +14293,17 @@ function MainFrame:SelectCategory(catId)
     return
   end
   activeCategory = catId
+  C_Timer.After(0, Build.UpdateWellFedGui)
+
+  -- Mode furtif : apercu de l'assombrissement tant que sa page est ouverte
+  if prevCat == "stealthMode" and catId ~= "stealthMode" then
+    local SMo = ns.Modules.StealthMode
+    if SMo and SMo.SetPreview then SMo.SetPreview(false) end
+  end
+  if catId == "stealthMode" then
+    local SMo = ns.Modules.StealthMode
+    if SMo and SMo.SetPreview then SMo.SetPreview(true) end
+  end
 
   -- Quitter une section "Auras & Procs" ? réafficher le cercle de vie +
   -- OutOfCombatResourceCircle tout de suite (nécessaire même si on va vers
@@ -13536,6 +14504,18 @@ function MainFrame:SelectCategory(catId)
     end)
   end
 
+  -- Cercles hors combat : barres de vie (cadres d'unites) et barre de cible masquees le temps du reglage, elles
+  -- genent. Differe d'une frame (frames potentiellement securisees) et APRES les blocs ci-dessus, dont les
+  -- sorties differees relevent aussi le masquage. Vers Animations 3D / Mode AFK, leur propre bloc garde la main.
+  if catId == "outOfCombat" or (prevCat == "outOfCombat" and catId ~= "spellEffects" and catId ~= "afkMode") then
+    local hide = (catId == "outOfCombat")
+    C_Timer.After(0, function()
+      local UB, TTB = ns.Modules.UnitBars, ns.Modules.TopTargetBar
+      if UB  and UB.SetGuiHidden  then UB.SetGuiHidden(hide)  end
+      if TTB and TTB.SetGuiHidden then TTB.SetGuiHidden(hide) end
+    end)
+  end
+
   for cid, btn in pairs(categoryButtons) do
     btn:UpdateSelected(cid == catId)
   end
@@ -13592,6 +14572,51 @@ function MainFrame:OpenSection(catId, label)
       return
     end
   end
+end
+
+-- Fait defiler le panneau jusqu'a un widget de la page affichee (en haut de la zone visible)
+function MainFrame:ScrollToWidget(w)
+  if not (w and w.GetTop) then return end
+  local wt, ct = w:GetTop(), content:GetTop()
+  if not (wt and ct) then return end
+  local range = scrollFrame:GetVerticalScrollRange() or 0
+  scrollFrame:SetVerticalScroll(math.max(0, math.min(range, ct - wt - 4)))
+end
+
+-- Ouvre une page, deplie la section `section` (libelle tel qu'affiche, cf. OpenSection) et, si fourni, fait
+-- defiler jusqu'au widget renvoye par scrollTo(). Utilise par le survol des modules (ModuleHoverOverlay).
+-- Les delais laissent a une page reconstruite (invalidee juste avant) le temps de l'etre.
+function MainFrame:GoToElement(catId, section, scrollTo)
+  if not self:IsShown() then self:ShowUI() end
+  self:SelectCategory(catId)
+  C_Timer.After(0.05, function()
+    if section then self:OpenSection(catId, section) end
+    if scrollTo then
+      C_Timer.After(0.1, function()
+        local w = scrollTo()
+        if w then self:ScrollToWidget(w) end
+      end)
+    end
+  end)
+end
+
+function MainFrame:GetActiveCategory()
+  return activeCategory
+end
+
+-- Libelle d'une page des reglages (nom affiche au survol des modules)
+function ns.SettingsCategoryLabel(catId)
+  for _, c in ipairs(CATEGORIES) do
+    if c.id == catId then return c.label end
+  end
+end
+
+function ns.GetTargetAurasSettingsHeader(group)
+  return Build.taHeaders and Build.taHeaders[group]
+end
+
+function ns.GetUnitBarSettingsHeader(barKey)
+  return Build.ubHeaders and Build.ubHeaders[barKey]
 end
 
 -- Clic droit sur un module (page Modules) : ouvre ses reglages
@@ -13717,9 +14742,17 @@ MainFrame:SetScript("OnShow", function(self)
   if not initialized then
     initialized = true
     BuildSidebar()
-    self:SelectCategory(CATEGORIES[1].id)
+    -- Premiere ouverture de la session : les Patch Notes (repli sur la 1re page si absente)
+    local startId = CATEGORIES[1].id
+    for _, c in ipairs(CATEGORIES) do
+      if c.id == "patchNotes" then startId = c.id; break end
+    end
+    self:SelectCategory(startId)
   end
   self:RefreshValues()
+
+  Build._wfSig = nil
+  C_Timer.After(0.1, Build.UpdateWellFedGui)   -- apres les autres previews (cf. fin de SelectCategory)
 
   local RC   = ns.Modules.ResourceCircle
   local HC   = ns.Modules.HealthCircle
@@ -13816,6 +14849,17 @@ MainFrame:SetScript("OnShow", function(self)
   if RH   and RH.SetPreview     then RH.SetPreview(true)     end
   local TA  = ns.Modules.TargetAuras
   if TA   and TA.SetPreview     then TA.SetPreview(true)     end
+  if activeCategory == "stealthMode" then
+    local SMo = ns.Modules.StealthMode
+    if SMo and SMo.SetPreview then SMo.SetPreview(true) end
+  end
+  -- Panneau rouvert directement sur les cercles hors combat : meme masquage que dans SelectCategory
+  if activeCategory == "outOfCombat" then
+    C_Timer.After(0, function()
+      if UB  and UB.SetGuiHidden  then UB.SetGuiHidden(true)  end
+      if TTB and TTB.SetGuiHidden then TTB.SetGuiHidden(true) end
+    end)
+  end
 end)
 
 MainFrame:SetScript("OnHide", function(self)
@@ -13842,6 +14886,11 @@ MainFrame:SetScript("OnHide", function(self)
   local UB   = ns.Modules.UnitBars
   local TTB  = ns.Modules.TopTargetBar
   local RH   = ns.Modules.RotationHelper
+  Build._wfSig = "off"
+  do
+    local WF = ns.Modules.WellFedCircle
+    if WF then WF.SetDraggable(false); WF.SetPreview(false) end
+  end
   if RH   and RH.EnableDrag      then RH.EnableDrag(false)      end
   if RC   and RC.SetDraggable    then RC.SetDraggable(false)    end
   if HC   and HC.SetDraggable    then HC.SetDraggable(false)    end
@@ -13864,6 +14913,8 @@ MainFrame:SetScript("OnHide", function(self)
   if TCB  and TCB.SetDragUnlocked then TCB.SetDragUnlocked(false) end
   local LOC = ns.Modules.Location
   if LOC  and LOC.SetDragUnlocked then LOC.SetDragUnlocked(false) end
+  local MBR = ns.Modules.MenuBar
+  if MBR  and MBR.SetDragUnlocked then MBR.SetDragUnlocked(false) end
   if SR   and SR.SetLayoutMode   then SR.SetLayoutMode(false)   end
   if SR   and SR.SetPreview      then SR.SetPreview(false)      end
   if RH   and RH.SetPreview      then RH.SetPreview(false)      end
@@ -13873,6 +14924,8 @@ MainFrame:SetScript("OnHide", function(self)
   if TA   and TA.SetPreview      then TA.SetPreview(false)      end
   local AM  = ns.Modules.AFKMode
   if AM   and AM.SetPreview      then AM.SetPreview(false)      end
+  local SMd = ns.Modules.StealthMode
+  if SMd  and SMd.SetPreview     then SMd.SetPreview(false)     end
   -- Buffs manquants : meme filet de securite -- SetPreview(true) est lance a
   -- l'entree de la categorie "aurasMissingBuffs" (cf. bloc SelectCategory
   -- plus haut) mais son pendant SetPreview(false) n'est appele QUE sur un

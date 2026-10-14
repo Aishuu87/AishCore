@@ -24,93 +24,118 @@ local secDotType        = nil
 -- Force-masquage GUI (meme pattern que PriorityBar/UnitBars/TopTargetBar.SetGuiHidden) : masquage inconditionnel depuis le panneau de reglages
 local ocrcHiddenForGui  = false
 
--- Ratio hauteur restante de circle_piecrop.tga (déjà croppée) : texture = arcPx x arcPx*ARC_CROP_H, ancrage TOP
-local ARC_CROP_H = 0.88
+-- Arc en rendu radial natif (StatusBar:SetRenderMode(Radial)) sur un disque plein : meme systeme que ResourceCircle.lua.
 
--- Remplissage radial (meme systeme que ResourceCircle.lua) : arc 280°, 1 quartier par %, bascule via cfg.radialFillTest
-local RADIAL_FRAG_COUNT = 100
-local RADIAL_ARC_SPAN_DEG  = 280
-local RADIAL_ARC_START_DEG = 220
-
--- Geometrie des quartiers radiaux (RadialWedge), en fraction du RAYON de l'arc. L'oversize
--- les fait se chevaucher (anti-aliasing) : leur bord reellement peint depasse donc le rayon
--- nominal, ce dont depend VERTICAL_OVERLAY_OFFSET ci-dessous.
-local RADIAL_FRAG_INNER    = 0.05
-local RADIAL_FRAG_OUTER    = 0.98
-local RADIAL_FRAG_OVERSIZE = 1.2
-
--- Rayon exterieur reellement peint par les quartiers, exprime en fraction du DIAMETRE de
--- l'arc (~0.5365). L'arc vertical, lui, s'arrete pile au rayon nominal (0.5).
-local RADIAL_OUTER_R = ((RADIAL_FRAG_INNER + RADIAL_FRAG_OUTER) / 2
-                        + (RADIAL_FRAG_OUTER - RADIAL_FRAG_INNER) * RADIAL_FRAG_OVERSIZE / 2) / 2
-
--- Les deux visualisations ne peignent donc pas jusqu'au meme rayon : a reglage d'epaisseur
--- identique, l'anneau radial est plus epais que le vertical de (RADIAL_OUTER_R - 0.5) en
--- rayon. On retranche le double au ratio d'overlay en vertical, pour que le meme cran de
--- slider donne la MEME epaisseur visible dans les deux modes -- sinon, passer de l'un a
--- l'autre donne l'impression d'un bug (l'arc vertical devient un filet, voire disparait).
-local VERTICAL_OVERLAY_OFFSET = 2 * (RADIAL_OUTER_R - 0.5)
-
--- Taille du masque central, dans le mode d'affichage courant. Le clamp a 0.99 garde un
--- anneau visible en vertical : le slider d'epaisseur du cercle central monte jusqu'a 1.2,
--- borne prevue pour le radial et son bord debordant.
-local function OverlayPx(cfg, arcPx)
-  local ratio = cfg.overlayRatio or 0.75
-  if not cfg.radialFillTest then
-    ratio = math.min(ratio - VERTICAL_OVERLAY_OFFSET, 0.99)
-  end
-  return arcPx * math.max(0, ratio)
-end
-
-local function LayoutRadialFrags()
-  if not bar or not bar.radialFrags then return end
+-- Migration unique des anciens profils : "overlayRatio" (taille du trou) devient "arcThickness" (epaisseur de l'anneau,
+-- fraction du diametre de l'arc), comme sur le cercle principal. Le rendu des profils existants est conserve.
+function OutOfCombatResourceCircle.EnsureArcSettings()
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
-  local arcPx = cfg.size * (cfg.arcSizeRatio or 1.0)
-  local fragInnerR = (arcPx / 2) * RADIAL_FRAG_INNER
-  local fragOuterR = (arcPx / 2) * RADIAL_FRAG_OUTER
-  local fragMidR   = (fragInnerR + fragOuterR) / 2
-  local fragSize   = (fragOuterR - fragInnerR) * RADIAL_FRAG_OVERSIZE
-  for k = 0, RADIAL_FRAG_COUNT - 1 do
-    local frag = bar.radialFrags[k + 1]
-    if frag then
-      frag:SetSize(fragSize, fragSize)
-      local angleDeg = RADIAL_ARC_START_DEG + (k * RADIAL_ARC_SPAN_DEG / RADIAL_FRAG_COUNT)
-      local angle = angleDeg * math.pi / 180
-      local fx = fragMidR * math.sin(angle)
-      local fy = fragMidR * math.cos(angle)
-      frag:ClearAllPoints()
-      frag:SetPoint("CENTER", bar, "CENTER", fx, fy)
-      local tex = frag:GetStatusBarTexture()
-      if tex then tex:SetRotation(-angle) end
+  if not cfg then return cfg end
+  if not cfg.arcGeomV2 then
+    cfg.arcThickness = math.max(0.01, math.min(1, 1.073 - (cfg.overlayRatio or 0.75)))
+    cfg.arcGeomV2 = true
+  end
+  return cfg
+end
+
+-- Masque central qui creuse l'anneau : trou = 1 - epaisseur (en fraction du diametre de l'arc).
+local function OverlayPx(cfg, arcPx)
+  local hole = 1 - (cfg.arcThickness or 0.32)
+  return arcPx * math.max(0, math.min(hole, 0.995))
+end
+
+-- SetMinMaxValues est enveloppe : le maximum est agrandi de 360/etendue pour que 0-100 % ne parcoure que l'arc
+-- (etendue < 360).
+local function SetupRadialArc(sb)
+  ns.SetSmoothStatusBarTexture(sb, ns.Media.circle)
+  sb:SetRenderMode(Enum.StatusBarRenderMode.Radial)
+  local raw = sb.SetMinMaxValues
+  sb._k = 1
+  sb.SetMinMaxValues = function(self, lo, hi)
+    self._ulo, self._uhi = lo, hi
+    local k, scaled = self._k or 1, hi
+    if k ~= 1 then
+      local ok, v = pcall(function() return hi * k end)
+      if ok then scaled = v end
     end
+    raw(self, lo, scaled)
   end
 end
 
--- Bascule vertical/radial : montre l'élément actif, cache l'autre depuis un état propre (alpha/scale à 1).
-function OutOfCombatResourceCircle.ApplyRadialMode()
+-- Angles (degres, horaire, 0 = midi) : depart et fin de l'arc ; SetReverseFill inverse le sens du remplissage.
+local function SetArcAngle(sb, startDeg, endDeg, reverse)
+  if not sb then return end
+  local a0, a1 = tonumber(startDeg) or 220, tonumber(endDeg) or 140
+  local span = (a1 - a0) % 360
+  if span < 1 then span = 360 end
+  -- Rendu radial : le sens antihoraire se regle sur la texture geree (SetRadialProgressBarReverse, 12.1) ;
+  -- StatusBar:SetReverseFill ne joue que sur l'axe lineaire. Repli sur ce dernier si l'API est absente.
+  local tex = sb:GetStatusBarTexture()
+  if tex and tex.SetRadialProgressBarReverse then
+    sb:SetReverseFill(false)
+    tex:SetRadialProgressBarReverse(reverse and true or false)
+  else
+    sb:SetReverseFill(reverse and true or false)
+  end
+  if tex then tex:SetRotation(-math.rad(reverse and a1 or a0)) end
+  local k = 360 / span
+  if sb._k ~= k then
+    sb._k = k
+    pcall(sb.SetMinMaxValues, sb, sb._ulo or 0, sb._uhi or 100)
+  end
+end
+
+-- Remplissage (cfg.arcFillMode) : "cw" / "ccw" (sens horaire / antihoraire), "mirror_out" (du milieu de l'arc vers
+-- les extremites), "mirror_in" (des extremites vers le milieu), "vertical" (de bas en haut, ancien rendu).
+-- Les miroirs utilisent deux arcs natifs, un par sens.
+-- Miroirs : l'angle de depart est le POINT D'ORIGINE commun des deux arcs, l'angle de fin l'etendue maximale de CHAQUE arc
+-- (0 a 180 deg). Depart 0 / fin 90 : l'arc droit va de midi a 3 h, l'arc gauche de midi a 9 h. "Sortant" : les deux
+-- partent de l'origine ; "entrant" : ils partent des extremites et convergent vers l'origine.
+local VERTICAL_CROP_H = 0.88   -- ratio de hauteur de circle_piecrop.tga (deja croppee)
+-- "Remplissage inverse" (cfg.arcFillInverted) : horaire <-> antihoraire, miroir sortant <-> entrant, vertical de haut en bas.
+local FILL_INVERSE = { cw = "ccw", ccw = "cw", mirror_out = "mirror_in", mirror_in = "mirror_out", vertical = "vertical" }
+
+local function ApplyArcAngles()
   if not bar then return end
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
-  local radial = cfg.radialFillTest == true
-  if bar.arc then
-    if radial then bar.arc:Hide() else bar.arc:SetAlpha(1); bar.arc:SetScale(1); bar.arc:Show() end
+  local mode = cfg.arcFillMode or "cw"
+  local inverted = cfg.arcFillInverted == true
+  if inverted then mode = FILL_INVERSE[mode] or mode end
+  local mirror = (mode == "mirror_out" or mode == "mirror_in")
+  bar.arc:SetShown(mode ~= "vertical")
+  bar.arc2:SetShown(mirror)
+  bar.arcV:SetShown(mode == "vertical")
+  bar.arcV:SetReverseFill(inverted)
+  if mode == "vertical" then return end
+  local a0, a1 = tonumber(cfg.arcStartAngle) or 220, tonumber(cfg.arcEndAngle) or 140
+  if mirror then
+    local half = math.max(1, math.min(a1, 180))
+    local out = (mode == "mirror_out")
+    SetArcAngle(bar.arc,  a0, a0 + half, not out)   -- arc horaire : origine -> origine + etendue
+    SetArcAngle(bar.arc2, a0 - half, a0, out)       -- arc antihoraire : origine -> origine - etendue
+  else
+    SetArcAngle(bar.arc, a0, a1, mode == "ccw")
   end
-  if bar.radialFillFrame then
-    if radial then bar.radialFillFrame:SetAlpha(1); bar.radialFillFrame:SetScale(1); bar.radialFillFrame:Show() else bar.radialFillFrame:Hide() end
-  end
-  pcall(OutOfCombatResourceCircle.Update)
 end
 
--- Applique pct (0-100) à l'arc actif. Vertical : lissé (ns.SmoothBarValue). Radial : pose
--- directe dans chacun des 100 quartiers (cf. ResourceCircle.lua, même raison).
+-- Apercu anime (panneau de reglages ouvert) : le remplissage va et vient de 0 a 100 %, pour juger le mode choisi.
+local previewTicker = nil
+local previewPct = 72
+local function PreviewSweep()
+  local t = (GetTime() % 5) / 2.5
+  if t > 1 then t = 2 - t end
+  return math.floor(t * t * (3 - 2 * t) * 100 + 0.5)   -- lissage aux extremites
+end
+local function StopPreviewAnim()
+  if previewTicker then previewTicker:Cancel(); previewTicker = nil end
+  previewPct = 72
+end
+
+-- Applique pct (0-100) aux arcs (lisse) ; les masques par ApplyArcAngles ne servent pas, la valeur est posee partout.
 local function ApplyArcValue(pct)
-  local cfg = ns.GetCfg("outOfCombatResourceCircle")
-  if cfg.radialFillTest and bar.radialFrags then
-    for _, frag in ipairs(bar.radialFrags) do
-      pcall(ns.SmoothSetValue, frag, pct)
-    end
-  else
-    pcall(ns.SmoothBarValue, bar.arc, pct)
-  end
+  pcall(ns.SmoothBarValue, bar.arc, pct)
+  pcall(ns.SmoothBarValue, bar.arc2, pct)
+  pcall(ns.SmoothBarValue, bar.arcV, pct)
 end
 
 -- Suivi des changements via UNIT_POWER_FREQUENT (evite comparaison sur secret numbers, GetTime() reste propre)
@@ -286,6 +311,7 @@ end
 
 -- Applique les settings en live
 function OutOfCombatResourceCircle.ApplySettings()
+  OutOfCombatResourceCircle.EnsureArcSettings()
   if not bar then return end
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
 
@@ -317,9 +343,14 @@ function OutOfCombatResourceCircle.ApplySettings()
   end
   local arcPx     = size * (cfg.arcSizeRatio or 1.0)
   local overlayPx = OverlayPx(cfg, arcPx)
-  bar.arc:SetSize(arcPx, arcPx * ARC_CROP_H)
-  bar.arc:ClearAllPoints()
-  bar.arc:SetPoint("TOP", bar, "CENTER", 0, arcPx / 2)
+  for _, a in ipairs({ bar.arc, bar.arc2 }) do
+    a:SetSize(arcPx, arcPx)
+    a:ClearAllPoints()
+    a:SetPoint("CENTER", bar, "CENTER", 0, 0)
+  end
+  bar.arcV:SetSize(arcPx, arcPx * VERTICAL_CROP_H)
+  bar.arcV:ClearAllPoints()
+  bar.arcV:SetPoint("TOP", bar, "CENTER", 0, arcPx / 2)
   if bar.overlay then
     if overlayPx >= 2 then
       bar.overlay:SetSize(overlayPx, overlayPx)
@@ -329,13 +360,8 @@ function OutOfCombatResourceCircle.ApplySettings()
       bar.overlay:Hide()
     end
   end
-  -- Recaler les 100 quartiers radiaux (dépendent de arcPx/overlayRatio)
-  LayoutRadialFrags()
-  if previewMode and bar.radialFrags then
-    for _, frag in ipairs(bar.radialFrags) do
-      pcall(ns.SmoothSetValue, frag, 72)
-    end
-  end
+  ApplyArcAngles()
+  if previewMode then ApplyArcValue(previewPct) end
   ns.ApplyFontReliable(bar.text, "OOCText",
     function() local c = ns.GetCfg("outOfCombatResourceCircle"); return c and c.font or ns.Media.font end,
     function() local c = ns.GetCfg("outOfCombatResourceCircle"); return c and c.fontSize or cfg.fontSize end)
@@ -368,12 +394,8 @@ function OutOfCombatResourceCircle.UpdateResourceColors()
   local arcC  = (CLR and CLR.Get("powercircle")) or colors.bar
   local textC = (CLR and CLR.Get("powertext"))   or colors.text
 
-  if bar.arc then bar.arc:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1) end
-  -- Fragments radiaux : même couleur que l'arc vertical
-  if bar.radialFrags then
-    for _, frag in ipairs(bar.radialFrags) do
-      frag:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1)
-    end
+  for _, a in ipairs({ bar.arc, bar.arc2, bar.arcV }) do
+    a:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1)
   end
   bar.text:SetTextColor(textC[1], textC[2], textC[3], textC[4] or 1)
   if bar.bgGlow and CLR then
@@ -396,6 +418,7 @@ end
 
 -- Creation du cercle
 function OutOfCombatResourceCircle.Create(parent)
+  OutOfCombatResourceCircle.EnsureArcSettings()
   if bar then return bar end
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
 
@@ -427,44 +450,41 @@ function OutOfCombatResourceCircle.Create(parent)
   bgLarge:SetVertexColor(0x0e/255, 0x0e/255, 0x0e/255, 1)
   bar.bgLarge = bgLarge
 
-  -- Arc (remplissage bas -> haut) : frame non-carre (arcPx x arcPx*ARC_CROP_H), ancre TOP pour rester centre
+  -- Arc en rendu radial natif sur un disque plein (carre) ; l'overlay creuse l'anneau
   local arcPx = cfg.size * (cfg.arcSizeRatio or 1.0)
-  local arc = CreateFrame("StatusBar", "AishCoreOCResourceRingArc", bar)
-  arc:SetFrameLevel(bar:GetFrameLevel() + 1)
-  arc:SetSize(arcPx, arcPx * ARC_CROP_H)
-  arc:SetPoint("TOP", bar, "CENTER", 0, arcPx / 2)
-  ns.SetSmoothStatusBarTexture(arc, "Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
-  arc:SetOrientation("VERTICAL")
-  arc:SetMinMaxValues(0, 100)
-  arc:SetValue(0)
-  arc:Show()
-  bar.arc = arc
-
-  -- Remplissage radial (100 quartiers, cf. LayoutRadialFrags/ApplyRadialMode) : actif via cfg.radialFillTest
-  local radialFillFrame = CreateFrame("Frame", nil, bar)
-  radialFillFrame:SetFrameLevel(arc:GetFrameLevel())
-  radialFillFrame:SetAllPoints(bar)
-  local radialFrags = {}
-  for k = 0, RADIAL_FRAG_COUNT - 1 do
-    local frag = CreateFrame("StatusBar", nil, radialFillFrame)
-    frag:SetFrameLevel(radialFillFrame:GetFrameLevel() + 1 + k)
-    frag:SetStatusBarTexture("Interface\\AddOns\\AishCore\\Media\\UI\\RadialWedge.tga")
-    frag:SetOrientation("VERTICAL")
-    local lo = (k / RADIAL_FRAG_COUNT) * 100
-    local hi = ((k + 1) / RADIAL_FRAG_COUNT) * 100
-    frag:SetMinMaxValues(lo, hi)
-    frag:SetValue(lo)
-    radialFrags[k + 1] = frag
+  -- arcGroup : un seul element a afficher / animer, quel que soit le mode de remplissage (cf. ApplyArcAngles)
+  local arcGroup = CreateFrame("Frame", nil, bar)
+  arcGroup:SetFrameLevel(bar:GetFrameLevel() + 1)
+  arcGroup:SetAllPoints(bar)
+  bar.arcGroup = arcGroup
+  local function NewRadial(name)
+    local a = CreateFrame("StatusBar", name, arcGroup)
+    a:SetFrameLevel(arcGroup:GetFrameLevel())
+    a:SetSize(arcPx, arcPx)
+    a:SetPoint("CENTER", bar, "CENTER", 0, 0)
+    SetupRadialArc(a)
+    a:SetMinMaxValues(0, 100)
+    a:SetValue(0)
+    return a
   end
-  bar.radialFillFrame = radialFillFrame
-  bar.radialFrags      = radialFrags
-  LayoutRadialFrags()
+  local arc = NewRadial("AishCoreOCResourceRingArc")
+  bar.arc = arc
+  bar.arc2 = NewRadial(nil)   -- 2e moitie des remplissages miroir
+  -- Remplissage vertical (ancien rendu) : barre de bas en haut sur la texture pre-croppee
+  local arcV = CreateFrame("StatusBar", nil, arcGroup)
+  arcV:SetFrameLevel(arcGroup:GetFrameLevel())
+  arcV:SetSize(arcPx, arcPx * VERTICAL_CROP_H)
+  arcV:SetPoint("TOP", bar, "CENTER", 0, arcPx / 2)
+  ns.SetSmoothStatusBarTexture(arcV, "Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
+  arcV:SetOrientation("VERTICAL")
+  arcV:SetMinMaxValues(0, 100)
+  arcV:SetValue(0)
+  bar.arcV = arcV
 
   -- Overlay sombre : masque le centre pour simuler un arc en anneau
   local overlayPx = OverlayPx(cfg, arcPx)
   local overlayFrame = CreateFrame("Frame", nil, bar)
-  -- +101 (pas +1) : doit rester au-dessus des 100 quartiers radiaux (frameLevel +1 a +100), sinon caché en mode radial
-  overlayFrame:SetFrameLevel(arc:GetFrameLevel() + 101)
+  overlayFrame:SetFrameLevel(arc:GetFrameLevel() + 1)
   overlayFrame:SetAllPoints(bar)
   local overlay = overlayFrame:CreateTexture(nil, "ARTWORK")
   ns.SetSmoothTexture(overlay, ns.Media.circle)
@@ -488,7 +508,7 @@ function OutOfCombatResourceCircle.Create(parent)
 
   OutOfCombatResourceCircle.DetectSecondaryDots()
   OutOfCombatResourceCircle.UpdateResourceColors()
-  OutOfCombatResourceCircle.ApplyRadialMode()
+  ApplyArcAngles()
 
   return bar
 end
@@ -861,8 +881,7 @@ function OutOfCombatResourceCircle.AnimateVisibility(shouldShow)
 
   local si = 0.04
   -- Rebuild en place : tables {element,delay} créées une fois puis mutées (pas d'allocation apres le 1er appel)
-  local cfgRadial = ns.GetCfg("outOfCombatResourceCircle")
-  local arcEl = (cfgRadial.radialFillTest and bar.radialFillFrame) or bar.arc
+  local arcEl = bar.arcGroup
   _ocrcAnimElems[1] = _ocrcAnimElems[1] or {}; _ocrcAnimElems[1].element = bar.bgGlow;       _ocrcAnimElems[1].delay = 0
   _ocrcAnimElems[2] = _ocrcAnimElems[2] or {}; _ocrcAnimElems[2].element = bar.bgLarge;      _ocrcAnimElems[2].delay = si
   _ocrcAnimElems[3] = _ocrcAnimElems[3] or {}; _ocrcAnimElems[3].element = bar.text;         _ocrcAnimElems[3].delay = si * 2
@@ -899,6 +918,7 @@ function OutOfCombatResourceCircle.SetPreview(on)
   if animationTicker then animationTicker:Cancel(); animationTicker = nil end
   ocrcAnimBusy = false
   ocrcAnimDirty = false
+  StopPreviewAnim()
 
   if on then
     lastVisibilityState = nil
@@ -920,15 +940,7 @@ function OutOfCombatResourceCircle.SetPreview(on)
         bar.bgGlow:Hide()
       end
     end
-    -- Respecter le mode radial en preview : montrer le bon élément actif
-    local radial = cfgPrev.radialFillTest == true
-    if radial then
-      bar.arc:Hide()
-      if bar.radialFillFrame then bar.radialFillFrame:Show(); bar.radialFillFrame:SetAlpha(1); bar.radialFillFrame:SetScale(1) end
-    elseif bar.radialFillFrame then
-      bar.radialFillFrame:Hide()
-    end
-    local elems = { bar.bgLarge, bar.text, (radial and bar.radialFillFrame) or bar.arc }
+    local elems = { bar.bgLarge, bar.text, bar.arcGroup }
     for i = 1, secDotCount do elems[#elems + 1] = secDots[i] end
     for _, el in ipairs(elems) do
       if el then
@@ -940,6 +952,12 @@ function OutOfCombatResourceCircle.SetPreview(on)
     if bar.overlayFrame then bar.overlayFrame:Show(); bar.overlayFrame:SetAlpha(1); bar.overlayFrame:SetScale(1) end
     ApplyArcValue(72)
     bar.text:SetText("72")
+    previewTicker = C_Timer.NewTicker(0.03, function()
+      if not (bar and previewMode and bar:IsShown()) then return StopPreviewAnim() end
+      previewPct = PreviewSweep()
+      ApplyArcValue(previewPct)
+      bar.text:SetText(tostring(previewPct))
+    end)
   else
     lastVisibilityState = nil
     OutOfCombatResourceCircle.Update()
@@ -1048,12 +1066,7 @@ function OutOfCombatResourceCircle.UpdateVisibility()
   if shouldShow then
     bar:Show()
     local cfgOC = ns.GetCfg("outOfCombatResourceCircle")
-    if cfgOC.radialFillTest and bar.radialFillFrame then
-      bar.arc:Hide(); bar.radialFillFrame:Show()
-    else
-      if bar.radialFillFrame then bar.radialFillFrame:Hide() end
-      bar.arc:Show()
-    end
+    bar.arcGroup:Show()
     bar.bgLarge:Show()
     bar.text:Show()
     if bar.overlay then bar.overlay:Show() end
@@ -1066,14 +1079,4 @@ function OutOfCombatResourceCircle.UpdateVisibility()
   else
     OutOfCombatResourceCircle.AnimateVisibility(false)
   end
-end
-
--- Debug : /rcocradial — bascule vertical/radial à chaud (miroir de /rcradial)
-SLASH_RCOCRADIAL1 = "/rcocradial"
-SlashCmdList["RCOCRADIAL"] = function()
-  local cfg = ns.GetCfg("outOfCombatResourceCircle")
-  cfg.radialFillTest = not cfg.radialFillTest
-  OutOfCombatResourceCircle.ApplySettings()
-  local state = cfg.radialFillTest and "|cff00ff00RADIAL|r" or "|cff88ccffVERTICAL (défaut)|r"
-  DEFAULT_CHAT_FRAME:AddMessage("|cff88ffff[OutOfCombatResourceCircle]|r Remplissage : " .. state)
 end

@@ -118,6 +118,129 @@ end
 
 -- Crop constant for circle_piecrop.tga (texture pre-croppee, bas transparent supprime)
 local ARC_CROP_H = 0.88
+local PIECROP = "Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga"
+
+-- Arcs en rendu radial natif (StatusBar:SetRenderMode(Radial)) sur un disque plein, comme OutOfCombatResourceCircle.lua.
+-- Remplissage (cfg.arcFillMode) : "vertical" (bas -> haut, ancien rendu, defaut), "cw" / "ccw", "mirror_out" (du milieu
+-- de l'arc vers les extremites), "mirror_in" (des extremites vers le milieu). Les miroirs utilisent deux arcs, un par sens.
+-- Miroirs : l'angle de depart est le POINT D'ORIGINE commun des deux arcs, l'angle de fin l'etendue maximale de CHAQUE arc
+-- (0 a 180 deg). Depart 0 / fin 90 : l'arc droit va de midi a 3 h, l'arc gauche de midi a 9 h. "Sortant" : les deux
+-- partent de l'origine ; "entrant" : ils partent des extremites et convergent vers l'origine.
+
+-- Migration unique des anciens profils : "overlayRatio" (taille du trou) devient "arcThickness" (epaisseur de l'anneau,
+-- fraction du diametre de l'arc). Le rendu des profils existants est conserve.
+function HealthCircle.EnsureArcSettings()
+  local cfg = ns.GetCfg("healthCircle")
+  if not cfg then return cfg end
+  if not cfg.arcGeomV2 then
+    cfg.arcThickness = math.max(0.01, math.min(1, 1 - (cfg.overlayRatio or 0.75)))
+    cfg.arcGeomV2 = true
+  end
+  return cfg
+end
+
+-- Masque central qui creuse l'anneau : trou = 1 - epaisseur (en fraction du diametre de l'arc).
+local function OverlayPx(cfg, arcPx)
+  local hole = 1 - (cfg.arcThickness or 0.25)
+  return arcPx * math.max(0, math.min(hole, 0.995))
+end
+
+-- SetMinMaxValues est enveloppe : le maximum est agrandi de 360/etendue pour que 0-100 % ne parcoure que l'arc.
+local function SetupRadialArc(sb)
+  ns.SetSmoothStatusBarTexture(sb, ns.Media.circle)
+  sb:SetRenderMode(Enum.StatusBarRenderMode.Radial)
+  local raw = sb.SetMinMaxValues
+  sb._k = 1
+  sb.SetMinMaxValues = function(self, lo, hi)
+    self._ulo, self._uhi = lo, hi
+    local k, scaled = self._k or 1, hi
+    if k ~= 1 then
+      local ok, v = pcall(function() return hi * k end)
+      if ok then scaled = v end
+    end
+    raw(self, lo, scaled)
+  end
+end
+
+-- Angles (degres, horaire, 0 = midi) : depart et fin de l'arc ; SetReverseFill inverse le sens du remplissage.
+local function SetArcAngle(sb, startDeg, endDeg, reverse)
+  if not sb then return end
+  local a0, a1 = tonumber(startDeg) or 220, tonumber(endDeg) or 140
+  local span = (a1 - a0) % 360
+  if span < 1 then span = 360 end
+  -- Rendu radial : le sens antihoraire se regle sur la texture geree (SetRadialProgressBarReverse, 12.1) ;
+  -- StatusBar:SetReverseFill ne joue que sur l'axe lineaire. Repli sur ce dernier si l'API est absente.
+  local tex = sb:GetStatusBarTexture()
+  if tex and tex.SetRadialProgressBarReverse then
+    sb:SetReverseFill(false)
+    tex:SetRadialProgressBarReverse(reverse and true or false)
+  else
+    sb:SetReverseFill(reverse and true or false)
+  end
+  if tex then tex:SetRotation(-math.rad(reverse and a1 or a0)) end
+  local k = 360 / span
+  if sb._k ~= k then
+    sb._k = k
+    pcall(sb.SetMinMaxValues, sb, sb._ulo or 0, sb._uhi or 100)
+  end
+end
+
+-- "Remplissage inverse" (cfg.arcFillInverted) : horaire <-> antihoraire, miroir sortant <-> entrant, vertical de haut en bas.
+local FILL_INVERSE = { cw = "ccw", ccw = "cw", mirror_out = "mirror_in", mirror_in = "mirror_out", vertical = "vertical" }
+
+-- Mode de remplissage courant : montre / cache les arcs concernes et regle leurs angles.
+-- Les arcs de soins (harc, harc2) sont montres par UpdateHealPrediction.
+local function ApplyArcAngles()
+  if not bar then return end
+  local cfg = ns.GetCfg("healthCircle")
+  local mode = cfg.arcFillMode or "vertical"
+  local inverted = cfg.arcFillInverted == true
+  if inverted then mode = FILL_INVERSE[mode] or mode end
+  local vertical = (mode == "vertical")
+  local mirror = (mode == "mirror_out" or mode == "mirror_in")
+  bar.arc:SetShown(not vertical)
+  bar.arc2:SetShown(mirror)
+  bar.arcV:SetShown(vertical)
+  bar.arcV:SetReverseFill(inverted)
+  -- Soins previsionnels verticaux : ancres sur le sommet du remplissage, donc inutilisables s'il part du haut
+  if bar.healClip then bar.healClip:SetShown(vertical and not inverted and cfg.showHealPrediction ~= false) end
+  if vertical then
+    bar.harc:Hide(); bar.harc2:Hide()
+    return
+  end
+  local a0, a1 = tonumber(cfg.arcStartAngle) or 220, tonumber(cfg.arcEndAngle) or 140
+  if mirror then
+    local half = math.max(1, math.min(a1, 180))
+    local out = (mode == "mirror_out")
+    SetArcAngle(bar.arc,   a0, a0 + half, not out)   -- arc horaire : origine -> origine + etendue
+    SetArcAngle(bar.harc,  a0, a0 + half, not out)
+    SetArcAngle(bar.arc2,  a0 - half, a0, out)       -- arc antihoraire : origine -> origine - etendue
+    SetArcAngle(bar.harc2, a0 - half, a0, out)
+  else
+    SetArcAngle(bar.arc,  a0, a1, mode == "ccw")
+    SetArcAngle(bar.harc, a0, a1, mode == "ccw")
+  end
+end
+
+-- Apercu anime (panneau de reglages ouvert) : le remplissage va et vient de 0 a 100 %, pour juger le mode choisi.
+local previewTicker = nil
+local previewPct = 72
+local function PreviewSweep()
+  local t = (GetTime() % 5) / 2.5
+  if t > 1 then t = 2 - t end
+  return math.floor(t * t * (3 - 2 * t) * 100 + 0.5)   -- lissage aux extremites
+end
+local function StopPreviewAnim()
+  if previewTicker then previewTicker:Cancel(); previewTicker = nil end
+  previewPct = 72
+end
+
+-- Applique pct (0-100, peut etre secret) aux arcs de vie.
+local function ApplyArcValue(pct)
+  pcall(ns.SmoothBarValue, bar.arc, pct)
+  pcall(ns.SmoothBarValue, bar.arc2, pct)
+  pcall(ns.SmoothBarValue, bar.arcV, pct)
+end
 
 -- Coeur central : taille fixe (px, avant application du scale global du cercle).
 local HEART_SIZE = 8
@@ -234,6 +357,7 @@ end
 
 -- Applique les settings en live (taille, police, etc.)
 function HealthCircle.ApplySettings()
+  HealthCircle.EnsureArcSettings()
   if not bar then return end
   local cfg = ns.GetCfg("healthCircle")
 
@@ -257,10 +381,15 @@ function HealthCircle.ApplySettings()
   bar:SetSize(size, size)
   bar.bgLarge:SetSize(bgSize, bgSize)
   local arcPx     = size * (cfg.arcSizeRatio or 1.0)
-  local overlayPx = arcPx * (cfg.overlayRatio or 0.75)
-  bar.arc:SetSize(arcPx, arcPx * ARC_CROP_H)
-  bar.arc:ClearAllPoints()
-  bar.arc:SetPoint("TOP", bar, "CENTER", 0, arcPx / 2)
+  local overlayPx = OverlayPx(cfg, arcPx)
+  for _, a in ipairs({ bar.arc, bar.arc2, bar.harc, bar.harc2 }) do
+    a:SetSize(arcPx, arcPx)
+    a:ClearAllPoints()
+    a:SetPoint("CENTER", bar, "CENTER", 0, 0)
+  end
+  bar.arcV:SetSize(arcPx, arcPx * ARC_CROP_H)
+  bar.arcV:ClearAllPoints()
+  bar.arcV:SetPoint("TOP", bar, "CENTER", 0, arcPx / 2)
   -- La regle de mesure garde sa taille, mais PAS son ancrage : il doit rester pose sur le
   -- sommet du fill de vie, c'est lui qui fait l'addition (cf. HealthCircle.Create).
   if bar.arcHeal then bar.arcHeal:SetSize(arcPx, arcPx * ARC_CROP_H) end
@@ -285,7 +414,10 @@ function HealthCircle.ApplySettings()
   local dotC   = (CLR and CLR.Get("oocdot"))    or cfg.barColor
   local textC  = dotC  -- texte du cercle de vie = couleur OoC Dot
   bar.text:SetTextColor(textC[1], textC[2], textC[3], textC[4] or 1)
-  if bar.arc then bar.arc:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1) end
+  for _, a in ipairs({ bar.arc, bar.arc2, bar.arcV }) do
+    a:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1)
+  end
+  ApplyArcAngles()
   -- Redimensionner le coeur central proportionnellement
   local baseSize = ns.Defaults.healthCircle.size
   local scale = size / baseSize
@@ -321,6 +453,7 @@ function HealthCircle.ApplySettings()
 end
 
 function HealthCircle.Create(parent)
+  HealthCircle.EnsureArcSettings()
   if bar then return bar end
   local cfg = ns.GetCfg("healthCircle")
 
@@ -354,19 +487,42 @@ function HealthCircle.Create(parent)
   -- des soins en vol ; a zero soin les deux arcs coincident et celui-ci est invisible.
   EnsureHealCalc()
 
-  local arc = CreateFrame("StatusBar", "AishCoreHealthRingArc", bar)
-  arc:SetFrameLevel(bar:GetFrameLevel() + 2)
-  arc:SetSize(arcPx, arcPx * ARC_CROP_H)
-  arc:SetPoint("TOP", bar, "CENTER", 0, arcPx / 2)
-  arc:SetStatusBarTexture("Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
+  -- arcGroup : un seul element a afficher / animer, quel que soit le mode de remplissage (cf. ApplyArcAngles)
+  local arcGroup = CreateFrame("Frame", nil, bar)
+  arcGroup:SetFrameLevel(bar:GetFrameLevel() + 1)
+  arcGroup:SetAllPoints(bar)
+  bar.arcGroup = arcGroup
+  local function NewRadial(name, lvl)
+    local a = CreateFrame("StatusBar", name, arcGroup)
+    a:SetFrameLevel(arcGroup:GetFrameLevel() + lvl)
+    a:SetSize(arcPx, arcPx)
+    a:SetPoint("CENTER", bar, "CENTER", 0, 0)
+    SetupRadialArc(a)
+    a:SetMinMaxValues(0, 100)
+    a:SetValue(0)
+    return a
+  end
+  -- Soins previsionnels en radial : arcs poses SOUS ceux de la vie, remplis a (vie + soins) ; la bande qui depasse est la part des soins.
+  bar.harc  = NewRadial(nil, 0)
+  bar.harc2 = NewRadial(nil, 0)
+  local arc = NewRadial("AishCoreHealthRingArc", 1)
   arc:SetStatusBarColor(unpack(cfg.barColor))
-  arc:SetOrientation("VERTICAL")
-  arc:SetMinMaxValues(0, 100)
-  arc:SetValue(0)
-  arc:Show()
   bar.arc = arc
+  bar.arc2 = NewRadial(nil, 1)   -- 2e moitie des remplissages miroir
 
-  -- Soins previsionnels : exactement le principe des barres d'unites -- aucun calcul, c'est
+  -- Remplissage vertical (ancien rendu) : barre de bas en haut sur la texture pre-croppee
+  local arcV = CreateFrame("StatusBar", nil, arcGroup)
+  arcV:SetFrameLevel(arcGroup:GetFrameLevel() + 1)
+  arcV:SetSize(arcPx, arcPx * ARC_CROP_H)
+  arcV:SetPoint("TOP", bar, "CENTER", 0, arcPx / 2)
+  arcV:SetStatusBarTexture(PIECROP)
+  arcV:SetStatusBarColor(unpack(cfg.barColor))
+  arcV:SetOrientation("VERTICAL")
+  arcV:SetMinMaxValues(0, 100)
+  arcV:SetValue(0)
+  bar.arcV = arcV
+
+  -- Soins previsionnels (mode vertical) : exactement le principe des barres d'unites -- aucun calcul, c'est
   -- l'ANCRAGE qui additionne. L'arithmetique sur les valeurs secretes etant refusee, c'est
   -- la seule voie. Trois pieces :
   --   arcHeal  : regle de mesure invisible, posee sur le sommet du fill de vie et remplie a
@@ -377,7 +533,7 @@ function HealthCircle.Create(parent)
   local arcHeal = CreateFrame("StatusBar", nil, bar)
   arcHeal:SetFrameLevel(bar:GetFrameLevel() + 1)
   arcHeal:SetSize(arcPx, arcPx * ARC_CROP_H)
-  arcHeal:SetPoint("BOTTOM", arc:GetStatusBarTexture(), "TOP", 0, 0)
+  arcHeal:SetPoint("BOTTOM", arcV:GetStatusBarTexture(), "TOP", 0, 0)
   arcHeal:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
   arcHeal:SetOrientation("VERTICAL")
   arcHeal:SetMinMaxValues(0, 100)
@@ -385,22 +541,22 @@ function HealthCircle.Create(parent)
   arcHeal:SetAlpha(0)          -- regle de mesure : jamais visible
   bar.arcHeal = arcHeal
 
-  local healClip = CreateFrame("Frame", nil, bar)
-  healClip:SetFrameLevel(bar:GetFrameLevel() + 1)
-  healClip:SetPoint("LEFT",   arc, "LEFT",  0, 0)
-  healClip:SetPoint("RIGHT",  arc, "RIGHT", 0, 0)
-  healClip:SetPoint("BOTTOM", arc:GetStatusBarTexture(), "TOP", 0, 0)
+  local healClip = CreateFrame("Frame", nil, arcGroup)
+  healClip:SetFrameLevel(arcGroup:GetFrameLevel())
+  healClip:SetPoint("LEFT",   arcV, "LEFT",  0, 0)
+  healClip:SetPoint("RIGHT",  arcV, "RIGHT", 0, 0)
+  healClip:SetPoint("BOTTOM", arcV:GetStatusBarTexture(), "TOP", 0, 0)
   healClip:SetPoint("TOP",    arcHeal:GetStatusBarTexture(), "TOP", 0, 0)
   if healClip.SetClipsChildren then healClip:SetClipsChildren(true) end
   bar.healClip = healClip
 
   local healTex = healClip:CreateTexture(nil, "ARTWORK")
-  healTex:SetTexture("Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
-  healTex:SetAllPoints(arc)    -- aligne sur le cercle, pas sur le cadre de rognage
+  healTex:SetTexture(PIECROP)
+  healTex:SetAllPoints(arcV)   -- aligne sur le cercle, pas sur le cadre de rognage
   bar.healTex = healTex
 
   -- Overlay sombre : masque le centre pour simuler un arc en anneau
-  local overlayPx = arcPx * (cfg.overlayRatio or 0.75)
+  local overlayPx = OverlayPx(cfg, arcPx)
   local overlayFrame = CreateFrame("Frame", nil, bar)
   overlayFrame:SetFrameLevel(arc:GetFrameLevel() + 1)
   overlayFrame:SetAllPoints(bar)
@@ -480,8 +636,7 @@ function HealthCircle.Create(parent)
     local si = 0.04
     _hcAnimElems[1] = { element = bar.bgLarge,      delay = 0      }
     _hcAnimElems[2] = { element = bar.text,         delay = si * 1 }
-    _hcAnimElems[3] = { element = bar.arc,          delay = si * 2 }
-    _hcAnimElems[7] = { element = bar.healClip,     delay = si * 2 }
+    _hcAnimElems[3] = { element = bar.arcGroup,     delay = si * 2 }
     _hcAnimElems[4] = { element = bar.overlayFrame, delay = si * 2 }
     _hcAnimElems[5] = { element = bar.dot3,         delay = si * 3 }
     -- Meme delai que le texte : le cache doit apparaitre et disparaitre avec lui,
@@ -489,6 +644,7 @@ function HealthCircle.Create(parent)
     _hcAnimElems[6] = { element = bar.textBackdrop, delay = si * 1 }
   end
 
+  ApplyArcAngles()
   return bar
 end
 
@@ -547,6 +703,7 @@ function HealthCircle.SetPreview(on)
   hcAnimBusy = false
   hcAnimDirty = false
   StopPulse()   -- arrêter le pouls quand on entre/sort du mode preview
+  StopPreviewAnim()
 
   if on then
     lastHealthVisState = nil
@@ -564,7 +721,7 @@ function HealthCircle.SetPreview(on)
     bar:Show()
     bar:SetAlpha(1)
     bar:SetScale(1)
-    local elements = { bar.bgLarge, bar.text, bar.arc, bar.dot3, bar.textBackdrop, bar.healClip }
+    local elements = { bar.bgLarge, bar.text, bar.arcGroup, bar.dot3, bar.textBackdrop }
     for _, el in ipairs(elements) do
       if el then
         el:Show()
@@ -576,8 +733,14 @@ function HealthCircle.SetPreview(on)
     if bar.overlayFrame then bar.overlayFrame:Show(); bar.overlayFrame:SetAlpha(1); bar.overlayFrame:SetScale(1) end
     bar._healthShown = true
     -- Valeur fictive pour visualiser
-    bar.arc:SetValue(72)
+    ApplyArcValue(72)
     bar.text:SetText("72")
+    previewTicker = C_Timer.NewTicker(0.03, function()
+      if not (bar and previewMode and bar:IsShown()) then return StopPreviewAnim() end
+      previewPct = PreviewSweep()
+      ApplyArcValue(previewPct)
+      bar.text:SetText(tostring(previewPct))
+    end)
   else
     lastHealthVisState = nil
     bar._healthShown = false
@@ -696,8 +859,7 @@ function HealthCircle.UpdateVisibility()
 
   if shouldShow then
     bar:Show()
-    bar.arc:Show()
-    if bar.healClip then bar.healClip:Show() end
+    bar.arcGroup:Show()
     if bar.overlay then bar.overlay:Show() end
     if bar.overlayFrame then bar.overlayFrame:Show(); bar.overlayFrame:SetAlpha(1); bar.overlayFrame:SetScale(1) end
     bar.bgLarge:Show()
@@ -725,8 +887,32 @@ local function UpdateHealPrediction()
   local arcHeal, healTex = bar and bar.arcHeal, bar and bar.healTex
   if not (arcHeal and healTex) then return end
   local cfg = ns.GetCfg("healthCircle")
+  local mode = cfg.arcFillMode or "vertical"
+  if cfg.arcFillInverted == true then mode = FILL_INVERSE[mode] or mode end
+  local radial = (mode ~= "vertical")
+  local on = cfg.showHealPrediction ~= false
 
-  if cfg.showHealPrediction == false then
+  -- Modes radiaux : arcs de soins remplis a (vie + soins). Valeurs lues sous pcall : illisibles (secretes), pas de soins.
+  bar.harc:SetShown(radial and on)
+  bar.harc2:SetShown(radial and on and (mode == "mirror_out" or mode == "mirror_in"))
+  if radial then
+    if not on then return end
+    local hc = cfg.healPredColor or { 0.45, 1, 0.55, 1 }
+    local v = 0
+    pcall(function()
+      local mx = UnitHealthMax("player")
+      if mx > 0 then
+        v = math.min(100, (UnitHealth("player") + (UnitGetIncomingHeals and UnitGetIncomingHeals("player") or 0)) / mx * 100)
+      end
+    end)
+    for _, h in ipairs({ bar.harc, bar.harc2 }) do
+      h:SetStatusBarColor(hc[1], hc[2], hc[3], hc[4] or 1)
+      pcall(h.SetValue, h, v)
+    end
+    return
+  end
+
+  if not on then
     arcHeal:SetValue(0)
     return
   end
@@ -763,7 +949,7 @@ function HealthCircle.Update()
   local pct = UnitHealthPercent("player", true, CurveConstants.ScaleTo100)
   if not pct then
     if bar.arcHeal then bar.arcHeal:SetValue(0) end
-    bar.arc:SetValue(0)
+    for _, a in ipairs({ bar.arc, bar.arc2, bar.arcV, bar.harc, bar.harc2 }) do a:SetValue(0) end
     bar.text:SetText("-")
     return
   end
@@ -771,10 +957,12 @@ function HealthCircle.Update()
   local CLR2  = ns.Modules.Colors
   local arcC2 = (CLR2 and CLR2.Get("oochealth")) or cfg.barColor
   local txtC2 = (CLR2 and CLR2.Get("oocdot"))    or cfg.textColor
-  if bar.arc then bar.arc:SetStatusBarColor(arcC2[1], arcC2[2], arcC2[3], arcC2[4] or 1) end
+  for _, a in ipairs({ bar.arc, bar.arc2, bar.arcV }) do
+    a:SetStatusBarColor(arcC2[1], arcC2[2], arcC2[3], arcC2[4] or 1)
+  end
   bar.text:SetTextColor(txtC2[1], txtC2[2], txtC2[3], txtC2[4] or 1)
 
-  pcall(ns.SmoothBarValue, bar.arc, pct)
+  ApplyArcValue(pct)
   UpdateHealPrediction()
   bar.text:SetText(format('%d', pct))
   -- UpdateVisibility est maintenant appelé par le ticker avant Update().

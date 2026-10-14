@@ -86,7 +86,11 @@ function DisplaySetupPopup(name, titleText, msgText, buttons)
   end)
   -- Libère la place pour la prochaine popup en file, quelle que soit la façon dont celle-ci
   -- se ferme (bouton, Échap, ou :Hide() direct).
-  popup:HookScript("OnHide", function()
+  -- OnHide est aussi declenche quand UIParent se cache (cinematique de premiere connexion, capture d'ecran) :
+  -- la popup reste alors "shown" (IsShown vrai, IsVisible faux) et reapparait avec l'interface. La liberer ici
+  -- affichait la suivante par-dessus, d'ou deux popups superposees apres la cinematique.
+  popup:HookScript("OnHide", function(self)
+    if self:IsShown() then return end
     if activeName == name then activeName = nil end
     ProcessQueue()
   end)

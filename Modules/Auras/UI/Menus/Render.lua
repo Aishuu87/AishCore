@@ -215,45 +215,68 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
     -- Espace supplementaire si la case "Miroir" est visible, pour ne pas chevaucher la section suivante.
     y = y + 130 + ((rk == "circlebars" or rk == "totems") and 30 or 0)
     local sections = {}
-    -- GLOW desactive (`false and`) : ecrasait silencieusement le reglage par-sort de Tactics.lua. Code garde intact au cas ou.
-    if false and HasSection(rk, "glow") then
+    -- GLOW : type et taille propres a ce mode (cf. ns.ModeGlow). Ne remplace QUE le type et la taille : les sorts
+    -- sans glow dans "Auras a tracker" n'en gagnent pas, couleur et opacite restent celles du sort.
+    if HasSection(rk, "glow") then
         sections[#sections+1] = {id="GLOW",name=L["AURASMENU_RENDER_SECTION_GLOW"],category="APPARENCE",build=function(c,w) local cy=0; local cf=ns.db and ns.db[rk] or {}; local slW=math.min(260,w/2-20); local gap=20; local ox=math.max(5,(w-slW*2-gap)/2)
-            local info=c:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(info,FONT,9)
-            info:SetPoint("TOPLEFT",15,-cy); info:SetTextColor(unpack(Theme.textDim))
-            info:SetText(L["AURASMENU_RENDER_GLOW_OVERRIDE_INFO"]); cy=cy+18
+            local function Refresh()
+                pcall(ns.ScanAuras); IconsRefresh(); CircleBarsRefresh(); FreeBarsRefresh(); IconListRefresh()
+                if rk == "iconlist" and ns.RepositionIconListNativeGridTarget then pcall(ns.RepositionIconListNativeGridTarget) end
+            end
             local cbGlowOn=SW.CreateCheckbox(c,L["AURASMENU_RENDER_ENABLE_GLOW"],w-30); cbGlowOn:SetPoint("TOPLEFT",15,-cy); cbGlowOn:SetChecked(cf.glowEnabled ~= false)
-            cbGlowOn.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowEnabled=v end; pcall(ns.ScanAuras); IconsRefresh(); FreeBarsRefresh(); IconListRefresh() end; cy=cy+30
-            local pf=CreateFrame("Frame",nil,c); pf:SetSize(48,48); pf:SetPoint("TOP",0,-cy); pf:SetFrameStrata("DIALOG"); pf:SetFrameLevel(c:GetFrameLevel()+10)
+            cbGlowOn.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowEnabled=v end; Refresh() end; cy=cy+30
+            local cbMode=SW.CreateCheckbox(c,L["AURASMENU_RENDER_GLOW_MODE_ON"],w-30); cbMode:SetPoint("TOPLEFT",15,-cy); cbMode:SetChecked(cf.glowModeOn == true)
+            local orig=cbMode:GetScript("OnEnter")
+            cbMode:SetScript("OnEnter",function(sf) if orig then orig(sf) end; GameTooltip:SetOwner(sf,"ANCHOR_TOP"); GameTooltip:SetText(L["AURASMENU_RENDER_GLOW_MODE_ON"],1,1,1); GameTooltip:AddLine(L["AURASMENU_RENDER_GLOW_MODE_ON_TT"],0.8,0.8,0.8,true); GameTooltip:Show() end)
+            cbMode:HookScript("OnLeave",function() GameTooltip:Hide() end)
+            cy=cy+34
+            -- Apercu : icone exemple avec le glow resultant
+            local pf=CreateFrame("Frame",nil,c); pf:SetSize(48,48); pf:SetPoint("TOP",0,-cy); pf:SetFrameLevel(c:GetFrameLevel()+10)
             local pfIco=pf:CreateTexture(nil,"ARTWORK"); pfIco:SetAllPoints(); pfIco:SetTexCoord(TC,1-TC,TC,1-TC)
             pcall(function() pfIco:SetTexture(134154) end)
-            cy=cy+55
-            local function RefreshRenderGlowPreview()
+            cy=cy+60
+            local function Preview()
                 pcall(function()
                     if ns.HideGlow then ns.HideGlow(pf) end
-                    local idx = cf.glowOverrideIdx or 0
-                    if idx > 1 then
-                        local gc = {cf.glowOverrideR or ns.barColor[1], cf.glowOverrideG or ns.barColor[2], cf.glowOverrideB or ns.barColor[3]}
-                        if ns.ShowGlow then ns.ShowGlow(pf, idx, gc, cf.glowOverrideAlpha or 0.7, cf.glowOverrideScale or 1.0) end
-                    end
+                    local idx, scale, col, alpha = ns.ModeGlow(cf, 2, 1.0, ns.barColor, 0.8)
+                    if cf.glowEnabled ~= false and idx and idx > 1 and ns.ShowGlow then ns.ShowGlow(pf, idx, col, alpha, scale) end
                 end)
             end
             local glOpts={{value=0,text=L["AURASMENU_RENDER_GLOW_PER_SPELL_DEFAULT"]}}
-            for idx,def in ipairs(ns.GLOW_DEFS) do if not def.isProcStart then glOpts[#glOpts+1]={value=idx,text=def.name} end end
-            local gdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_GLOW_TYPE"],glOpts,w-30); gdd:SetPoint("TOPLEFT",15,-cy)
+            for idx,def in ipairs(ns.GLOW_DEFS) do if not def.isProcStart and idx > 1 then glOpts[#glOpts+1]={value=idx,text=def.name} end end
+            local gdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_GLOW_TYPE"],glOpts,slW); gdd:SetPoint("TOPLEFT",ox,-cy)
             gdd:SetValue(cf.glowOverrideIdx or 0)
-            gdd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowOverrideIdx=(v>0 and v or nil); cf.glowOverrideIdx=(v>0 and v or nil) end; RefreshRenderGlowPreview(); pcall(ns.ScanAuras); IconsRefresh(); FreeBarsRefresh(); IconListRefresh() end
-            cy=cy+50
+            gdd.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowOverrideIdx=(v>0 and v or nil); cf=ns.db[rk] end; Preview(); Refresh() end
+            local gsc=SW.CreateSlider(c,L["AURASMENU_RENDER_SIZE_GENERIC"],0.3,3.0,0.05,slW); gsc:SetPoint("TOPLEFT",ox+slW+gap,-cy); gsc:SetValue(cf.glowOverrideScale or 1.0)
+            gsc.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowOverrideScale=v; cf=ns.db[rk] end; Preview(); Refresh() end
+            cy=cy+60
+            -- Couleur (celle du sort, ou une couleur commune au mode) et opacite
             local gcc=SW.CreateColorButton(c,L["AURASMENU_TACTICS_GLOW_COLOR"],slW); gcc:SetPoint("TOPLEFT",ox,-cy)
-            local gc=ns.barColor
-            gcc:SetColor(cf.glowOverrideR or gc[1], cf.glowOverrideG or gc[2], cf.glowOverrideB or gc[3])
-            gcc.onChanged=function(col) if ns.db and ns.db[rk] then ns.db[rk].glowOverrideR=col[1]; ns.db[rk].glowOverrideG=col[2]; ns.db[rk].glowOverrideB=col[3]; cf.glowOverrideR=col[1]; cf.glowOverrideG=col[2]; cf.glowOverrideB=col[3] end; RefreshRenderGlowPreview(); pcall(ns.ScanAuras); IconsRefresh(); FreeBarsRefresh(); IconListRefresh() end
+            gcc:SetColor(cf.glowOverrideR or ns.barColor[1], cf.glowOverrideG or ns.barColor[2], cf.glowOverrideB or ns.barColor[3])
+            gcc.onChanged=function(col) if ns.db and ns.db[rk] then local d=ns.db[rk]; d.glowOverrideR,d.glowOverrideG,d.glowOverrideB=col[1],col[2],col[3]; cf=d end; Preview(); Refresh() end
             local goa=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_OPACITY"],0,1,0.05,slW); goa:SetPoint("TOPLEFT",ox+slW+gap,-cy); goa:SetValue(cf.glowOverrideAlpha or 0.7)
-            goa.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowOverrideAlpha=v end; RefreshRenderGlowPreview(); pcall(ns.ScanAuras); IconsRefresh(); FreeBarsRefresh(); IconListRefresh() end
-            cy=cy+60
-            local gsc=SW.CreateSlider(c,L["AURASMENU_RENDER_SIZE_GENERIC"],0.3,3.0,0.1,slW); gsc:SetPoint("TOPLEFT",ox,-cy); gsc:SetValue(cf.glowOverrideScale or 1.0)
-            gsc.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowOverrideScale=v end; RefreshRenderGlowPreview(); pcall(ns.ScanAuras); IconsRefresh(); FreeBarsRefresh(); IconListRefresh() end
-            cy=cy+60
-            C_Timer.After(0.1, RefreshRenderGlowPreview)
+            goa.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowOverrideAlpha=v; cf=ns.db[rk] end; Preview(); Refresh() end
+            cy=cy+36
+            local cbSpellCol=SW.CreateCheckbox(c,L["AURASMENU_RENDER_GLOW_SPELL_COLOR"],slW); cbSpellCol:SetPoint("TOPLEFT",ox,-cy); cbSpellCol:SetChecked(cf.glowUseSpellColor ~= false)
+            cy=cy+34
+            -- Reglages grises tant que le mode n'a pas son propre glow (couleur : aussi tant qu'on garde celle du sort)
+            local function Gray()
+                local on = cf.glowModeOn == true
+                local function G(wdg, en)
+                    wdg:SetAlpha(en and 1 or 0.35)
+                    if wdg._btn then wdg._btn:EnableMouse(en) end
+                    if wdg._swatch then wdg._swatch:EnableMouse(en) end
+                    if wdg.slider then wdg.slider:EnableMouse(en) end
+                    if wdg.editBox then wdg.editBox:EnableMouse(en) end
+                    if wdg.EnableMouse and wdg.GetObjectType and wdg:GetObjectType() ~= "Frame" then wdg:EnableMouse(en) end
+                end
+                G(gdd, on); G(gsc, on); G(goa, on); G(cbSpellCol, on)
+                G(gcc, on and cf.glowUseSpellColor == false)
+            end
+            cbSpellCol.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowUseSpellColor=v; cf=ns.db[rk] end; Gray(); Preview(); Refresh() end
+            cbMode.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].glowModeOn=v; cf=ns.db[rk] end; Gray(); Preview(); Refresh() end
+            Gray()
+            C_Timer.After(0.1, Preview)
             c:SetHeight(cy) end}
     end
     -- DIMENSIONS : taille des barres et icones, espacements

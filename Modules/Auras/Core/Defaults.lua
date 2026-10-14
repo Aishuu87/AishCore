@@ -329,6 +329,46 @@ function ns.ApplyAutoColor(info, profileName, spellID)
     info._colorDefault = false -- ne plus retoucher (cf. ns.RollDefaultSpecColors)
 end
 
+-- Section "Glow" d'un mode d'affichage (cfg.glowModeOn) : type, taille, couleur et opacite du glow pour ce mode.
+-- PRIORITE AU SORT : un sort dont le glow a ete personnalise dans "Auras a tracker" (custom = info._glowCustom) garde
+-- tous ses reglages ; le mode ne s'applique qu'aux sorts qui suivent le glow par defaut. L'activation du glow reste
+-- celle du sort. Couleur : celle du sort tant que glowUseSpellColor n'est pas a false. Les anciens champs
+-- glowOverride* (section retiree autrefois) restent inertes tant que glowModeOn est faux.
+function ns.ModeGlow(cfg, idx, scale, color, alpha, custom)
+    if cfg and cfg.glowModeOn and not custom then
+        if cfg.glowOverrideIdx and cfg.glowOverrideIdx > 1 then idx = cfg.glowOverrideIdx end
+        if cfg.glowOverrideScale then scale = cfg.glowOverrideScale end
+        if cfg.glowOverrideAlpha then alpha = cfg.glowOverrideAlpha end
+        if cfg.glowUseSpellColor == false and cfg.glowOverrideR then
+            color = { cfg.glowOverrideR, cfg.glowOverrideG or 1, cfg.glowOverrideB or 1 }
+        end
+    end
+    return idx, scale, color, alpha
+end
+
+-- Recale info.color sur sa couleur thematique (colorKey). Les sorts non personnalises sont recrees a
+-- chaque activation de profil (cf. Profiles.lua PullDiscovery), souvent avant que le theme du profil
+-- et la spe soient connus : Colors.Get rendait alors la couleur de classe, figee dans info.color -- que
+-- lisent la liste "Auras a tracker", les glows et plusieurs rendus. colorKey, lui, est juste.
+function ns.RefreshAutoColor(info)
+    local key = info and info.colorKey
+    if not key then return end
+    local Colors = _addon.Modules and _addon.Modules.Colors
+    local c = Colors and Colors.Get and Colors.Get(key)
+    if not (c and c[1]) then return end
+    local cur = info.color
+    if cur and cur[1] == c[1] and cur[2] == c[2] and cur[3] == c[3] then return end
+    info.color = { c[1], c[2], c[3] }
+end
+
+function ns.RefreshAutoColors(spells)
+    spells = spells or (ns.GetSpecSpells and ns.GetSpecSpells())
+    if type(spells) ~= "table" then return end
+    for _, info in pairs(spells) do
+        if type(info) == "table" then ns.RefreshAutoColor(info) end
+    end
+end
+
 -- Sort "personnalisé" = à conserver dans le profil (sauvegarde, export). Le reste est recréé depuis
 -- le registre du compte (AishUIAuraDB.discovery) à l'activation du profil. Champs d'identité (posés à
 -- la découverte ou recalculés) et miroir du glow par défaut (recopié tant que _glowCustom ~= true)

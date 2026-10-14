@@ -16,6 +16,7 @@ local ALERT_TEXT_KEYS = {
     USE_ATTUNEMENT   = "MISSINGBUFFS_ALERT_USE_ATTUNEMENT",
     SUMMON_PET       = "MISSINGBUFFS_ALERT_SUMMON_PET",
     PET_PASSIVE      = "MISSINGBUFFS_ALERT_PET_PASSIVE",
+    PET_UNHAPPY      = "MISSINGBUFFS_ALERT_PET_UNHAPPY",
     REVIVE_PET       = "MISSINGBUFFS_ALERT_REVIVE_PET",
     APPLY_LETHAL     = "MISSINGBUFFS_ALERT_APPLY_LETHAL",
     APPLY_NONLETHAL  = "MISSINGBUFFS_ALERT_APPLY_NONLETHAL",
@@ -193,7 +194,15 @@ ns.MISSING_HUNTER_ALL_PETS = {
 
 -- Alerte "familier en Passif" : pas de sort associe, cle de combo fictive (cf. PSEUDO_SPELLS_3D dans SettingsPanel.lua)
 ns.MISSING_PET_PASSIVE_KEY = 9000010
+-- Forever : alerte "familier mecontent" (satisfaction au plus bas, C_PetInfo.GetPetHappiness() == 1), meme principe
+ns.MISSING_PET_UNHAPPY_KEY = 9000013
+ns.MISSING_PET_UNHAPPY_SETTINGS_ID = 118   -- interrupteur de l'entree HUNTER (liste "kind" de Forever)
+ns.MISSING_PET_UNHAPPY_ICON = "Interface\\Icons\\Ability_Hunter_BeastTraining"
 ns.MISSING_PET_PASSIVE_ICON = "Interface\\Icons\\Ability_Seal"
+-- Forever : alertes de quantite (munitions du Chasseur, fragments d'ame du Demoniste), sans sort associe : cles
+-- de combo fictives (cf. PSEUDO_SPELLS_3D dans SettingsPanel.lua)
+ns.MISSING_LOW_AMMO_KEY   = 9000011
+ns.MISSING_LOW_SHARDS_KEY = 9000012
 
 ns.MISSING_WARLOCK_PET = 688 -- Imp
 ns.MISSING_WARLOCK_ALL_PETS = {
@@ -336,7 +345,8 @@ if _addon.IsForever then
               casts = { 28176, "Fel Armor", 706, "Demon Armor", 687, "Demon Skin" },
               displayName = "Demon Armor / Skin", icon = I .. "Spell_Shadow_RagingScream", text = "MISSING" },
             -- Fragments d'ame : objet des sacs (6265), alerte sous le seuil
-            { settingsId = 106, kind = "item", item = 6265, min = 3, text = "LOW_SHARDS",
+            -- requiresSpell 1120 (Siphon d'ame) : sans lui, aucun moyen de generer un fragment, l'alerte n'a pas de sens
+            { settingsId = 106, kind = "item", item = 6265, min = 3, text = "LOW_SHARDS", pseudoKey = 9000012, requiresSpell = 1120,
               displayName = "Soul Shards", icon = I .. "INV_Misc_Gem_Amethyst_02" },
         },
         HUNTER = {
@@ -352,8 +362,12 @@ if _addon.IsForever then
             { settingsId = 108, onlySelf = true, names = { 19506, "Trueshot Aura" }, casts = { 19506, "Trueshot Aura" },
               displayName = "Trueshot Aura", icon = I .. "Ability_TrueShot", text = "MISSING" },
             -- Munitions : stack equipe dans l'emplacement de munitions, alerte sous le seuil
-            { settingsId = 109, kind = "ammo", min = 200, text = "LOW_AMMO",
+            { settingsId = 109, kind = "ammo", min = 200, text = "LOW_AMMO", pseudoKey = 9000011,
               displayName = "Ammo", icon = I .. "INV_Ammo_Arrow_02" },
+            -- Familier mecontent : simple interrupteur dans les options (kind inconnu de ItemEntryMissing = jamais manquant ici),
+            -- l'alerte elle-meme est posee par CheckPetMissing / CheckForMissings (cf. PetIsUnhappy)
+            { settingsId = 118, kind = "petHappiness", text = "PET_UNHAPPY", pseudoKey = 9000013,
+              displayName = "Pet unhappy", icon = I .. "Ability_Hunter_BeastTraining" },
         },
         WARRIOR = {
             { settingsId = 24, names = { 6673, "Battle Shout", 469, "Commanding Shout" }, casts = { 6673, "Battle Shout" },

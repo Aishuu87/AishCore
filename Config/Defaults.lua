@@ -40,6 +40,28 @@ ns.Defaults = {
   resourceCircle = {
     locked = false,   -- verrou du glisser-deposer (cf. SetDraggable)
     enabled = true,
+    -- Delai Attaque auto (Forever uniquement) : arc qui se vide entre deux attaques automatiques
+    swingEnabled = false,
+    swingStrata = "mid",            -- "bg" (derriere le fond) | "mid" | "front" (devant, sous le texte)
+    swingSizeRatio = 1.15,          -- diametre = size * ratio
+    swingBarMode = false,           -- true : simple barre au lieu de l'arc
+    swingBarFillUp = false,         -- remplissage inverse de la barre (swingFillUp = celui de l'arc)
+    swingBarBgColor = { 0, 0, 0, 0.45 },   -- fond de la barre
+    swingBarColor = { 1, 0.82, 0.2, 1 },
+    swingBarUseSpecColor = false,
+    swingBarSpecColorKey = "powercircle",
+    swingFillUp = false,            -- false : vidage ; true : remplissage
+    swingDirection = "cw",          -- arc : "cw" | "ccw" | "mirror" (depuis le point de depart)
+    swingRotation = 0,              -- arc : point de depart, en degres (0 = haut, sens horaire)
+    swingAngle = 360,               -- arc : etendue en degres
+    swingThickness = 3,             -- arc : 1 (fin) a 8 (epais)
+    swingBarX = 0, swingBarY = -58, -- barre : decalage depuis le centre du cercle
+    swingBarLength = 120,
+    swingBarThickness = 8,
+    swingBarDirection = "ltr",      -- "ltr" | "rtl" | "in" | "out"
+    swingColor = { 1, 0.82, 0.2, 1 },
+    swingUseSpecColor = false,
+    swingSpecColorKey = "powercircle",
     size = 80,
     -- Cache sombre sous le texte central, en pixels (cf. bar.textBackdrop).
     textBackdropSize = 35,
@@ -52,7 +74,10 @@ ns.Defaults = {
     x = 0,
     y = 0,
     anchor = "CENTER",
-    textColor = { 0, 176/255, 255/255, 1 },
+    textColor = { 0, 176/255, 255/255, 1 },   -- couleur du texte de ressource (hors couleurs thematiques)
+    themedColors = true,                      -- couleurs du module Couleurs ; decoche : arcColor + textColor
+    arcColor = { 0, 176/255, 255/255, 1 },    -- couleur de l'arc (hors couleurs thematiques)
+    bgColor = { 0x0e/255, 0x0e/255, 0x0e/255, 1 },   -- couleur de l'arriere plan (fond, masques, fond du texte)
     dotColors = {
       { 0.8, 0, 0.8 },
       { 1, 0.2, 0.8 },
@@ -77,10 +102,16 @@ ns.Defaults = {
     -- Arc circulaire (circle_piecrop) + overlay masque centre
     arcSizeRatio = 1.0,  -- taille de l'arc par rapport a cfg.size
     overlayRatio = 0.75, -- taille de l'overlay par rapport a l'arc (0.0 - 0.99)
-    -- Remplissage radial (horaire, depuis midi) au lieu du
-    -- remplissage vertical bas->haut. Bascule via /rcradial. Voir ResourceCircle.lua.
-    radialFillTest = false,
+    -- Rendu radial natif : angle de depart (degres, horaire) et sens inverse de chaque arc
+    arcStartAngle = 220,   -- arc d'environ 280 deg, ouverture centree en bas
+    arcEndAngle   = 140,
+    arcReverse = false,
+    arcThickness = 0.32,   -- epaisseur de l'anneau (fraction du diametre de l'arc)
+    arcGeomV2 = false,     -- false = ancien profil : migre au chargement (cf. EnsureArcSettings)
     -- Arc secondaire de stagger (Moine Brasseur)
+    staggerArcStartAngle = 220,
+    staggerArcEndAngle   = 140,
+    staggerArcReverse    = false,
     staggerArcRatio     = 0.72,  -- taille relative a arcPx (doit tenir dans le trou de l'overlay)
     staggerOverlayRatio = 0.76,  -- overlay interne du cercle de stagger
     staggerShowPercent  = false, -- afficher le % de stagger sous le texte de ressource
@@ -95,6 +126,9 @@ ns.Defaults = {
     ebonyPowerArcEnabled   = false,
     durationArcRatio        = 0.72, -- taille de l'arc de durée (identique au stagger par défaut)
     durationArcOverlayRatio = 0.76, -- épaisseur (overlay intérieur)
+    durationArcStartAngle = 220,
+    durationArcEndAngle   = 140,
+    durationArcReverse    = false,
     durationArcColorR = nil,  -- nil = couleur par défaut du spec
     durationArcColorG = nil,
     durationArcColorB = nil,
@@ -173,7 +207,14 @@ ns.Defaults = {
     healPredColor      = { 0.45, 1, 0.55, 1 },
     -- Arc circulaire (circle_piecrop) + overlay masque centre
     arcSizeRatio = 1.0,  -- taille de l'arc par rapport a cfg.size
-    overlayRatio = 0.75, -- taille de l'overlay par rapport a l'arc (0.0 - 0.99)
+    overlayRatio = 0.75, -- ancien reglage (taille du trou) : migre vers arcThickness, cf. EnsureArcSettings
+    -- Arc radial natif : angles, remplissage, epaisseur de l'anneau
+    arcStartAngle = 220,
+    arcEndAngle   = 140,
+    arcFillMode = "vertical",   -- "vertical" | "cw" | "ccw" | "mirror_out" | "mirror_in"
+    arcFillInverted = false,    -- remplissage inverse (horaire <-> antihoraire, miroir sortant <-> entrant)
+    arcThickness = 0.25,
+    arcGeomV2 = false,
     -- Mode de visibilite : "always" | "important" (default)
     visibilityMode = "important",
     -- Zone de clic securisee posee sur le cercle : clic gauche pour se cibler, clic droit
@@ -205,8 +246,13 @@ ns.Defaults = {
     -- Arc circulaire (circle_piecrop) + overlay masque centre
     arcSizeRatio = 1.0,  -- taille de l'arc par rapport a cfg.size (0.5 - 1.0)
     overlayRatio = 0.75, -- taille de l'overlay par rapport a l'arc (0.0 - 0.99)
-    -- Remplissage radial (comme resourceCircle) au lieu du vertical.
-    radialFillTest = false,
+    -- Arc radial natif (comme resourceCircle) : angles, sens, epaisseur (migree depuis overlayRatio, cf. EnsureArcSettings)
+    arcStartAngle = 220,
+    arcEndAngle   = 140,
+    arcFillMode = "cw",   -- "cw" | "ccw" | "mirror_out" | "mirror_in" | "vertical"
+    arcFillInverted = false,   -- remplissage inverse (cf. FILL_INVERSE)
+    arcThickness = 0.32,
+    arcGeomV2 = false,
     -- Globes de Puissance Sacrée en spé Protection / Vindicte (hors combat)
     holyPowerAllSpecs = false,
     -- Globes d'Essence en spé Dévastation / Augmentation (hors combat)
@@ -225,6 +271,7 @@ ns.Defaults = {
     -- Garde la barre affichee en permanence. Les informations detaillees (total, tooltip) restent
     -- reservees au survol : c'est la barre qui devient permanente, pas tout son contenu.
     alwaysVisible  = false,
+    nextLevelPreview = true,   -- survol du niveau : apercu de ce que debloque le prochain niveau
     repEnabled     = true,        -- affiche la réputation au niveau max
     companionXP    = true,         -- affiche l'XP du compagnon de gouffre si en gouffre
     repDisplayMode = "tracked",   -- "tracked" | "lastGained"
@@ -356,6 +403,46 @@ ns.Defaults = {
     -- Animations jouees derriere les deux logos (en-tete du panneau + mode AFK) :
     -- meme schema de cles que oocCombos (global_CLASSE et spec_CLASSE_N)
     logoCombos = {},
+    -- Cercle Bien Nourri : wellFedCombos.eating (pendant le repas) / wellFedCombos.fed (buff obtenu)
+    wellFedEnabled = true,
+    wellFedCombos = {},
+  },
+
+  -- Cercle Bien Nourri (hors combat) : se vide pendant qu'on mange, change de couleur a l'obtention du buff
+  wellFedCircle = {
+    enabled = true,
+    locked = false,
+    size = 28,
+    arcSizeRatio = 1.0,
+    arcThickness = 1.0,   -- 1 = disque plein
+    arcStartAngle = 0,
+    arcEndAngle = 359,
+    arcFillMode = "cw",
+    arcFillInverted = false,
+    anchorPctX = 0.22,
+    anchorPctY = 0.20,
+    x = 0,
+    y = 0,
+    statsShort = false,                   -- noms de stats raccourcis (Poly, Mast, AP...)
+    eatingColor = { 0.88, 0.76, 0.52, 1 },
+    fedColor    = { 0.20, 0.90, 0.35, 1 },
+    showWithoutBuff = false,   -- afficher le cercle meme pour une nourriture qui ne donne pas de buff
+    showFoodIcon = false,   -- icone de la nourriture au centre du cercle (circulaire)
+    foodIconScale = 0.6,    -- taille de cette icone, relative au cercle
+    showStats = true,       -- stats du buff (+59 Polyvalence...) lues dans le tooltip, a droite de l'icone
+    statsSize = 11,
+    statsOutline = "OUTLINE",
+    statsFont = "Fonts\\2002.TTF",
+    statsColor = { 1, 1, 1, 1 },
+    showPlus = true,
+    plusFont = "Fonts\\2002.TTF",
+    plusSize = 22,
+    plusIconSize = 22,        -- taille de l'icone du buff (migree depuis plusSize, cf. plusIconV2)
+    plusIconV2 = false,
+    plusOutline = "OUTLINE",   -- "NONE" | "OUTLINE" | "THICKOUTLINE"
+    plusX = 0,
+    plusY = 0,
+    plusDuration = 4,
   },
 
   -- Assistant de rotation : icone du sort highlighte, miroir du highlight Blizzard
@@ -438,6 +525,14 @@ ns.Defaults = {
     glowColor = { 1, 0.85, 0, 0.8 },
     glowSize = 4,
     useSpecGlowColor = false,  -- si true, utilise la couleur Glow du module Couleurs (spec active)
+    -- Surbrillance (Procs) : miroir des surbrillances de proc Blizzard des barres d'action
+    procGlowEnabled = false,
+    procGlowRoleOnly = false,  -- true : seulement en spe Soigneur / Tank
+    procGlowLoopIndex = 2,     -- index dans LOOP_GLOW_TYPES (1 = Aucun, 2 = Pulse)
+    procGlowStartIndex = 1,    -- index dans PROC_START_TYPES (1 = Aucun)
+    procGlowColor = { 0.3, 0.7, 1, 0.85 },
+    procGlowSize = 4,
+    procGlowUseSpecColor = false,
     spellColors = {},          -- [spellID] = {r, g, b, a} : couleur de glow individuelle par sort
     -- Mode de visibilite : "always" | "target" | "combat" (default)
     visibilityMode = "combat",
@@ -599,6 +694,9 @@ ns.Defaults = {
     -- client ; les entrees LibSharedMedia s'ajoutent au dropdown quand une media pack
     -- est installee.
     barTexture    = "flat",
+    sparkTexture  = "default",                      -- etincelle : "default" | "line" | "star" | "burst" | "dot"
+    sparkSize     = 100,                            -- taille de l'etincelle, en % de sa taille de base
+    sparkColor    = { 1, 0.867, 0.710, 1 },
     font          = "Fonts\\2002.TTF",
     nameOutlineStyle = "OUTLINE",
     timerFont     = "Fonts\\2002.TTF",
@@ -677,13 +775,17 @@ ns.Defaults = {
     -- Masquer les cadres d'unites Blizzard (Modules/BlizzardUnitFrames.lua)
     hideBlizzPlayer = false, hideBlizzTarget = false, hideBlizzFocus = false,
     hideBlizzPet = false, hideBlizzTargetTarget = false,
-    bgColor = { 0.0549, 0.0549, 0.0549, 1 },  -- #0e0e0e
+    bgColor = { 0.0549, 0.0549, 0.0549, 1 },  -- #0e0e0e : couleur de l'arriere plan (hors couleurs thematiques)
+    themedColors = true,                      -- couleurs du module Couleurs ; decoche : barColor + bgColor
+    showPlayerNameHover = false,              -- nom du personnage au survol de sa barre de vie (hors combat)
+    showTargetLevel = false,                  -- niveau devant le nom de la barre de cible ("7 \226\128\162 Nom")
+    barColor = { 0.71, 0.60, 0.49, 1 },       -- couleur des barres de vie (hors couleurs thematiques)
     bars = {
       player = {
         enabled = true, width = 200, height = 4,
         x = -260, y = -120,
         fillColor = { 0.78, 0.61, 0.44, 1 },
-        nameOffX = 0, nameOffY = 2,
+        nameOffX = 0, nameOffY = 2,   -- nom au survol : decale automatiquement en miroir de celui de la cible (EnsurePlayerNameOffset)
       },
       target = {
         enabled = true, width = 200, height = 4,
@@ -773,6 +875,44 @@ ns.Defaults = {
     cursorSize = 2,
   },
 
+  -- Herbes et minerais sur la minimap, cf. Modules/MinimapNodes.lua
+  minimapNodes = {
+    enabled = false,
+    size = 14,            -- taille des icones
+    style = "ring",       -- "square", "round", "ring" (rond + anneau dore du jeu) ou un cadre d'atlas (cf. MinimapNodes.STYLES)
+    frameScale = 100,     -- taille du cadre d'atlas, en % de sa taille d'origine
+    dotScale = 100,       -- taille des points d'origine du jeu, en % (10 a 100)
+  },
+
+  -- Barre de menu, cf. Modules/MenuBar.lua. Les listes de raccourcis (left / right) n'ont volontairement pas de defaut ici :
+  -- MergeDefaults ressusciterait les cases retirees (defauts dans MenuBar.DEFAULT_SLOTS).
+  menuBar = {
+    enabled = false, hideBlizzard = true,
+    point = "BOTTOM", relativePoint = "BOTTOM", x = 0, y = 6,
+    iconSize = 22, spacing = 10, tooltip = true,
+    -- Couleurs thematiques (module Couleurs) : icones = Texte de puissance, survol = Decorations B, horloge = Cercle de puissance
+    desaturate = true, iconColor = { 0.86, 0.86, 0.86, 1 }, iconThemed = true,
+    hoverEnabled = true, hoverColor = { 1, 0.82, 0.2, 1 }, hoverThemed = true, hoverGrow = true,
+    bgEnabled = true, bgTexture = "soft", bgColor = { 0, 0, 0, 0.6 }, bgPadX = 12, bgPadY = 8,
+    bgEdge = 16, bgBorderSize = 0, bgBorderColor = { 0, 0, 0, 1 },
+    hideInCombat = false, alpha = 1, mouseover = false, mouseoverAlpha = 0,
+    clockEnabled = true, clockPos = "center", clock24 = true, clockBlink = true, clockServer = false,
+    clockFont = "Fonts\\2002.TTF", clockOutline = "OUTLINE", clockSize = 22, clockColor = { 0.95, 0.78, 0.4, 1 }, clockThemed = true,
+  },
+
+  -- Mode furtif, cf. Modules/StealthMode.lua : vignettage qui assombrit l'ecran en furtivite
+  stealthMode = {
+    enabled  = false,
+    darkness = 0.6,    -- opacite maximale du vignettage (0 a 1)
+    color    = { 0, 0, 0, 1 },   -- couleur du vignettage (noir par defaut)
+    disableInCombat = false,     -- jamais affiche en combat
+    size     = 1.0,    -- taille de l'ellipse claire : 1 = inscrite dans l'ecran
+    ratio    = 1.0,    -- hauteur de l'ellipse relativement a sa largeur
+    feather  = 3,      -- douceur du bord, de 1 (tres doux) a 5 (net)
+    fadeIn   = 0.6,    -- secondes
+    fadeOut  = 0.8,    -- secondes
+  },
+
   -- Confort de jeu, cf. Modules/Comfort.lua : CVars de rendu + raccourcis /rl /edit /cdm.
   comfort = {
     -- Rendu graphique (groundDensity/groundFade/groundDist/sharpen) : lie au PC/compte et non au profil,
@@ -782,6 +922,7 @@ ns.Defaults = {
     merchantExtend = false,   -- fenetre marchand sur plusieurs pages a la fois
     merchantPages  = 3,
     spellIDTooltip = false,   -- spellID dans l'infobulle des buffs/debuffs
+    minimapTracking = false,  -- clic droit sur la minimap : ouvre le menu de pistage
     spellIDModifier = "NONE", -- touche requise : NONE / ALT / SHIFT / CTRL
   },
 

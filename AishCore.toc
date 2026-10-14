@@ -2,7 +2,7 @@
 ## Title: AishCore
 ## Notes: Custom UI overlay - resource & health circles, spell effects, auras & procs
 ## Author: Aishuu
-## Version: 4.3
+## Version: 4.4
 ## X-Curse-Project-ID: 1689788
 ## SavedVariables: AishaddonDB AishUIAuraDB
 ## SavedVariablesPerCharacter: AishUILearnDB, AishUISetupCharDB
@@ -28,7 +28,10 @@ Locales\frFR.lua
 
 # Data
 Data\ModelPaths.lua
+Data\PatchNotes.lua
 Data\SearchIndex.lua
+Data\ClassSpellLevels.lua
+Data\LevelGains.lua
 
 # Engine
 CircularProgress.lua
@@ -37,6 +40,7 @@ CircularProgress.lua
 Modules\ResourceCircle.lua
 Modules\HealthCircle.lua
 Modules\OutOfCombatResourceCircle.lua
+Modules\WellFedCircle.lua
 Modules\SpellEffects.lua
 Modules\RotationHelper.lua
 Modules\PriorityBar.lua
@@ -61,6 +65,9 @@ Modules\CharacterArmory.lua
 Modules\AFKMode.lua
 Modules\BigCursor.lua
 Modules\Comfort.lua
+Modules\StealthMode.lua
+Modules\MenuBar.lua
+Modules\MinimapNodes.lua
 Modules\EllesmereRaidGrowth.lua
 Modules\AishUISetup.lua
 
@@ -114,6 +121,8 @@ UI\SettingsPanel.lua
 UI\ProfileModulesUI.lua
 UI\CDMLayoutPage.lua
 UI\ExtraBarsPage.lua
+UI\MenuBarPage.lua
+UI\PatchNotesPage.lua
 UI\ModuleHoverOverlay.lua
 
 # Init

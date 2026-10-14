@@ -13,6 +13,7 @@ end
 local function ForeverEntryLabel(entry)
     if entry.kind == "item" then return L["MISSINGBUFFS_ENTRY_SHARDS"] or entry.displayName end
     if entry.kind == "ammo" then return L["MISSINGBUFFS_ENTRY_AMMO"] or entry.displayName end
+    if entry.kind == "petHappiness" then return L["SETTINGS_PSEUDO_PET_UNHAPPY"] or entry.displayName end
     local out, seen = {}, {}
     for _, v in ipairs(entry.casts or {}) do
         if type(v) == "number" and #out < 3 then

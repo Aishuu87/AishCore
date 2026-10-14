@@ -961,3 +961,99 @@ function ns.PrintMemoryReport()
         print(string.format("  %-26s %7.2f Mo", pages[i][1], pages[i][2] / 1024))
     end
 end
+
+-- /aishradial : banc d'essai du rendu radial NATIF (StatusBar:SetRenderMode(Enum.StatusBarRenderMode.Radial), 12.1+).
+-- Trois barres animees (disque plein, texture pre-croppee du cercle central, carre blanc) pour juger de la fluidite,
+-- du point de depart / sens du remplissage et du comportement avec nos textures.
+do
+    local testFrame
+
+    local function Build()
+        local P = "|cff00ffff[Radial]|r "
+        local f = CreateFrame("Frame", "AishCoreRadialTest", UIParent)
+        f:SetSize(620, 330)
+        f:SetPoint("CENTER")
+        f:SetFrameStrata("DIALOG")
+        f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+        f:SetScript("OnDragStart", f.StartMoving); f:SetScript("OnDragStop", f.StopMovingOrSizing)
+        local bg = f:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetColorTexture(0.04, 0.04, 0.05, 0.95)
+        local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        title:SetPoint("TOP", 0, -10)
+        title:SetText("Rendu radial natif : StatusBar:SetRenderMode(Radial)")
+        local close = CreateFrame("Button", nil, f, "UIPanelCloseButton"); close:SetPoint("TOPRIGHT", 2, 2)
+        tinsert(UISpecialFrames, "AishCoreRadialTest")
+
+        local tests = {
+            { "Disque plein\n(ns.Media.circle)", ns.Media and ns.Media.circle or "Interface\Buttons\WHITE8X8" },
+            { "Texture du cercle central\n(circle_piecrop.tga)", "Interface\AddOns\AishCore\Media\circle_piecrop.tga" },
+            { "Carre blanc\n(masque du remplissage)", "Interface\Buttons\WHITE8X8" },
+        }
+        f.bars = {}
+        for i, t in ipairs(tests) do
+            local x = (i - 2) * 195
+            local back = f:CreateTexture(nil, "BORDER")
+            back:SetPoint("CENTER", f, "CENTER", x, 15); back:SetSize(150, 150)
+            back:SetColorTexture(0.12, 0.12, 0.14, 1)
+            local b = CreateFrame("StatusBar", nil, f)
+            b:SetSize(150, 150); b:SetPoint("CENTER", f, "CENTER", x, 15)
+            b:SetStatusBarTexture(t[2])
+            b:SetMinMaxValues(0, 1)
+            b:SetStatusBarColor(0.05, 0.9, 0.7, 1)
+            local ok, err = pcall(b.SetRenderMode, b, Enum.StatusBarRenderMode.Radial)
+            local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            lbl:SetPoint("TOP", back, "BOTTOM", 0, -6); lbl:SetText(t[1])
+            local mode = b.GetRenderMode and b:GetRenderMode()
+            local st = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+            st:SetPoint("TOP", lbl, "BOTTOM", 0, -4)
+            st:SetText(ok and ("mode = " .. tostring(mode)) or ("ERREUR : " .. tostring(err)))
+            print(P .. t[1]:gsub("\n", " ") .. " : SetRenderMode " .. (ok and "ok" or ("ERREUR " .. tostring(err))) .. ", GetRenderMode=" .. tostring(mode))
+            f.bars[i] = b
+        end
+
+        f.paused, f.manual, f.t = false, nil, 0
+        f.value = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        f.value:SetPoint("BOTTOM", 0, 44)
+        f:SetScript("OnUpdate", function(self, el)
+            if not self.paused then self.t = self.t + el end
+            local v = self.manual or ((math.sin(self.t * 0.9 - 1.5708) + 1) / 2)
+            for _, b in ipairs(self.bars) do b:SetValue(v) end
+            self.value:SetText(string.format("valeur %.1f %%", v * 100))
+        end)
+
+        local function Btn(text, x, fn)
+            local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+            b:SetSize(110, 22); b:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", x, 12); b:SetText(text)
+            b:SetScript("OnClick", fn)
+            return b
+        end
+        Btn("Pause / reprise", 12, function() f.paused = not f.paused; f.manual = nil end)
+        local rev = false
+        Btn("Sens inverse", 130, function()
+            rev = not rev
+            for _, b in ipairs(f.bars) do if b.SetReverseFill then b:SetReverseFill(rev) end end
+        end)
+        for i, pct in ipairs({ 0, 25, 50, 75, 100 }) do
+            local bt = Btn(pct .. " %", 255 + (i - 1) * 70, function() f.manual = pct / 100 end)
+            bt:SetSize(64, 22)
+        end
+        Btn("Auto", 12 + 130 + 118 + 355, function() f.manual = nil; f.paused = false end):SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 12)
+        return f
+    end
+
+    SLASH_AISHRADIAL1 = "/aishradial"
+    SlashCmdList["AISHRADIAL"] = function()
+        local P = "|cff00ffff[Radial]|r "
+        local hasEnum = Enum and Enum.StatusBarRenderMode and Enum.StatusBarRenderMode.Radial
+        local probe = CreateFrame("StatusBar")
+        local hasFn = type(probe.SetRenderMode) == "function"
+        print(P .. string.format("build %s | Enum.StatusBarRenderMode.Radial = %s | StatusBar:SetRenderMode = %s",
+            tostring(select(4, GetBuildInfo())), tostring(hasEnum), tostring(hasFn)))
+        if not (hasEnum and hasFn) then
+            print(P .. "API absente sur ce client : le rendu radial natif n'est pas disponible ici.")
+            return
+        end
+        if testFrame and testFrame:IsShown() then testFrame:Hide(); return end
+        testFrame = testFrame or Build()
+        testFrame:Show()
+    end
+end

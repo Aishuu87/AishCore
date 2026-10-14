@@ -15,8 +15,8 @@ local CVAR_TOGGLES = {
   { key = "objFade",       cvar = "lodObjectFadeScale",    on = 200 },
   { key = "objCull",       cvar = "lodObjectCullSize",     on = 8   },
   { key = "terrainLod",    cvar = "terrainLodDist",        on = 1000 },
-  { key = "reflection",    cvar = "reflectionMode",        on = 3   },
-  { key = "weather",       cvar = "weatherDensity",        on = 3   },
+  { key = "reflection",    cvar = "reflectionMode",        on = 3,   off = 1   },
+  { key = "weather",       cvar = "weatherDensity",        on = 3,   off = 1   },
 }
 
 local function Cfg()
@@ -535,8 +535,57 @@ function Comfort.SetToggle(key, value)
   ApplyCVars()
 end
 
+-- ── Clic droit sur la minimap : menu de pistage ─────────────────────────────
+-- Selon le client, le bouton de pistage est un DropdownButton moderne (MinimapCluster.Tracking.Button) ou l'ancien
+-- MiniMapTracking + menu deroulant. Si un autre addon a deja ouvert un menu au meme clic, on ne fait rien : un second
+-- appel le refermerait.
+local function AnyMenuOpen()
+  if _G.DropDownList1 and _G.DropDownList1:IsShown() then return true end
+  if _G.Menu and Menu.GetManager then
+    local ok, m = pcall(function() return Menu.GetManager():GetOpenMenu() end)
+    if ok and m then return true end
+  end
+  return false
+end
+
+local function OpenTrackingMenu()
+  local cluster = _G.MinimapCluster
+  local btn = cluster and cluster.Tracking and cluster.Tracking.Button
+  if btn then
+    if btn.OpenMenu then pcall(btn.OpenMenu, btn); return end
+    if btn.ToggleMenu then pcall(btn.ToggleMenu, btn); return end
+    if btn.Click then pcall(btn.Click, btn); return end
+  end
+  local old = _G.MiniMapTrackingButton or _G.MiniMapTracking
+  if old and old.Click then pcall(old.Click, old); return end
+  if _G.ToggleDropDownMenu and _G.MiniMapTrackingDropDown then
+    pcall(ToggleDropDownMenu, 1, nil, _G.MiniMapTrackingDropDown, "MiniMapTracking")
+  end
+end
+
+local minimapHooked = false
+local function ApplyMinimapTracking()
+  if minimapHooked or not Cfg().minimapTracking then return end
+  local mm = _G.Minimap
+  if not mm or not mm.SetScript then return end
+  minimapHooked = true
+  -- Le script d'origine (Minimap_OnClick) lance un ping a CHAQUE clic, droit compris : on le remplace par un relais qui
+  -- ne l'appelle pas pour le clic droit (quand l'option est cochee) et le laisse intact pour tout le reste.
+  local orig = mm:GetScript("OnMouseUp")
+  mm:SetScript("OnMouseUp", function(self, button, ...)
+    if button == "RightButton" and Cfg().minimapTracking then
+      C_Timer.After(0, function()
+        if not AnyMenuOpen() then OpenTrackingMenu() end   -- un autre addon (hook) a pu l'ouvrir entre-temps
+      end)
+      return
+    end
+    if orig then return orig(self, button, ...) end
+  end)
+end
+
 function Comfort.ApplySettings()
   MigrateFromProfile()
+  ApplyMinimapTracking()
   ApplyCVars()
   ApplySlashes()
   ApplyMerchant()

@@ -153,6 +153,10 @@ local function GetLevelPrefix(unit)
     end
 end
 
+-- Partages avec UnitBars (niveau devant le nom de la barre de cible)
+TopTargetBar.GetLevelColor  = GetLevelColor
+TopTargetBar.GetLevelPrefix = GetLevelPrefix
+
 local function AbbreviateNumber(n)
     -- n est un nombre propre (fourni par Blizzard C via OnValueChanged), comparaisons >= sures
     n = tonumber(n) or 0
