@@ -1,8 +1,8 @@
-## Interface: 120100, 16001
+## Interface: 120100, 120105, 16001
 ## Title: AishCore
 ## Notes: Custom UI overlay - resource & health circles, spell effects, auras & procs
 ## Author: Aishuu
-## Version: 4.4
+## Version: 4.4.1
 ## X-Curse-Project-ID: 1689788
 ## SavedVariables: AishaddonDB AishUIAuraDB
 ## SavedVariablesPerCharacter: AishUILearnDB, AishUISetupCharDB
