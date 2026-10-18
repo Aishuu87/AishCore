@@ -35,6 +35,8 @@ local CENTER_ARC_SPELLS = {
                cfgKey = "ebonyPowerArcEnabled", useCDMBar = true },
     -- Pas d'entree [581] (DH Vengeance) : texte de ressource secondaire seulement, pas d'arc dedie
 }
+-- Forever : Dur au mal n'existe pas sur ce client (le guerrier Protection n'a pas d'arc secondaire)
+if _addon.IsForever then CENTER_ARC_SPELLS[73] = nil end
 
 local activeInfo      = nil
 -- specID resolu au moment du choix d'activeInfo (reglages par spec), plutot que _addon._specID qui peut etre perime
@@ -418,10 +420,10 @@ local function ResolveActiveArc()
     StopCDMBarMode()
     -- Resolution fraiche en priorite : _addon._specID (PAS ns._specID, jamais rempli) peut etre perime
     local specID = nil
-    if GetSpecialization and GetSpecializationInfo then
-        local idx = GetSpecialization()
+    if _addon.GetSpecialization and _addon.GetSpecializationInfo then
+        local idx = _addon.GetSpecialization()
         if idx and idx > 0 then
-            local ok, sid = pcall(GetSpecializationInfo, idx)
+            local ok, sid = pcall(_addon.GetSpecializationInfo, idx)
             if ok and sid and sid > 0 then specID = sid end
         end
     end
@@ -434,10 +436,10 @@ local function ResolveActiveArc()
     end
     if activeInfo and activeInfo.isTotem then pcall(ScanTotemArc) end
     if activeInfo and activeInfo.supportsAbsorbMode then
-        absorbTicker = C_Timer.NewTicker(0.1, AbsorbTick)
+        absorbTicker = _addon.NewTicker(0.1, AbsorbTick)
     end
     if activeInfo and IsStackMode() then
-        stackModeTicker = C_Timer.NewTicker(0.1, StackModeTick)
+        stackModeTicker = _addon.NewTicker(0.1, StackModeTick)
     end
     StartCDMBarMode()
 end
@@ -488,7 +490,7 @@ local function OnCenterArcEvent(_, event, arg1, arg2, arg3)
                     local frac = (data.expirationTime - GetTime()) / fallMaxDur
                     pcall(RC.SetCenterArcValue, math.max(0, math.min(1, frac)), activeInfo.color)
                 end
-                fallTicker = C_Timer.NewTicker(0.016, FallbackTick)
+                fallTicker = _addon.NewTicker(0.016, FallbackTick)
             elseif fallExpiry > 0 and GetTime() >= fallExpiry then
                 StopFallback(); PushNil()
             end

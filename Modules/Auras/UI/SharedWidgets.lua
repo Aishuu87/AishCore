@@ -176,6 +176,17 @@ function SW.CreateSectionHeader(parent, text, width)
     -- Label
     local lbl = f:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lbl,FONT,HEADER_FONT_SIZE)
     lbl:SetPoint("LEFT",14,0)
+    -- Nouveaute du dernier patch : l'icone remplace le point (cf. Data/PatchNotes.lua)
+    if _addon.IsNewHeader and _addon.IsNewHeader(text) then
+        local badge = _addon.CreateNewBadge(f, 16)
+        if badge then
+            badge:SetPoint("LEFT", 0, 0)
+            _addon.RegisterNewBadge(badge, function(shown)
+                dot1:SetShown(not shown)
+                lbl:SetPoint("LEFT", shown and (badge:GetWidth() + 3) or 14, 0)
+            end)
+        end
+    end
     lbl:SetTextColor(tc[1], tc[2], tc[3], 1)
     -- Libelle "nu", sans le prefixe +/- d'un en-tete repliable : SetHeaderCollapsedState
     -- le reecrit a chaque pli, il lui faut donc la base intacte.
@@ -184,6 +195,7 @@ function SW.CreateSectionHeader(parent, text, width)
     lbl:SetText(f._baseText)
     -- Gold gradient hairline
     local line = f:CreateTexture(nil,"ARTWORK"); line:SetHeight(1)
+    if _addon.SharedWidgets and _addon.SharedWidgets.PixelLine then _addon.SharedWidgets.PixelLine(line) end
     line:SetPoint("LEFT", lbl,"RIGHT", 10, 0); line:SetPoint("RIGHT",-2,0)
     line:SetColorTexture(1,1,1,1)
     local function ApplyGradient(color)
@@ -245,6 +257,9 @@ end
 function SW.MakeSectionTitle(f)
     if not f or f._isSectionTitle then return f end
     f._isSectionTitle = true
+    -- Retenu par la page : CreateSectionStack y branche le pli / depli global
+    local par = f:GetParent()
+    if par then par._pageTitle = f end
     if f._lbl then ns.ApplyFont(f._lbl, FONT, TITLE_FONT_SIZE) end
     f:SetHeight(TITLE_HEIGHT)
     if f.RefreshColor then f:RefreshColor() end
@@ -268,14 +283,22 @@ function SW.MakeHeaderCollapsible(f, onToggle)
     hitbox:SetScript("OnLeave", function() hl:Hide() end)
     hitbox:SetScript("OnClick", function()
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-        if onToggle then onToggle() end
+        -- Double clic / repli differe : meme logique que le GUI principal
+        local main = _addon.SharedWidgets
+        if main and main.HeaderClick then
+            main.HeaderClick(f, onToggle)
+        elseif onToggle then
+            onToggle()
+        end
     end)
     f._hitbox = hitbox
     return f
 end
 
 function SW.SetHeaderCollapsedState(f, collapsed)
-    if not f or not f._collapseReady or not f._lbl then return end
+    if not f then return end
+    f._collapsed = collapsed
+    if not f._collapseReady or not f._lbl then return end
     f._lbl:SetText((collapsed and "+ " or "- ") .. (f._baseText or ""))
 end
 
@@ -410,6 +433,36 @@ function SW.CreateSectionStack(parent, sections, cw, startY, stackId)
     local entries = {}
     local Relayout
 
+    -- Pli/depli anime (meme pilote que le reste du GUI), repli sec si indisponible
+    local function AnimateRelayout()
+        local main = _addon.SharedWidgets
+        if main and main.AnimateLayout then
+            local frames = {}
+            for _, en in ipairs(entries) do frames[#frames + 1] = en.hdr; frames[#frames + 1] = en.sub end
+            main.AnimateLayout("stack:" .. tostring(stackId or wrap), frames, Relayout)
+        else
+            Relayout()
+        end
+    end
+
+    local function SetEntryCollapsed(entry, collapsed)
+        entry.collapsed = collapsed
+        -- Pas de `x and false or nil` : en Lua `false or nil` vaut toujours nil,
+        -- l'etat "deplie" ne serait jamais memorise.
+        if collapsed then
+            _stackCollapsed[entry.key] = nil
+        else
+            _stackCollapsed[entry.key] = false
+        end
+        SW.SetHeaderCollapsedState(entry.hdr, collapsed)
+    end
+
+    -- Aligne tous les en-tetes sur un meme etat (double clic, clic sur le titre de page)
+    local function SetAll(collapsed)
+        for _, en in ipairs(entries) do SetEntryCollapsed(en, collapsed) end
+        AnimateRelayout()
+    end
+
     for i, sec in ipairs(sections) do
         local name = sec.name or ("SECTION "..i)
         local hdr = SW.CreateSectionHeader(wrap, name, W)
@@ -431,25 +484,10 @@ function SW.CreateSectionStack(parent, sections, cw, startY, stackId)
         entries[i] = entry
 
         SW.MakeHeaderCollapsible(hdr, function()
-            entry.collapsed = not entry.collapsed
-            -- Pas de `x and false or nil` : en Lua `false or nil` vaut toujours nil,
-            -- l'etat "deplie" ne serait jamais memorise.
-            if entry.collapsed then
-                _stackCollapsed[entry.key] = nil
-            else
-                _stackCollapsed[entry.key] = false
-            end
-            SW.SetHeaderCollapsedState(hdr, entry.collapsed)
-            -- Pli/depli anime (meme pilote que le reste du GUI), repli sec si indisponible
-            local main = _addon.SharedWidgets
-            if main and main.AnimateLayout then
-                local frames = {}
-                for _, en in ipairs(entries) do frames[#frames + 1] = en.hdr; frames[#frames + 1] = en.sub end
-                main.AnimateLayout("stack:" .. tostring(stackId or wrap), frames, Relayout)
-            else
-                Relayout()
-            end
+            SetEntryCollapsed(entry, not entry.collapsed)
+            AnimateRelayout()
         end)
+        hdr._onSetAll = SetAll
         SW.SetHeaderCollapsedState(hdr, entry.collapsed)
     end
 
@@ -479,6 +517,17 @@ function SW.CreateSectionStack(parent, sections, cw, startY, stackId)
         -- categorie : sans ca, plier/deplier la laisse sur l'ancienne hauteur.
         local SP = _addon.SettingsPanel
         if SP and SP.SyncScrollTo then SP.SyncScrollTo(parent) end
+    end
+
+    -- Clic sur le titre de la page : tout replier si une section est ouverte, sinon tout deplier.
+    -- Le titre ne recoit jamais de prefixe +/- (SetHeaderCollapsedState n'y est pas appele).
+    local title = parent._pageTitle
+    if title and not title._collapseReady then
+        SW.MakeHeaderCollapsible(title, function()
+            local anyOpen = false
+            for _, en in ipairs(entries) do if not en.collapsed then anyOpen = true end end
+            SetAll(anyOpen)
+        end)
     end
 
     -- Une section qui se redimensionne d'elle-meme apres coup (apercu qui se peuple,
@@ -516,4 +565,33 @@ function SW.CreateActionBtn(parent, text, width, bgColor, borderColor, textColor
     local lbl=btn:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(lbl,FONT,11); lbl:SetAllPoints(); lbl:SetJustifyH("CENTER")
     if textColor then lbl:SetTextColor(textColor[1],textColor[2],textColor[3]) else lbl:SetTextColor(1,1,1) end
     lbl:SetText(text or ""); btn._lbl=lbl; return btn
+end
+
+-- Widgets de base : ceux du GUI principal (UI/SharedWidgets.lua), pour que les pages des Modes aient exactement le meme
+-- rendu (polices, curseurs, menus deroulants avec barre de defilement cliquable, bouton couleur) que le reste. Les
+-- versions locales ci-dessus ne servent plus que de repli si la bibliotheque principale manquait (chargee apres ce
+-- fichier : resolue a l'appel, jamais au chargement).
+do
+    local function Main() return _addon.SharedWidgets end
+    local old = { cb = SW.CreateCheckbox, sl = SW.CreateSlider, dd = SW.CreateDropdown, col = SW.CreateColorButton }
+    SW.CreateCheckbox = function(parent, label, width)
+        local M = Main()
+        if M and M.CreateCheckbox then return M.CreateCheckbox(parent, label, nil, width) end
+        return old.cb(parent, label, width)
+    end
+    SW.CreateSlider = function(parent, label, minVal, maxVal, step, width)
+        local M = Main()
+        if M and M.CreateSlider then return M.CreateSlider(parent, label, minVal, maxVal, step, width) end
+        return old.sl(parent, label, minVal, maxVal, step, width)
+    end
+    SW.CreateDropdown = function(parent, label, options, width)
+        local M = Main()
+        if M and M.CreateDropdown then return M.CreateDropdown(parent, label, options, width) end
+        return old.dd(parent, label, options, width)
+    end
+    SW.CreateColorButton = function(parent, label, width)
+        local M = Main()
+        if M and M.CreateColorButton then return M.CreateColorButton(parent, label, width) end
+        return old.col(parent, label, width)
+    end
 end

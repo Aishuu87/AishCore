@@ -10,6 +10,7 @@ local Theme = ns.Theme
 
 local WHITE = "Interface\\Buttons\\WHITE8x8"
 local GEAR  = "Interface\\Buttons\\UI-OptionsButton"
+local LINK_ATLAS = "UI_Editor_Eye_Icon"
 local TAB_H, TAB_GAP = 24, 6
 local FOREVER_TAG = "[Forever]"
 local FOREVER_HEX = "66ccff"
@@ -104,8 +105,17 @@ local function MakeHeaderLink(header, link)
   bg:SetPoint("TOPLEFT", -3, 3); bg:SetPoint("BOTTOMRIGHT", 3, -3)
   bg:SetColorTexture(0.06, 0.06, 0.08, 1)
   local ic = b:CreateTexture(nil, "ARTWORK")
-  ic:SetAllPoints()
-  ic:SetTexture(GEAR)
+  -- Oeil de l'editeur, proportions de l'atlas gardees dans le carre ; repli sur la roue si absent du client
+  local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(LINK_ATLAS)
+  if info and info.width and info.height and info.width > 0 and info.height > 0 then
+    ic:SetAtlas(LINK_ATLAS)
+    local k = 18 / math.max(info.width, info.height)
+    ic:SetSize(info.width * k, info.height * k)
+    ic:SetPoint("CENTER")
+  else
+    ic:SetAllPoints()
+    ic:SetTexture(GEAR)
+  end
   ic:SetVertexColor(ac[1], ac[2], ac[3], 0.75)
   b:SetScript("OnEnter", function(self)
     ic:SetVertexColor(1, 1, 1, 1)

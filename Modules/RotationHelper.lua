@@ -493,7 +493,8 @@ local function ShouldShowIcons()
       if not (UnitAffectingCombat("player") or IsTargetAttackable()) then return false end
     elseif vMode == "combat" then
       if not UnitAffectingCombat("player") then return false end
-    else
+    elseif not (UnitAffectingCombat("player") or IsTargetAttackable()) then
+      -- "Toujours" : masque en zone de repos, sauf combat ou cible attaquable (mannequin, ennemi egare...)
       return false
     end
   end
@@ -531,7 +532,7 @@ end
 
 local function StartPolling()
   if pollTicker then return end
-  pollTicker = C_Timer.NewTicker(0.15, PollGlows)
+  pollTicker = ns.NewTicker(0.15, PollGlows)
 end
 
 local function StopPolling()

@@ -69,8 +69,8 @@ function ns.GetSpecKey()
         -- Globals d'abord : ils portent la spe deduite des branches de talents sur un client sans
         -- vraies specialisations (cf. Core.lua). Dans l'autre ordre, la cle de spe restait nulle
         -- et les listes d'auras par spec ne se chargeaient jamais.
-        local gS = GetSpecialization or (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization)
-        local gI = GetSpecializationInfo or (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo)
+        local gS = _addon.GetSpecialization or (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization)
+        local gI = _addon.GetSpecializationInfo or (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo)
         if not gS or not gI then return end
         local specID = gI(gS())
         if not specID then return end
@@ -98,8 +98,9 @@ function ns.ApplyAdminOverrides(spells)
     if not spells then return end
     -- Baseline codée en dur (SpellClassificationOverrides.lua) pour tous, puis override
     -- personnel du joueur (ns.GetAdminOverrides, /aishadmin) par-dessus qui garde le dernier mot.
-    local hardcoded = ns.SpellClassificationOverrides
-    if hardcoded then
+    -- Table propre a Forever appliquee apres la commune (cf. SpellClassificationOverrides.lua).
+    for _, hardcoded in ipairs({ ns.SpellClassificationOverrides,
+                                 _addon.IsForever and ns.SpellClassificationOverridesForever or nil }) do
         for spellID, o in pairs(hardcoded) do
             local info = spells[spellID]
             if info then
@@ -200,6 +201,7 @@ function ns.GetSpecSpells()
     if not key or not ns.db then return nil end
     if not ns.db.discoveredSpells then ns.db.discoveredSpells = {} end
     if _addon.IsForever then MergeSpecListsIntoClass(key) end
+    if ns.PullDiscoveryKey then ns.PullDiscoveryKey(key) end   -- sorts du registre compte, spe par spe
     if not ns.db.discoveredSpells[key] then ns.db.discoveredSpells[key] = {} end
     local spells = ns.db.discoveredSpells[key]
     ns.ApplyAdminOverrides(spells)

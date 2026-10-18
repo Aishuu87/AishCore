@@ -4,6 +4,9 @@ local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _ad
 local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
 
+-- Filet d'1 pixel physique (cf. UI/SharedWidgets.lua, PixelLine)
+local function PxLine(t) local M = _addon.SharedWidgets; if M and M.PixelLine then M.PixelLine(t) end end
+
 local TC = 0.07
 
 function ns.SettingsPanel.BuildEffectsMenu(p, cw)
@@ -134,7 +137,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
             local vtTx=vt:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(vtTx,FONT,10); vtTx:SetAllPoints(); vtTx:SetJustifyH("CENTER")
             vtTx:SetText(vn)
             -- Soulignement legacy (toujours cache, le parchemin gere l'effet actif)
-            local vtUl=vt:CreateTexture(nil,"OVERLAY"); vtUl:SetHeight(1); vtUl:SetPoint("BOTTOMLEFT"); vtUl:SetPoint("BOTTOMRIGHT")
+            local vtUl=vt:CreateTexture(nil,"OVERLAY"); vtUl:SetHeight(1); PxLine(vtUl); vtUl:SetPoint("BOTTOMLEFT"); vtUl:SetPoint("BOTTOMRIGHT")
             vtUl:Hide()
             viewBtns[vi]={bg=vtBg, tx=vtTx, ul=vtUl, key=viewKeys[vi]}
             -- Etat initial via le helper (TOUTES = actif au build)
@@ -153,7 +156,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
         end
 
         -- Separateur fin entre le bloc vues et le bloc anim tabs (gris tres dim)
-        local sep=rf:CreateTexture(nil,"BORDER"); sep:SetHeight(1)
+        local sep=rf:CreateTexture(nil,"BORDER"); sep:SetHeight(1); PxLine(sep)
         sep:SetPoint("TOPLEFT",0,-68); sep:SetPoint("TOPRIGHT",0,-68)
         sep:SetColorTexture(0.18, 0.18, 0.20, 0.6)
 
@@ -182,7 +185,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
             local tTx=tab:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(tTx,FONT,10); tTx:SetAllPoints(); tTx:SetJustifyH("CENTER")
             tTx:SetText(td[2])
             -- Soulignement legacy (toujours cache, le parchemin gere l'effet actif)
-            local ul=tab:CreateTexture(nil,"OVERLAY"); ul:SetHeight(1); ul:SetPoint("BOTTOMLEFT"); ul:SetPoint("BOTTOMRIGHT")
+            local ul=tab:CreateTexture(nil,"OVERLAY"); ul:SetHeight(1); PxLine(ul); ul:SetPoint("BOTTOMLEFT"); ul:SetPoint("BOTTOMRIGHT")
             ul:Hide()
             tabBtns[ti]={btn=tab, tBg=tBg, tx=tTx, ul=ul, key=td[1]}
             -- Etat initial via le helper (le 1er = actif au build)

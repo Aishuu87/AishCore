@@ -45,6 +45,8 @@ ns.Defaults = {
     swingStrata = "mid",            -- "bg" (derriere le fond) | "mid" | "front" (devant, sous le texte)
     swingSizeRatio = 1.15,          -- diametre = size * ratio
     swingBarMode = false,           -- true : simple barre au lieu de l'arc
+    swingIgnoreOffhand = false,     -- ambidextrie : seule la main principale est suivie
+    swingRangedOnly = false,        -- tirs uniquement : rien pour les coups en melee
     swingBarFillUp = false,         -- remplissage inverse de la barre (swingFillUp = celui de l'arc)
     swingBarBgColor = { 0, 0, 0, 0.45 },   -- fond de la barre
     swingBarColor = { 1, 0.82, 0.2, 1 },
@@ -272,6 +274,10 @@ ns.Defaults = {
     -- reservees au survol : c'est la barre qui devient permanente, pas tout son contenu.
     alwaysVisible  = false,
     nextLevelPreview = true,   -- survol du niveau : apercu de ce que debloque le prochain niveau
+    -- Toast de montee de niveau (Modules/LevelUpToast.lua)
+    toastEnabled = true, toastWaitCombat = true, toastDuration = 6, toastScale = 1, toastTitleScale = 1,
+    toastFontScale = 1, toastBgScale = 1, toastBgAlpha = 0.85, toastTitleColor = { 1, 0.82, 0.10, 1 },
+    toastX = 0, toastY = 220,
     repEnabled     = true,        -- affiche la réputation au niveau max
     companionXP    = true,         -- affiche l'XP du compagnon de gouffre si en gouffre
     repDisplayMode = "tracked",   -- "tracked" | "lastGained"
@@ -409,6 +415,27 @@ ns.Defaults = {
   },
 
   -- Cercle Bien Nourri (hors combat) : se vide pendant qu'on mange, change de couleur a l'obtention du buff
+  -- Buffs de deplacement (Modules/MovementBuffs.lua) : rond central + 2 barres en miroir par buff actif
+  -- Integration Horizon Suite (Modules/HorizonSuiteTweak.lua) : decalage vertical du panneau des quetes
+  horizonSuite = {
+    enabled = false,
+    offsetY = 20,                  -- px, + = vers le haut
+  },
+  movementBuffs = {
+    enabled = true,
+    locked = false,
+    anchorPctX = 0.5, anchorPctY = 0.30,
+    dotSize = 5,
+    gap = 6,                       -- ecart rond / barres
+    barWidth = 70,
+    barHeight = 3,
+    rowSpacing = 8,                -- ecart entre deux rangees (plusieurs buffs)
+    dotColor = { 1, 1, 1, 1 },
+    barColor = { 1, 0.82, 0.2, 1 },
+    useSpecColor = false,
+    specColorKey = "powercircle",
+    visibilityMode = "always",     -- "always" | "combat" | "ooc"
+  },
   wellFedCircle = {
     enabled = true,
     locked = false,
@@ -745,6 +772,9 @@ ns.Defaults = {
     -- "Au survol" : s'ajoute au mode ci-dessus, il ne le remplace pas. Le curseur sur une
     -- barre la fait sortir, meme masquee par le mode courant.
     hoverReveal      = false,
+    -- Visibilite par regles (Modules/UnitBars.lua, GetVisRules) : visRules / visRulesRole crees au premier
+    -- changement ; sans eux, derivees de visibilityMode / alwaysInInstance ci-dessus.
+    roleVisibility   = false,  -- "Options par role" : un jeu de regles par role de la spe active
     -- Debordement de la zone de survol ET de la zone cliquable, en pixels sur chaque cote.
     -- Nos barres font quelques pixels de haut : ca les rend visables.
     hoverTolerance   = 0,
@@ -923,6 +953,14 @@ ns.Defaults = {
     merchantPages  = 3,
     spellIDTooltip = false,   -- spellID dans l'infobulle des buffs/debuffs
     minimapTracking = false,  -- clic droit sur la minimap : ouvre le menu de pistage
+    hideErrors     = false,   -- masque les messages d'erreur rouges au centre de l'ecran
+    ctrlFocus      = false,   -- Ctrl + clic gauche sur une unite : focalisation
+    questTurnInBox = false,   -- case "rendu auto des quetes" pendant une discussion avec un PNJ
+    autoTurnIn     = false,   -- etat de cette case
+    questTurnInSize = 22,     -- taille de la case (position : questTurnInX / questTurnInY)
+    mapReveal      = false,   -- carte du monde : zones non decouvertes affichees (Modules/MapReveal.lua)
+    mapRevealColored = false, -- ... teintees de mapRevealColor
+    mapRevealColor = { 0.35, 0.6, 0.95, 1 },
     spellIDModifier = "NONE", -- touche requise : NONE / ALT / SHIFT / CTRL
   },
 
@@ -957,6 +995,8 @@ ns.Defaults = {
     showTargetOfTarget = true,
     -- Barre de ressource (énergie / mana / rage…) sous la barre de vie
     showPowerBar = false,
+    -- Ornement argent (rare / rare élite) ou or (élite / boss mondial) sous la barre
+    eliteDeco = true,
   },
 
   -- Buffs / Debuffs de la cible (sous la TopTargetBar)

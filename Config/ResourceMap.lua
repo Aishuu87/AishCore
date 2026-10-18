@@ -97,8 +97,8 @@ local function GetCurrentSpecID()
   -- Globals d'abord : sur Forever, ce sont eux qui portent la spe deduite des branches de talents
   -- (cf. Core.lua) ; C_SpecializationInfo y renvoie une specialisation factice. En Retail les
   -- deux sont equivalents.
-  local getSpec = GetSpecialization or (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization)
-  local getInfo = GetSpecializationInfo or (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo)
+  local getSpec = ns.GetSpecialization or (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization)
+  local getInfo = ns.GetSpecializationInfo or (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo)
   if not getSpec then return nil end
   local spec = getSpec()
   if not spec or not getInfo then return nil end

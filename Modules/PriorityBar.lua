@@ -320,7 +320,7 @@ local _learnedCD         = {}
 -- Durees de CD reelles apprises, sauvegardees par perso (AishUILearnDB) et par spe : evite de
 -- reapprendre 2 cycles a chaque session. Une mesure plus courte ecrase toujours la valeur stockee.
 local function LearnedStore()
-  local idx = GetSpecialization and GetSpecialization() or 0
+  local idx = ns.GetSpecialization and ns.GetSpecialization() or 0
   AishUILearnDB = AishUILearnDB or { learnedDurations = {}, verbose = false }
   AishUILearnDB.pbLearnedCD = AishUILearnDB.pbLearnedCD or {}
   local t = AishUILearnDB.pbLearnedCD[idx]
@@ -853,6 +853,38 @@ end
 
 -- Lit une itemFrame d'un CooldownViewer et depose son etat dans _cdViewerState.
 -- Extrait de ScanCooldownViewer pour que la boucle sur les deux viewers reste lisible.
+-- Tables d'etat recyclees d'un passage a l'autre (ticker 0,15 s) : les recreer a chaque scan produisait un
+-- flux continu de garbage. Lues sur le champ par UpdateSlot, jamais conservees.
+local _scanPool = {}
+local function RecycleInto(map)
+  for k, t in pairs(map) do
+    map[k] = nil
+    _scanPool[#_scanPool + 1] = t
+  end
+end
+local function PooledTable()
+  local n = #_scanPool
+  if n > 0 then
+    local t = _scanPool[n]
+    _scanPool[n] = nil
+    return wipe(t)   -- pool commun a plusieurs etats : aucun champ d'un autre usage ne doit trainer
+  end
+  return {}
+end
+local function ToBool(v) return v and true or false end   -- pcall(ToBool, x) : sans closure par appel
+
+-- Entrees de _cdViewerState distribuees pendant le scan (une meme table peut etre indexee sous plusieurs IDs)
+local _cvUsed = {}
+local function ReadChargeText(fs)
+  local t = fs:GetText()
+  if t then local _ = t .. ""; return tonumber(t) end
+  return nil
+end
+local function OverrideOf(info, spellID)
+  if info.overrideSpellID ~= spellID and info.overrideSpellID > 0 then return info.overrideSpellID end
+  return nil
+end
+
 local function ScanViewerFrame(itemFrame)
   local info = itemFrame.cooldownInfo
   if info and info.spellID then
@@ -877,11 +909,7 @@ local function ScanViewerFrame(itemFrame)
     -- Charges : lire le FontString (toujours clean, nil si non-charge)
     local charges = nil
     if itemFrame.ChargeCount and itemFrame.ChargeCount.Current then
-      local okC, txt = pcall(function()
-        local t = itemFrame.ChargeCount.Current:GetText()
-        if t then local _ = t .. ""; return tonumber(t) end
-        return nil
-      end)
+      local okC, txt = pcall(ReadChargeText, itemFrame.ChargeCount.Current)
       if okC then charges = txt end
     end
 
@@ -890,7 +918,10 @@ local function ScanViewerFrame(itemFrame)
     local _useNew = not _prev
                  or (cdDuration and (not _prev.cdDuration or cdDuration > _prev.cdDuration))
     if _useNew then
-      _cdViewerState[spellID] = { onCD = onCD, charges = charges, cdStart = cdStart, cdDuration = cdDuration }
+      local e = PooledTable()
+      e.onCD, e.charges, e.cdStart, e.cdDuration = onCD, charges, cdStart, cdDuration
+      _cvUsed[#_cvUsed + 1] = e
+      _cdViewerState[spellID] = e
       -- Apprendre spellCDBase depuis le CDViewer (couvre les sorts sans GetSpellBaseCooldown en TWW)
       if cdDuration and cdDuration > 1.5 and not spellCDBase[spellID] then
         spellCDBase[spellID] = cdDuration
@@ -900,12 +931,7 @@ local function ScanViewerFrame(itemFrame)
 
     -- Indexer aussi sous l'overrideSpellID du cooldownInfo (si différent)
     if info.overrideSpellID then
-      local okOv, ovID = pcall(function()
-        if info.overrideSpellID ~= spellID and info.overrideSpellID > 0 then
-          return info.overrideSpellID
-        end
-        return nil
-      end)
+      local okOv, ovID = pcall(OverrideOf, info, spellID)
       if okOv and ovID then
         _cdViewerState[ovID] = _cdViewerState[spellID]
       end
@@ -929,8 +955,24 @@ end
 
 -- Scan du CooldownViewer Blizzard (seule source fiable de l'état CD en combat en TWW), appelé à chaque tick de PollSlots.
 -- Si indisponible, _cdViewerAvail reste false et UpdateSlotExtras tombe sur le fallback event-driven.
+local function IsLongerThanGCD(d) return d > 1.5 end   -- pcall sans closure par appel
+local function ScanViewers()
+  for _, viewerName in ipairs(CD_VIEWERS) do
+    local viewer = _G[viewerName]
+    if viewer and viewer.itemFramePool then
+      for itemFrame in viewer.itemFramePool:EnumerateActive() do
+        ScanViewerFrame(itemFrame)
+      end
+    end
+  end
+end
+
 local function ScanCooldownViewer()
   wipe(_cdViewerState)
+  for i = #_cvUsed, 1, -1 do
+    _scanPool[#_scanPool + 1] = _cvUsed[i]
+    _cvUsed[i] = nil
+  end
   _cdViewerAvail = false
   -- Sorts à charges : durée > 1.5s = vrai CD, sinon GCD seul. Stocké dans _chargeIsOnRealCD (utilisé par UpdateSlotExtras).
   wipe(_chargeRechargeData)
@@ -940,7 +982,7 @@ local function ScanCooldownViewer()
       if okCD and cdInfo and cdInfo.duration then
         local okCmp, isLong = false, nil
         if not (issecretvalue and issecretvalue(cdInfo.duration)) then
-          okCmp, isLong = pcall(function() return cdInfo.duration > 1.5 end)
+          okCmp, isLong = pcall(IsLongerThanGCD, cdInfo.duration)
         end
         _chargeIsOnRealCD[chSid] = (okCmp and isLong) or nil
       else
@@ -969,16 +1011,7 @@ local function ScanCooldownViewer()
   -- Les DEUX viewers : les sorts de rotation vivent dans Essential, les utilitaires dans
   -- Utility. N'en scanner qu'un laissait l'autre moitie sans etat de CD -- symptome : la
   -- desaturation marchait sur les utilitaires et jamais sur la rotation.
-  local ok = pcall(function()
-    for _, viewerName in ipairs(CD_VIEWERS) do
-      local viewer = _G[viewerName]
-      if viewer and viewer.itemFramePool then
-        for itemFrame in viewer.itemFramePool:EnumerateActive() do
-          ScanViewerFrame(itemFrame)
-        end
-      end
-    end
-  end)
+  local ok = pcall(ScanViewers)
 
   -- Debug : loguer l'état CDViewer quand il change (on ne spam pas, seulement sur delta)
   if debugMode then
@@ -1104,13 +1137,13 @@ end
 -- Ajoute un spellID glowé + ses overrides/base dans la table glowed.
 local function AddGlowedSpell(glowed, sid, bName)
   glowed[sid] = true
-  Debug("  glow: " .. bName .. " spellID=" .. sid .. " (" .. (GetSpellName(sid) or "?") .. ")")
+  if debugMode then Debug("  glow: " .. bName .. " spellID=" .. sid .. " (" .. (GetSpellName(sid) or "?") .. ")") end
   -- Ajouter aussi l'override courant (ex: Flame Shock -> Voltaic Blaze)
   if C_Spell and C_Spell.GetOverrideSpell then
     local ok, ov = pcall(C_Spell.GetOverrideSpell, sid)
     if ok and ov and ov ~= sid and ov > 0 then
       glowed[ov] = true
-      Debug("    override: " .. ov .. " (" .. (GetSpellName(ov) or "?") .. ")")
+      if debugMode then Debug("    override: " .. ov .. " (" .. (GetSpellName(ov) or "?") .. ")") end
     end
   end
   -- Ajouter le base spell (lien inverse override→base, ex: 444995→1221348)
@@ -1118,7 +1151,7 @@ local function AddGlowedSpell(glowed, sid, bName)
     local ok, base = pcall(FindBaseSpellByID, sid)
     if ok and base and base ~= sid and base > 0 then
       glowed[base] = true
-      Debug("    base: " .. base .. " (" .. (GetSpellName(base) or "?") .. ")")
+      if debugMode then Debug("    base: " .. base .. " (" .. (GetSpellName(base) or "?") .. ")") end
     end
   end
 end
@@ -1130,7 +1163,7 @@ local function ProcGlowAllowed()
   local pbCfg = ns.GetCfg("priorityBar")
   if not (pbCfg and pbCfg.procGlowEnabled) then return false end
   if pbCfg.procGlowRoleOnly then
-    local okR, role = pcall(function() return GetSpecializationRole and GetSpecializationRole(GetSpecialization()) end)
+    local okR, role = pcall(function() return ns.GetSpecializationRole and ns.GetSpecializationRole(ns.GetSpecialization()) end)
     if not (okR and (role == "HEALER" or role == "TANK")) then return false end
   end
   return true
@@ -1145,13 +1178,14 @@ local function SpellIsOverlayed(sid)
   return res and true or false
 end
 
+local _scannedButtons = {}
 local function CollectGlowedSpells()
   local glowed = _glowedSpells
   local pbCfg = ns.GetCfg("priorityBar")
   _ignoreAssisted = pbCfg and pbCfg.ignoreAssistedHighlight and true or false
   wipe(glowed)
   local foundAny = false
-  local scannedButtons = {}
+  local scannedButtons = wipe(_scannedButtons)   -- reutilisee : une entree par bouton, recreee a chaque passe (~4 Ko)
 
   -- Passe 0 : sort suggere par l'Assistant via l'API directe, independante de tout bouton d'action
   local assistedSid = GetAssistedCombatHighlightSpell()
@@ -1195,7 +1229,7 @@ local function CollectGlowedSpells()
     end
   end
 
-  if not foundAny then
+  if not foundAny and debugMode then   -- chaine de debug construite seulement en mode debug
     local cacheSize = 0; for _ in pairs(sourceData) do cacheSize = cacheSize + 1 end
     Debug("CollectGlowedSpells: aucun glow (source=" .. (_hasDrakeSnapshot and "snapshot" or "cache") .. " " .. cacheSize .. " entrees, full scan done)")
   end
@@ -2720,7 +2754,7 @@ end
 -- ticker ISOLE, comme les autres lectures C_Spell : la meme lecture depuis la stack PollSlots
 -- peut revenir taintee. Le GCD n'influence pas IsSpellUsable, donc aucun filtre a faire ici.
 local function ScanSpellUsable()
-  wipe(_usableState)
+  RecycleInto(_usableState)
   wipe(_rangeState)
   if not (C_Spell and C_Spell.IsSpellUsable) then return end
   -- Sans cible, la portee n'a pas de sens : on laisse _rangeState vide plutot que de teinter
@@ -2732,15 +2766,16 @@ local function ScanSpellUsable()
     if sid and not _usableState[sid] then
       local ok, usable, noPower = pcall(C_Spell.IsSpellUsable, sid)
       if ok and usable ~= nil then
-        _usableState[sid] = { usable = usable and true or false,
-                              noPower = noPower and true or false }
+        local e = PooledTable()
+        e.usable, e.noPower = usable and true or false, noPower and true or false
+        _usableState[sid] = e
       end
       -- nil = le sort ne se preoccupe pas de la portee (buff perso, sort de zone...) : aucune
       -- teinte dans ce cas, seul un false explicite en declenche une.
       if hasTarget and C_Spell.IsSpellInRange then
         local okR, inRange = pcall(C_Spell.IsSpellInRange, sid, "target")
         if okR and inRange ~= nil then
-          local okB, b = pcall(function() return inRange and true or false end)
+          local okB, b = pcall(ToBool, inRange)
           if okB then _rangeState[sid] = b end
         end
       end
@@ -2750,7 +2785,7 @@ end
 
 -- Scan isolé de l'état CD live par slot (même ticker que ScanCooldownViewer) pour éviter le taint entre lectures C_Spell
 local function ScanLiveSwipeState()
-  wipe(_liveSwipeState)
+  RecycleInto(_liveSwipeState)
   if not (C_Spell and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldownDuration) then return end
   for i = 1, MAX_SLOTS do
     local slot = slotFrames[i]
@@ -2758,11 +2793,10 @@ local function ScanLiveSwipeState()
     if sid and not _liveSwipeState[sid] then
       local okCD, cd     = pcall(C_Spell.GetSpellCooldown, sid)
       local okDur, durObj = pcall(C_Spell.GetSpellCooldownDuration, sid)
-      local entry = {
-        isActive = (okCD and CDInfoIsRealCD(cd, sid)) or false,
-        onGCD    = okCD and CDInfoNativeOnGCD(cd) or nil,
-        durObj   = (okDur and durObj) or nil,
-      }
+      local entry = PooledTable()
+      entry.isActive = (okCD and CDInfoIsRealCD(cd, sid)) or false
+      entry.onGCD    = okCD and CDInfoNativeOnGCD(cd) or nil
+      entry.durObj   = (okDur and durObj) or nil
       -- Sort a override (ex. Brasier voltaique) : le vrai CD peut etre porte par l'id de base alors
       -- que l'id affiche ne montre que le GCD.
       local base = overrideToBase[sid]
@@ -2806,13 +2840,29 @@ local function PollSlots()
   end
 end
 
+-- /aishmem bench : passes du polling mesurees isolement (cf. Modules/MemDiag.lua)
+PriorityBar._memBench = {
+  displayed = function() return PBDisplayed() and true or false end,
+  PollSlots = PollSlots,
+  ScanCooldownViewer = ScanCooldownViewer,
+  ScanSpellUsable = ScanSpellUsable,
+  ScanLiveSwipeState = ScanLiveSwipeState,
+}
+
 local function StartPolling()
   if pollTicker then return end
-  pollTicker = C_Timer.NewTicker(0.15, PollSlots)
+  pollTicker = ns.NewTicker(0.15, PollSlots)
   -- Ticker isolé pour le scan CDViewer : évite la propagation de taint vers PollSlots
   if not cdViewerTicker then
-    cdViewerTicker = C_Timer.NewTicker(0.15, function()
+    local skipOOC = false
+    cdViewerTicker = ns.NewTicker(0.15, function()
       if not PBDisplayed() then return end
+      -- Hors combat : un passage sur deux (0,3 s). Ces lectures C_Spell renvoient des tables neuves a chaque
+      -- appel (~6 Ko par passe). En combat, cadence pleine : aucune perte de reactivite.
+      if not InCombatLockdown() then
+        skipOOC = not skipOOC
+        if skipOOC then return end
+      end
       ScanCooldownViewer()
       ScanSpellUsable()
       if CD_SWIPE_ISOLATION_ENABLED then ScanLiveSwipeState() end
@@ -2916,7 +2966,7 @@ local function AnimatePB(shouldShow)
     if leftContainer  then leftContainer:SetAlpha(0)  end
     if rightContainer then rightContainer:SetAlpha(0) end
     local _t0 = GetTime()
-    pbFadeTicker = C_Timer.NewTicker(0.016, function()
+    pbFadeTicker = ns.NewTicker(0.016, function()
       local _p = math.min((GetTime() - _t0) / 0.35, 1)
       local _a = 1 - (1 - _p)^3
       if leftContainer  then leftContainer:SetAlpha(_a)  end
@@ -2929,7 +2979,7 @@ local function AnimatePB(shouldShow)
     if leftContainer  then leftContainer:SetAlpha(1)  end
     if rightContainer then rightContainer:SetAlpha(1) end
     local _t0 = GetTime()
-    pbFadeTicker = C_Timer.NewTicker(0.016, function()
+    pbFadeTicker = ns.NewTicker(0.016, function()
       local _p = math.min((GetTime() - _t0) / 0.35, 1)
       local _a = (1 - _p)^3
       if leftContainer  then leftContainer:SetAlpha(_a)  end
@@ -4810,7 +4860,7 @@ function PriorityBar.Init()
         return
       end
       local lastAnomalyTime = 0
-      _zdbgWatcher = C_Timer.NewTicker(0.3, function()
+      _zdbgWatcher = ns.NewTicker(0.3, function()
         for i = 1, MAX_SLOTS do
           local slot = slotFrames[i]
           if slot and slot.isHighlighted and slot.glowContainer and slot:IsShown() then
@@ -5234,10 +5284,10 @@ local function GetCurrentSpecID_Internal()
       return key
     end
   end
-  if GetSpecialization then
-    local specIndex = GetSpecialization()
+  if ns.GetSpecialization then
+    local specIndex = ns.GetSpecialization()
     if specIndex and specIndex > 0 then
-      local ok, specID = pcall(GetSpecializationInfo, specIndex)
+      local ok, specID = pcall(ns.GetSpecializationInfo, specIndex)
       if ok and specID and specID > 0 then return specID end
     end
   end
@@ -5467,9 +5517,9 @@ function PriorityBar.GetSpecSpells()
   -- Résolution du specID courant : priorité ns._specID, fallback API directe
   local currentSpecID = ns._specID
   if not currentSpecID then
-    local specIdx = GetSpecialization and GetSpecialization()
+    local specIdx = ns.GetSpecialization and ns.GetSpecialization()
     if specIdx then
-      local ok, sid2 = pcall(GetSpecializationInfo, specIdx)
+      local ok, sid2 = pcall(ns.GetSpecializationInfo, specIdx)
       if ok and sid2 then currentSpecID = sid2 end
     end
   end

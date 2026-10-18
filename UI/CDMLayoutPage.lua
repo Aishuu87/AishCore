@@ -243,13 +243,16 @@ function ns.BuildCDMLayoutPage(p, cw)
     EnsureEditable(function()
     local conf = EditConf()
     if not conf then return end
-    conf.cats[cid] = cat
+    -- Racial : emplacement generique "racial" (valable pour toutes les races), cf. Modules/CDMLayout.lua
+    local key = CDM.KeyForCid(cid)
+    if key ~= cid then conf.cats[cid] = nil end
+    conf.cats[key] = cat
     if cat ~= CDM.ESSENTIAL then
-      for i = #conf.order, 1, -1 do if conf.order[i] == cid then table.remove(conf.order, i) end end
+      for i = #conf.order, 1, -1 do if conf.order[i] == key or conf.order[i] == cid then table.remove(conf.order, i) end end
     else
       local found = false
-      for _, x in ipairs(conf.order) do if x == cid then found = true end end
-      if not found then conf.order[#conf.order + 1] = cid end
+      for _, x in ipairs(conf.order) do if x == key then found = true end end
+      if not found then conf.order[#conf.order + 1] = key end
     end
     Refresh()
     end)
@@ -275,6 +278,8 @@ function ns.BuildCDMLayoutPage(p, cw)
         break
       end
     end
+    -- l'ordre du build est stocke en cles (le racial sous "racial")
+    for i, cid in ipairs(ordered) do ordered[i] = CDM.KeyForCid(cid) end
     conf.order = ordered
     Refresh()
     end)
@@ -344,6 +349,7 @@ function ns.BuildCDMLayoutPage(p, cw)
     s.line = list:CreateTexture(nil, "ARTWORK")
     s.line:SetColorTexture(unpack(Theme.separator))
     s.line:SetHeight(1)
+    if ns.SharedWidgets and ns.SharedWidgets.PixelLine then ns.SharedWidgets.PixelLine(s.line) end
     secs[i] = s
     return s
   end
@@ -355,9 +361,7 @@ function ns.BuildCDMLayoutPage(p, cw)
     for _, r in ipairs(rows) do r:Hide() end
     for _, s in ipairs(secs) do s:Hide(); s.line:Hide() end
 
-    local specIdx = GetSpecialization and GetSpecialization()
-    local specID, specName
-    if specIdx then specID, specName = GetSpecializationInfo(specIdx) end
+    local specID, specName = CDM.CurrentSpecID()
     specLbl:SetText(string.format(L["CDM_LAYOUT_SPEC"], specName or "?"))
     specLbl:SetTextColor(unpack(Theme.textNormal))
 
@@ -395,8 +399,8 @@ function ns.BuildCDMLayoutPage(p, cw)
     local view = conf or { cats = {}, order = {} }
     if not conf then
       for _, e in ipairs(entries) do
-        if e.current ~= 0 then view.cats[e.cooldownID] = e.current end
-        if e.current == CDM.ESSENTIAL then view.order[#view.order + 1] = e.cooldownID end
+        if e.current ~= 0 then view.cats[CDM.KeyOf(e)] = e.current end
+        if e.current == CDM.ESSENTIAL then view.order[#view.order + 1] = CDM.KeyOf(e) end
       end
       status:SetText("|cff999999" .. L["CDM_LAYOUT_STATUS_NONE"] .. "|r")
     else
@@ -417,7 +421,7 @@ function ns.BuildCDMLayoutPage(p, cw)
     for _, e in ipairs(entries) do
       e._name, e._icon = EntryDisplay(e)
       byID[e.cooldownID] = e
-      local cat = view.cats[e.cooldownID]
+      local cat = CDM.CatOf(view, e)
       if e.isKnown or showUnknown or cat then
         if cat == CDM.UTILITY then util[#util + 1] = e
         elseif cat ~= CDM.ESSENTIAL then none[#none + 1] = e end

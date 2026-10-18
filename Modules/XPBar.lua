@@ -1362,6 +1362,88 @@ end
 local HAS_CLASS_TRAINERS = ns.IsForever or not (C_SpellBook and C_SpellBook.GetSpellBookItemLevelLearned
                                 and Enum and Enum.SpellBookItemType and Enum.SpellBookItemType.FutureSpell)
 
+-- Competences d'armes (Forever), apprises chez un maitre d'armes : niveau 1 et 10 pa, sauf les armes d'hast (niveau 20,
+-- 1 po). Classes autorisees par arme. Donnees reprises de l'addon WhatsTraining (Classes/WeaponSkills.lua, regles "era").
+-- Une seule table (et pas des locales) : le fichier est a la limite des 200 locales.
+XPBar.WEAPON_SKILLS = {
+  { id = 196,   classes = { WARRIOR = 1, PALADIN = 1, HUNTER = 1, SHAMAN = 1 } },                          -- haches a une main
+  { id = 197,   classes = { WARRIOR = 1, PALADIN = 1, HUNTER = 1 } },                                      -- haches a deux mains
+  { id = 198,   classes = { WARRIOR = 1, PALADIN = 1, ROGUE = 1, PRIEST = 1, SHAMAN = 1, DRUID = 1 } },     -- masses a une main
+  { id = 199,   classes = { WARRIOR = 1, PALADIN = 1, DRUID = 1 } },                                       -- masses a deux mains
+  { id = 201,   classes = { WARRIOR = 1, PALADIN = 1, HUNTER = 1, ROGUE = 1, MAGE = 1, WARLOCK = 1 } },    -- epees a une main
+  { id = 202,   classes = { WARRIOR = 1, PALADIN = 1, HUNTER = 1 } },                                      -- epees a deux mains
+  { id = 1180,  classes = { WARRIOR = 1, HUNTER = 1, ROGUE = 1, PRIEST = 1, SHAMAN = 1, DRUID = 1, WARLOCK = 1, MAGE = 1 } }, -- dagues
+  { id = 15590, classes = { WARRIOR = 1, HUNTER = 1, ROGUE = 1, SHAMAN = 1, DRUID = 1 } },                 -- armes de pugilat
+  { id = 227,   classes = { WARRIOR = 1, HUNTER = 1, PRIEST = 1, SHAMAN = 1, DRUID = 1, WARLOCK = 1, MAGE = 1 } }, -- batons
+  { id = 200,   classes = { WARRIOR = 1, PALADIN = 1, HUNTER = 1, DRUID = 1 }, level = 20, cost = 10000 },  -- armes d'hast
+  { id = 264,   classes = { WARRIOR = 1, HUNTER = 1, ROGUE = 1 } },                                        -- arcs
+  { id = 266,   classes = { WARRIOR = 1, HUNTER = 1, ROGUE = 1 } },                                        -- armes a feu
+  { id = 5011,  classes = { WARRIOR = 1, HUNTER = 1, ROGUE = 1 } },                                        -- arbaletes
+  { id = 2567,  classes = { WARRIOR = 1, HUNTER = 1, ROGUE = 1 } },                                        -- armes de jet
+}
+
+-- Villes des maitres d'armes (donnees "era" de WhatsTraining) : id de zone (GetAreaInfo, nom localise), carte de repli
+local WEAPON_CITY = {
+  IF = { 1537, 1455 }, SW = { 1519, 1453 }, DARN = { 1657, 1457 },
+  ORG = { 1637, 1454 }, TB = { 1638, 1456 }, UC = { 1497, 1458 },
+}
+local WEAPON_TRAINERS = {
+  [196]   = { Alliance = { "IF" },               Horde = { "ORG" } },
+  [197]   = { Alliance = { "IF" },               Horde = { "ORG" } },
+  [198]   = { Alliance = { "IF" },               Horde = { "TB" } },
+  [199]   = { Alliance = { "IF" },               Horde = { "TB" } },
+  [201]   = { Alliance = { "SW" },               Horde = { "UC" } },
+  [202]   = { Alliance = { "SW" },               Horde = { "UC" } },
+  [1180]  = { Alliance = { "IF", "SW", "DARN" }, Horde = { "ORG", "UC" } },
+  [15590] = { Alliance = { "IF", "DARN" },       Horde = { "ORG" } },
+  [227]   = { Alliance = { "SW", "DARN" },       Horde = { "ORG", "TB" } },
+  [200]   = { Alliance = { "SW" },               Horde = { "UC" } },
+  [264]   = { Alliance = { "DARN" },             Horde = { "ORG" } },
+  [266]   = { Alliance = { "IF" },               Horde = { "TB" } },
+  [5011]  = { Alliance = { "IF", "SW" },         Horde = { "UC" } },
+  [2567]  = { Alliance = { "IF", "DARN" },       Horde = { "ORG" } },
+}
+
+local function CityName(key)
+  local c = WEAPON_CITY[key]
+  local name = C_Map and C_Map.GetAreaInfo and C_Map.GetAreaInfo(c[1])
+  if not name or name == "" then
+    local info = C_Map and C_Map.GetMapInfo and C_Map.GetMapInfo(c[2])
+    name = info and info.name
+  end
+  return name or key
+end
+
+-- Villes (noms localises, faction du joueur) ou un maitre d'armes enseigne cette competence ; nil si inconnue
+function XPBar.WeaponCities(id)
+  local t = WEAPON_TRAINERS[id]
+  local list = t and t[UnitFactionGroup("player") or ""]
+  if not list then return nil end
+  local out = {}
+  for i, key in ipairs(list) do out[i] = CityName(key) end
+  return out
+end
+
+-- Competences d'armes de la classe du joueur, pas encore apprises, dont le niveau requis est entre lo et hi.
+-- Renvoie une liste { id, name, icon, cost, level, weapon = true, cities }. Forever uniquement (maitres d'armes).
+function XPBar.WeaponUnlocks(lo, hi)
+  local out = {}
+  if not HAS_CLASS_TRAINERS then return out end
+  local cf = select(2, UnitClass("player"))
+  for _, w in ipairs(XPBar.WEAPON_SKILLS) do
+    local lvl = w.level or 1
+    if w.classes[cf] and lvl >= lo and lvl <= hi then
+      local known = (IsPlayerSpell and IsPlayerSpell(w.id)) or (IsSpellKnown and IsSpellKnown(w.id))
+      local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(w.id)
+      if not known and name then
+        out[#out + 1] = { id = w.id, name = name, icon = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(w.id),
+                          cost = w.cost or 1000, level = lvl, weapon = true, cities = XPBar.WeaponCities(w.id) }
+      end
+    end
+  end
+  return out
+end
+
 local function ScanTrainerSpells()
   if not HAS_CLASS_TRAINERS then return end
   if not (GetNumTrainerServices and GetTrainerServiceInfo and GetTrainerServiceLevelReq) then return end
@@ -1429,6 +1511,47 @@ local trainerEvt = CreateFrame("Frame")
 trainerEvt:SetScript("OnEvent", function() pcall(ScanTrainerSpells) end)
 for _, ev in ipairs({ "TRAINER_SHOW", "TRAINER_UPDATE" }) do pcall(trainerEvt.RegisterEvent, trainerEvt, ev) end
 
+-- Retail : les `maxN` prochains sorts a debloquer en montant de niveau (sorts "futurs" du livre de sorts), du plus
+-- proche au plus lointain, chacun avec son niveau d'apprentissage (affiche a la place du rang, inexistant sur Retail).
+-- Renvoie une liste { id, name, icon, rank = "Niveau 25" }.
+local function UpcomingSpells(maxN)
+  local list, seen = {}, {}
+  local SB = C_SpellBook
+  local T = Enum and Enum.SpellBookItemType
+  if not (SB and T and T.FutureSpell and SB.GetNumSpellBookSkillLines and SB.GetSpellBookSkillLineInfo
+          and SB.GetSpellBookItemInfo and SB.GetSpellBookItemLevelLearned) then return list end
+  local bank = Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player or 0
+  local cur = UnitLevel("player") or 0
+  pcall(function()
+    for line = 1, SB.GetNumSpellBookSkillLines() do
+      local li = SB.GetSpellBookSkillLineInfo(line)
+      if li and (not li.offSpecID or li.offSpecID == 0) then
+        for slot = li.itemIndexOffset + 1, li.itemIndexOffset + li.numSpellBookItems do
+          local info = SB.GetSpellBookItemInfo(slot, bank)
+          if info and info.itemType == T.FutureSpell and info.spellID and not seen[info.spellID] then
+            local lvl = SB.GetSpellBookItemLevelLearned(slot, bank)
+            if type(lvl) == "number" and lvl > cur then
+              seen[info.spellID] = true
+              list[#list + 1] = { id = info.spellID, name = info.name, icon = info.iconID, lvl = lvl }
+            end
+          end
+        end
+      end
+    end
+  end)
+  table.sort(list, function(a, b)
+    if a.lvl ~= b.lvl then return a.lvl < b.lvl end
+    return (a.name or "") < (b.name or "")
+  end)
+  local out = {}
+  for i = 1, math.min(maxN, #list) do
+    local e = list[i]
+    e.rank = string.format(L["XP_NL_UNLOCK_LEVEL"], e.lvl)
+    out[i] = e
+  end
+  return out
+end
+
 -- Sorts appris au niveau `lvl` : sorts "futurs" du livre de sorts (Retail), sinon ceux releves chez l'entraineur.
 -- Renvoie une liste { id, name, icon, rank }.
 local function SpellsLearnedAtLevel(lvl)
@@ -1487,8 +1610,36 @@ local function SpellsLearnedAtLevel(lvl)
         end
       end
     end
+    -- competences d'armes qui se debloquent a ce niveau (maitre d'armes)
+    for _, w in ipairs(XPBar.WeaponUnlocks(lvl, lvl)) do out[#out + 1] = w end
   end
   return out
+end
+
+-- Pour le toast de niveau (Modules/LevelUpToast.lua) : memes sorts et meme format de nombres que l'apercu
+XPBar.SpellsLearnedAtLevel = SpellsLearnedAtLevel
+XPBar.ShortNum = ShortNum
+
+-- Badge d'un sort a venir (apercu du prochain niveau, toast de niveau) : "+" pour un sort nouveau, chevron pour un
+-- nouveau rang d'un sort deja connu. Connu = le jeu resout son nom (le livre de sorts ne resout que les sorts appris) ;
+-- repli sans cette API : rang 2 ou plus. sp.upgrade (booleen) force le choix (exemples de l'apercu).
+XPBar.BADGE_PLUS    = "Interface\\AddOns\\AishCore\\Media\\UI\\plus.png"
+XPBar.BADGE_CHEVRON = "Interface\\AddOns\\AishCore\\Media\\UI\\chevron.png"
+function XPBar.IsSpellUpgrade(sp, rank)
+  if type(sp) ~= "table" then return false end
+  if sp.upgrade ~= nil then return sp.upgrade and true or false end
+  -- Retail : pas de rangs, et les sorts a venir sont deja dans le livre de sorts (leur nom s'y resout) : toujours "+"
+  if not HAS_CLASS_TRAINERS then return false end
+  local name = sp.name
+  if type(name) == "string" and name ~= "" and C_Spell and C_Spell.GetSpellInfo then
+    local ok, info = pcall(C_Spell.GetSpellInfo, name)
+    if ok then return type(info) == "table" and info.spellID ~= nil end
+  end
+  local n = type(rank) == "string" and tonumber(rank:match("(%d+)")) or nil
+  return n ~= nil and n > 1
+end
+function XPBar.SpellBadge(sp, rank)
+  return XPBar.IsSpellUpgrade(sp, rank) and XPBar.BADGE_CHEVRON or XPBar.BADGE_PLUS
 end
 
 -- /xpnl : diagnostic de la source des sorts du prochain niveau (livre de sorts)
@@ -1701,9 +1852,10 @@ local function BuildNextLevelPanel()
     c.icon:SetSize(NL.SPELL_ICON, NL.SPELL_ICON)
     c.icon:SetPoint("LEFT", c, "LEFT", 0, 0)
     c.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    c.plus = NL.Text(c, NL.FONT_BOLD, 32, NL.TEAL, "CENTER")
-    c.plus:SetText("+")
-    c.plus:SetPoint("CENTER", c.icon, "TOPRIGHT", -7, -2)
+    -- badge "+" (sort nouveau) ou chevron (nouveau rang), pose par LayoutLevel (XPBar.SpellBadge)
+    c.plus = c:CreateTexture(nil, "OVERLAY")
+    c.plus:SetSize(20, 20)
+    c.plus:SetPoint("CENTER", c.icon, "TOPRIGHT", -4, -1)
     c.name = NL.Text(c, ns.FONT_FALLBACK, 12, NL.TEAL, "LEFT")
     c.name:SetWordWrap(true)
     c.name:SetMaxLines(2)
@@ -1753,8 +1905,62 @@ local function BuildNextLevelPanel()
   return f
 end
 
--- Nom d'un sort + "(Rang X)" sous le nom (gris, plus petit), le bloc etant centre sur l'icone
-function NL.NameBlock(c, name, rank, tw, iconSize)
+-- Ville(s) du maitre d'armes sous une competence d'arme : boite a la largeur du nom ; un texte plus long defile
+-- lentement d'un bout a l'autre (pause aux extremites) au lieu de deborder sur la colonne voisine
+NL.CITY_SPEED, NL.CITY_PAUSE = 14, 1.5   -- px/s, s
+function NL.CityScroll(clip, el)
+  local fs = clip.text
+  local over = fs:GetStringWidth() - clip:GetWidth()
+  if over <= 0 then return end
+  clip.t = clip.t + el
+  local sp, pause = NL.CITY_SPEED, NL.CITY_PAUSE
+  local run = over / sp
+  local t = clip.t % (2 * (pause + run))
+  local x
+  if t < pause then x = 0
+  elseif t < pause + run then x = (t - pause) * sp
+  elseif t < 2 * pause + run then x = over
+  else x = over - (t - 2 * pause - run) * sp end
+  fs:ClearAllPoints()
+  fs:SetPoint("LEFT", clip, "LEFT", -x, 0)
+end
+
+-- Ligne des villes (sous le nom, a la place du rang) ; renvoie sa hauteur, 0 si rien a afficher
+function NL.CityLine(c, cities, tw)
+  local txt = type(cities) == "table" and #cities > 0 and table.concat(cities, ", ") or nil
+  local cb = c.city
+  if not txt then
+    if cb then cb:SetScript("OnUpdate", nil); cb:Hide() end
+    return 0
+  end
+  if not cb then
+    cb = CreateFrame("Frame", nil, c)
+    cb:SetClipsChildren(true)
+    cb.text = cb:CreateFontString(nil, "OVERLAY")
+    cb.text:SetWordWrap(false)
+    cb.text:SetJustifyH("LEFT")
+    c.city = cb
+  end
+  local font, size, flags = c.rank:GetFont()
+  cb.text:SetFont(font or "Fonts\\2002.TTF", size or 10, flags or "")
+  cb.text:SetTextColor(c.rank:GetTextColor())
+  cb.text:SetShadowColor(c.rank:GetShadowColor())
+  cb.text:SetShadowOffset(c.rank:GetShadowOffset())
+  cb.text:SetText(txt)
+  cb:SetSize(tw, cb.text:GetStringHeight() + 2)
+  cb.text:ClearAllPoints()
+  cb.text:SetPoint("LEFT", cb, "LEFT", 0, 0)
+  cb.t = 0
+  cb:SetScript("OnUpdate", (cb.text:GetStringWidth() > tw) and NL.CityScroll or nil)
+  cb:ClearAllPoints()
+  cb:SetPoint("TOPLEFT", c.name, "BOTTOMLEFT", 0, 0)
+  cb:Show()
+  return cb:GetHeight()
+end
+
+-- Nom d'un sort + "(Rang X)" sous le nom (gris, plus petit), le bloc etant centre sur l'icone. cities : competence
+-- d'arme, villes de son maitre d'armes a la place du rang
+function NL.NameBlock(c, name, rank, tw, iconSize, cities)
   c.name:SetWidth(tw)
   c.name:SetText(name or "")
   local r = (type(rank) == "string" and rank ~= "") and rank or nil
@@ -1766,7 +1972,8 @@ function NL.NameBlock(c, name, rank, tw, iconSize)
   else
     c.rank:Hide()
   end
-  local block = c.name:GetStringHeight() + (r and (c.rank:GetStringHeight() + 1) or 0)
+  local cityH = NL.CityLine(c, (not r) and cities or nil, tw)
+  local block = c.name:GetStringHeight() + (r and (c.rank:GetStringHeight() + 1) or (cityH > 0 and cityH + 1) or 0)
   c.name:ClearAllPoints()
   c.name:SetPoint("TOPLEFT", c.icon, "TOPRIGHT", 6, -math.max(0, (iconSize - block) / 2))
   c.rank:ClearAllPoints()
@@ -1861,6 +2068,15 @@ function NL.SpellRank(id)
   return nil
 end
 
+-- Ajoute a la liste "a entrainer" les competences d'armes non apprises dont le niveau est atteint (maitre d'armes)
+function NL.AddWeapons(out, total, lvl)
+  for _, w in ipairs(XPBar.WeaponUnlocks(1, lvl)) do
+    out[#out + 1] = { name = w.name, icon = w.icon, cost = w.cost, cities = w.cities }
+    total = total + (w.cost or 0)
+  end
+  return out, total
+end
+
 function NL.CollectTrainable()
   local out, total = {}, 0
   local cf = select(2, UnitClass("player"))
@@ -1904,12 +2120,12 @@ function NL.CollectTrainable()
         end
       end
     end
-    return out, total
+    return NL.AddWeapons(out, total, lvl)
   end
 
   -- 2) classe absente des donnees livrees : releves faits par le joueur chez son entraineur
   local saved = AishaddonDB and AishaddonDB.futureSpells and AishaddonDB.futureSpells[cf]
-  if not saved then return out, 0 end
+  if not saved then return NL.AddWeapons(out, 0, lvl) end
   local levels = {}
   for l in pairs(saved) do if type(l) == "number" and l <= lvl then levels[#levels + 1] = l end end
   table.sort(levels)
@@ -1924,7 +2140,7 @@ function NL.CollectTrainable()
       end
     end
   end
-  return out, total
+  return NL.AddWeapons(out, total, lvl)
 end
 
 local nlMode = "level"     -- "level" : prochain niveau ; "train" : competences a entrainer (Maj enfonce)
@@ -2058,7 +2274,7 @@ function NL.LayoutTrain(f, lvlX, lvlY)
     local row = math.ceil(k / ncols)
     c.icon:SetTexture(sp.icon)
     c.price:SetText(sp.cost and NL.Money(sp.cost) or "")
-    NL.NameBlock(c, sp.name, sp.rank, cellW - 60 - 36 - 6, 36)
+    NL.NameBlock(c, sp.name, sp.rank, cellW - 60 - 36 - 6, 36, sp.cities)
     local cy = lastRow + (rows - row) * NL.SPELL_ROW_H
     NL.Place(f, c, NL.W - (Ls[col] + cellW), cy - 18, cellW)
     NL.Add(f, c, delay + (k - 1) * 0.04)
@@ -2121,7 +2337,8 @@ function NL.LayoutLevel(f)
     end
   end
   local statRows = math.max(#cols[1], #cols[2], #cols[3])
-  local spells = SpellsLearnedAtLevel(nextLvl)
+  -- Retail : les 6 prochains sorts du leveling (avec leur niveau) plutot que ceux du seul niveau suivant
+  local spells = HAS_CLASS_TRAINERS and SpellsLearnedAtLevel(nextLvl) or UpcomingSpells(6)
   local nSp = #spells
   local spOverflow = nSp > 12
   if nSp > 12 then nSp = 12 end
@@ -2157,6 +2374,12 @@ function NL.LayoutLevel(f)
   -- titre
   f.titleLight:SetText(string.format("%s %s ", remaining and ShortNum(remaining) or "?", L["XP_NL_XPTO"]))
   f.titleBold:SetText(string.format("%s %d", L["XP_NL_LEVEL"], nextLvl))
+  -- "niveau N" : couleur de la cle "Barre XP" des Couleurs Thematiques (comme le badge de niveau), sinon creme
+  do
+    local CLR = ns.Modules and ns.Modules.Colors
+    local c = (CLR and CLR.Get and CLR.Get("xpbar")) or NL.CREAM
+    f.titleBold:SetTextColor(c[1], c[2], c[3], 1)
+  end
   f.title:SetSize(f.titleLight:GetStringWidth() + f.titleBold:GetStringWidth() + 4, 34)
   NL.Place(f, f.title, 52, yTitle - 17 + 10)
   NL.Add(f, f.title, delay)
@@ -2190,7 +2413,7 @@ function NL.LayoutLevel(f)
   -- sorts
   if showSpellBlock then
     delay = delay + 0.04
-    f.hdrSpells.text:SetText(L["XP_NL_SPELLS"])
+    f.hdrSpells.text:SetText(HAS_CLASS_TRAINERS and L["XP_NL_SPELLS"] or L["XP_NL_UPCOMING"])
     f.hdrSpells:SetSize(f.hdrSpells.text:GetStringWidth() + 4, 24)
     NL.Place(f, f.hdrSpells, 53, yHdrSpells - 12)
     NL.Add(f, f.hdrSpells, delay)
@@ -2210,7 +2433,9 @@ function NL.LayoutLevel(f)
         local c = f.spells[k]
         local tw = lay.tw[colIdx]
         c.icon:SetTexture(sp.icon)
-        NL.NameBlock(c, sp.name, sp.rank or NL.SpellRank(sp.id), tw, NL.SPELL_ICON)
+        local rk = sp.rank or (not sp.weapon and NL.SpellRank(sp.id)) or nil
+        NL.NameBlock(c, sp.name, rk, tw, NL.SPELL_ICON, sp.cities)
+        c.plus:SetTexture(XPBar.SpellBadge(sp, rk))
         local cellW = NL.SPELL_ICON + 6 + tw
         local cy = 44 + (spRows - row) * NL.SPELL_ROW_H
         NL.Place(f, c, NL.W - (lay.L[colIdx] + cellW), cy - NL.SPELL_ICON / 2, cellW)
@@ -2247,7 +2472,7 @@ function NL.ShowHint()
     NL.hint = h
   end
   local h = NL.hint
-  h.text:SetText(HAS_CLASS_TRAINERS and L["XP_NL_HINT"] or L["XP_NL_HINT_ALT"])
+  h.text:SetText(HAS_CLASS_TRAINERS and L["XP_NL_HINT"] or L["XP_NL_HINT_RETAIL"])
   -- meme couleur que la barre d'xp (celle du texte d'xp, cf. UpdateBarColor)
   local r, g, b = 0.55, 0.55, 0.55
   if tooltipXP and tooltipXP.GetTextColor then r, g, b = tooltipXP:GetTextColor() end
@@ -2303,16 +2528,19 @@ end
 -- ═══ Quetes pretes a rendre (ALT enfonce au survol) ═══════════════════════════════════════════════
 -- Au-dessus du texte d'xp central : chaque quete terminee avec l'xp qu'elle donnerait, en % de la barre du niveau,
 -- puis le total si on rendait tout.
+-- 3e/4e retours : quetes EN COURS (pas encore pretes) avec l'xp qu'elles donneraient, et leur total (Retail seulement,
+-- affichees avec Maj a la place des competences a entrainer de Forever).
 local function GetTurnInQuests()
   local out, totalXP = {}, 0
+  local prog, progXP = {}, 0
   local n = (C_QuestLog and C_QuestLog.GetNumQuestLogEntries and select(1, C_QuestLog.GetNumQuestLogEntries()))
             or (GetNumQuestLogEntries and select(1, GetNumQuestLogEntries())) or 0
   for i = 1, n do
     pcall(function()
-      local title, level, questID, isHeader, ready
+      local title, level, questID, isHeader, ready, hidden
       if C_QuestLog and C_QuestLog.GetInfo then
         local info = C_QuestLog.GetInfo(i)
-        if info then title, level, questID, isHeader = info.title, info.level, info.questID, info.isHeader end
+        if info then title, level, questID, isHeader, hidden = info.title, info.level, info.questID, info.isHeader, info.isHidden end
         if questID and not isHeader then
           ready = (C_QuestLog.ReadyForTurnIn and C_QuestLog.ReadyForTurnIn(questID))
                   or (C_QuestLog.IsComplete and C_QuestLog.IsComplete(questID))
@@ -2322,7 +2550,8 @@ local function GetTurnInQuests()
         title, level, isHeader, questID = t, lv, hdr, qid
         ready = (isComplete == 1) or (isComplete == true)
       end
-      if not title or isHeader or not ready then return end
+      if not title or isHeader or hidden then return end
+      if not ready and ns.IsForever then return end
       local xp
       if GetQuestLogRewardXP and questID then xp = GetQuestLogRewardXP(questID) end
       if (not xp or xp == 0) and GetRewardXP and SelectQuestLogEntry then
@@ -2332,12 +2561,17 @@ local function GetTurnInQuests()
         if prev and prev > 0 then SelectQuestLogEntry(prev) end
       end
       if type(xp) == "number" and xp > 0 then
-        out[#out + 1] = { title = title, level = level, xp = xp }
-        totalXP = totalXP + xp
+        if ready then
+          out[#out + 1] = { title = title, level = level, xp = xp }
+          totalXP = totalXP + xp
+        else
+          prog[#prog + 1] = { title = title, level = level, xp = xp }
+          progXP = progXP + xp
+        end
       end
     end)
   end
-  return out, totalXP
+  return out, totalXP, prog, progXP
 end
 
 -- Couleur d'une quete selon sa difficulte par rapport au joueur ; "normale" (niveau proche du sien) = ocre #FFBD74
@@ -2444,9 +2678,17 @@ HideQuestPanel = function()
   NL.HidePot()
 end
 
+-- ALT : quetes pretes a rendre. Maj (Retail, sans entraineur de classe) : quetes en cours, meme presentation.
 ShowQuestPanel = function()
-  if not IsAltKeyDown() or IsMaxLevel() then HideQuestPanel(); return end
-  local list, totalXP = GetTurnInQuests()
+  local kind = (IsAltKeyDown() and "ready") or ((not HAS_CLASS_TRAINERS and IsShiftKeyDown()) and "progress") or nil
+  if not kind or IsMaxLevel() then HideQuestPanel(); return end
+  local ready, readyXP, prog, progXP = GetTurnInQuests()
+  local list, totalXP = ready, readyXP
+  if kind == "progress" then
+    -- les plus rentables d'abord (le panneau n'a que 15 lignes ; le total compte toutes les quetes)
+    table.sort(prog, function(a, b) return a.xp > b.xp end)
+    list, totalXP = prog, progXP
+  end
   local xpMax = (UnitXPMax and UnitXPMax("player")) or 0
   if #list == 0 or xpMax <= 0 then HideQuestPanel(); return end
   if not qPanel then qPanel = BuildQuestPanel() end
@@ -2459,7 +2701,7 @@ ShowQuestPanel = function()
   for _, r in ipairs(q.rows) do r:Hide() end
   q.hdr:Hide(); q.tot:Hide()
 
-  q.hdr.text:SetText(L["XP_QUESTS_READY"])
+  q.hdr.text:SetText(kind == "progress" and string.format(L["XP_QUESTS_IN_PROGRESS"], #list) or L["XP_QUESTS_READY"])
   local nameW = q.hdr.text:GetStringWidth()
   local n = math.min(#list, #q.rows)
   for i = 1, n do
@@ -2529,7 +2771,7 @@ ShowQuestPanel = function()
 
   NL.RaiseXPBar("quest")
   FadeTo(q, true)
-  NL.ShowPot(totalXP, xpMax)
+  if totalXP > 0 then NL.ShowPot(totalXP, xpMax) else NL.HidePot() end
 end
 
 -- Maj : remplace le contenu du panneau du prochain niveau par les competences a entrainer ; Alt : quetes a rendre
@@ -2545,6 +2787,8 @@ nlModEvt:SetScript("OnEvent", function(_, _, key)
     end
   elseif key == "LALT" or key == "RALT" then
     NLSetAlt(IsAltKeyDown())
+    ShowQuestPanel()
+  elseif not HAS_CLASS_TRAINERS and (key == "LSHIFT" or key == "RSHIFT") then
     ShowQuestPanel()
   end
 end)
@@ -3035,7 +3279,7 @@ local function CreateXPBar_Finalize()
 
   -- Ticker de sécurité : rattrape les cas où OnHoverLeave n'a pas firé
   -- (frame caché sous la souris, lag, transition de zone) laissant isHovered=true.
-  C_Timer.NewTicker(1, function()
+  ns.NewTicker(1, function()
     if not container or not container:IsVisible() then return end
     if isLayoutMode then return end
     if isHovered or showTimer then return end

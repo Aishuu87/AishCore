@@ -112,7 +112,6 @@ ef:SetScript("OnEvent", function(_, event, arg1)
             -- ou mal configurées au /reload.
             C_Timer.After(0.5, function() ns._initComplete = true; ns.ScanAuras() end)
         end)
-        print("|cff00b0ffAishCore|r [Auras] v" .. ns.ADDON_VERSION .. " — |cffffcc00/aa|r ou |cffffcc00/aishaura|r")
 
     elseif event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" or event == "ZONE_CHANGED_NEW_AREA" then
         ns._inCombat = InCombatLockdown(); ns._whitelistBuilt = false

@@ -46,6 +46,20 @@ local frame = nil
 -- depuis le panel (bouton dédié). Verrouillé par défaut.
 local dragUnlocked = false
 
+-- Nom affiche d'un cast : 2e retour de UnitCastingInfo / UnitChannelInfo (celui de la barre Blizzard), repli sur le 1er.
+-- Sorts techniques "... - No Text" (ex. "Opening - No Text" sur certains objets, Forever) : nom brut non traduit,
+-- remplace par le sort "Ouverture" (6478) localise, sinon prive de son suffixe.
+local function CastLabel(name, text)
+    local label = name
+    if type(text) == "string" and not (issecretvalue and issecretvalue(text)) and text ~= "" then label = text end
+    if type(label) == "string" and not (issecretvalue and issecretvalue(label)) and label:find("%- No Text$") then
+        local open = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(6478)
+        if label:find("^Opening") and open and open ~= "" then return open end
+        return (label:gsub("%s*%- No Text$", ""))
+    end
+    return label
+end
+
 -- GUID du cast en attente de PollStart (UnitChannelInfo pas encore disponible).
 -- Bloque le Hide de StopCast tant qu'un PollStart est en vol.
 local pendingGUID = nil
@@ -81,6 +95,32 @@ local function ResolveBarColor(cfg)
         if c then return c end
     end
     return cfg.barColor or DEFAULTS.barColor
+end
+
+--- Couleur du texte (nom du sort + temps) : ecole de magie du sort (si coche et connue), sinon couleur de la spe
+--- (si cochee), sinon couleur choisie. L'ecole prend la teinte claire du degrade, plus lisible sur la barre.
+local TEXT_DEFAULT = { 0.792, 0.639, 0.392, 1 }
+local SCHOOL_TEXT                          -- defini apres SCHOOL_GRADIENTS
+local function ResolveTextColor(spellId)
+    local cfg = Cfg()
+    -- Reglage reserve, comme la coloration de la barre par ecole (cf. ns.HasHeroicFeatures)
+    if cfg.textUseSchoolColor and spellId and SCHOOL_TEXT and ns.HasHeroicFeatures and ns.HasHeroicFeatures() then
+        local c = SCHOOL_TEXT(spellId)
+        if c then return c end
+    end
+    if cfg.textUseSpecColor then
+        local CLR = ns.Modules and ns.Modules.Colors
+        local c = CLR and CLR.Get and CLR.Get("powerdotsa")
+        if c then return c end
+    end
+    return cfg.textColor or TEXT_DEFAULT
+end
+
+local function ApplyTextColor(spellId)
+    if not frame then return end
+    local c = ResolveTextColor(spellId)
+    frame.nameTxt:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+    if frame.timerTxt then frame.timerTxt:SetTextColor(c[1], c[2], c[3], c[4] or 1) end
 end
 
 local function FormatTime(t)
@@ -132,6 +172,26 @@ local SCHOOL_GRADIENTS = {
     [20] = "ff5500:ffc20a",  -- Fire+Holy+? → Fire
     [80] = "76b9fd:d3fcff",  -- Frost+Shadow → Frost
 }
+
+SCHOOL_TEXT = function(spellId)
+    local gradient = ns.SpellGradients and ns.SpellGradients[spellId]
+    if not gradient then
+        local school = ns.SpellSchools and ns.SpellSchools[spellId]
+        if school then
+            gradient = SCHOOL_GRADIENTS[school]
+            if not gradient then
+                for _, mask in ipairs({64, 32, 16, 8, 4, 2}) do
+                    if bit.band(school, mask) ~= 0 then gradient = SCHOOL_GRADIENTS[mask]; break end
+                end
+            end
+        end
+    end
+    if not gradient then return nil end
+    local _, rhex = strsplit(":", gradient)
+    rhex = rhex or gradient
+    return { (tonumber(rhex:sub(1, 2), 16) or 255) / 255, (tonumber(rhex:sub(3, 4), 16) or 255) / 255,
+             (tonumber(rhex:sub(5, 6), 16) or 255) / 255, 1 }
+end
 
 local function ApplyBarColor(spellId, spellName, spellIcon)
     if not frame then return end
@@ -454,7 +514,7 @@ local function StartCast(name, startTimeMS, endTimeMS, spellId, spellIcon, castG
     state.completed  = false
 
     -- Restaurer couleurs normales (au cas où un interrupt était en cours)
-    frame.nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
+    ApplyTextColor(spellId)
     ApplyBarColor(spellId, name, spellIcon)
     -- Ticks : aucun sur un cast normal (l'empower a son propre handler)
     HideTicks()
@@ -481,7 +541,7 @@ local function StartChannel(name, startTimeMS, endTimeMS, spellId, spellIcon, ca
     state.completed  = false
 
     -- Restaurer couleurs normales
-    frame.nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
+    ApplyTextColor(spellId)
     ApplyBarColor(spellId, name, spellIcon)
     -- Ticks pour sorts canalisés (Pénance, Mind Flay, etc.)
     ShowTicks(CHANNEL_TICKS[spellId])
@@ -562,7 +622,7 @@ local function InterruptCast()
             local bc2 = ResolveBarColor()
             frame.bar:SetStatusBarColor(bc2[1], bc2[2], bc2[3], bc2[4] or 1)
             frame.nameTxt:SetText("")
-            frame.nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
+            ApplyTextColor(nil)
         end)
     end)
 end
@@ -767,11 +827,11 @@ function CastBar.Create(parent)
         -- Retourne true si un cast a pu être lancé.
         local function TryStart(g, sid)
             -- Essai 1 : cast normal
-            local n, _, ic, s, e, _, _, _, si = UnitCastingInfo("player")
-            if n then pendingGUID = nil; StartCast(n, s, e, si or sid, ic, g); return true end
+            local n, nt, ic, s, e, _, _, _, si = UnitCastingInfo("player")
+            if n then pendingGUID = nil; StartCast(CastLabel(n, nt), s, e, si or sid, ic, g); return true end
             -- Essai 2 : canal
-            n, _, ic, s, e, _, _, si = UnitChannelInfo("player")
-            if n then pendingGUID = nil; StartChannel(n, s, e, si or sid, ic, g); return true end
+            n, nt, ic, s, e, _, _, si = UnitChannelInfo("player")
+            if n then pendingGUID = nil; StartChannel(CastLabel(n, nt), s, e, si or sid, ic, g); return true end
             -- Essai 3 : fallback spellID de l'event
             if sid and sid ~= 0 then
                 local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
@@ -815,9 +875,9 @@ function CastBar.Create(parent)
         end
 
         if event == "UNIT_SPELLCAST_CHANNEL_START" then
-            local name, _, icon, startMS, endMS, _, _, sid = UnitChannelInfo("player")
+            local name, txt, icon, startMS, endMS, _, _, sid = UnitChannelInfo("player")
             if name then
-                StartChannel(name, startMS, endMS, sid, icon, castGUID)
+                StartChannel(CastLabel(name, txt), startMS, endMS, sid, icon, castGUID)
             else
                 local g, si = castGUID, spellID
                 pendingGUID = g
@@ -825,9 +885,9 @@ function CastBar.Create(parent)
             end
 
         elseif event == "UNIT_SPELLCAST_START" then
-            local name, _, icon, startMS, endMS, _, _, _, sid = UnitCastingInfo("player")
+            local name, txt, icon, startMS, endMS, _, _, _, sid = UnitCastingInfo("player")
             if name then
-                StartCast(name, startMS, endMS, sid, icon, castGUID)
+                StartCast(CastLabel(name, txt), startMS, endMS, sid, icon, castGUID)
             else
                 local g, si = castGUID, spellID
                 pendingGUID = g
@@ -938,6 +998,8 @@ function CastBar.ApplySettings()
             frame.timerTxt:SetText(FormatTime(math.max(0, state.endTime - GetTime())))
         end
     end
+    -- Couleur du texte : reglages appliques en direct (cast en cours ou apercu)
+    ApplyTextColor(state.spellId)
 end
 
 -- Preview : affiche la barre avec des données fictives (GUI ouvert)
@@ -953,7 +1015,7 @@ function CastBar.SetPreview(on)
         state.name       = L["CASTBAR_PREVIEW_SPELL_NAME"]
         state.spellId    = 133               -- Fireball : utile pour colorBySchool
         state.spellIcon  = 0
-        frame.nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
+        ApplyTextColor(133)
         ApplyBarColor(133, L["CASTBAR_PREVIEW_SPELL_NAME"], 0)
         frame.nameTxt:SetText(L["CASTBAR_PREVIEW_SPELL_NAME"])
         frame.timerTxt:SetText("2.1")

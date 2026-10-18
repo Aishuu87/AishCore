@@ -70,6 +70,8 @@ end
 function _G.AishCoreMenuBar_Profession(which)
   if not _G.GetProfessions then return end
   local p1, p2, arch, fish, cook, aid = _G.GetProfessions()
+  -- Forever : les Premiers soins sont renvoyes en 3e position, celle de l'Archeologie en Retail
+  if ns.IsForever then aid, arch = aid or arch, nil end
   local idx = ({ [1] = p1, [2] = p2, archaeology = arch, fishing = fish, cooking = cook, firstaid = aid })[which]
   if not idx then return end
   if which == "archaeology" then
@@ -162,6 +164,8 @@ MenuBar.ACTIONS = {
   { id = "professions", icon = "Trade_BlackSmithing", macro = function() return ClickBtn("ProfessionMicroButton") end,
     mods = function()
       local function Run(w) return "/run AishCoreMenuBar_Profession(" .. w .. ")" end
+      -- Forever : Premiers soins absent de GetProfessions sur ce client -> la macro lance directement le sort du metier
+      -- (nom traduit par le jeu, tous rangs confondus), comme un clic dans le livre de sorts : sa fenetre s'ouvre.
       -- Ordre des modificateurs dans les attributs securises : alt-ctrl-shift
       return { ["shift-1"] = Run(1), ["ctrl-1"] = Run(2), ["alt-1"] = Run('"cooking"'), ["ctrl-shift-1"] = Run('"fishing"'),
                ["alt-ctrl-1"] = Run(ns.IsForever and '"firstaid"' or '"archaeology"') }
@@ -553,7 +557,9 @@ function Strip:NewSlot()
       end
     elseif self2.actionId == "professions" then
       -- Noms reels des deux metiers principaux
-      local p1, p2 = _G.GetProfessions and _G.GetProfessions()
+      -- Pas de "GetProfessions and GetProfessions()" : un "and" ne garde que la 1re valeur (2e metier perdu)
+      local p1, p2
+      if _G.GetProfessions then p1, p2 = _G.GetProfessions() end
       local function PName(idx, fallback)
         local n = idx and _G.GetProfessionInfo and _G.GetProfessionInfo(idx)
         return n or Loc(fallback)
@@ -611,7 +617,7 @@ local function NewPlus(S, side)
   local p = CreateFrame("Button", nil, S.frame)
   p.bg = p:CreateTexture(nil, "BACKGROUND")
   p.bg:SetAllPoints()
-  p.bg:SetColorTexture(1, 1, 1, 0.08)
+  p.bg:SetColorTexture(0, 0, 0, 0.4)   -- carre noir transparent : visible sur les fonds clairs
   p.fs = p:CreateFontString(nil, "OVERLAY")
   p.fs:SetFont(DEFAULT_FONT, 16, "OUTLINE")
   p.fs:SetPoint("CENTER", 0, 1)
@@ -625,7 +631,7 @@ local function NewPlus(S, side)
     GameTooltip:Show()
   end)
   p:SetScript("OnLeave", function(self)
-    self.bg:SetColorTexture(1, 1, 1, 0.08)
+    self.bg:SetColorTexture(0, 0, 0, 0.4)
     self.fs:SetTextColor(0.8, 0.8, 0.8, 1)
     GameTooltip:Hide()
   end)
@@ -773,7 +779,7 @@ function MenuBar.NewStrip(parent, preview)
 end
 
 -- Horloge : un ticker commun pour tous les strips visibles
-C_Timer.NewTicker(0.25, function()
+ns.NewTicker(0.25, function()
   for _, S in ipairs(strips) do
     if S.frame:IsVisible() then S:UpdateClock() end
   end
@@ -925,5 +931,30 @@ do
     CL.RegisterCallback(function()
       for _, S in ipairs(strips) do S:Recolor() end
     end)
+  end
+end
+
+-- /aishprof : diagnostic des metiers (Forever : lignes de competences et GetProfessions)
+SLASH_AISHPROF1 = "/aishprof"
+SlashCmdList["AISHPROF"] = function()
+  local P = "|cff33aaff[AishCore metiers]|r "
+  print(P .. "TRADE_SKILLS=" .. tostring(_G.TRADE_SKILLS) .. " | GetNumSkillLines=" .. type(_G.GetNumSkillLines)
+    .. " | GetSkillLineInfo=" .. type(_G.GetSkillLineInfo))
+  if _G.GetProfessions then
+    local t = { pcall(_G.GetProfessions) }
+    local parts = {}
+    for i = 2, 7 do
+      local idx = t[i]
+      local name = idx and _G.GetProfessionInfo and select(1, _G.GetProfessionInfo(idx))
+      parts[#parts + 1] = tostring(idx) .. "=" .. tostring(name)
+    end
+    print(P .. "GetProfessions : " .. table.concat(parts, "  "))
+  end
+  if _G.GetNumSkillLines and _G.GetSkillLineInfo then
+    for i = 1, _G.GetNumSkillLines() or 0 do
+      local name, isHeader, isExpanded, rank, _, _, maxRank = _G.GetSkillLineInfo(i)
+      print(P .. string.format("%d %s%s %s/%s", i, isHeader and "[EN-TETE] " or "", tostring(name),
+        tostring(rank), tostring(maxRank)) .. (isHeader and (isExpanded and " (deplie)" or " (replie)") or ""))
+    end
   end
 end

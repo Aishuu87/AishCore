@@ -7,6 +7,104 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.5", date = "2026-10-18",
+    lines = {
+      { k = "h", t = "General", fr = "Général" },
+      { k = "li", lvl = 1, t = "New general optimization pass on the addon, about 30-35% faster", fr = "Nouvelle passe d'optimisation générale sur l'addon, avec un gain d'environ 30-35%" },
+
+      { k = "h", t = "Settings panel", fr = "Panneau de réglages" },
+      { k = "li", lvl = 1, t = "Subtle textured backgrounds in the settings panel, with a parchment-style border", fr = "Ajout d'arrière-plans texturés subtils dans le panneau de réglage et d'un contour effet parchemin" },
+      { k = "li", lvl = 1, t = "New Minimize button: clicking it collapses the panel", fr = "Ajout d'un bouton de Réduction de fenêtre. Le cliquer minimise le panneau." },
+      { k = "li", lvl = 1, t = "New icons flagging every new category, and every new section inside another module", fr = "Ajout d'icônes pour notifier chaque nouvelle catégorie ou chaque nouvelle section à l'intérieur d'un autre module" },
+      { k = "li", lvl = 1, t = "The new feature icons can be hidden or shown by clicking the text to the right of the logo", fr = "Les icônes de nouveautés peuvent être cachées ou affichées en cliquant sur le texte à droite du logo" },
+      { k = "li", lvl = 2, t = "New features cover the last 2 major patches (the current version and the one before it). Minor patches (e.g. 4.2.2) are not counted", fr = "Les nouveautés contiennent les 2 derniers patchs majeurs (la version actuelle et celle juste avant elle). Les patchs mineurs (ex : 4.2.2) ne sont pas comptés" },
+      { k = "li", lvl = 2, t = "New features stop being new after a month. \"Hide new features\" is then turned on automatically", fr = "Les nouveautés cessent de l'être au bout d'un mois. À ce moment-là, le bouton « Cacher les nouveautés » s'active automatiquement" },
+      { k = "li", lvl = 2, t = "Clicking \"Show new features\" brings back the new features of the last 2 versions at any time", fr = "Cliquer sur « Montrer les nouveautés » permet tout de même de réafficher les nouveautés des 2 dernières versions, à tout moment" },
+      { k = "li", lvl = 1, t = "Scrolling in a window now moves smoothly instead of abruptly jumping up or down", fr = "Scroller dans une fenêtre se fait avec un mouvement fluide plutôt que de brusquement faire monter/descendre la page" },
+      { k = "li", lvl = 1, t = "Clicking a page title expands/collapses all its sections at once", fr = "Cliquer sur le titre d'une page permet de déplier/replier toutes les sections d'un coup" },
+      { k = "li", lvl = 1, t = "Double-clicking a section expands/collapses all the other sections at once too", fr = "Double cliquer sur une section permet de déplier/replier toutes les autres sections d'un coup également" },
+
+      { k = "h", link = { page = "resourceCircle" }, t = "Central Circle", fr = "Cercle Central" },
+      { k = "li", lvl = 1, t = "[Forever] Dual-wield support for the auto-attack Swing Timer", fr = "[Forever] Ajout du support de l'ambidextrie pour le Délai d'auto-attaque" },
+      { k = "li", lvl = 1, t = "[Forever] New option to track ranged auto-attacks only", fr = "[Forever] Ajout d'une option pour ne suivre l'auto-attaque qu'à distance" },
+      { k = "li", lvl = 1, t = "[Forever] New option to ignore the off-hand and track only the main-hand weapon when dual-wielding", fr = "[Forever] Ajout d'une option pour ignorer la main gauche et ne suivre que l'arme principale en ambidextrie" },
+      { k = "li", lvl = 1, t = "[Forever] In \"Bar\" mode, Left/Right fills create a second bar, while Mirror fills send the main hand and off-hand to either side of a single bar", fr = "[Forever] En mode « Barre », une 2e barre est créée pour les remplissages Gauche/Droite, tandis que les remplissages Miroir font partir la main gauche et droite de part et d'autre d'une unique barre" },
+      { k = "li", lvl = 1, t = "New option to show a dragon decoration (Elite Dragons) when the target is elite, rare, rare elite or a world boss", fr = "Ajout d'une option pour afficher une décoration de dragon lorsque la cible est élite, rare, rare élite ou world boss" },
+
+      { k = "h", link = { page = "xpBar" }, t = "XP Bar", fr = "Barre d'XP" },
+      { k = "li", lvl = 1, t = "The \"Next Level\" info now uses the XP Bar colors", fr = "L'affichage des infos « Prochain Niveau » prend les couleurs de la barre d'XP" },
+      { k = "li", lvl = 1, t = "Holding SHIFT also shows your active quests and the XP they give (Retail only)", fr = "Maintenir MAJ permet également d'afficher les quêtes en cours et l'équivalent en XP de ce qu'elles offrent (Retail seulement)" },
+      { k = "li", lvl = 1, t = "On Retail, the next level shows the next 6 unlockable spells, with their level", fr = "Sur Retail, le prochain niveau affiche les 6 prochains sorts déblocables, ainsi que leur niveau" },
+      { k = "li", lvl = 1, t = "[Forever] New abilities show a \"+\" icon, while upgrades of abilities you already know show a \"^\" chevron", fr = "[Forever] Les compétences nouvelles affichent une icône « + », alors que les améliorations de compétences déjà apprises ont un chevron « ^ »" },
+      { k = "li", lvl = 1, t = "[Forever] Polearms training at level 20 added for the relevant classes", fr = "[Forever] Ajout de l'apprentissage des Armes d'hast au niveau 20 pour les classes concernées" },
+      { k = "li", lvl = 1, t = "[Forever] Shows the city where you can find the Weapon Masters to learn your weapon skills", fr = "[Forever] Ajout de la ville dans laquelle vous pouvez trouver les Maîtres d'armes pour apprendre vos compétences d'armes" },
+      { k = "li", lvl = 1, t = "New Level Up notification:", fr = "Ajout d'une notification à la montée de niveau :" },
+      { k = "li", lvl = 2, t = "It shows your stat gains", fr = "Elle affiche les gains de statistiques" },
+      { k = "li", lvl = 2, t = "It shows the newly unlocked abilities", fr = "Elle affiche les nouvelles compétences débloquées" },
+      { k = "li", lvl = 2, t = "Its display can be adjusted in the AishCore options", fr = "L'affichage est réglable dans les options d'AishCore" },
+      { k = "li", lvl = 2, t = "An option waits for the end of combat before showing it", fr = "Une option permet d'attendre la fin du combat avant d'afficher la notification" },
+
+      { k = "h", link = { page = "unitBars" }, t = "Unit Frames", fr = "Cadres d'unités" },
+      { k = "li", lvl = 1, t = "New, more complete visibility system", fr = "Ajout d'un nouveau système plus complet de visibilité" },
+      { k = "li", lvl = 2, t = "The \"Options per role\" option sets different conditions depending on the spec you play", fr = "L'option « Options par rôle » permet de définir des conditions différentes suivant la spé que vous jouez" },
+      { k = "li", lvl = 2, t = "New visibility conditions: \"Friendly target / Attackable target\", \"In a group\", \"In an instance\"", fr = "Les conditions de visibilité « Cible alliée / Cible attaquable », « En groupe », « En instance » ont été ajoutées" },
+      { k = "li", lvl = 2, t = "When \"Always\" is checked, only \"Hide when mounted\" / \"Hide in rest areas\" can still decide whether the health bars are shown", fr = "Lorsque l'option « Toujours » est cochée, seules les conditions « Cacher en monture / zone de repos » peuvent prendre le pas sur la visibilité ou non des barres de vie" },
+      { k = "li", lvl = 2, t = "This visibility system will be adapted to other modules in a future update", fr = "Ce système de visibilité sera adapté pour d'autres modules dans une future mise à jour" },
+
+      { k = "h", link = { page = "aurasMissingBuffs" }, t = "Missing buffs", fr = "Buffs manquants" },
+      { k = "li", lvl = 1, t = "New \"General\" category:", fr = "Ajout d'une catégorie « Général » :" },
+      { k = "li", lvl = 2, t = "If you carry sharpening stones or oils, an alert offers to apply one to your weapon", fr = "Si le joueur possède des pierres à aiguiser ou des huiles dans ses sacs, une alerte s'affiche pour proposer d'en appliquer sur son arme" },
+      { k = "li", lvl = 2, t = "If you carry food that gives a buff, an alert offers to eat it", fr = "Si le joueur possède de la nourriture capable de donner des buffs, une alerte s'affiche alors pour en consommer" },
+      { k = "li", lvl = 2, t = "If you carry flasks, an alert can also be shown", fr = "Si le joueur possède des flacons à appliquer, une alerte peut aussi s'afficher" },
+      { k = "li", lvl = 1, t = "New \"Talent Points & Heritage\" category: when you have points to spend, clicking the alert opens the matching panel", fr = "Ajout d'une catégorie « Points de talents & Héritage » : si le joueur a des points à dépenser, un clic sur l'alerte ouvre alors le panneau correspondant" },
+      { k = "li", lvl = 1, t = "New \"Bags Full\" alert, warning when your bags are full or almost full. A threshold sets when it shows up", fr = "Ajout d'une alerte Sacs pleins, qui avertit lorsque les sacs sont pleins ou presque pleins. Un seuil permet de définir le moment du rappel" },
+      { k = "li", lvl = 1, t = "New \"Find Herbs/Minerals\" alert when your character has the profession but no gathering tracking active", fr = "Ajout d'une alerte Découverte herbes/minerais lorsque votre personnage a la compétence mais qu'il n'a plus de pistage activé" },
+      { k = "li", lvl = 1, t = "Sections and alerts reorganized", fr = "Réorganisation des sections et des alertes" },
+      { k = "li", lvl = 1, t = "Crusader Aura is suggested while mounted, even with \"Ignore while mounted\" on", fr = "L'Aura de Croisé est proposée en alerte lorsque le joueur est en monture, même si l'option « Ignorer si monté » est active" },
+      { k = "li", lvl = 1, t = "In combat with no aura, or with Crusader Aura, Concentration Aura and Devotion Aura are suggested (clicks are disabled in combat: you can't just click their icon)", fr = "Lorsque le joueur est en combat avec aucune aura, ou en Aura de Croisé, les auras de Concentration et de Dévotion sont proposées (les clics sont désactivés en combat, vous ne pourrez pas simplement cliquer sur leur icône)" },
+
+      { k = "h", link = { page = "movementBuffs" }, t = "Movement Buffs", fr = "Buffs de déplacement" },
+      { k = "li", lvl = 1, t = "This new module shows your movement and speed buffs as simple bars", fr = "Ce nouveau module permet d'afficher très simplement les buffs de déplacement et de vitesse sous forme de barres" },
+      { k = "li", lvl = 1, t = "It can be shown independently from the regular \"Auras to Track\"", fr = "Ce système peut s'afficher indépendamment des « Auras à tracker » classiques" },
+      { k = "li", lvl = 1, t = "[Forever] The Tauren racial \"Plainsrunning\" is supported too", fr = "[Forever] Le racial Tauren « Course dans les plaines » est également supporté" },
+
+      { k = "h", link = { page = "extraBars" }, t = "Dynamic Bars", fr = "Barres dynamiques" },
+      { k = "li", lvl = 1, t = "[Forever] FIX: sharpening stones were not detected correctly", fr = "[Forever] FIX : les pierres à aiguiser n'étaient pas détectées correctement" },
+      { k = "li", lvl = 1, t = "New whitelist to add specific items that escaped the Dynamic Bars detection or don't fit any category", fr = "Ajout d'une whitelist afin d'ajouter des items spécifiques qui auraient échappé à la détection des barres dynamiques ou qui ne conviendraient à aucune catégorie" },
+      { k = "li", lvl = 1, t = "New \"Teleports\" category", fr = "Ajout de la catégorie Téléportations" },
+      { k = "li", lvl = 1, t = "New \"Scrolls\" category", fr = "Ajout de la catégorie Parchemins" },
+      { k = "li", lvl = 1, t = "New \"Gadgets\" category", fr = "Ajout de la catégorie Gadgets" },
+
+      { k = "h", link = { page = "comfortQoL" }, t = "QoL", fr = "QoL" },
+      { k = "li", lvl = 1, t = "New checkbox to easily turn on quest auto turn-in", fr = "Ajout d'un carré à cocher pour facilement activer le rendu automatique des quêtes" },
+      { k = "li", lvl = 1, t = "New option to hide the red error messages in the middle of the screen (Not enough mana, You can't do that yet, etc.)", fr = "Ajout d'une fonctionnalité pour cacher les erreurs rouges du milieu d'écran (Pas assez de mana, Vous ne pouvez pas faire ça en ce moment, etc.)" },
+      { k = "li", lvl = 1, t = "New option to reveal the fog of war (undiscovered areas) on your map", fr = "Ajout d'une fonctionnalité pour afficher le brouillard de guerre (zones pas encore découvertes) sur votre carte" },
+      { k = "li", lvl = 1, t = "New option to set a target as your focus with Ctrl + click", fr = "Ajout d'une option permettant de passer une cible en focalisation à l'aide d'un Ctrl + clic" },
+
+      { k = "h", link = { page = "spellEffects" }, t = "3D Animations", fr = "Animations 3D" },
+      { k = "li", lvl = 1, t = "New \"Random\" option that plays one of the listed FX at random when the spell / aura triggers", fr = "Ajout d'une option « Au hasard » pour lire un des FX de la liste au moment du déclenchement du sort / de l'aura de manière aléatoire" },
+
+      { k = "h", t = "Fixes & Misc", fr = "Correctifs & Divers" },
+      { k = "li", lvl = 1, t = "Many auras reclassified into their proper Buff/Debuff/Totem category", fr = "Reclassement de nombreuses auras dans leur bonne catégorie Buff/Debuff/Totem" },
+      { k = "li", lvl = 1, t = "Scrollbar added to dropdown menus (fonts, textures, etc.)", fr = "Ajout d'une barre de scroll dans les menus déroulants (polices, textures, etc.)" },
+      { k = "li", lvl = 1, t = "New options to set the Cast Bar text color", fr = "Ajout d'options pour régler la couleur du texte de la barre de cast" },
+      { k = "li", lvl = 1, t = "Drinks are now supported by the Well Fed Circle", fr = "Les boissons sont maintenant supportées par l'affichage « Cercle Bien Nourri »" },
+      { k = "li", lvl = 1, t = "Herb and ore icons on the minimap optimized: the feature no longer uses any performance when neither tracking is active", fr = "Optimisation de la fonctionnalité des icônes d'herbes/minerais sur la minimap. Elle n'utilise plus aucune performance lorsqu'aucun des 2 pistages n'est actif" },
+      { k = "li", lvl = 1, t = "[Forever] The Menu Bar did not open the First Aid page correctly with Ctrl+Alt+click on the Professions icon", fr = "[Forever] La barre de menu n'affichait pas correctement la page de Premiers Soins avec Ctrl+Alt+clic sur l'icône Métiers" },
+      { k = "li", lvl = 1, t = "Previews in menus now use a background image", fr = "Les aperçus dans les menus utilisent maintenant une image de fond" },
+      { k = "li", lvl = 1, t = "Element placement is now pixel perfect, and small objects render much sharper", fr = "Le placement des éléments est désormais « pixel perfect » et le rendu des petits objets est beaucoup plus net" },
+      { k = "li", lvl = 1, t = "[Forever] The Outlaw spec has been renamed \"Combat\"", fr = "[Forever] La spé Hors-la-loi a été renommée « Combat »" },
+      { k = "li", lvl = 1, t = "[Forever] Fire and Frost specs correctly show mana in the Central Circle", fr = "[Forever] Les spés Feu et Givre affichent correctement la mana dans le cercle central" },
+      { k = "li", lvl = 1, t = "[Forever] Removed the Warrior \"Ignore Pain\" secondary resource circle, which doesn't exist in this version of the game", fr = "[Forever] Retrait du cercle de ressource secondaire du guerrier « Dur au mal », qui n'existe pas sur cette version du jeu" },
+      { k = "li", lvl = 1, t = "FIX: secondary professions are named correctly in the tooltip of the Menu Bar Professions button", fr = "FIX : les métiers secondaires sont correctement nommés dans l'infobulle du bouton Métiers de la barre de menu" },
+      { k = "li", lvl = 1, t = "FIX: heal prediction no longer worked with the new fill types of the Out-of-Combat Health Circle", fr = "FIX : le soin prévisionnel ne fonctionnait plus avec les nouveaux types de remplissage du Cercle de vie hors combat" },
+      { k = "li", lvl = 1, t = "FIX: heal prediction was not shown in the Out-of-Combat Health Circle with a radial fill", fr = "FIX : les soins prévisionnels ne s'affichaient pas dans le Cercle de vie hors combat en remplissage radial" },
+      { k = "li", lvl = 1, t = "[Forever] FIX: the Cast Bar correctly shows \"Opening\" instead of \"Opening - No text\"", fr = "[Forever] FIX : la barre de cast affiche correctement « Ouverture » au lieu de « Opening - No text »" },
+      { k = "li", lvl = 1, t = "FIX: custom textures (SharedMedia_MyMedia) were not picked up", fr = "FIX : ajout des textures custom qui n'étaient pas prises en compte (SharedMedia_MyMedia)" },
+      { k = "li", lvl = 1, t = "FIX: the bandage cooldown keeps showing correctly when entering combat", fr = "FIX : le cooldown des bandages continue de s'afficher correctement en entrant en combat" },
+    },
+  },
+  {
     version = "4.4", date = "2026-10-14",
     lines = {
       { k = "h", link = { page = "modulesOverview" }, t = "Modules", fr = "Modules" },
@@ -320,3 +418,139 @@ ns.PatchNoteLinks = {
   { match = "xp bar", page = "xpBar" },
   { match = "totem", page = "aurasTotems" },
 }
+
+-- Nouveautes par version MAJEURE (4.4, 4.5...), la plus recente en premier : icone "Bonus-Objective-Star"
+-- devant leur categorie (barre laterale) et leur en-tete de section ; "worldquest-Capstone" devant les
+-- categories qui contiennent une nouvelle section (containers). Seules les 2 premieres entrees comptent
+-- (version actuelle + precedente). Une mineure (4.4.1...) AJOUTE ses nouveautes a l'entree de sa majeure.
+-- Une nouvelle majeure s'insere en tete. Masquees d'office 30 jours apres la date de la 1re entree dans
+-- ns.PatchNotes (cf. ns.NewBadgesShown).
+ns.NewByVersion = {
+  {
+    version = "4.5",
+    categories = { movementBuffs = true },
+    containers = { resourceCircle = true, xpBar = true, aurasMissingBuffs = true, extraBars = true, comfortQoL = true },
+    headers = {
+      "SETTINGS_CAT_MOVEMENT_BUFFS", "SETTINGS_RC_ELITE_HEADER", "XP_TOAST_HEADER", "MISSINGBUFFS_SEC_ALERTS",
+      "EXTRABARS_SEC_WHITELIST", "SETTINGS_COMFORT_AUTO_TURNIN", "SETTINGS_MAPREVEAL_TITLE",
+    },
+  },
+  {
+    version = "4.4",
+    categories = { stealthMode = true, menuBar = true, patchNotes = true },
+    containers = { outOfCombat = true, priorityBar = true, resourceCircle = true, comfortQoL = true },
+    headers = {
+      "SETTINGS_CAT_STEALTH_MODE", "SETTINGS_CAT_MENU_BAR", "SETTINGS_CAT_PATCH_NOTES",
+      "SETTINGS_SEC_WELLFED", "SETTINGS_SEC_GLOW_PROCS", "SETTINGS_SEC_SWING", "SETTINGS_MMN_TITLE",
+    },
+  },
+  {
+    version = "4.3",
+    categories = {},
+    containers = { comfortQoL = true },
+    headers = { "SETTINGS_COMFORT_SEC_INTERFACE" },
+  },
+}
+
+-- Fusion des 2 dernieres majeures, lue par la barre laterale et les en-tetes
+ns.NewInPatch = { categories = {}, containers = {}, headers = {} }
+for i = 1, math.min(2, #ns.NewByVersion) do
+  local v = ns.NewByVersion[i]
+  for k in pairs(v.categories or {}) do ns.NewInPatch.categories[k] = true end
+  for k in pairs(v.containers or {}) do ns.NewInPatch.containers[k] = true end
+  for _, h in ipairs(v.headers or {}) do table.insert(ns.NewInPatch.headers, h) end
+end
+
+-- Les en-tetes ne connaissent que leur texte : comparaison sur le libelle localise, en majuscules.
+local newHeaderTexts
+function ns.IsNewHeader(text)
+  if type(text) ~= "string" then return false end
+  if not newHeaderTexts then
+    newHeaderTexts = {}
+    for _, key in ipairs(ns.NewInPatch.headers) do
+      local s = ns.L and ns.L[key]
+      if s then newHeaderTexts[s:upper()] = true end
+    end
+  end
+  return newHeaderTexts[text:upper()] == true
+end
+
+-- nil si l'atlas manque sur ce client (rien n'est alors affiche).
+-- size = hauteur ; la largeur suit les proportions de l'atlas.
+-- contains : categorie qui contient une nouveaute (icone distincte).
+local NEW_ATLAS, CONTAINS_ATLAS = "Bonus-Objective-Star", "worldquest-Capstone"
+function ns.CreateNewBadge(parent, size, contains)
+  local atlas = contains and CONTAINS_ATLAS or NEW_ATLAS
+  local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas)
+  if not info then return nil end
+  local tex = parent:CreateTexture(nil, "OVERLAY")
+  tex:SetAtlas(atlas)
+  local ratio = (info.width and info.height and info.height > 0) and (info.width / info.height) or 1
+  tex:SetSize(size * ratio, size)
+  return tex
+end
+
+-- Bouton "Cacher / Montrer les nouveautes" (sous le numero de version du GUI) :
+-- choix du compte Battle.net, jamais du profil : garde dans AishaddonDB._device[<hash du BattleTag>]
+-- (ns.GetDeviceSettings, Modules/Comfort.lua). Un pack livre avec ma SavedVariable ne le transmet donc
+-- pas aux joueurs. Le choix vaut pour la majeure en cours : la suivante repart sur la regle des 30 jours.
+local badges = {}
+local AUTO_HIDE_DAYS = 30
+
+local function CurrentMajor()
+  return ns.NewByVersion[1] and ns.NewByVersion[1].version
+end
+
+-- Date de sortie de la majeure en cours (champ date de ns.PatchNotes), en secondes ; nil si inconnue
+local function ReleaseTime()
+  local cur = CurrentMajor()
+  for _, e in ipairs(ns.PatchNotes or {}) do
+    if e.version == cur and e.date then
+      local y, m, d = e.date:match("^(%d+)-(%d+)-(%d+)$")
+      if y then return time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 }) end
+    end
+  end
+end
+
+local function Device()
+  local d = ns.GetDeviceSettings and ns.GetDeviceSettings()
+  if not d then return nil end
+  -- Anciens emplacements (racine de AishaddonDB, puis booleen sans version) : repris une fois puis retires
+  local old = d.hideNewBadges
+  if AishaddonDB and AishaddonDB._hideNewBadges ~= nil then
+    old = AishaddonDB._hideNewBadges
+    AishaddonDB._hideNewBadges = nil
+  end
+  if old ~= nil then
+    d.newBadges = { version = CurrentMajor(), shown = not old }
+    d.hideNewBadges = nil
+  end
+  return d
+end
+
+function ns.NewBadgesShown()
+  local d = Device()
+  local choice = d and d.newBadges
+  if choice and choice.version == CurrentMajor() then return choice.shown end
+  local t = ReleaseTime()
+  if not t then return true end
+  return (time() - t) < AUTO_HIDE_DAYS * 86400
+end
+
+-- onToggle(shown) : recale le porteur (libelle, point) ; applique tout de suite l'etat courant.
+function ns.RegisterNewBadge(tex, onToggle)
+  local entry = { tex = tex, onToggle = onToggle }
+  badges[#badges + 1] = entry
+  local shown = ns.NewBadgesShown()
+  tex:SetShown(shown)
+  if onToggle then onToggle(shown) end
+end
+
+function ns.SetNewBadgesShown(shown)
+  local d = Device()
+  if d then d.newBadges = { version = CurrentMajor(), shown = shown and true or false } end
+  for _, e in ipairs(badges) do
+    e.tex:SetShown(shown)
+    if e.onToggle then e.onToggle(shown) end
+  end
+end

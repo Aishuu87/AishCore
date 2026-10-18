@@ -12,6 +12,7 @@ Instructions permanentes d'Aishuu. Elles priment sur les comportements par défa
 
 - Il connaît son addon. Quand il affirme « le problème vient du mode d'affichage : Icônes », c'est **certain à 100 %** : chercher la cause à cet endroit, ne pas remettre en doute ni proposer d'autres pistes « au cas où ».
 - Il fait **toujours un `/reload` avant de tester**. Ne jamais le lui rappeler ni supposer que la manip a été oubliée.
+- C'est lui qui teste en jeu, à chaque fois. Ne pas écrire « ça compile mais je n'ai pas pu tester en jeu » (ou équivalent) dans les réponses : c'est inutile. Signaler seulement un vrai doute précis sur un comportement à vérifier.
 
 ## Aucune référence à Claude
 
@@ -87,6 +88,7 @@ de les modifier.
 | --- | --- | --- |
 | `Data/SearchIndex.lua` | `python generate_search_index.py` | **Après toute modif qui ajoute, retire ou renomme un texte d'option** dans `UI/SettingsPanel.lua` ou `Modules/Auras/UI/Menus/*.lua` (nouveau `L["..."]` dans une page, nouvelle page dans `CATEGORIES`). Sinon la recherche du GUI ne trouve pas la nouvelle option. Une nouvelle page dont le texte vient d'une table hors de sa fonction `Build.*` : l'ajouter à `EXTRA_BLOCKS` dans le script ; une page construite dans un fichier à part (ex. `UI/CDMLayoutPage.lua`) : l'ajouter à `EXTERNAL_PAGES`. |
 | `Config/ProfileTemplate.lua` + `Modules/Auras/Core/ProfileTemplate.lua` | `python generate_profile_template.py` | **Apres chaque mise a jour du profil de reference "Empty Template" en jeu** (faire un `/reload` avant, pour que le profil soit ecrit dans les SavedVariables). Ces deux fichiers servent de configuration de depart a tout nouveau profil et au tout premier lancement. Ne jamais les editer a la main. |
+| `Data/MapOverlays.lua` | `python generate_map_overlays.py` | Calques de la carte du monde pour « Révéler la carte » (tables WorldMapOverlay / WorldMapOverlayTile des dernières builds Retail et Forever, via wago.tools). À relancer quand un patch ajoute ou modifie des zones. |
 | `Data/ModelPaths.lua` | `python generate_model_paths.py` | Seulement pour **mettre à jour la liste des modèles 3D** (nouveau patch WoW avec de nouveaux modèles). Télécharge la listfile communautaire. Inutile après une modif de code. |
 
 Les deux scripts sont dans `.gitignore` : ils restent en local, seuls les `.lua` générés sont versionnés.

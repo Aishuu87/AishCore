@@ -31,6 +31,11 @@ local ALERT_TEXT_KEYS = {
     LOW_SHARDS       = "MISSINGBUFFS_ALERT_LOW_SHARDS",
     NO_HEALTHSTONE   = "MISSINGBUFFS_ALERT_NO_HEALTHSTONE",
     NO_SOULSTONE     = "MISSINGBUFFS_ALERT_NO_SOULSTONE",
+    SPEND_TALENTS    = "MISSINGBUFFS_ALERT_SPEND_TALENTS",
+    SPEND_LEGACY     = "MISSINGBUFFS_ALERT_SPEND_LEGACY",
+    BAGS_FULL        = "MISSINGBUFFS_ALERT_BAGS_FULL",
+    TRACKING_OFF     = "MISSINGBUFFS_ALERT_TRACKING_OFF",
+    APPLY_WEAPON_STONE = "MISSINGBUFFS_ALERT_APPLY_WEAPON_STONE",
 }
 ns.MISSING_TEXT = setmetatable({}, {
     __index = function(_, key)
@@ -202,6 +207,21 @@ ns.MISSING_PET_PASSIVE_ICON = "Interface\\Icons\\Ability_Seal"
 -- Forever : alertes de quantite (munitions du Chasseur, fragments d'ame du Demoniste), sans sort associe : cles
 -- de combo fictives (cf. PSEUDO_SPELLS_3D dans SettingsPanel.lua)
 ns.MISSING_LOW_AMMO_KEY   = 9000011
+-- Alertes de consommables et de talents : UNE cle par type d'alerte (combo d'Animations 3D unique, meme si l'alerte
+-- propose plusieurs objets ; seule la 1re icone porte la cle et ancre le combo)
+ns.MISSING_FOOD_KEY        = 9000030
+ns.MISSING_FLASK_KEY       = 9000031
+ns.MISSING_WEAPON_STONE_KEY = 9000032
+ns.MISSING_TALENTS_KEY     = 9000033
+ns.MISSING_LEGACY_KEY      = 9000034  -- Forever : points d'Heritage
+ns.MISSING_BAGS_KEY        = 9000035  -- sacs pleins
+ns.MISSING_TRACKING_HERBS_KEY = 9000036  -- Decouverte des herbes desactivee
+ns.MISSING_TRACKING_ORE_KEY   = 9000037  -- Decouverte des mineraux desactivee
+-- Sorts de pistage de recolte (cf. GatherTrackingChoices dans MissingBuffs.lua) ; une ligne de combo chacun
+ns.MISSING_GATHER_FINDERS = {
+    { spellId = 2383, key = ns.MISSING_TRACKING_HERBS_KEY, icon = "Interface\\Icons\\INV_Misc_Flower_02" },     -- Denicher les herbes
+    { spellId = 2580, key = ns.MISSING_TRACKING_ORE_KEY,   icon = "Interface\\Icons\\Spell_Nature_Earthquake" }, -- Denicher les mineraux
+}
 ns.MISSING_LOW_SHARDS_KEY = 9000012
 
 ns.MISSING_WARLOCK_PET = 688 -- Imp
@@ -370,9 +390,10 @@ if _addon.IsForever then
               displayName = "Pet unhappy", icon = I .. "Ability_Hunter_BeastTraining" },
         },
         WARRIOR = {
+            -- shoutReminder : rappel aussi a <= 20 s et en combat ; hors combat, seulement avec la rage pour le lancer
             { settingsId = 24, names = { 6673, "Battle Shout", 469, "Commanding Shout" }, casts = { 6673, "Battle Shout" },
               displayName = "Battle Shout", icon = I .. "Ability_Warrior_BattleShout",
-              ignoreRangeCheck = true, showRaidCount = true, text = "MISSING" },
+              ignoreRangeCheck = true, showRaidCount = true, shoutReminder = true, text = "MISSING" },
         },
     }
 

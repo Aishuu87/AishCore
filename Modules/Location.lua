@@ -230,6 +230,6 @@ end)
 -- LocationPlus). Les changements de zone passent de toute facon par les evenements ci-dessus,
 -- ce ticker ne rattrape que les cas muets : 2 s suffisent largement.
 -- Comparaison de chaine d'abord, donc aucun SetText inutile.
-C_Timer.NewTicker(2, function()
+ns.NewTicker(2, function()
     if frame and frame:IsShown() then Location.Update() end
 end)

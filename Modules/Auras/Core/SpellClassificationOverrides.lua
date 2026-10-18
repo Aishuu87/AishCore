@@ -223,6 +223,125 @@ ns.SpellClassificationOverrides = {
     [1307888] = { source = "totem" }, -- Pluie guerisseuse
 }
 
+-- Forever seulement (classement fait en mode admin sur Forever). Applique apres la table commune ci-dessus,
+-- jamais sur Retail : plusieurs sorts de paladin Retail y sont masques, ce qui serait faux sur Retail.
+ns.SpellClassificationOverridesForever = {
+    [99]      = { source = "debuff" }, -- Rugissement demoralisant
+    [143]     = { source = "debuff" }, -- Boule de feu
+    [205]     = { source = "debuff" }, -- Eclair de givre
+    [339]     = { source = "debuff" }, -- Sarments
+    [370]     = { deleted = true }, -- Expiation
+    [548]     = { deleted = true }, -- Eclair
+    [603]     = { source = "debuff" }, -- Plaie funeste
+    [707]     = { source = "debuff" }, -- Immolation
+    [770]     = { source = "debuff" }, -- Lucioles
+    [772]     = { source = "debuff" }, -- Pourfendre
+    [865]     = { source = "debuff" }, -- Nova de givre
+    [1079]    = { source = "debuff" }, -- Dechirure
+    [1130]    = { source = "debuff" }, -- Marque du chasseur
+    [1160]    = { source = "debuff" }, -- Cri demoralisant
+    [1725]    = { source = "debuff" }, -- Distraction
+    [1822]    = { source = "debuff" }, -- Griffure
+    [2637]    = { source = "debuff" }, -- Hibernation
+    [2908]    = { source = "debuff" }, -- Apaiser les animaux
+    [2944]    = { source = "debuff" }, -- Peste devorante
+    [2974]    = { source = "debuff" }, -- Coupure d'ailes
+    [3043]    = { source = "debuff" }, -- Piqure de scorpide
+    [5209]    = { source = "debuff" }, -- Rugissement provocateur
+    [5246]    = { source = "debuff" }, -- Cri d'intimidation
+    [5570]    = { source = "debuff" }, -- Essaim d'insectes
+    [5782]    = { source = "debuff" }, -- Peur
+    [6136]    = { source = "debuff" }, -- Transi
+    [6343]    = { source = "debuff" }, -- Coup de tonnerre
+    [6788]    = { source = "debuff" }, -- Ame affaiblie
+    [6795]    = { source = "debuff" }, -- Grondement
+    [7386]    = { source = "debuff" }, -- Fracasser armure
+    [7402]    = { source = "debuff" }, -- Coup railleur
+    [8053]    = { source = "debuff" }, -- Horion de flammes
+    [8056]    = { source = "debuff" }, -- Horion de givre
+    [8092]    = { deleted = true }, -- Attaque mentale
+    [8179]    = { source = "totem" }, -- Totem de Glebe (passif)
+    [8492]    = { source = "debuff" }, -- Cone de froid
+    [8512]    = { source = "totem" }, -- Totem Furie-des-vents
+    [8639]    = { source = "debuff" }, -- Rupture
+    [8921]    = { source = "debuff" }, -- Eclat lunaire
+    [9005]    = { source = "debuff" }, -- Traquenard
+    [9484]    = { deleted = true }, -- Entraves des morts-vivants
+    [10428]   = { source = "totem" }, -- Totem de Griffes de pierre
+    [10495]   = { source = "totem" }, -- Totem Fontaine de mana
+    [10894]   = { source = "debuff" }, -- Mot de l'ombre : Douleur
+    [11198]   = { source = "debuff" }, -- Exposer l'armure
+    [12355]   = { source = "debuff" }, -- Impact
+    [12494]   = { source = "debuff" }, -- Morsure du givre
+    [12505]   = { source = "debuff" }, -- Explosion pyrotechnique
+    [13018]   = { source = "debuff" }, -- Vague explosive
+    [13553]   = { source = "debuff" }, -- Morsure de serpent
+    [13797]   = { source = "debuff" }, -- Piege d'immolation
+    [14280]   = { source = "debuff" }, -- Morsure de vipere
+    [15257]   = { source = "debuff" }, -- Tissage de l'ombre
+    [15286]   = { source = "debuff" }, -- Etreinte vampirique
+    [15326]   = { source = "debuff" }, -- Aveuglement
+    [16387]   = { source = "totem" }, -- Totem Langue de feu
+    [16511]   = { source = "debuff" }, -- Hemorragie
+    [16922]   = { source = "debuff" }, -- Feu stellaire etourdissant
+    [17364]   = { source = "buff" }, -- Courroux naturel
+    [17928]   = { source = "debuff" }, -- Hurlement de terreur
+    [18119]   = { source = "debuff" }, -- Consequences
+    [18223]   = { source = "debuff" }, -- Malediction de fatigue
+    [19185]   = { source = "debuff" }, -- Piege
+    [20184]   = { source = "debuff" }, -- Jugement de justice
+    [20185]   = { source = "debuff" }, -- Jugement de lumiere
+    [20186]   = { source = "debuff" }, -- Jugement de sagesse
+    [21183]   = { source = "debuff" }, -- Jugement du Croise
+    [21553]   = { source = "debuff" }, -- Frappe mortelle
+    [23694]   = { source = "debuff" }, -- Brise-genou ameliore
+    [31935]   = { deleted = true }, -- Bouclier du vengeur
+    [53600]   = { deleted = true }, -- Bouclier du vertueux
+    [156910]  = { deleted = true }, -- Guide de foi
+    [190456]  = { deleted = true }, -- Dur au mal
+    [275779]  = { deleted = true }, -- Jugement
+    [383346]  = { deleted = true }, -- Expurgation
+    [412538]  = { source = "debuff" }, -- Enflammer
+    [412609]  = { source = "debuff" }, -- Blessure profonde
+    [431380]  = { deleted = true }, -- Aubastre
+    [431752]  = { deleted = true }, -- Volonte de l'aube
+    [432502]  = { source = "debuff", deleted = true }, -- Arme sacree
+    [432629]  = { deleted = true }, -- Verdict unanime
+    [440667]  = { source = "debuff" }, -- Justification
+    [469882]  = { deleted = true }, -- Feu d'affinage
+    [1235826] = { source = "debuff" }, -- Lacerer
+    [1237312] = { source = "debuff" }, -- Eclair de givrefeu
+    [1238289] = { source = "debuff" }, -- Lien terrestre
+    [1241413] = { deleted = true }, -- Marteau de courroux
+    [1260251] = { source = "debuff", deleted = true }, -- Condamnation a mort
+    [1277038] = { deleted = true }, -- Arbitrage
+    [1277455] = { source = "debuff" }, -- Eclair deconcertant
+    [1310703] = { source = "debuff" }, -- Toxine
+    [1320379] = { source = "debuff" }, -- Metamorphose
+    [1324401] = { source = "debuff" }, -- Contresort  Silence
+    [1324415] = { source = "debuff" }, -- Entraves des Morts-vivants
+    [1324427] = { source = "debuff" }, -- Silence
+    [1324459] = { source = "debuff" }, -- Voile mortel
+    [1324462] = { source = "debuff" }, -- Bannir
+    [1324473] = { source = "debuff" }, -- Plaie de tumulte
+    [1324474] = { source = "debuff" }, -- Aiguillon perfide
+    [1324477] = { source = "debuff" }, -- Cecite
+    [1324481] = { source = "debuff" }, -- Suriner
+    [1324482] = { source = "debuff" }, -- Assommer
+    [1324485] = { source = "debuff" }, -- Silence  Coup de pied
+    [1324487] = { source = "debuff" }, -- Sonner
+    [1324494] = { source = "debuff" }, -- Intimidation
+    [1324499] = { source = "debuff" }, -- Fleche de dispersion
+    [1324500] = { source = "debuff" }, -- Piege givrant
+    [1324506] = { source = "debuff" }, -- Effrayer une bete
+    [1324511] = { source = "debuff" }, -- Trait de choc ameliore
+    [1324513] = { source = "debuff" }, -- Marteau de la justice
+    [1324538] = { source = "debuff" }, -- Repentir
+    [1324543] = { source = "debuff" }, -- Renvoi des Morts-vivants
+    [1324558] = { source = "debuff" }, -- Desarmement
+    [1326053] = { source = "debuff" }, -- Frost Blast
+}
+
 -- Auras que le joueur lance sur SON familier mais qui lui appartiennent (buff perso). Aucun viewer
 -- CDM ne les liste cote joueur -- l'aura vit sur le pet -- elles ne seraient donc ni auto-decouvertes
 -- ni scannees. Declarees ici, elles sont enregistrees pour la spec voulue (source "buff", categorie

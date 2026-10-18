@@ -102,6 +102,52 @@ local function ForeverResolve(entry)
     return false
 end
 
+-- Buffs du JOUEUR lus une seule fois par changement d'aura : chaque lecture d'aura (GetAuraDataByIndex)
+-- cree une table neuve, et l'evaluation relisait tous les buffs plusieurs fois a chaque passage (~25 Ko).
+-- Invalide par UNIT_AURA du joueur (MissingBuffs.BumpAuraGen), avec une relecture de securite toutes les 30 s.
+local auraGen, buffGen, buffTime = 0, -1, 0
+local bSid, bName, bExp, bSrc, bN, bAnySecret = {}, {}, {}, {}, 0, false
+-- Generations des autres sources (sacs, equipement, talents) : les resultats couteux sont memorises tant
+-- qu'elles ne bougent pas (cf. Memo), incrementees par l'eventFrame en bas de fichier.
+local bagGen, invGen, talentGen = 0, 0, 0
+function MissingBuffs.BumpAuraGen() auraGen = auraGen + 1 end
+local function PlayerBuffs()
+    local now = GetTime()
+    if buffGen == auraGen and now - buffTime < 30 then return bN end
+    buffGen, buffTime, bN, bAnySecret = auraGen, now, 0, false
+    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+        for i = 1, 60 do
+            local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
+            if not ok or not a then break end
+            bN = bN + 1
+            bSid[bN], bName[bN], bExp[bN], bSrc[bN] = a.spellId, a.name, a.expirationTime, a.sourceUnit
+            if IsSecret(a.spellId) then bAnySecret = true end
+        end
+    elseif UnitBuff then
+        for i = 1, 60 do
+            local ok, n, _, _, _, _, exp, src, _, _, sid = pcall(UnitBuff, "player", i)
+            if not ok or not n then break end
+            bN = bN + 1
+            bSid[bN], bName[bN], bExp[bN], bSrc[bN] = sid, n, exp, src
+        end
+    end
+    return bN
+end
+MissingBuffs.PlayerBuffs = function() local n = PlayerBuffs(); return bSid, bName, n end
+
+-- Resultat memorise tant que sacs, equipement, buffs et talents n'ont pas change (30 s de securite) : les
+-- propositions de consommables reparcouraient tous les sacs a chaque evaluation (~2 Ko par type).
+local function Memo(fn)
+    local v, b, a, inv, tal, t
+    return function()
+        local now = GetTime()
+        if t and b == bagGen and a == auraGen and inv == invGen and tal == talentGen and now - t < 30 then return v end
+        v = fn()
+        b, a, inv, tal, t = bagGen, auraGen, invGen, talentGen, now
+        return v
+    end
+end
+
 -- Premiere aura benefique de "unit" dont le nom est dans "names" (tous rangs). Renvoie une table
 -- { name, expirationTime, sourceUnit } ou nil. ownOnly : ne compte que nos propres instances.
 local _nameLookups = setmetatable({}, { __mode = "k" })
@@ -113,6 +159,19 @@ local function FindAuraByNames(unit, names, ownOnly)
         lookup = {}
         for _, n in ipairs(names) do lookup[n] = true end
         _nameLookups[names] = lookup
+    end
+    if unit == "player" then
+        for i = 1, PlayerBuffs() do
+            local name, source = bName[i], bSrc[i]
+            if name and not IsSecret(name) and lookup[name] then
+                local mine = true
+                if ownOnly then
+                    mine = source ~= nil and not IsSecret(source) and UnitIsUnit(source, "player")
+                end
+                if mine then return { name = name, expirationTime = bExp[i], sourceUnit = source } end
+            end
+        end
+        return nil
     end
     for i = 1, 60 do
         local name, expiration, source
@@ -226,7 +285,22 @@ end
 
 -- Lecture d'aura SUR SOI (fiable -- contrairement a un instanceID capture via un hook CDM,
 -- GetPlayerAuraBySpellID reste utilisable ici)
+-- Cache des buffs d'abord (aucune allocation) : un buff present renvoie une table de travail REUTILISEE
+-- (lue sur le champ par les appelants, jamais conservee). Repli sur l'API si un spellID du cache est secret.
+local _selfAura = {}
 local function GetSelfAura(spellId)
+    if not spellId then return nil end
+    local n = PlayerBuffs()
+    if not bAnySecret then
+        for i = 1, n do
+            if bSid[i] == spellId then
+                _selfAura.spellId, _selfAura.name, _selfAura.expirationTime, _selfAura.sourceUnit =
+                    bSid[i], bName[i], bExp[i], bSrc[i]
+                return _selfAura
+            end
+        end
+        return nil
+    end
     if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return nil end
     local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellId)
     if ok and aura then return aura end
@@ -234,9 +308,19 @@ local function GetSelfAura(spellId)
 end
 MissingBuffs.GetSelfAura = GetSelfAura
 
+-- spellID present dans le cache des buffs du joueur (aucune allocation, contrairement a GetSelfAura)
+local function CachedHasSid(sid)
+    if not sid then return false end
+    for i = 1, PlayerBuffs() do
+        local v = bSid[i]
+        if not IsSecret(v) and v == sid then return true end
+    end
+    return false
+end
+
 local function SelfHasBuff(entry)
     if entry.names then return FindAuraByNames("player", entry.names) ~= nil end
-    if GetSelfAura(entry.spellId) then return true end
+    if CachedHasSid(entry.spellId) or GetSelfAura(entry.spellId) then return true end
     if entry.extraBuffSpellIds then
         for _, sid in ipairs(entry.extraBuffSpellIds) do
             if GetSelfAura(sid) then return true end
@@ -519,6 +603,83 @@ local function SpellNameById(id)
     return nil
 end
 
+-- Forever, Cri de guerre (entry.shoutReminder) : rappel s'il est absent, en combat comme hors combat, et seulement s'il
+-- est lancable (cf. ShoutCastable). Pas de rappel "bientot expire" : la duree d'aura est illisible en combat.
+local function ShoutCost(entry)
+    local sid = entry.casts and entry.casts[1]
+    if type(sid) == "number" and C_Spell and C_Spell.GetSpellPowerCost then
+        local ok, costs = pcall(C_Spell.GetSpellPowerCost, sid)
+        if ok and type(costs) == "table" then
+            for _, c in ipairs(costs) do
+                local cost = c.cost
+                if type(cost) == "number" and not IsSecret(cost) and (c.type == 1 or c.name == "RAGE") then return cost end
+            end
+        end
+    end
+    return 10
+end
+local function HasRageFor(entry)
+    local ok, rage = pcall(UnitPower, "player", 1)
+    if not ok or type(rage) ~= "number" or IsSecret(rage) then return true end
+    return rage >= ShoutCost(entry)
+end
+-- Lancable maintenant (rage et autres conditions, C_Spell.IsSpellUsable sur le rang connu) ; repli : rage seule.
+-- Rang connu memorise jusqu'au prochain changement de sorts (talentGen, incremente par SPELLS_CHANGED).
+local function ShoutCastable(entry)
+    if C_Spell and C_Spell.IsSpellUsable then
+        if entry._usableGen ~= talentGen then
+            entry._usableGen, entry._usableId = talentGen, nil
+            for _, n in ipairs(ExpandNames(entry.casts)) do
+                local id = KnownSpellByName(n)
+                if id then entry._usableId = id; break end
+            end
+        end
+        if entry._usableId then
+            local ok, usable = pcall(C_Spell.IsSpellUsable, entry._usableId)
+            if ok and usable ~= nil and not IsSecret(usable) then return usable and true or false end
+        end
+    end
+    return HasRageFor(entry)
+end
+-- "absent" ou nil (present). En combat, noms / IDs d'aura peuvent etre secrets : la
+-- recherche par nom les saute, d'ou une recherche directe par nom de sort (GetAuraDataBySpellName), fiable meme alors.
+-- Sources de detection, dans l'ordre (aussi lues par /aishshout) : cache des buffs par nom, recherche par nom de sort,
+-- recherche par ID du rang connu (l'ID du buff est celui du sort lance ; GetPlayerAuraBySpellID reste fiable en combat).
+local function ShoutAuraSources(entry)
+    local byCache = FindAuraByNames("player", entry.names)
+    local byName
+    if C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName then
+        for _, n in ipairs(ExpandNames(entry.names)) do
+            local ok, a = pcall(C_UnitAuras.GetAuraDataBySpellName, "player", n, "HELPFUL")
+            if ok and a then byName = a; break end
+        end
+    end
+    local byId
+    ShoutCastable(entry)   -- resout entry._usableId (rang connu)
+    if entry._usableId and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+        local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, entry._usableId)
+        if ok and a then byId = a end
+    end
+    return byCache, byName, byId
+end
+MissingBuffs.ShoutAuraSources = ShoutAuraSources
+
+local function ShoutState(entry)
+    local aura = FindAuraByNames("player", entry.names)
+    if not aura then
+        local _, byName, byId = ShoutAuraSources(entry)
+        aura = byName or byId
+        if not aura then return "absent" end
+    end
+    return nil
+end
+local function ShoutEntry()
+    if not _addon.IsForever then return nil end
+    for _, e in ipairs(ns.MISSING_CLASS_BUFFS and ns.MISSING_CLASS_BUFFS.WARRIOR or {}) do
+        if e.shoutReminder then return e end
+    end
+end
+
 -- Propositions d'UNE entree : Forever = un choix par sort de "casts" reellement connu (doublons
 -- ID/nom fusionnes) ; Retail = un seul choix (le sort de l'entree).
 local function ChoicesFromEntry(entry, targetUnit)
@@ -563,6 +724,25 @@ end
 
 -- Groupe mutuellement exclusif : rien a alerter si UNE des options est deja active, sinon toutes
 -- les options lancables en propositions. nil = pas d'alerte.
+-- Aura du croise (paladin) : faite pour la monture. En monture et absente, elle est proposee seule -- meme si une
+-- autre aura est active, et meme avec "Ignorer si monte". nil = rien a rappeler (pas en monture, connue, active...).
+local function CrusaderMountedChoices()
+    local id = ns.MISSING_CRUSADER_AURA
+    if not id or not (IsMounted and IsMounted()) then return nil end
+    for _, opt in ipairs(ns.MISSING_PALADIN_AURAS or {}) do
+        local isCrusader = (opt.spellId == id)
+        if not isCrusader and opt.names then
+            for _, n in ipairs(opt.names) do if n == id then isCrusader = true; break end end
+        end
+        if isCrusader then
+            if (opt.names and FindAuraByNames("player", opt.names)) or GetSelfAura(id) then return nil end
+            local choices = GroupChoices({ opt })
+            return #choices > 0 and choices or nil
+        end
+    end
+    return nil
+end
+
 local function ExclusiveGroupAlert(list)
     for _, opt in ipairs(list) do
         if opt.names then
@@ -1412,6 +1592,22 @@ function MissingBuffs.SetPreview(on, spellId)
                 ns.MISSING_TEXT.PET_PASSIVE)
             return
         end
+        -- Consommables / talents : icone et texte de l'alerte reelle (apercu du combo dans les Animations 3D)
+        local PREVIEW_PSEUDO = {
+            [ns.MISSING_FOOD_KEY]         = { "Interface\\Icons\\INV_Misc_Food_15", "EAT_FOOD" },
+            [ns.MISSING_FLASK_KEY]        = { "Interface\\Icons\\INV_Potion_62", "USE_FLASK" },
+            [ns.MISSING_WEAPON_STONE_KEY] = { "Interface\\Icons\\INV_Stone_SharpeningStone_05", "APPLY_WEAPON_STONE" },
+            [ns.MISSING_TALENTS_KEY]      = { "Interface\\Icons\\Ability_Marksmanship", "SPEND_TALENTS" },
+            [ns.MISSING_LEGACY_KEY]       = { "Interface\\Icons\\INV_Misc_Book_11", "SPEND_LEGACY" },
+            [ns.MISSING_BAGS_KEY]         = { "Interface\\Icons\\INV_Misc_Bag_08", "BAGS_FULL" },
+            [ns.MISSING_TRACKING_HERBS_KEY] = { "Interface\\Icons\\INV_Misc_Flower_02", "TRACKING_OFF" },
+            [ns.MISSING_TRACKING_ORE_KEY]   = { "Interface\\Icons\\Spell_Nature_Earthquake", "TRACKING_OFF" },
+        }
+        local pp = resolvedId and PREVIEW_PSEUDO[resolvedId]
+        if pp then
+            MissingBuffs.ShowAlertChoices({ { key = resolvedId, icon = pp[1] } }, ns.MISSING_TEXT[pp[2]])
+            return
+        end
         if resolvedId == ns.MISSING_PET_UNHAPPY_KEY then
             MissingBuffs.ShowAlertChoices({ { key = resolvedId, icon = ns.MISSING_PET_UNHAPPY_ICON } },
                 ns.MISSING_TEXT.PET_UNHAPPY)
@@ -1641,21 +1837,61 @@ local function PetIsUnhappy()
     return ok and level == 1
 end
 
+-- Paladin (Retail), en combat : aucune aura, ou l'Aura du croise (faite pour la monture) -> Devotion / Concentration.
+-- Les auras se lisent sur la barre de postures (GetShapeshiftFormInfo), lisible en combat, contrairement aux auras.
+local PALADIN_COMBAT_AURAS = { [465] = true, [317920] = true }   -- Aura de devotion, Aura de concentration
+local function PaladinCombatAuraChoices()
+    if not (GetNumShapeshiftForms and GetShapeshiftFormInfo) then return nil end
+    local active
+    for i = 1, GetNumShapeshiftForms() or 0 do
+        local ok, _, isActive, _, sid = pcall(GetShapeshiftFormInfo, i)
+        if ok and not IsSecret(isActive) and isActive then active = sid end
+    end
+    if active and active ~= ns.MISSING_CRUSADER_AURA then return nil end
+    local list = {}
+    for _, opt in ipairs(ns.MISSING_PALADIN_AURAS or {}) do
+        if PALADIN_COMBAT_AURAS[opt.spellId] then list[#list + 1] = opt end
+    end
+    local choices = GroupChoices(list)
+    return #choices > 0 and choices or nil
+end
+
 -- Appelee en combat (evenements + ticker). Renvoie true si une alerte familier est en place (le
 -- frame principal ne doit alors pas etre masque).
 function MissingBuffs.CheckPetInCombat()
     local cfg = Cfg()
     local class = _addon._playerClass or select(2, UnitClass("player"))
+    local shout = class == "WARRIOR" and ShoutEntry() or nil  -- Forever : Cri de guerre en combat
+    local palAuras = (class == "PALADIN" and not _addon.IsForever and not cfg.ignorePaladinAuras)
+        and PaladinCombatAuraChoices() or nil
     local ignored = (class == "HUNTER" and cfg.ignoreHunterPets) or (class == "WARLOCK" and cfg.ignoreWarlockPets)
-    if not cfg.enabled or ignored or (class ~= "HUNTER" and class ~= "WARLOCK")
+        or (shout and MissingBuffs.IsIgnored(shout.settingsId))
+    if not cfg.enabled or ignored or (class ~= "HUNTER" and class ~= "WARLOCK" and not shout and not palAuras)
        or UnitIsDeadOrGhost("player") or (cfg.ignoreBuffsWhileMounted and IsMounted and IsMounted())
        or (IsMounted and IsMounted())
        or (C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()) then
         MissingBuffs.HideCombatPet(); return false
     end
     local choices, text
-    local ok, ch, tk = pcall(CheckPetMissing, class)
-    if ok and ch and #ch > 0 then
+    local ok, ch, tk
+    if palAuras then
+        choices = palAuras
+        text = ns.MISSING_TEXT.USE_AURA
+    elseif shout then
+        local state = IsEntryLearned(shout) and ShoutCastable(shout) and ShoutState(shout)
+        if state then
+            local c = ChoicesFromEntry(shout, "player")[1]
+            if c then
+                choices = { { key = c.key, spellId = c.spellId, icon = shout.icon } }
+                text = ns.MISSING_TEXT[shout.text or "MISSING"]
+            end
+        end
+    else
+        ok, ch, tk = pcall(CheckPetMissing, class)
+    end
+    if choices then
+        -- deja rempli (Cri de guerre)
+    elseif ok and ch and #ch > 0 then
         choices = ch
         text = ns.MISSING_TEXT[tk]
     elseif PetIsPassive() then
@@ -1729,10 +1965,343 @@ local function CheckWarlockStones(cfg)
     return nil
 end
 
+-- Consommables : pierre a aiguiser / huile dans les sacs et arme sans enchantement temporaire -> une icone par objet,
+-- le clic l'applique (macro "/use objet" puis "/use 16|17" : l'objet cible l'emplacement de l'arme).
+-- Pas pour le voleur ni le chaman : leurs poisons / imprégnations occupent deja cet enchantement temporaire.
+local function WeaponStoneChoices()
+    local EB = _addon.Modules and _addon.Modules.ExtraBars
+    if not (EB and EB.IsWeaponEnhancementItem and GetWeaponEnchantInfo) then return nil end
+    local hasMain, _, _, _, hasOff = GetWeaponEnchantInfo()
+    local function IsWeaponSlot(slot)
+        local id = GetInventoryItemID("player", slot)
+        if not id then return false end
+        local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(id)
+        return classID == (Enum.ItemClass and Enum.ItemClass.Weapon or 2)
+    end
+    local slot
+    if IsWeaponSlot(16) and not hasMain then slot = 16
+    elseif IsWeaponSlot(17) and not hasOff then slot = 17 end
+    if not slot then return nil end
+    local items, seen = {}, {}
+    for bag = 0, (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4) do
+        for s = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local id = C_Container.GetContainerItemID(bag, s)
+            if id and not seen[id] then
+                seen[id] = true
+                if EB.IsWeaponEnhancementItem(id) then items[#items + 1] = id end
+            end
+        end
+    end
+    if #items == 0 then return nil end
+    table.sort(items)
+    local choices = {}
+    for i = 1, math.min(#items, 4) do
+        local id = items[i]
+        choices[#choices + 1] = { key = (i == 1) and ns.MISSING_WEAPON_STONE_KEY or nil, icon = C_Item.GetItemIconByID(id),
+                                  macro = "/use item:" .. id .. "\n/use " .. slot }
+    end
+    return choices
+end
+
+-- Consommables : pas de "Bien nourri" (et pas en train de manger) avec de la nourriture qui le donne dans les sacs ->
+-- une icone par aliment (au plus 4), le clic le mange.
+local function WellFedFoodChoices()
+    local WF = _addon.Modules and _addon.Modules.WellFedCircle
+    if not (WF and WF.FedState and WF.FoodGivesWellFed) then return nil end
+    local fed, eating = WF.FedState(bSid, bName, PlayerBuffs())
+    if fed or eating then return nil end
+    local items, seen = {}, {}
+    for bag = 0, (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4) do
+        for s = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local id = C_Container.GetContainerItemID(bag, s)
+            if id and not seen[id] then
+                seen[id] = true
+                local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(id)
+                if classID == (Enum.ItemClass and Enum.ItemClass.Consumable or 0) and WF.FoodGivesWellFed(id) then
+                    items[#items + 1] = id
+                end
+            end
+        end
+    end
+    if #items == 0 then return nil end
+    table.sort(items, function(a, b) return a > b end)
+    local choices = {}
+    for i = 1, math.min(#items, 4) do
+        local id = items[i]
+        choices[#choices + 1] = { key = (i == 1) and ns.MISSING_FOOD_KEY or nil, icon = C_Item.GetItemIconByID(id), macro = "/use item:" .. id }
+    end
+    return choices
+end
+
+-- Consommables : jamais en monture, en vol, en chute, en taxi, en vehicule ni en combat de mascottes ; la nage
+-- bloque seulement la nourriture (flacons, pierres a aiguiser et huiles s'utilisent dans l'eau).
+local function ConsumablesBlocked(allowSwim)
+    if IsMounted and IsMounted() then return true end
+    if IsFlying and IsFlying() then return true end
+    if IsFalling and IsFalling() then return true end
+    if UnitOnTaxi and UnitOnTaxi("player") then return true end
+    if (UnitInVehicle and UnitInVehicle("player")) or (UnitHasVehicleUI and UnitHasVehicleUI("player")) then return true end
+    if C_PetBattles and C_PetBattles.IsInBattle and C_PetBattles.IsInBattle() then return true end
+    if not allowSwim and IsSwimming and IsSwimming() then return true end
+    return false
+end
+
+-- Consommables : flacon / fiole. Objets "Flacons & fioles" des sacs ; l'alerte ne sort que si AUCUN buff de flacon
+-- n'est actif : ni celui d'un flacon des sacs (sort d'utilisation de l'objet), ni un autre dont le nom parle de
+-- flacon / fiole (flacon bu puis epuise dans les sacs). Une icone par flacon (au plus 4), le clic le boit.
+local FLASK_SUB = 3
+local FLASK_WORDS = { "flacon", "fiole", "flask", "phial", "fläschchen", "phiole", "frasco", "vial", "фляг", "флакон" }
+local function FlaskChoices()
+    local items, seen, spellIDs = {}, {}, {}
+    for bag = 0, (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4) do
+        for s = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local id = C_Container.GetContainerItemID(bag, s)
+            if id and not seen[id] then
+                seen[id] = true
+                local _, _, _, _, _, classID, subID = C_Item.GetItemInfoInstant(id)
+                if classID == (Enum.ItemClass and Enum.ItemClass.Consumable or 0) and subID == FLASK_SUB then
+                    local okS, _, sid = pcall(C_Item.GetItemSpell, id)
+                    if okS and sid then
+                        items[#items + 1] = id
+                        spellIDs[sid] = true
+                    end
+                end
+            end
+        end
+    end
+    if #items == 0 then return nil end
+    -- Un flacon deja actif ? (buffs du joueur en cache, cf. PlayerBuffs)
+    for i = 1, PlayerBuffs() do
+        local sid, name = bSid[i], bName[i]
+        if not (IsSecret(sid) or IsSecret(name)) then
+            if spellIDs[sid] then return nil end
+            local low = type(name) == "string" and name:lower() or ""
+            for _, w in ipairs(FLASK_WORDS) do
+                if low:find(w, 1, true) then return nil end
+            end
+        end
+    end
+    table.sort(items, function(a, b) return a > b end)
+    local choices = {}
+    for i = 1, math.min(#items, 4) do
+        local id = items[i]
+        choices[#choices + 1] = { key = (i == 1) and ns.MISSING_FLASK_KEY or nil, icon = C_Item.GetItemIconByID(id), macro = "/use item:" .. id }
+    end
+    return choices
+end
+
+-- Points de talents a depenser : arbre de traits (Retail et Forever), sinon API des anciens clients
+local function UnspentTalentPoints()
+    -- HasUnspentTalentPoints ne couvre que classe / spe : les points de talents de heros passent par
+    -- HasUnspentHeroTalentPoints ou, a defaut, par les monnaies de l'arbre (classe, spe et heros)
+    local answered = false
+    if C_ClassTalents and C_ClassTalents.HasUnspentTalentPoints then
+        local ok, has = pcall(C_ClassTalents.HasUnspentTalentPoints)
+        if ok and has then return true end
+        answered = ok and has ~= nil
+    end
+    if C_ClassTalents and C_ClassTalents.HasUnspentHeroTalentPoints then
+        local ok, has = pcall(C_ClassTalents.HasUnspentHeroTalentPoints)
+        if ok and has then return true end
+    end
+    if C_ClassTalents and C_ClassTalents.GetActiveConfigID and C_Traits and C_Traits.GetConfigInfo
+       and C_Traits.GetTreeCurrencyInfo then
+        local okC, cfgID = pcall(C_ClassTalents.GetActiveConfigID)
+        local okI, info = okC and cfgID and pcall(C_Traits.GetConfigInfo, cfgID)
+        if okI and info and info.treeIDs then
+            for _, treeID in ipairs(info.treeIDs) do
+                local okT, cur = pcall(C_Traits.GetTreeCurrencyInfo, cfgID, treeID, false)
+                if okT and type(cur) == "table" then
+                    for _, c in ipairs(cur) do
+                        local q = c.quantity
+                        if not IsSecret(q) and (tonumber(q) or 0) > 0 then return true end
+                    end
+                end
+            end
+            return false
+        end
+    end
+    if answered then return false end
+    if GetUnspentTalentPoints then
+        local ok, n = pcall(GetUnspentTalentPoints)
+        if ok then return (tonumber(n) or 0) > 0 end
+    end
+    if UnitCharacterPoints then
+        local ok, n = pcall(UnitCharacterPoints, "player")
+        if ok then return (tonumber(n) or 0) > 0 end
+    end
+    return false
+end
+-- Memorises (cf. Memo) : recalcules seulement apres un changement de sacs, d'equipement, de buffs ou de talents
+WeaponStoneChoices = Memo(WeaponStoneChoices)
+WellFedFoodChoices = Memo(WellFedFoodChoices)
+FlaskChoices = Memo(FlaskChoices)
+UnspentTalentPoints = Memo(UnspentTalentPoints)
+MissingBuffs.UnspentTalentPoints = UnspentTalentPoints
+
+-- Forever : points d'Heritage a depenser (LegacySystem.GetCurrencyInfo, cf. LEGACY_POINTS_CURR_MAX "%d/%d").
+-- Format de retour non documente : nombre, info de monnaie de traits ({ quantity, maxQuantity }) ou liste de celles-ci.
+local function LegacyQuantity(v)
+    if type(v) == "number" then return v end
+    if type(v) ~= "table" then return nil end
+    local q = tonumber(v.quantity or v.availableQuantity or v.unspent or v.current)
+    if q then return q end
+    local sum
+    for _, c in ipairs(v) do
+        local n = LegacyQuantity(c)
+        if n then sum = (sum or 0) + n end
+    end
+    return sum
+end
+-- LegacySystem vit dans Blizzard_LegacySystem, charge a la demande (ouverture du panneau) : on le charge nous-memes,
+-- une fois, hors combat, sinon l'alerte ne voit rien tant que le panneau n'a pas ete ouvert.
+-- Le cache de LegacySystem n'est rempli qu'apres UpdateCurrencyInfo (appele par le panneau a son ouverture) : on le
+-- demande une fois au chargement ; le callback relance l'evaluation quand les donnees arrivent. Pas d'appel a chaque
+-- evaluation (le callback reboucherait).
+local legacyLoadTries, legacyReady = 0, false
+local function EnsureLegacyUI()
+    if not _G.LegacySystem and legacyLoadTries < 3 and _G.LegacySystemFrame_LoadUI and not InCombatLockdown() then
+        legacyLoadTries = legacyLoadTries + 1
+        pcall(_G.LegacySystemFrame_LoadUI)
+    end
+    local LS = _G.LegacySystem
+    if LS and not legacyReady then
+        legacyReady = true
+        if LS.RegisterCurrencyInfoCallback then
+            pcall(LS.RegisterCurrencyInfoCallback, LS, function() MissingBuffs.RequestCheck() end)
+        end
+        if LS.UpdateCurrencyInfo then pcall(LS.UpdateCurrencyInfo, LS) end
+        C_Timer.After(2, function() MissingBuffs.RequestCheck() end)
+    end
+    return LS
+end
+local function UnspentLegacyPoints()
+    if not _G.LegacySystemFrame_LoadUI and not _G.LegacySystem then return false end  -- client sans Heritage
+    local LS = EnsureLegacyUI()
+    if LS and LS.GetCurrencyInfo then
+        local ok, a = pcall(LS.GetCurrencyInfo, LS)
+        if not ok or a == nil then ok, a = pcall(LS.GetCurrencyInfo) end
+        local q = ok and LegacyQuantity(a)
+        if q then return q > 0 end
+    end
+    -- Repli : compteur "Points disponibles" du panneau (LegacyTreePointSummary.Shield.Points)
+    local f = _G.LegacySystemFrame
+    local fs = f and f.TreePage and f.TreePage.LegacyTreePointSummary and f.TreePage.LegacyTreePointSummary.Shield
+        and f.TreePage.LegacyTreePointSummary.Shield.Points
+    if fs and fs.GetText then
+        local ok, t = pcall(fs.GetText, fs)
+        local n = ok and type(t) == "string" and tonumber(t:match("%d+"))
+        if n then return n > 0 end
+    end
+    return false
+end
+MissingBuffs.UnspentLegacyPoints = UnspentLegacyPoints
+
+-- Panneau des talents ouvert : pas d'alerte (on est justement en train de les depenser). Ses OnShow / OnHide
+-- relancent l'evaluation, pour que l'alerte revienne a la fermeture s'il reste des points. Les panneaux sont charges
+-- a la demande : accroches des que leur addon Blizzard est charge.
+local TALENT_FRAMES = { "PlayerSpellsFrame", "ClassTalentFrame", "PlayerTalentFrame", "TalentFrame", "LegacySystemFrame" }
+local hookedTalentFrames = {}
+local function HookTalentFrames()
+    for _, n in ipairs(TALENT_FRAMES) do
+        local f = _G[n]
+        if f and f.HookScript and not hookedTalentFrames[f] then
+            hookedTalentFrames[f] = true
+            f:HookScript("OnShow", function() MissingBuffs.RequestCheck() end)
+            f:HookScript("OnHide", function() MissingBuffs.RequestCheck() end)
+        end
+    end
+end
+local function TalentFrameOpen()
+    HookTalentFrames()
+    for _, n in ipairs(TALENT_FRAMES) do
+        local f = _G[n]
+        if f and f.IsVisible and f:IsVisible() then return true end
+    end
+    return false
+end
+do
+    local hf = CreateFrame("Frame")
+    hf:RegisterEvent("ADDON_LOADED")
+    hf:SetScript("OnEvent", function() HookTalentFrames() end)
+end
+
+-- Places libres des sacs generiques (sac a dos + sacs equipes ; carquois, sacs de composants et sac de reagents
+-- exclus : famille ~= 0). nil = illisible.
+local function FreeBagSlots()
+    if not (C_Container and C_Container.GetContainerNumFreeSlots) then return nil end
+    local free, any = 0, false
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        local ok, n, family = pcall(C_Container.GetContainerNumFreeSlots, bag)
+        if ok and type(n) == "number" and (C_Container.GetContainerNumSlots(bag) or 0) > 0 then
+            any = true
+            if (family or 0) == 0 then free = free + n end
+        end
+    end
+    return any and free or nil
+end
+
+-- Pistage de recolte : Denicher les herbes / les mineraux connus (presents dans la liste de pistage) mais coupes.
+-- Retail : chaque pistage connu doit etre actif (ils se cumulent). Forever : un seul pistage a la fois, comme les
+-- anciens clients -- aucune API ne le dit, d'ou ns.IsForever -- on n'alerte donc que si aucun des deux n'est actif.
+-- Une icone par pistage coupe ; le clic l'active (C_Minimap.SetTracking, sans protection).
+local function GatherTrackingChoices()
+    if not (C_Minimap and C_Minimap.GetNumTrackingTypes and C_Minimap.GetTrackingInfo) then return nil end
+    local state, anyActive = {}, false
+    for i = 1, C_Minimap.GetNumTrackingTypes() do
+        local t = C_Minimap.GetTrackingInfo(i)
+        if IsSecret(t) then return nil end
+        for _, f in ipairs(ns.MISSING_GATHER_FINDERS) do
+            if t and t.spellID == f.spellId then
+                state[f.spellId] = t.active and true or false
+                if t.active then anyActive = true end
+            end
+        end
+    end
+    if _addon.IsForever and anyActive then return nil end
+    local choices = {}
+    for _, f in ipairs(ns.MISSING_GATHER_FINDERS) do
+        if state[f.spellId] == false then
+            choices[#choices + 1] = { key = f.key, icon = f.icon,
+                macro = "/run for i=1,C_Minimap.GetNumTrackingTypes() do local t=C_Minimap.GetTrackingInfo(i) if t and t.spellID=="
+                    .. f.spellId .. " then C_Minimap.SetTracking(i,true) end end" }
+        end
+    end
+    return choices[1] and choices or nil
+end
+
+-- Ouverture du panneau des talents (meme macro que le raccourci de la barre de menu)
+local function TalentsMacro()
+    if _G.PlayerSpellsUtil and _G.PlayerSpellsUtil.ToggleClassTalentFrame then
+        return "/run PlayerSpellsUtil.ToggleClassTalentFrame()"
+    end
+    return "/click TalentMicroButton"
+end
+
 local fallRecheck = false
 
 -- Orchestration principale : ordre de priorite fixe (stance/aura/attunement de soi -> poisons ->
 -- familier -> buff de classe)
+-- Mesure d'allocation par etape de CheckForMissings (/aishmem bench) : inerte hors mesure
+local probeOn, probePrev, probeLast, probeAcc = false, nil, 0, {}
+local function Probe(tag)
+    if not probeOn then return end
+    local c = collectgarbage("count")
+    if probePrev then probeAcc[probePrev] = (probeAcc[probePrev] or 0) + (c - probeLast) end
+    probePrev, probeLast = tag, collectgarbage("count")
+end
+function MissingBuffs.ProbeRun(runs)
+    wipe(probeAcc)
+    probeOn = true
+    for _ = 1, runs do
+        probePrev, probeLast = "start", collectgarbage("count")
+        pcall(MissingBuffs.CheckForMissings)
+        Probe("__done")
+    end
+    probeOn = false
+    return probeAcc
+end
+
 function MissingBuffs.CheckForMissings()
     -- Gardefou dur : rien n'est evalue ni affiche en combat, passe avant meme previewMode -- un
     -- apercu laisse a tort actif (previewMode coince a true) bloquerait toute reevaluation, y
@@ -1754,8 +2323,14 @@ function MissingBuffs.CheckForMissings()
     -- Les flags showInCombat/showBuffsInCombat plus bas ne concernent que la boucle whitelist --
     -- deja coupe court ci-dessus pour tout le reste, qui ne sert de toute facon a rien en combat.
     local cfg = Cfg()
+    Probe("gates")
     if not cfg.enabled then MissingBuffs.HideAlert(); return end
     if UnitIsDeadOrGhost("player") then MissingBuffs.HideAlert(); return end
+    -- Paladin en monture : Aura du croise rappelee si absente, avant (et malgre) "Ignorer si monte"
+    if not cfg.ignorePaladinAuras and (_addon._playerClass or select(2, UnitClass("player"))) == "PALADIN" then
+        local crusader = CrusaderMountedChoices()
+        if crusader then MissingBuffs.ShowAlertChoices(crusader, ns.MISSING_TEXT.USE_AURA); return end
+    end
     -- Forme de voyage Druide (783) : IsMounted() renvoie false dessus alors qu'elle sert au meme
     -- usage (deplacement rapide) -- traitee comme une monture pour ce toggle.
     if cfg.ignoreBuffsWhileMounted and ((IsMounted and IsMounted()) or GetSelfAura(783)) then
@@ -1788,6 +2363,7 @@ function MissingBuffs.CheckForMissings()
         return
     end
 
+    Probe("1")
     -- 1) Stance / aura / attunement / forme (priorite max, soi uniquement). Toutes les options
     -- apprises sont proposees (une icone chacune).
     if class == "WARRIOR" and not cfg.ignoreWarriorStances then
@@ -1811,12 +2387,14 @@ function MissingBuffs.CheckForMissings()
         end
     end
 
+    Probe("2")
     -- 2) Poisons Voleur (soi uniquement) : tous les poisons connus en propositions
     if class == "ROGUE" then
         local choices, textKey = CheckRoguePoisons()
         if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT[textKey]); return end
     end
 
+    Probe("3")
     -- 3) Familier (Chasseur / Demoniste, soi uniquement) : tous les familiers / demons invocables
     -- En monture (skyriding compris) : pas d'alerte familier, il n'est pas invoque et ne reapparait pas a l'atterrissage
     local flying = IsMounted and IsMounted()
@@ -1830,6 +2408,7 @@ function MissingBuffs.CheckForMissings()
         if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT[textKey]); return end
     end
 
+    Probe("3b")
     -- 3b) Familier en Passif avec une cible attaquable : clic = mode Assistance (hors combat : bouton
     -- securise normal ; l'alerte reste en place et cliquable a l'entree en combat)
     if not flying and ((class == "HUNTER" and not cfg.ignoreHunterPets) or (class == "WARLOCK" and not cfg.ignoreWarlockPets)) then
@@ -1841,6 +2420,7 @@ function MissingBuffs.CheckForMissings()
         end
     end
 
+    Probe("3b'")
     -- 3b') Familier mecontent (Forever, Chasseur) : a nourrir
     if not flying and class == "HUNTER" and not cfg.ignoreHunterPets and PetIsUnhappy() then
         MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_PET_UNHAPPY_KEY, icon = UNHAPPY_ICON } },
@@ -1848,12 +2428,14 @@ function MissingBuffs.CheckForMissings()
         return
     end
 
+    Probe("3c")
     -- 3c) Pierre de soins / pierre d'ame (Demoniste)
     if class == "WARLOCK" then
         local choices, text = CheckWarlockStones(cfg)
         if choices then MissingBuffs.ShowAlertChoices(choices, text); return end
     end
 
+    Probe("4")
     -- 4) Buff de classe manquant (soi puis allies -- cf. limite en tete de fichier)
     -- On affiche le PREMIER trouve (texte, priorite inchangee). Une entree a plusieurs sorts connus
     -- (Forever : enchantements, armures, Aspects...) et les enchantements d'arme equivalents de la meme
@@ -1871,7 +2453,8 @@ function MissingBuffs.CheckForMissings()
         -- cfg.expiringSoonThreshold est en minutes (reglage GUI), converti ici en secondes.
         local expiringThreshold = cfg.expiringSoonEnabled and cfg.expiringSoonThreshold and (cfg.expiringSoonThreshold * 60)
         for _, entry in ipairs(list) do
-            if (entry.kind or IsEntryLearned(entry)) and EntryApplies(entry) then
+            if (entry.kind or IsEntryLearned(entry)) and EntryApplies(entry)
+               and not (entry.shoutReminder and _addon.IsForever and not ShoutCastable(entry)) then
                 local missing, unit, itemCount
                 if entry.kind then
                     missing, itemCount = ItemEntryMissing(entry)
@@ -1902,7 +2485,8 @@ function MissingBuffs.CheckForMissings()
                     end
                     local line = (not entry.kind) and BuildCastLine(entry, unit) or nil
                     if line then castLines[#castLines + 1] = line end
-                elseif expiringThreshold and not expiringEntry and not primaryEntry then
+                elseif expiringThreshold and not expiringEntry and not primaryEntry
+                       and not (entry.shoutReminder and _addon.IsForever) then  -- Cri de guerre : jamais de rappel "bientot expire"
                     if GetSelfBuffExpiringSoon(entry, expiringThreshold) then
                         expiringEntry = entry
                     end
@@ -1941,7 +2525,181 @@ function MissingBuffs.CheckForMissings()
         end
     end
 
+    Probe("5")
+    -- 5) Points de talents a depenser
+    if not cfg.ignoreTalentPoints and not TalentFrameOpen() and UnspentTalentPoints() then
+        MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_TALENTS_KEY, icon = "Interface\\Icons\\Ability_Marksmanship",
+            macro = TalentsMacro() } }, ns.MISSING_TEXT.SPEND_TALENTS)
+        return
+    end
+    Probe("5b")
+    -- 5b) Forever : points d'Heritage a depenser
+    if not cfg.ignoreLegacyPoints and not TalentFrameOpen() and UnspentLegacyPoints() then
+        MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_LEGACY_KEY, icon = "Interface\\Icons\\INV_Misc_Book_11",
+            macro = "/run if LegacySystemFrame then ShowUIPanel(LegacySystemFrame) elseif ToggleLegacyChallenges then ToggleLegacyChallenges() end" } },
+            ns.MISSING_TEXT.SPEND_LEGACY)
+        return
+    end
+
+    Probe("5d")
+    -- 5d) Pistage des herbes / minerais coupe alors que le metier le permet. Retail : hors instance (rien a
+    -- recolter) ; Forever : partout, les donjons ont des herbes et des filons.
+    if not cfg.ignoreGatherTracking and (_addon.IsForever or not IsInInstance()) then
+        local choices = GatherTrackingChoices()
+        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.TRACKING_OFF); return end
+    end
+
+    Probe("6")
+    -- 6) Consommables : pierre a aiguiser / huile a appliquer sur l'arme
+    if not cfg.ignoreWeaponStones and class ~= "ROGUE" and class ~= "SHAMAN" and not ConsumablesBlocked(true) then
+        local choices = WeaponStoneChoices()
+        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.APPLY_WEAPON_STONE); return end
+    end
+
+    Probe("7")
+    -- 7) Consommables : flacon / fiole
+    if not cfg.ignoreFlasks and not ConsumablesBlocked(true) then
+        local choices = FlaskChoices()
+        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_FLASK); return end
+    end
+
+    Probe("8")
+    -- 8) Consommables : nourriture qui donne "Bien nourri"
+    if not cfg.ignoreWellFedFood and not ConsumablesBlocked(false) then
+        local choices = WellFedFoodChoices()
+        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.EAT_FOOD); return end
+    end
+
+    Probe("9")
+    -- 9) Sacs pleins ou presque (places libres <= seuil) : la moins prioritaire
+    if not cfg.ignoreBagsFull then
+        local free = FreeBagSlots()
+        if free and free <= (cfg.bagsFreeThreshold or 2) then
+            MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_BAGS_KEY, icon = "Interface\\Icons\\INV_Misc_Bag_08",
+                -- ToggleAllBags (et non OpenAllBags) : Baganator / EllesmereUIBags le remplacent par leur fenetre, alors que
+                -- Baganator ignore volontairement OpenAllBags (reserve a l'ouverture automatique : marchand...)
+                macro = "/run ToggleAllBags()" } }, string.format("%s (%d)", ns.MISSING_TEXT.BAGS_FULL or "", free))
+            return
+        end
+    end
+
+    Probe("hide")
     MissingBuffs.HideAlert()
+end
+
+-- /aishshout (Forever, guerrier) : etat du rappel du Cri de guerre, a lancer en combat apres avoir remis le buff
+SLASH_AISHSHOUT1 = "/aishshout"
+SlashCmdList["AISHSHOUT"] = function()
+    local P = "|cff33ff99[AishCore shout]|r "
+    local e = ShoutEntry()
+    if not e then print(P .. "pas d'entree Cri de guerre (Forever, guerrier uniquement)") return end
+    local function D(a)
+        if a == nil then return "nil" end
+        local n, sid, exp = a.name, a.spellId, a.expirationTime
+        return string.format("trouve (nom %s, id %s, fin %s)",
+            IsSecret(n) and "SECRET" or tostring(n), IsSecret(sid) and "SECRET" or tostring(sid),
+            IsSecret(exp) and "SECRET" or tostring(exp))
+    end
+    local n = PlayerBuffs()
+    local byCache, byName, byId = ShoutAuraSources(e)
+    print(P .. "combat=" .. tostring(InCombatLockdown()) .. " buffs en cache=" .. n .. " secrets=" .. tostring(bAnySecret)
+        .. " rang connu=" .. tostring(e._usableId))
+    print(P .. "cache par nom : " .. D(byCache))
+    print(P .. "GetAuraDataBySpellName : " .. D(byName))
+    print(P .. "GetPlayerAuraBySpellID : " .. D(byId))
+    print(P .. "lancable=" .. tostring(ShoutCastable(e)) .. " etat=" .. tostring(ShoutState(e)))
+    print(P .. "alerte : principale visible=" .. tostring(frame and frame:IsShown() and frame:GetAlpha() > 0.01)
+        .. " copie de combat visible=" .. tostring(combatFrame and combatFrame:IsShown()) .. " combatSig=" .. tostring(combatSig))
+end
+
+-- /aishheritage : cherche dans le client (Forever) les fonctions et la monnaie des points d'Heritage
+SLASH_AISHHERITAGE1 = "/aishheritage"
+SlashCmdList["AISHHERITAGE"] = function()
+    local P = "|cff33ff99[AishCore heritage]|r "
+    local words = { "heritage", "legacy", "herit" }
+    local function Match(k)
+        local low = tostring(k):lower()
+        for _, w in ipairs(words) do if low:find(w, 1, true) then return true end end
+    end
+    local n = 0
+    for k, v in pairs(_G) do
+        if type(k) == "string" and Match(k) then
+            n = n + 1
+            if n <= 40 then
+                local extra = ""
+                if type(v) == "table" then
+                    local fns = {}
+                    for fk, fv in pairs(v) do if type(fv) == "function" then fns[#fns + 1] = fk end end
+                    table.sort(fns)
+                    extra = " { " .. table.concat(fns, ", ") .. " }"
+                elseif type(v) == "string" then
+                    extra = " = " .. v
+                end
+                print(P .. k .. " (" .. type(v) .. ")" .. extra)
+            end
+        end
+    end
+    -- Monnaies du joueur dont le nom parle d'heritage
+    if C_CurrencyInfo and C_CurrencyInfo.GetCurrencyListSize then
+        for i = 1, C_CurrencyInfo.GetCurrencyListSize() do
+            local info = C_CurrencyInfo.GetCurrencyListInfo(i)
+            if info and info.name and Match(info.name) then
+                print(P .. "monnaie : " .. info.name .. " = " .. tostring(info.quantity))
+            end
+        end
+    end
+    print(P .. n .. " nom(s) global(aux) trouve(s)")
+    -- Retour brut de LegacySystem.GetCurrencyInfo (format non documente)
+    -- API C_* (independantes de l'interface chargee a la demande)
+    for nsName, t in pairs(_G) do
+        if type(nsName) == "string" and nsName:sub(1, 2) == "C_" and type(t) == "table" then
+            for fk in pairs(t) do
+                if Match(fk) or Match(nsName) then print(P .. nsName .. "." .. tostring(fk)) end
+            end
+        end
+    end
+    -- LegacySystem vit dans l'interface du panneau d'Heritage, chargee a la demande
+    if not _G.LegacySystem and _G.LegacySystemFrame_LoadUI and not InCombatLockdown() then
+        pcall(_G.LegacySystemFrame_LoadUI)
+        print(P .. "interface d'Heritage chargee : " .. tostring(_G.LegacySystem ~= nil))
+    end
+    local LS = _G.LegacySystem
+    if LS and LS.GetCurrencyInfo then
+        local function Dump(v, ind)
+            if type(v) ~= "table" then return tostring(v) end
+            if ind > 2 then return "{...}" end
+            local parts = {}
+            for k, x in pairs(v) do parts[#parts + 1] = tostring(k) .. "=" .. Dump(x, ind + 1) end
+            return "{ " .. table.concat(parts, ", ") .. " }"
+        end
+        local fields = {}
+        for k, v in pairs(LS) do if type(v) ~= "function" then fields[#fields + 1] = tostring(k) .. "=" .. Dump(v, 1) end end
+        print(P .. "LegacySystem champs : " .. table.concat(fields, ", "))
+        if LS.UpdateCurrencyInfo then pcall(LS.UpdateCurrencyInfo, LS) end
+        local r = { pcall(LS.GetCurrencyInfo, LS) }
+        print(P .. "GetCurrencyInfo(self) : " .. Dump(r, 0))
+        r = { pcall(LS.GetCurrencyInfo) }
+        print(P .. "GetCurrencyInfo() : " .. Dump(r, 0))
+        print(P .. "points a depenser detectes : " .. tostring(UnspentLegacyPoints()))
+    end
+    -- Garde-fous de CheckForMissings qui peuvent masquer l'alerte
+    local cfg = Cfg()
+    local open = {}
+    for _, n in ipairs(TALENT_FRAMES) do
+        local f = _G[n]
+        if f and f.IsVisible and f:IsVisible() then open[#open + 1] = n end
+    end
+    print(P .. "enabled=" .. tostring(cfg.enabled) .. " ignoreTalentPoints=" .. tostring(cfg.ignoreTalentPoints)
+        .. " ignoreLegacyPoints=" .. tostring(cfg.ignoreLegacyPoints)
+        .. " preview=" .. tostring(previewMode) .. " combat=" .. tostring(InCombatLockdown()))
+    print(P .. "repos=" .. tostring(IsResting and IsResting()) .. " (ignore=" .. tostring(cfg.ignoreWhileResting) .. ")"
+        .. " monture=" .. tostring(IsMounted and IsMounted()) .. " (ignore=" .. tostring(cfg.ignoreBuffsWhileMounted) .. ")"
+        .. " chute=" .. tostring(IsFalling and IsFalling()))
+    print(P .. "panneaux ouverts : " .. (#open > 0 and table.concat(open, ", ") or "aucun")
+        .. " | talents a depenser=" .. tostring(UnspentTalentPoints()))
+    MissingBuffs.CheckForMissings()
+    print(P .. "alerte affichee=" .. tostring(frame and frame:IsShown()) .. " texte=" .. tostring(textFS and textFS:GetText())
+        .. " cle=" .. tostring(currentAlertSpell))
 end
 
 -- Debounce + evenements (meme principe que MCB.CHECK_THROTTLE : un seul rescan differe si des
@@ -2003,6 +2761,11 @@ local GROUP_EVENTS = {
     -- mais la FIN n'a pas d'ecran de chargement -- sans cet evenement le module restait coupe
     -- jusqu'au prochain UNIT_AURA/GROUP_ROSTER_UPDATE fortuit.
     "CHALLENGE_MODE_START", "CHALLENGE_MODE_COMPLETED",
+    -- Consommables (objets dans les sacs) et points de talents
+    "BAG_UPDATE_DELAYED", "PLAYER_LEVEL_UP", "PLAYER_TALENT_UPDATE", "CHARACTER_POINTS_CHANGED",
+    "TRAIT_TREE_CURRENCY_INFO_UPDATED", "CURRENCY_DISPLAY_UPDATE", "PLAYER_EQUIPMENT_CHANGED",
+    -- Pistage des herbes / minerais active ou coupe
+    "MINIMAP_UPDATE_TRACKING",
 }
 
 eventFrame:SetScript("OnEvent", function(_, event, unit)
@@ -2016,6 +2779,21 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     end
     if event == "PLAYER_ENTERING_WORLD" then
         enterWorldGraceUntil = GetTime() + ENTER_WORLD_GRACE
+    end
+    -- Cache des buffs du joueur (cf. PlayerBuffs) ; sortie de combat : des valeurs lues secretes en combat
+    -- ne doivent pas survivre dans le cache
+    if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_REGEN_ENABLED" or (event == "UNIT_AURA" and unit == "player") then
+        auraGen = auraGen + 1
+    end
+    -- Generations des resultats memorises (cf. Memo)
+    if event == "BAG_UPDATE_DELAYED" or event == "PLAYER_ENTERING_WORLD" then bagGen = bagGen + 1 end
+    if (event == "UNIT_INVENTORY_CHANGED" and unit == "player") or event == "PLAYER_EQUIPMENT_CHANGED" then
+        invGen = invGen + 1
+    end
+    if event == "PLAYER_TALENT_UPDATE" or event == "TRAIT_CONFIG_UPDATED" or event == "CHARACTER_POINTS_CHANGED"
+       or event == "PLAYER_LEVEL_UP" or event == "TRAIT_TREE_CURRENCY_INFO_UPDATED" or event == "SPELLS_CHANGED"
+       or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" then
+        talentGen = talentGen + 1
     end
     if event == "UNIT_AURA" then
         if unit and unit ~= "player" and not unit:match("^party") and not unit:match("^raid") then return end
@@ -2039,20 +2817,35 @@ function MissingBuffs.Init()
     MissingBuffs.RequestCheck()
 
     -- Familier en combat : la mort / le renvoi du familier ne declenche pas toujours d'evenement exploitable
-    local wasFlying = false
-    C_Timer.NewTicker(1, function()
+    local wasFlying = -1
+    local lastShoutState
+    _addon.NewTicker(1, function()
         if InCombatLockdown() and Cfg().enabled then MissingBuffs.CheckPetInCombat() end
-        -- Mise en selle / descente : on relance l'evaluation du familier
-        local fl = IsMounted and IsMounted() or false
+        -- Mise en selle / descente, vol, nage, taxi (aucun evenement pour ces etats) : on relance l'evaluation
+        -- (familier, consommables bloques dans ces situations)
+        -- Etat encode en entier (pas de table ni de chaine creees chaque seconde)
+        local fl = ((IsMounted and IsMounted()) and 1 or 0) + ((IsFlying and IsFlying()) and 2 or 0)
+            + ((IsSwimming and IsSwimming()) and 4 or 0) + ((UnitOnTaxi and UnitOnTaxi("player")) and 8 or 0)
         if fl ~= wasFlying then
             wasFlying = fl
             if not InCombatLockdown() then MissingBuffs.RequestCheck() end
+        end
+        -- Forever, Cri de guerre : sort devenu lancable ou non (rage), sans evenement dedie
+        local shout = not InCombatLockdown() and (_addon._playerClass or select(2, UnitClass("player"))) == "WARRIOR"
+            and ShoutEntry()
+        if shout then
+            local s = ShoutState(shout)
+            local st = (s == "absent" and 1 or 0) + (ShoutCastable(shout) and 4 or 0)
+            if st ~= lastShoutState then
+                lastShoutState = st
+                MissingBuffs.RequestCheck()
+            end
         end
     end)
 
     -- Rappel "bientot expire" : contrairement au reste du module (event-driven), le franchissement
     -- du seuil de duree n'est pas un evenement -- ticker leger (2s), inoffensif si desactive.
-    C_Timer.NewTicker(2, function()
+    _addon.NewTicker(2, function()
         local cfg = Cfg()
         if cfg.enabled and cfg.expiringSoonEnabled then
             MissingBuffs.RequestCheck()
@@ -2156,6 +2949,16 @@ function MissingBuffs.GetTriggerSpells()
         for _, o in ipairs(ns.MISSING_ROGUE_POISONS.lethal) do addEntry(o) end
         for _, o in ipairs(ns.MISSING_ROGUE_POISONS.forever or {}) do addEntry(o) end
     end
+
+    -- Consommables et talents : toutes classes (pierres / huiles : pas le voleur ni le chaman)
+    add(ns.MISSING_TALENTS_KEY)
+    if _G.LegacySystemFrame_LoadUI or _G.LegacySystem then add(ns.MISSING_LEGACY_KEY) end
+    add(ns.MISSING_BAGS_KEY)
+    add(ns.MISSING_TRACKING_HERBS_KEY)
+    add(ns.MISSING_TRACKING_ORE_KEY)
+    if class ~= "ROGUE" and class ~= "SHAMAN" then add(ns.MISSING_WEAPON_STONE_KEY) end
+    add(ns.MISSING_FLASK_KEY)
+    add(ns.MISSING_FOOD_KEY)
 
     return out
 end

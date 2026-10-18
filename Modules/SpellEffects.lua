@@ -8,6 +8,42 @@ local addonName, ns = ...
 
 local SpellEffects = {}
 ns.Modules.SpellEffects = SpellEffects
+-- Sort "Attaque" (coups blancs de melee) : declenche par PLAYER_SWING sur Forever (cf. evFrame plus bas)
+SpellEffects.MELEE_SWING_SPELL = 6603
+-- Variations d'attaque : 4 combos complets (pseudo-sorts "Attaque - Variation A..D"). A chaque coup blanc, une des
+-- variations configurees est tiree au hasard (jamais deux fois de suite la meme) et jouee EN ENTIER ; sans variation
+-- configuree, c'est le combo "Attaque" qui joue.
+SpellEffects.MELEE_VARIANTS = { 9000020, 9000021, 9000022, 9000023 }
+
+-- "Vrai" shuffle : un sac par cle. Chaque element sort une fois par tour, au hasard ; quand le sac est vide, il est
+-- rempli a nouveau avec tous les elements. Avec A B C D : D, puis A/B/C, puis..., le 5e tirage repart des 4.
+-- Le sac est refait si la liste change (variation ajoutee / retiree, animation ajoutee au combo).
+local _bags = {}
+local function BagDraw(key, items)
+  local sig = table.concat(items, ",")
+  local b = _bags[key]
+  if not b or b.sig ~= sig or #b.left == 0 then
+    b = { sig = sig, left = {} }
+    for i, v in ipairs(items) do b.left[i] = v end
+    _bags[key] = b
+  end
+  return table.remove(b.left, math.random(#b.left))
+end
+SpellEffects.BagDraw = BagDraw
+
+function SpellEffects.PlayMeleeSwing()
+  local cfg = ns.GetCfg("spellEffects")
+  local combos = cfg and cfg.combos
+  local avail = {}
+  if combos then
+    for _, id in ipairs(SpellEffects.MELEE_VARIANTS) do
+      local c = combos[id]
+      if type(c) == "table" and #c > 0 then avail[#avail + 1] = id end
+    end
+  end
+  if #avail == 0 then return SpellEffects.Play(SpellEffects.MELEE_SWING_SPELL) end
+  SpellEffects.Play(BagDraw("melee", avail))
+end
 
 -- Helper nom de sort (C_Spell.GetSpellName est la seule API propre en TWW)
 local function GetSpellName(spellID)
@@ -426,7 +462,7 @@ local function PlaySingleAnim(anim, overrideAnchor, onSpawn)
     local startAlpha = f:GetAlpha()
     local elapsed = 0
     local interval = 0.016
-    entry.fadeTicker = C_Timer.NewTicker(interval, function(ticker)
+    entry.fadeTicker = ns.NewTicker(interval, function(ticker)
       elapsed = elapsed + interval
       local pct = math.min(1, elapsed / fadeTime)
       f:SetAlpha(startAlpha * (1 - pct))
@@ -726,7 +762,17 @@ function SpellEffects.Play(spellID)
         onhitAnims[#onhitAnims + 1] = a
       end
     end
-    if #onhitAnims > 0 then PlayCombo(onhitAnims) end
+    if #onhitAnims > 0 then
+      -- Mode "au hasard" (cfg.comboRandom[sort]) : une seule animation par declenchement, tiree dans un sac
+      -- (chaque animation sort une fois par tour, cf. BagDraw)
+      if cfg.comboRandom and cfg.comboRandom[resolvedID] and #onhitAnims > 1 then
+        local idx = {}
+        for i = 1, #onhitAnims do idx[i] = i end
+        PlayCombo({ onhitAnims[SpellEffects.BagDraw("combo:" .. tostring(resolvedID), idx)] })
+      else
+        PlayCombo(onhitAnims)
+      end
+    end
     return
   end
 
@@ -1266,7 +1312,7 @@ function SpellEffects.PreviewLoop(anim, overrideAnchors)
   loopLastModelID = tonumber(anim.modelID)
 
   -- Ticker rapide (~30 fps) : ré-applique TOUTES les propriétés en continu
-  loopUpdateTick = C_Timer.NewTicker(0.033, function()
+  loopUpdateTick = ns.NewTicker(0.033, function()
     if #loopEntries == 0 or not loopAnim then return end
     local a = loopAnim
 
@@ -1434,7 +1480,7 @@ function SpellEffects.PreviewComboLoop(combo, overrideAnchors)
 
   -- Ticker qui relance le combo à chaque cycle
   local totalDur = CalcTotalDur()
-  comboLoopTicker = C_Timer.NewTicker(totalDur, function()
+  comboLoopTicker = ns.NewTicker(totalDur, function()
     if not comboLoopCombo then return end
     local newDur = CalcTotalDur()
     for _, anchor in ipairs(anchors) do
@@ -1443,7 +1489,7 @@ function SpellEffects.PreviewComboLoop(combo, overrideAnchors)
     if math.abs(newDur - totalDur) > 0.05 then
       totalDur = newDur
       if comboLoopTicker then comboLoopTicker:Cancel() end
-      comboLoopTicker = C_Timer.NewTicker(totalDur, function()
+      comboLoopTicker = ns.NewTicker(totalDur, function()
         if not comboLoopCombo then return end
         for _, anchor in ipairs(anchors) do
           PlayCombo(comboLoopCombo, anchor or nil, onSpawn)
@@ -1454,7 +1500,7 @@ function SpellEffects.PreviewComboLoop(combo, overrideAnchors)
 
   -- Ticker rapide (~15 fps) : réapplique position/rotation/échelle/alpha en direct sur les modèles
   -- déjà affichés, sans rappeler SetModel, pour que les sliders soient visibles avant le prochain cycle.
-  comboLoopUpdateTick = C_Timer.NewTicker(0.066, function()
+  comboLoopUpdateTick = ns.NewTicker(0.066, function()
     for i = #comboLoopLiveEntries, 1, -1 do
       local le = comboLoopLiveEntries[i]
       if not le.entry.inUse then
@@ -1715,7 +1761,7 @@ local function ResolveOocCombo()
   local _, cls = UnitClass("player")
   cls = cls or ""
   -- Chercher combo pour la spé active (clé qualifiée par classe)
-  local specIdx = GetSpecialization and GetSpecialization()
+  local specIdx = ns.GetSpecialization and ns.GetSpecialization()
   if specIdx then
     local specKey = "spec_" .. cls .. "_" .. specIdx
     local combo = oocCombos[specKey]
@@ -1757,7 +1803,7 @@ local function ResolveLogoCombo()
   if not logoCombos then return nil end
   local _, cls = UnitClass("player")
   cls = cls or ""
-  local specIdx = GetSpecialization and GetSpecialization()
+  local specIdx = ns.GetSpecialization and ns.GetSpecialization()
   if specIdx then
     local combo = logoCombos["spec_" .. cls .. "_" .. specIdx]
     if combo and #combo > 0 then return combo end
@@ -1841,7 +1887,7 @@ function SpellEffects.AnimateOocDeco(shouldShow, duration)
       local startAlpha = f:GetAlpha()
       local elapsed = 0
       local interval = 0.016
-      entry.fadeTicker = C_Timer.NewTicker(interval, function(ticker)
+      entry.fadeTicker = ns.NewTicker(interval, function(ticker)
         elapsed = elapsed + interval
         local pct = math.min(1, elapsed / duration)
         local ea  = 1 - (1 - pct) ^ 3   -- même easing cubique que AnimateStagger
@@ -1931,8 +1977,8 @@ local function GetValidOrbKeys()
 
       -- Règle runes DK : n'activer que la clé de la spé courante
       if include and cls == "DEATHKNIGHT" and root:find("^rune_") then
-        local specIdx = GetSpecialization and GetSpecialization()
-        local specID  = specIdx and select(1, GetSpecializationInfo(specIdx)) or nil
+        local specIdx = ns.GetSpecialization and ns.GetSpecialization()
+        local specID  = specIdx and select(1, ns.GetSpecializationInfo(specIdx)) or nil
         local specRune = _DK_SPEC_RUNE[specID]
         if specRune ~= root then include = false end
       end
@@ -1941,7 +1987,7 @@ local function GetValidOrbKeys()
       if include and cls == "EVOKER" then
         local RC = ns.Modules and ns.Modules.ResourceCircle
         local burstActive = RC and RC.IsEssenceBurstActive and RC.IsEssenceBurstActive()
-        local specIdx = GetSpecialization and GetSpecialization()
+        local specIdx = ns.GetSpecialization and ns.GetSpecialization()
         local burstGlobalKey = "essence_burst_" .. cls
         local burstSpecKey   = specIdx and ("essence_burst_spec" .. specIdx .. "_" .. cls)
         local burstConfigured = (orbCombos[burstGlobalKey] and #orbCombos[burstGlobalKey] > 0)
@@ -2032,7 +2078,7 @@ local _startOrbDecoRef
 local function StartOrbRefreshTicker()
   if _orbRefreshTicker then return end
   _lastOrbDotSnapshot = GetVisibleDotCount()
-  _orbRefreshTicker = C_Timer.NewTicker(0.25, function()
+  _orbRefreshTicker = ns.NewTicker(0.25, function()
     if not decoOrbActive then
       if _orbRefreshTicker then _orbRefreshTicker:Cancel(); _orbRefreshTicker = nil end
       return
@@ -2323,7 +2369,7 @@ function SpellEffects.StartDecoPreview(combo, overrideAnchors)
   if #decoPreviewEntries == 0 then return end
 
   -- Ticker 30 fps : applique les propriétés en continu (sliders en temps réel)
-  decoPreviewTicker = C_Timer.NewTicker(0.033, function()
+  decoPreviewTicker = ns.NewTicker(0.033, function()
     if #decoPreviewEntries == 0 then return end
     for _, de in ipairs(decoPreviewEntries) do
       local ef = de.entry.frame
@@ -2944,6 +2990,21 @@ function SpellEffects.Init()
   evFrame:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_START", "player")
   evFrame:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_STOP", "player")
 
+  -- Coups blancs de melee : aucun evenement de sort (contrairement au Tir automatique), mais le client Forever fournit
+  -- PLAYER_SWING a chaque attaque auto. Main droite / main gauche -> combo du sort "Attaque" (6603).
+  -- Le tir (PLAYER_SWING Ranged) est ignore : il passe deja par UNIT_SPELLCAST_SUCCEEDED (Tir automatique).
+  if C_SwingTimer and Enum and Enum.PlayerSwingType then
+    local swingFx = CreateFrame("Frame")
+    pcall(swingFx.RegisterEvent, swingFx, "PLAYER_SWING")
+    swingFx:SetScript("OnEvent", function(_, _, _, swingType)
+      if issecretvalue and issecretvalue(swingType) then return end
+      local T = Enum.PlayerSwingType
+      if swingType == T.MainHand or (T.OffHand and swingType == T.OffHand) then
+        SpellEffects.PlayMeleeSwing()
+      end
+    end)
+  end
+
   evFrame:SetScript("OnEvent", function(self, event, unit, castGUID, spellID, ...)
     if SpellEffects._debugAll then
       local P = "|cff00ffff[SE-DEBUG]|r "
@@ -3104,7 +3165,7 @@ function SpellEffects.Init()
     _lastOrbTry = now
     if GetVisibleDotCount() > 0 then SpellEffects.StartOrbDeco() end
   end
-  C_Timer.NewTicker(1, TryStartOrbsIfDots)
+  ns.NewTicker(1, TryStartOrbsIfDots)
 
   powerFrame:SetScript("OnEvent", function()
     if not decoOrbActive then TryStartOrbsIfDots(); return end
@@ -3164,9 +3225,9 @@ function SpellEffects.Init()
   end)
 
   -- Filet de sécurité : UNIT_AURA ne se déclenche qu'au changement, un poll périodique garantit le démarrage sinon.
-  C_Timer.NewTicker(2, ScanAuraCombos)
+  ns.NewTicker(2, ScanAuraCombos)
   -- Buffs manquants : présence lue via MissingBuffs.GetCurrentAlertSpell(), poll périodique suffit (pas de UNIT_AURA).
-  C_Timer.NewTicker(2, ScanMissingBuffCombos)
+  ns.NewTicker(2, ScanMissingBuffCombos)
 
   -- Coupe les anims en cours si le toggle Raid/Groupe s'active ; pas de symétrique nécessaire au retrait du groupe.
   local groupGateFrame = CreateFrame("Frame")

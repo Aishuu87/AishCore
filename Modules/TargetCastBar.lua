@@ -425,22 +425,36 @@ local function InterruptCast()
 end
 
 -- Détection de cast/channel en cours (TARGET_CHANGED)
+-- Nom affiche d'un cast : 2e retour de UnitCastingInfo / UnitChannelInfo (celui de la barre Blizzard), repli sur le 1er.
+-- Sorts techniques "... - No Text" (ex. "Opening - No Text" sur certains objets, Forever) : nom brut non traduit,
+-- remplace par le sort "Ouverture" (6478) localise, sinon prive de son suffixe.
+local function CastLabel(name, text)
+    local label = name
+    if type(text) == "string" and not (issecretvalue and issecretvalue(text)) and text ~= "" then label = text end
+    if type(label) == "string" and not (issecretvalue and issecretvalue(label)) and label:find("%- No Text$") then
+        local open = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(6478)
+        if label:find("^Opening") and open and open ~= "" then return open end
+        return (label:gsub("%s*%- No Text$", ""))
+    end
+    return label
+end
+
 local function CheckTargetCast()
     if not frame then return end
     local cfg = Cfg()
     if cfg.enabled == false then return end
 
     -- Cast normal
-    local name, _, _, _, _, _, _, notInt, sid = UnitCastingInfo("target")
+    local name, txt, _, _, _, _, _, notInt, sid = UnitCastingInfo("target")
     if name then
-        StartCast(name, sid, notInt)
+        StartCast(CastLabel(name, txt), sid, notInt)
         return
     end
 
     -- Canal (UnitChannelInfo n'a pas de castID → spellID est en position 8)
-    name, _, _, _, _, _, notInt, sid = UnitChannelInfo("target")
+    name, txt, _, _, _, _, notInt, sid = UnitChannelInfo("target")
     if name then
-        StartChannel(name, sid, notInt)
+        StartChannel(CastLabel(name, txt), sid, notInt)
         return
     end
 
@@ -666,15 +680,15 @@ function TargetCastBar.Create(parent)
         if unit and unit ~= "target" then return end
 
         if event == "UNIT_SPELLCAST_START" then
-            local name, _, _, _, _, _, _, notInt, sid = UnitCastingInfo("target")
+            local name, txt, _, _, _, _, _, notInt, sid = UnitCastingInfo("target")
             if name then
-                StartCast(name, sid, notInt)
+                StartCast(CastLabel(name, txt), sid, notInt)
             end
 
         elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
-            local name, _, _, _, _, _, notInt, sid = UnitChannelInfo("target")
+            local name, txt, _, _, _, _, notInt, sid = UnitChannelInfo("target")
             if name then
-                StartChannel(name, sid, notInt)
+                StartChannel(CastLabel(name, txt), sid, notInt)
             end
 
         elseif event == "UNIT_SPELLCAST_INTERRUPTED" then

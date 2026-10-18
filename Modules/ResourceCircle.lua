@@ -311,7 +311,7 @@ local function SecResDurStart(specID)
   if ns.Auras and ns.Auras.SubscribeCDMAuraBar then
     ns.Auras.SubscribeCDMAuraBar(info.spellID, "secResDurBar", ResourceCircle.secResDurBarProxy)
   end
-  _secResDurTicker = C_Timer.NewTicker(0.05, SecResDurTick)
+  _secResDurTicker = ns.NewTicker(0.05, SecResDurTick)
 end
 
 -- Affiche/masque texte + tirets décoratifs ensemble ; tirets séparés de N car concat/format interdits sur une valeur secrète.
@@ -510,6 +510,7 @@ local DURATION_ARC_OVL_RATIO = 0.76
 
 -- Arcs en rendu radial natif (StatusBar:SetRenderMode(Radial)) sur un disque plein : hauteur = largeur.
 local ARC_CROP_H = 1
+local VERTICAL_CROP_H = 0.88   -- ratio de hauteur de circle_piecrop.tga (remplissage vertical)
 -- Barre verticale de l'arc de duree (sources a plage secrete, canal clone-bar) : texture pre-croppee comme avant
 local ARC_CROP_V = 0.88
 
@@ -644,14 +645,32 @@ local function ApplyArcAngles(specID)
   local cfg = ns.GetCfg("resourceCircle")
   -- Spec resolue ici : juste apres un /reload ns._specID est encore nil, et les reglages par spec (arc de duree)
   -- retombaient alors sur les valeurs plates par defaut.
-  if not specID and GetSpecialization and GetSpecializationInfo then
-    local idx = GetSpecialization()
+  if not specID and ns.GetSpecialization and ns.GetSpecializationInfo then
+    local idx = ns.GetSpecialization()
     if idx and idx > 0 then
-      local ok, sid = pcall(GetSpecializationInfo, idx)
+      local ok, sid = pcall(ns.GetSpecializationInfo, idx)
       if ok and sid and sid > 0 then specID = sid end
     end
   end
-  SetArcAngle(bar.arc, cfg.arcStartAngle, cfg.arcEndAngle, cfg.arcReverse)
+  -- Remplissage (cfg.arcFillMode), comme les cercles hors combat : "cw" / "ccw", "mirror_out" / "mirror_in".
+  -- Ancien reglage arcReverse repris tant qu'aucun mode n'a ete choisi. Miroirs : l'angle de depart est l'origine
+  -- commune, l'angle de fin l'etendue de chaque moitie (0 a 180 deg) ; bar.arc2 porte la moitie antihoraire.
+  local mode = cfg.arcFillMode or (cfg.arcReverse and "ccw" or "cw")
+  local mirror = (mode == "mirror_out" or mode == "mirror_in")
+  local vertical = (mode == "vertical") and bar.arcV ~= nil
+  if bar.arc2 then bar.arc2:SetShown(mirror) end
+  if bar.arcV then bar.arcV:SetShown(vertical) end
+  local tex = bar.arc:GetStatusBarTexture()
+  if tex then tex:SetAlpha(vertical and 0 or 1) end
+  if mirror and bar.arc2 then
+    local a0 = tonumber(cfg.arcStartAngle) or 220
+    local half = math.max(1, math.min(tonumber(cfg.arcEndAngle) or 140, 180))
+    local out = (mode == "mirror_out")
+    SetArcAngle(bar.arc,  a0, a0 + half, not out)
+    SetArcAngle(bar.arc2, a0 - half, a0, out)
+  else
+    SetArcAngle(bar.arc, cfg.arcStartAngle, cfg.arcEndAngle, mode == "ccw")
+  end
   SetArcAngle(bar.staggerArc, cfg.staggerArcStartAngle, cfg.staggerArcEndAngle, cfg.staggerArcReverse)
   SetArcAngle(bar.durationArc, ns.GetSecResCfg("durationArcStartAngle", specID), ns.GetSecResCfg("durationArcEndAngle", specID),
     ns.GetSecResCfg("durationArcReverse", specID))
@@ -683,8 +702,10 @@ local SWING_RING_FMT = "Interface\\AddOns\\AishCore\\Media\\UI\\SwingRing%d.tga"
 local SWING_BAR_TEX  = "Interface\\Buttons\\WHITE8x8"
 local swingArc, swingArcCW, swingArcCCW, swingMask   -- cadre de l'arc, 2 CircularProgress (normal / miroir), masque en anneau
 local swingBar, swingBarFull, swingBarL, swingBarR, swingBarBg
+local swingBar2, swingBarOH, swingBarBg2      -- 2e barre (main gauche, ambidextrie)
 local swingEvt, swingDriver, swingPreviewTicker
 local swingStart, swingDur
+local ohStart, ohDur                             -- delai de la main gauche (ambidextrie)
 -- Entree / sortie : fondu + leger glissement vers le haut. swingAlpha = progression 0..1 (lineaire, adoucie a l'affichage)
 local SWING_FADE_IN, SWING_FADE_OUT, SWING_SLIDE = 0.30, 0.30, 8
 local swingAlpha, swingEnded = 0, false
@@ -724,8 +745,27 @@ end
 --                       depuis S ; en remplissage inverse il SE VIDE depuis S (il reste a l'oppose).
 --   miroir "in"       : les bords vont de l'oppose vers S : l'arc SE VIDE vers S ; en remplissage inverse
 --                       il GRANDIT depuis l'oppose.
-local function DrawSwingArc(p)
+-- Ambidextrie : moitie droite (sens horaire depuis S) = main droite, moitie gauche = main gauche, chacune avec
+-- son propre delai. Horaire se comporte comme le miroir sortant, antihoraire comme le miroir entrant.
+local function DrawSwingArcDual(pM, pO)
   local o = swingOpt
+  local S, h = o.rot, o.angle / 2
+  local out = (o.dir == "cw" or o.dir == "mirror_out")
+  local growing   = out ~= o.fillUp
+  local fromStart = not o.fillUp
+  local function Side(cp, p, sign)
+    local v = growing and p or (1 - p)
+    local a, b
+    if fromStart then a, b = 0, v * h else a, b = (1 - v) * h, h end
+    if sign > 0 then SwingWedge(cp, S + a, S + b) else SwingWedge(cp, S - b, S - a) end
+  end
+  Side(swingArcCW,  pM, 1)
+  Side(swingArcCCW, pO, -1)
+end
+
+local function DrawSwingArc(p, pO)
+  local o = swingOpt
+  if o.dual then return DrawSwingArcDual(p, pO) end
   local S, A = o.rot, o.angle
   if o.dir == "mirror_out" or o.dir == "mirror_in" then
     local h = A / 2
@@ -753,9 +793,29 @@ local function DrawSwingArc(p)
   end
 end
 
--- p = fraction ecoulee du delai (0..1)
-local function DrawSwingBar(p)
+-- Ambidextrie : gauche/droite -> une 2e barre (main gauche) sous la premiere ; miroirs -> moitie gauche = main gauche,
+-- moitie droite = main droite, chacune avec son propre delai.
+local function DrawSwingBarDual(pM, pO)
   local o = swingOpt
+  if o.barDir == "in" or o.barDir == "out" then
+    local growing    = (o.barDir == "out") ~= o.fillUp
+    local fromCenter = not o.fillUp
+    swingBarFull:Hide(); swingBarL:Show(); swingBarR:Show()
+    swingBarL:SetReverseFill(fromCenter); swingBarR:SetReverseFill(not fromCenter)
+    swingBarL:SetValue(growing and pO or (1 - pO)); swingBarR:SetValue(growing and pM or (1 - pM))
+  else
+    swingBarL:Hide(); swingBarR:Hide(); swingBarFull:Show()
+    local anchoredLeft = (o.barDir ~= "rtl") == o.fillUp
+    swingBarFull:SetReverseFill(not anchoredLeft); swingBarOH:SetReverseFill(not anchoredLeft)
+    swingBarFull:SetValue(o.fillUp and pM or (1 - pM)); swingBarOH:SetValue(o.fillUp and pO or (1 - pO))
+  end
+end
+
+-- p = fraction ecoulee du delai (0..1) ; pO = celle de la main gauche (ambidextrie)
+local function DrawSwingBar(p, pO)
+  local o = swingOpt
+  swingBar2:SetShown(o.dual and not (o.barDir == "in" or o.barDir == "out"))
+  if o.dual then return DrawSwingBarDual(p, pO) end
   if o.barDir == "in" or o.barDir == "out" then
     -- Deux moities en miroir, positions de 0 (gauche) a 100 (droite), centre = 50.
     --   "out"            : un bord va de 50 vers 0, l'autre de 50 vers 100 -> la barre GRANDIT depuis le centre
@@ -790,23 +850,30 @@ local function ArmSwingBar()
           and Enum.StatusBarInterpolation and swingBarFull.SetTimerDuration) then return false end
   local o = swingOpt
   local DIR, IMM = Enum.StatusBarTimerDirection, Enum.StatusBarInterpolation.Immediate
-  local function Arm(sb, reverse, growing)
+  local function Arm(sb, reverse, growing, st, du)
     sb:SetReverseFill(reverse)
+    if not (st and du) then sb:SetValue(growing and 1 or 0); return end   -- main pas encore partie : etat final
     local obj = swingBarObjs[sb]
     if not obj then obj = C_DurationUtil.CreateDuration(); swingBarObjs[sb] = obj end
-    obj:SetTimeFromStart(swingStart, swingDur)
+    obj:SetTimeFromStart(st, du)
     sb:SetTimerDuration(obj, IMM, growing and DIR.ElapsedTime or DIR.RemainingTime)
   end
   local ok = pcall(function()
+    swingBar2:SetShown(o.dual and not (o.barDir == "in" or o.barDir == "out"))
     if o.barDir == "in" or o.barDir == "out" then
       local growing    = (o.barDir == "out") ~= o.fillUp
       local fromCenter = not o.fillUp
       swingBarFull:Hide(); swingBarL:Show(); swingBarR:Show()
-      Arm(swingBarL, fromCenter, growing); Arm(swingBarR, not fromCenter, growing)
+      if o.dual then
+        Arm(swingBarL, fromCenter, growing, ohStart, ohDur); Arm(swingBarR, not fromCenter, growing, swingStart, swingDur)
+      else
+        Arm(swingBarL, fromCenter, growing, swingStart, swingDur); Arm(swingBarR, not fromCenter, growing, swingStart, swingDur)
+      end
     else
       swingBarL:Hide(); swingBarR:Hide(); swingBarFull:Show()
       local anchoredLeft = (o.barDir ~= "rtl") == o.fillUp
-      Arm(swingBarFull, not anchoredLeft, o.fillUp)
+      Arm(swingBarFull, not anchoredLeft, o.fillUp, swingStart, swingDur)
+      if o.dual then Arm(swingBarOH, not anchoredLeft, o.fillUp, ohStart, ohDur) end
     end
   end)
   swingBarTimed = ok
@@ -838,22 +905,27 @@ end
 
 local function SwingTick(_, el)
   el = el or 0
-  if not swingStart or not swingDur then StopSwingVisuals(); return end
-  local p = (GetTime() - swingStart) / swingDur
-  local active = p < 1
+  if not (swingStart and swingDur) and not (swingOpt.dual and ohStart and ohDur) then StopSwingVisuals(); return end
+  local now = GetTime()
+  -- Fraction ecoulee d'une main (1 = delai fini ou pas encore lance)
+  local function Frac(st, du)
+    if not (st and du) then return 1 end
+    return math.max(0, math.min(1, (now - st) / du))
+  end
+  local p, pO = Frac(swingStart, swingDur), 1
+  if swingOpt.dual then pO = Frac(ohStart, ohDur) end
+  local active = p < 1 or pO < 1
   if active then
     swingAlpha = math.min(1, swingAlpha + el / SWING_FADE_IN)
-    if p < 0 then p = 0 end
   else
     swingAlpha = math.max(0, swingAlpha - el / SWING_FADE_OUT)
-    p = 1
   end
   -- Une derniere passe a p = 1 fige l'etat final (barre / arc plein en remplissage) pendant le fondu de sortie
   if active or not swingEnded then
     if swingOpt.barMode then
-      if not swingBarTimed then DrawSwingBar(p) end
+      if not swingBarTimed then DrawSwingBar(p, pO) end
     else
-      DrawSwingArc(p)
+      DrawSwingArc(p, pO)
     end
     if not active then swingEnded = true end
   end
@@ -861,9 +933,34 @@ local function SwingTick(_, el)
   if not active and swingAlpha <= 0 then StopSwingVisuals() end
 end
 
-local function StartSwing(dur)
+-- Ambidextrie : arme dans la main gauche (pas un bouclier ni un objet tenu). /swingdbg dual force le mode pour tester.
+local function IsDualWield()
+  if ns._swingDualTest ~= nil then return ns._swingDualTest end
+  if swingOpt.ignoreOH then return false end
+  if type(OffhandHasWeapon) == "function" then
+    local ok, v = pcall(OffhandHasWeapon)
+    if ok then return v and true or false end
+  end
+  local id = GetInventoryItemID("player", 17)
+  if not id or not (C_Item and C_Item.GetItemInfoInstant) then return false end
+  local classID = select(6, C_Item.GetItemInfoInstant(id))
+  return classID == (Enum.ItemClass and Enum.ItemClass.Weapon or 2)
+end
+
+-- hand : "mh" (main droite, defaut), "oh" (main gauche) ou "ranged" (tir : un seul delai, jamais scinde)
+local function StartSwing(dur, hand)
   if not swingDriver or type(dur) ~= "number" or not Plain(dur) or dur ~= dur or dur <= 0 or dur == math.huge then return end
-  swingStart, swingDur = GetTime(), dur
+  local dual = hand ~= "ranged" and IsDualWield()
+  if dual ~= swingOpt.dual then
+    swingOpt.dual = dual
+    ohStart, ohDur = nil, nil
+  end
+  if hand == "oh" then
+    if not dual then return end   -- main gauche sans ambidextrie : ignoree
+    ohStart, ohDur = GetTime(), dur
+  else
+    swingStart, swingDur = GetTime(), dur
+  end
   swingEnded = false
   if swingOpt.barMode then
     swingBar:Show(); swingArc:Hide()
@@ -875,11 +972,14 @@ local function StartSwing(dur)
   SwingTick()
 end
 
--- Main droite et tir uniquement : la main gauche garde son propre rythme et ferait doublon
+-- Main droite et tir ; main gauche seulement en ambidextrie (moitie gauche de l'arc / 2e barre)
 local function OnSwingEvent(_, event, dur, swingType)
   if event ~= "PLAYER_SWING" or not (Plain(dur) and Plain(swingType)) then return end
   local T = Enum.PlayerSwingType
-  if swingType == T.MainHand or swingType == T.Ranged then StartSwing(dur) end
+  if swingOpt.rangedOnly and swingType ~= T.Ranged then return end
+  if swingType == T.MainHand then StartSwing(dur, "mh")
+  elseif swingType == T.Ranged then StartSwing(dur, "ranged")
+  elseif T.OffHand and swingType == T.OffHand then StartSwing(dur, "oh") end
 end
 
 -- Apercu : tant que le panneau d'options est ouvert, un faux delai se relance en boucle
@@ -887,9 +987,18 @@ local function RefreshSwingPreview()
   local cfg = ns.GetCfg("resourceCircle") or {}
   if previewMode and cfg.swingEnabled and swingDriver then
     if not swingPreviewTicker then
-      swingPreviewTicker = C_Timer.NewTicker(2.4, function() StartSwing(2.0) end)
+      swingPreviewTicker = ns.NewTicker(2.4, function()
+        if swingOpt.rangedOnly then StartSwing(2.0, "ranged"); return end
+        StartSwing(2.0, "mh")
+        if IsDualWield() then C_Timer.After(0.8, function() if swingPreviewTicker then StartSwing(1.6, "oh") end end) end
+      end)
     end
-    StartSwing(2.0)
+    if swingOpt.rangedOnly then
+      StartSwing(2.0, "ranged")
+    else
+      StartSwing(2.0, "mh")
+      if IsDualWield() then C_Timer.After(0.8, function() if swingPreviewTicker then StartSwing(1.6, "oh") end end) end
+    end
   elseif swingPreviewTicker then
     swingPreviewTicker:Cancel(); swingPreviewTicker = nil
   end
@@ -929,6 +1038,18 @@ local function EnsureSwingFrames()
     return b
   end
   swingBarFull, swingBarL, swingBarR = MakeBar(), MakeBar(), MakeBar()
+  -- 2e barre (main gauche) : enfant de la barre, suit son fondu ; posee sous elle
+  swingBar2 = CreateFrame("Frame", nil, swingBar)
+  swingBarBg2 = swingBar2:CreateTexture(nil, "BACKGROUND")
+  swingBarBg2:SetAllPoints()
+  swingBarOH = CreateFrame("StatusBar", nil, swingBar2)
+  ns.SetSmoothStatusBarTexture(swingBarOH, SWING_BAR_TEX)
+  local bt = swingBarOH:GetStatusBarTexture()
+  if bt then bt:SetSnapToPixelGrid(false); bt:SetTexelSnappingBias(0) end
+  swingBarOH:SetAllPoints(swingBar2)
+  swingBarOH:SetMinMaxValues(0, 1)
+  swingBarOH:SetValue(0)
+  swingBar2:Hide()
   swingBar:Hide()
 end
 
@@ -951,6 +1072,11 @@ SlashCmdList["AISHSWINGDBG"] = function(msg)
     print(P .. "masque remplace par le disque plein (ns.Media.circle)")
   end
   if msg == "notimer" then ns._swingNoTimer = not ns._swingNoTimer; print(P .. "minuteur du moteur pour la barre : " .. (ns._swingNoTimer and "DESACTIVE (dessin manuel)" or "actif")) end
+  if msg == "dual" then
+    if ns._swingDualTest == nil then ns._swingDualTest = true elseif ns._swingDualTest then ns._swingDualTest = false else ns._swingDualTest = nil end
+    print(P .. "ambidextrie forcee : " .. tostring(ns._swingDualTest) .. " (nil = detection auto)")
+    StartSwing(3.0, "mh"); C_Timer.After(1.0, function() StartSwing(2.4, "oh") end)
+  end
   if msg == "test" or msg == "nomask" or msg == "maskcircle" or msg == "notimer" then StartSwing(3.0) end
   print(P .. string.format("cadres : arc=%s barre=%s driver=%s | arcShown=%s arcVisible=%s", tostring(swingArc ~= nil),
     tostring(swingBar ~= nil), tostring(swingDriver ~= nil), tostring(swingArc and swingArc:IsShown()),
@@ -981,6 +1107,9 @@ function ResourceCircle.ApplySwingSettings()
   EnsureSwingFrames()
 
   swingOpt.barMode = cfg.swingBarMode and true or false
+  swingOpt.ignoreOH   = cfg.swingIgnoreOffhand and true or false
+  swingOpt.rangedOnly = cfg.swingRangedOnly and true or false
+  if swingOpt.ignoreOH or swingOpt.rangedOnly then swingOpt.dual = false; ohStart, ohDur = nil, nil end
   -- Remplissage inverse propre a chaque visualisation (arc / barre)
   swingOpt.fillUp  = (cfg.swingBarMode and cfg.swingBarFillUp or (not cfg.swingBarMode and cfg.swingFillUp)) and true or false
   swingOpt.dir     = cfg.swingDirection or "cw"
@@ -1027,6 +1156,14 @@ function ResourceCircle.ApplySwingSettings()
   swingBar:SetFrameLevel(lvlBar)
   local bgc = cfg.swingBarBgColor or { 0, 0, 0, 0.45 }
   swingBarBg:SetColorTexture(bgc[1], bgc[2], bgc[3], bgc[4] or 1)
+  swingBarBg2:SetColorTexture(bgc[1], bgc[2], bgc[3], bgc[4] or 1)
+  swingBar2:ClearAllPoints()
+  swingBar2:SetPoint("TOPLEFT", swingBar, "BOTTOMLEFT", 0, -2)
+  swingBar2:SetPoint("TOPRIGHT", swingBar, "BOTTOMRIGHT", 0, -2)
+  swingBar2:SetHeight(thick)
+  swingBar2:SetFrameLevel(lvlBar)
+  swingBarOH:SetFrameLevel(lvlBar + 1)
+  swingBarOH:SetStatusBarColor(br, bg_, bb, ba)
   swingBarFull:SetAllPoints(swingBar)
   swingBarL:ClearAllPoints(); swingBarL:SetPoint("TOPLEFT", swingBar, "TOPLEFT"); swingBarL:SetPoint("BOTTOMRIGHT", swingBar, "BOTTOM")
   swingBarR:ClearAllPoints(); swingBarR:SetPoint("TOPRIGHT", swingBar, "TOPRIGHT"); swingBarR:SetPoint("BOTTOMLEFT", swingBar, "BOTTOM")
@@ -1105,6 +1242,7 @@ function ResourceCircle.ApplySettings()
   local arcPx     = ArcPx(cfg)
   local overlayPx = OverlayPx(cfg, arcPx)
   bar.arc:SetSize(arcPx, arcPx * ARC_CROP_H)
+  if bar.arcV then bar.arcV:SetHeight(arcPx * VERTICAL_CROP_H) end
   bar.arc:ClearAllPoints()
   bar.arc:SetPoint("BOTTOM", bar, "CENTER", 0, arcPx / 2 - arcPx * ARC_CROP_H)
   RecordHome(bar.arc, "BOTTOM", bar, "CENTER", 0, arcPx / 2 - arcPx * ARC_CROP_H, arcPx, arcPx * ARC_CROP_H)
@@ -1141,10 +1279,10 @@ function ResourceCircle.ApplySettings()
   -- Geometrie dependante de la spec : specID resolu fraichement ici (pas via ns._specID,
   -- pas encore rempli au login a ce stade) pour eviter d'ecraser la geometrie par-spec au login/reload.
   local specID = nil
-  if GetSpecialization and GetSpecializationInfo then
-    local idx = GetSpecialization()
+  if ns.GetSpecialization and ns.GetSpecializationInfo then
+    local idx = ns.GetSpecialization()
     if idx and idx > 0 then
-      local ok, sid = pcall(GetSpecializationInfo, idx)
+      local ok, sid = pcall(ns.GetSpecializationInfo, idx)
       if ok and sid and sid > 0 then specID = sid end
     end
   end
@@ -1195,7 +1333,21 @@ local function GetBgColor()
 end
 
 -- Met a jour les couleurs (arcs, texte, dots) selon la ressource primaire du joueur
+-- Couleurs du delai d'attaque auto (arc et barre), relues a chaque changement de couleurs (spe, spe par defaut des
+-- Couleurs Thematiques...) : sans cela, seul un passage par ses reglages les rafraichissait.
+function ResourceCircle.RecolorSwing()
+  if not (swingArc and swingArcCW) then return end
+  local cfg = ns.GetCfg("resourceCircle") or {}
+  local r, g, b, a = SwingColor(cfg, "swing")
+  for _, cp in ipairs({ swingArcCW, swingArcCCW }) do cp:SetColor(r, g, b, a) end
+  local br, bg_, bb, ba = SwingColor(cfg, "swingBar")
+  for _, sb in ipairs({ swingBarFull, swingBarL, swingBarR, swingBarOH }) do
+    if sb then sb:SetStatusBarColor(br, bg_, bb, ba) end
+  end
+end
+
 function ResourceCircle.UpdateResourceColors()
+  pcall(ResourceCircle.RecolorSwing)   -- delai d'attaque auto : memes changements de couleur que le reste du cercle
   if not bar then return end
   local powerType = ns.GetPlayerResource()
   local colors    = ns.GetResourceColors(powerType)
@@ -1344,6 +1496,39 @@ function ResourceCircle.Create(parent)
   arc:Show()
   bar.arc = arc
   RecordHome(arc, "BOTTOM", bar, "CENTER", 0, arcPx / 2 - arcPx * ARC_CROP_H, arcPx, arcPx * ARC_CROP_H)
+
+  -- Seconde moitie des remplissages miroir : enfant de l'arc (suit sa taille, son alpha, son echelle et ses
+  -- animations), valeur et couleur recopiees par hook. Affichee seulement en mode miroir (ApplyArcAngles).
+  local arc2 = CreateFrame("StatusBar", nil, arc)
+  arc2:SetAllPoints(arc)
+  arc2:SetFrameLevel(arc:GetFrameLevel())
+  SetupRadialArc(arc2)
+  arc2:SetMinMaxValues(0, 100)
+  arc2:SetValue(0)
+  arc2:Hide()
+  bar.arc2 = arc2
+  -- Remplissage vertical (de bas en haut, texture deja croppee) : meme principe, enfant de l'arc dont la texture
+  -- radiale est alors rendue invisible.
+  local arcV = CreateFrame("StatusBar", nil, arc)
+  arcV:SetPoint("TOPLEFT", arc, "TOPLEFT", 0, 0)
+  arcV:SetPoint("TOPRIGHT", arc, "TOPRIGHT", 0, 0)
+  arcV:SetHeight(arcPx * VERTICAL_CROP_H)
+  arcV:SetFrameLevel(arc:GetFrameLevel())
+  ns.SetSmoothStatusBarTexture(arcV, "Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
+  arcV:SetOrientation("VERTICAL")
+  arcV:SetMinMaxValues(0, 100)
+  arcV:SetValue(0)
+  arcV:Hide()
+  bar.arcV = arcV
+  hooksecurefunc(arc, "SetValue", function(_, v, interp)
+    for _, sb in ipairs({ arc2, arcV }) do
+      if interp then pcall(sb.SetValue, sb, v, interp) else pcall(sb.SetValue, sb, v) end
+    end
+  end)
+  hooksecurefunc(arc, "SetStatusBarColor", function(_, r, g, b, a)
+    arc2:SetStatusBarColor(r, g, b, a)
+    arcV:SetStatusBarColor(r, g, b, a)
+  end)
 
   -- Overlay sombre : masque le centre pour simuler un arc en anneau
   local overlayPx = OverlayPx(cfg, arcPx)
@@ -1565,8 +1750,8 @@ function ResourceCircle.Create(parent)
       if essenceBurstActive ~= prevActive then
         local _, ebClass = UnitClass("player")
         if ebClass == "EVOKER" then
-          local ebSpecIdx = GetSpecialization and GetSpecialization() or nil
-          local ebSpecID = ebSpecIdx and (GetSpecializationInfo and GetSpecializationInfo(ebSpecIdx)) or nil
+          local ebSpecIdx = ns.GetSpecialization and ns.GetSpecialization() or nil
+          local ebSpecID = ebSpecIdx and (ns.GetSpecializationInfo and ns.GetSpecializationInfo(ebSpecIdx)) or nil
           if ebSpecID == 1468 then
             local SE_eb = ns.Modules and ns.Modules.SpellEffects
             if SE_eb then
@@ -1583,7 +1768,7 @@ function ResourceCircle.Create(parent)
 
     -- Fire Mage (spec 2 = Fire uniquement)
     local _, playerClass = UnitClass("player")
-    if playerClass == "MAGE" and GetSpecialization() == 2 then
+    if playerClass == "MAGE" and ns.GetSpecialization() == 2 then
       if not isGlow then
         -- SPELL_ACTIVATION_OVERLAY_SHOW/HIDE : overlay écran = Heating Up
         fireOverlayActive = isShow
@@ -1619,8 +1804,8 @@ function ResourceCircle.Create(parent)
     -- Warlock Démonologie : Demonic Core → glow sur Demonbolt (264178)
     local _, wlClass = UnitClass("player")
     if isGlow and spellID == DEMONBOLT_SPELL_ID and wlClass == "WARLOCK" then
-      local wlSpecIdx = GetSpecialization and GetSpecialization() or nil
-      local wlSpecID  = wlSpecIdx and (GetSpecializationInfo and GetSpecializationInfo(wlSpecIdx)) or nil
+      local wlSpecIdx = ns.GetSpecialization and ns.GetSpecialization() or nil
+      local wlSpecID  = wlSpecIdx and (ns.GetSpecializationInfo and ns.GetSpecializationInfo(wlSpecIdx)) or nil
       if wlSpecID == 266 then  -- Demonologie (265 = Affliction, cf. ns.SPEC_MAP)
         demonicCoreOverlayActive = isShow
       end
@@ -1814,7 +1999,7 @@ local function AnimateArcOverlayPair(key, shouldShow, arcEl, overlayEl, overlayV
   local arcStart, overlayStart = now + arcSpec.delay, now + overlaySpec.delay
   local arcDone, overlayDone = false, false
 
-  _arcOverlayTickers[key] = C_Timer.NewTicker(0.016, function()
+  _arcOverlayTickers[key] = ns.NewTicker(0.016, function()
     local tick = GetTime()
 
     if not arcDone then
@@ -1985,7 +2170,7 @@ function ResourceCircle.AnimateVisibility(shouldShow)
 
   -- Animation du mouvement Y pour le frame parent
   if moveTicker then moveTicker:Cancel() end
-  moveTicker = C_Timer.NewTicker(0.016, function()
+  moveTicker = ns.NewTicker(0.016, function()
     local elapsed = GetTime() - startTime
     local frameProgress = math.min(elapsed / duration, 1)
     local easeProgress = 1 - (1 - frameProgress) ^ 3
@@ -2322,8 +2507,8 @@ function ResourceCircle.UpdateVisibility()
     local SE_show = ns.Modules and ns.Modules.SpellEffects
     if SE_show and SE_show.StartSustained then
       local _, playerClassShow = UnitClass("player")
-      local specShow = GetSpecialization and GetSpecialization() or nil
-      local specIDShow = specShow and (GetSpecializationInfo and GetSpecializationInfo(specShow)) or nil
+      local specShow = ns.GetSpecialization and ns.GetSpecialization() or nil
+      local specIDShow = specShow and (ns.GetSpecializationInfo and ns.GetSpecializationInfo(specShow)) or nil
       -- Mage Feu
       if playerClassShow == "MAGE" and specIDShow == 63 then
         if fireProcLevel == 1 then SE_show.StartSustained(9000001) end
@@ -2470,14 +2655,15 @@ function ResourceCircle.Update()
   end
 
   -- Fire Mage (spec 63) : afficher directement 0/1/2 au lieu de la mana (cache ns._playerClass/ns._specIndex).
-  if ns._playerClass == "MAGE" and ns._specIndex == 2 then  -- spec 2 = Fire
+  -- Forever : ni Rechauffement ni Glacons, le texte reste sur la mana (Feu et Givre)
+  if not ns.IsForever and ns._playerClass == "MAGE" and ns._specIndex == 2 then  -- spec 2 = Fire
     displayText = tostring(fireProcLevel)
   end
 
   ApplyArcValue(pct)
 
   -- Mage Givre (specID 64) : texte affiche les stacks de Glaçons (205473), arc reste sur la mana. Lit ns.AuraText.ICICLES directement, ApplyStacksToText échoue pour ce spellID.
-  if ns._playerClass == "MAGE" and ns._specID == 64 then
+  if not ns.IsForever and ns._playerClass == "MAGE" and ns._specID == 64 then
     local txt = ns.AuraText and ns.AuraText.ICICLES
     pcall(bar.text.SetText, bar.text, txt or "0")
   else
@@ -2560,16 +2746,16 @@ function ResourceCircle.DetectSecondaryDots()
       newCount = (maxCP and maxCP > 0) and maxCP or 5
     end
   elseif playerClass == "MONK" then
-    local specIndex = GetSpecialization and GetSpecialization() or nil
-    local specID = specIndex and (GetSpecializationInfo and GetSpecializationInfo(specIndex)) or nil
+    local specIndex = ns.GetSpecialization and ns.GetSpecialization() or nil
+    local specID = specIndex and (ns.GetSpecializationInfo and ns.GetSpecializationInfo(specIndex)) or nil
     if specID == 269 then  -- Windwalker
       newType = "CHI"
       local maxChi = UnitPowerMax("player", Enum.PowerType.Chi)
       newCount = (maxChi and maxChi > 0) and maxChi or 5
     end
   elseif playerClass == "PALADIN" then
-    local specIndex = GetSpecialization and GetSpecialization() or nil
-    local specID = specIndex and (GetSpecializationInfo and GetSpecializationInfo(specIndex)) or nil
+    local specIndex = ns.GetSpecialization and ns.GetSpecialization() or nil
+    local specID = specIndex and (ns.GetSpecializationInfo and ns.GetSpecializationInfo(specIndex)) or nil
     local cfg = ns.GetCfg("resourceCircle")
     local holyPowerAllSpecs = cfg and cfg.holyPowerAllSpecs
     if specID == 65 or (holyPowerAllSpecs and (specID == 66 or specID == 70)) then
@@ -2578,8 +2764,8 @@ function ResourceCircle.DetectSecondaryDots()
       newCount = (maxHP and maxHP > 0) and maxHP or 5
     end
   elseif playerClass == "EVOKER" then
-    local specIndex = GetSpecialization and GetSpecialization() or nil
-    local specID = specIndex and (GetSpecializationInfo and GetSpecializationInfo(specIndex)) or nil
+    local specIndex = ns.GetSpecialization and ns.GetSpecialization() or nil
+    local specID = specIndex and (ns.GetSpecializationInfo and ns.GetSpecializationInfo(specIndex)) or nil
     local cfg = ns.GetCfg("resourceCircle")
     local essenceAllSpecs = cfg and cfg.essenceAllSpecs
     if specID == 1468 or (essenceAllSpecs and (specID == 1473 or specID == 1467)) then
@@ -2588,8 +2774,8 @@ function ResourceCircle.DetectSecondaryDots()
       newCount = (maxEss and maxEss > 0) and maxEss or 6
     end
   elseif playerClass == "MAGE" then
-    local specIndex = GetSpecialization and GetSpecialization() or nil
-    local specID = specIndex and (GetSpecializationInfo and GetSpecializationInfo(specIndex)) or nil
+    local specIndex = ns.GetSpecialization and ns.GetSpecialization() or nil
+    local specID = specIndex and (ns.GetSpecializationInfo and ns.GetSpecializationInfo(specIndex)) or nil
     if specID == 62 then  -- Arcane
       newType = "ARCANE_CHARGES"
       newCount = 4
@@ -2630,7 +2816,7 @@ function ResourceCircle.DetectSecondaryDots()
   -- Ticker pour le fill + ciblage des animations
   -- Cercle masque : 1 passe sur 15 suffit (les cibles d'animation retombent a 0 sans rafale a 60 Hz)
   local secSkip = 0
-  secUpdateTicker = C_Timer.NewTicker(0.016, function()
+  secUpdateTicker = ns.NewTicker(0.016, function()
     if lastVisibilityState ~= true then
       secSkip = secSkip + 1
       if secSkip % 15 ~= 0 then return end
@@ -2735,8 +2921,8 @@ function ResourceCircle.UpdateSecDotColors()
   if secDotCount == 0 then return end
   local color
   if secDotType == "RUNES" then
-    local specIndex = GetSpecialization and GetSpecialization() or nil
-    local specID = specIndex and (GetSpecializationInfo and GetSpecializationInfo(specIndex)) or nil
+    local specIndex = ns.GetSpecialization and ns.GetSpecialization() or nil
+    local specID = specIndex and (ns.GetSpecializationInfo and ns.GetSpecializationInfo(specIndex)) or nil
     color = SEC_COLORS.RUNES[specID] or SEC_COLORS.RUNES.default
   elseif secDotType == "COMBO_ROGUE" then
     color = SEC_COLORS.COMBO_ROGUE.default
@@ -3070,15 +3256,15 @@ function ResourceCircle.RefreshSecResSpecGeometry(specID)
 end
 
 --- Resolution de spec exploitable, ou nil. Ne renvoie JAMAIS de valeur par defaut :
---- juste apres un /reload, GetSpecialization() repond nil pendant un court instant, et
+--- juste apres un /reload, ns.GetSpecialization() repond nil pendant un court instant, et
 --- un detecteur qui interprete ce nil comme "pas ma spe" se desactive jusqu'au prochain
 --- changement de spe (symptome : ressource secondaire, arc de Report et barre de duree
 --- absents apres un reload, revenant seulement en rechangeant de spe).
 local function ResolveSpecID()
-  if not (GetSpecialization and GetSpecializationInfo) then return nil end
-  local idx = GetSpecialization()
+  if not (ns.GetSpecialization and ns.GetSpecializationInfo) then return nil end
+  local idx = ns.GetSpecialization()
   if not idx or idx == 0 then return nil end
-  local ok, specID = pcall(GetSpecializationInfo, idx)
+  local ok, specID = pcall(ns.GetSpecializationInfo, idx)
   if not ok or not specID or specID == 0 then return nil end
   return specID
 end
@@ -3157,7 +3343,7 @@ function ResourceCircle.DetectSecondaryResource()
   end
 
   -- Démarrer le ticker de mise à jour (0.1s suffit pour ce type de ressource)
-  secResUpdateTicker = C_Timer.NewTicker(0.1, function()
+  secResUpdateTicker = ns.NewTicker(0.1, function()
     ResourceCircle.UpdateSecondaryResource()
   end)
 
@@ -3177,7 +3363,7 @@ local function StartSecResPop()
   local home  = _elemHome[bar.secResFrame]
   local start = GetTime()
   bar.secResFrame:SetAlpha(0)
-  _secResPopTicker = C_Timer.NewTicker(0.016, function()
+  _secResPopTicker = ns.NewTicker(0.016, function()
     local t = math.min((GetTime() - start) / SEC_RES_POP_DURATION, 1)
     local eased = ns.Ease(spec.ease, spec.easeType, t)
     bar.secResFrame:SetAlpha(eased)
@@ -3200,7 +3386,7 @@ local function StartSecResPopOut()
   local spec  = CIRCLE_ANIM.secResText.hide
   local home  = _elemHome[bar.secResFrame]
   local start = GetTime()
-  _secResPopTicker = C_Timer.NewTicker(0.016, function()
+  _secResPopTicker = ns.NewTicker(0.016, function()
     local t = math.min((GetTime() - start) / SEC_RES_POP_DURATION, 1)
     local eased = ns.Ease(spec.ease, spec.easeType, t)
     bar.secResFrame:SetAlpha(1 - eased)
@@ -3643,7 +3829,7 @@ function ResourceCircle.DetectStagger()
   end
   if ResolveSpecID() == 268 then  -- Brewmaster Monk
     staggerActive = true
-    staggerUpdateTicker = C_Timer.NewTicker(0.1, function()
+    staggerUpdateTicker = ns.NewTicker(0.1, function()
       ResourceCircle.UpdateStagger()
     end)
   end
@@ -4053,10 +4239,10 @@ SlashCmdList["RCSECRES"] = function()
   p(string.format("bar: IsShown=%s", tostring(bar:IsShown())))
   p(string.format("ShouldShow()=%s  lastVisibilityState=%s",
     tostring(ResourceCircle.ShouldShow()), tostring(lastVisibilityState)))
-  local idx = GetSpecialization and GetSpecialization()
-  local specID = idx and GetSpecializationInfo and select(1, pcall(GetSpecializationInfo, idx))
-  local okSpec, sid = pcall(GetSpecializationInfo, idx or 0)
-  p(string.format("GetSpecialization idx=%s specID(ok=%s)=%s", tostring(idx), tostring(okSpec), tostring(sid)))
+  local idx = ns.GetSpecialization and ns.GetSpecialization()
+  local specID = idx and ns.GetSpecializationInfo and select(1, pcall(ns.GetSpecializationInfo, idx))
+  local okSpec, sid = pcall(ns.GetSpecializationInfo, idx or 0)
+  p(string.format("ns.GetSpecialization idx=%s specID(ok=%s)=%s", tostring(idx), tostring(okSpec), tostring(sid)))
   p(string.format("ns._specID=%s  ResolveSpecID()=%s", tostring(ns._specID), tostring(ResolveSpecID and ResolveSpecID())))
 
   -- --- Barre de duree (deux moities miroir) ---------------------------------
@@ -4250,4 +4436,153 @@ SlashCmdList["RCSECRES"] = function()
     end
     if applied then SetSecResShown(true) end
   end
+end
+
+-- Dragons elites : texture Blizzard autour du cercle selon la classification de la cible. Elite : seulement hors
+-- instance (presque tous les mobs y sont elites) ; rare, rare elite et boss mondial partout. Taille et decalage sont
+-- relatifs a la taille du cercle (scale = largeur / taille du cercle pour une texture de 160 px, x / y = decalage /
+-- taille du cercle) : les dragons suivent exactement un redimensionnement. Valeurs calees en jeu.
+-- Etat regroupe dans une seule table : le chunk est a la limite des 200 locales.
+local Elite = { dir = "Interface\\AddOns\\AishCore\\Media\\UI\\ui-hud-unitframe-target-portraiton-boss-" }
+Elite.tex = {
+  elite     = { file = Elite.dir .. "gold-2x.png",          w = 160, h = 158, scale = 1.46,  x = 0.086, y = 0.018 },
+  rare      = { file = Elite.dir .. "rare-silver-2x.png",   w = 160, h = 158, scale = 1.46,  x = 0.086, y = 0.018 },
+  rareelite = { file = Elite.dir .. "silver-winged-2x.png", w = 198, h = 162, scale = 1.425, x = 0.248, y = 0.018 },
+  worldboss = { file = Elite.dir .. "gold-winged-2x.png",   w = 198, h = 162, scale = 1.425, x = 0.248, y = 0.018 },
+}
+
+-- Etats d'animation : dx / dy = decalage en plus de la position calee, r = rotation, a = opacite, s = echelle.
+-- SIDE : hors champ a droite (arrivee / depart de cible) ; DOWN : comme les elements du cercle qui se cache
+-- (glissement vers le bas, reduction, fondu -- cf. CIRCLE_ANIM.*.hide).
+Elite.HOME = { dx = 0,  dy = 0,   r = 0,              a = 1, s = 1 }
+Elite.SIDE = { dx = 40, dy = 0,   r = math.rad(-12),  a = 0, s = 1 }
+Elite.DOWN = { dx = 0,  dy = -20, r = 0,              a = 0, s = 0.5 }
+Elite.cur  = { dx = 0,  dy = 0,   r = 0,              a = 0, s = 1 }
+Elite.ease = {
+  expoOut  = function(t) return t >= 1 and 1 or 1 - 2 ^ (-10 * t) end,
+  expoIn   = function(t) return t <= 0 and 0 or 2 ^ (10 * (t - 1)) end,
+  quintOut = function(t) return 1 - (1 - t) ^ 5 end,
+  quintIn  = function(t) return t ^ 5 end,
+}
+
+function Elite.Apply()
+  local f, tx, c = Elite.frame, Elite.texture, Elite.cur
+  tx:ClearAllPoints()
+  tx:SetPoint("CENTER", bar, "CENTER", f._ox + c.dx, f._oy + c.dy)
+  tx:SetSize(f._w * c.s, f._h * c.s)
+  tx:SetRotation(c.r)
+  tx:SetAlpha(c.a)
+end
+
+function Elite.Set(state)
+  for k, v in pairs(state) do Elite.cur[k] = v end
+end
+
+function Elite.Step(self)
+  local t = math.min(1, (GetTime() - self._t0) / self._dur)
+  local e = self._easeFn(t)
+  local from, cur = self._from, Elite.cur
+  for k, v in pairs(self._to) do cur[k] = from[k] + (v - from[k]) * e end
+  Elite.Apply()
+  if t >= 1 then
+    self:SetScript("OnUpdate", nil)
+    local done = self._done
+    self._done = nil
+    if done then done() end
+  end
+end
+
+-- Interpole depuis l'etat courant (une animation interrompue repart de la ou elle en est)
+function Elite.Play(to, dur, easeName, done)
+  local f = Elite.frame
+  f._from = f._from or {}
+  for k, v in pairs(Elite.cur) do f._from[k] = v end
+  f._to, f._dur, f._easeFn, f._done, f._t0 = to, dur, Elite.ease[easeName], done, GetTime()
+  f:Show()
+  f:SetScript("OnUpdate", Elite.Step)
+end
+
+function Elite.Kind(cfg)
+  if not cfg.eliteDragons or not UnitExists("target") then return nil end
+  local ok, c = pcall(UnitClassification, "target")
+  if not ok or c == nil or (issecretvalue and issecretvalue(c)) then return nil end
+  if c == "worldboss" or c == "rareelite" or c == "rare" then return c end
+  if c == "elite" and not (IsInInstance and IsInInstance()) then return "elite" end
+  return nil
+end
+
+-- Geometrie calee pour la texture du dragon affiche (taille du cercle courante)
+function Elite.Layout(t, cfg)
+  local f, tx = Elite.frame, Elite.texture
+  local size = cfg.size or 100
+  f._w = size * t.scale * (t.w / 160)
+  f._h = f._w * t.h / t.w
+  f._ox, f._oy = size * t.x, size * t.y
+  tx:SetTexture(t.file)
+end
+
+function ResourceCircle.UpdateEliteDragon()
+  if not bar then return end
+  local cfg = ns.GetCfg("resourceCircle") or {}
+  local kind = Elite.Kind(cfg)
+  local t = kind and Elite.tex[kind]
+  local f = Elite.frame
+  if not t then
+    -- Plus de dragon : depart vers la droite (inverse de l'arrivee), puis masquage
+    if f and Elite.shown then
+      Elite.shown = nil
+      Elite.Play(Elite.SIDE, 0.3, "expoIn", function() f:Hide() end)
+    end
+    return
+  end
+  if not f then
+    f = CreateFrame("Frame", nil, bar)
+    f:SetAllPoints(bar)
+    f:Hide()
+    Elite.frame = f
+    Elite.texture = f:CreateTexture(nil, "OVERLAY", nil, 7)
+  end
+  f:SetFrameLevel(bar:GetFrameLevel() + 30)   -- au-dessus de l'arc, de l'overlay et des textes
+  Elite.Layout(t, cfg)
+  if kind ~= Elite.shown then
+    -- Nouvelle apparition (ou autre dragon) : arrivee depuis la droite
+    Elite.shown = kind
+    Elite.Set(Elite.SIDE)
+    Elite.Play(Elite.HOME, 0.45, "expoOut")
+  elseif not f:GetScript("OnUpdate") then
+    -- Meme dragon (taille du cercle modifiee...) : position finale directe
+    Elite.Apply()
+  end
+end
+
+-- Le cercle se cache / reapparait (ResourceCircle.AnimateVisibility) : le dragon suit le meme mouvement
+function Elite.OnCircleVisibility(show)
+  local f = Elite.frame
+  if not f then return end
+  if show then
+    local cfg = ns.GetCfg("resourceCircle") or {}
+    local kind = Elite.Kind(cfg)
+    if kind and kind == Elite.shown then
+      Elite.Layout(Elite.tex[kind], cfg)
+      Elite.Set(Elite.DOWN)
+      Elite.Play(Elite.HOME, 0.4, "quintOut")
+    else
+      ResourceCircle.UpdateEliteDragon()
+    end
+  elseif Elite.shown and f:IsShown() then
+    Elite.Play(Elite.DOWN, 0.3, "quintIn")
+  end
+end
+
+do
+  local ev = CreateFrame("Frame")
+  ev:RegisterEvent("PLAYER_TARGET_CHANGED")
+  ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+  ev:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+  ev:RegisterUnitEvent("UNIT_CLASSIFICATION_CHANGED", "target")
+  ev:SetScript("OnEvent", function() ResourceCircle.UpdateEliteDragon() end)
+  hooksecurefunc(ResourceCircle, "ApplySettings", function() ResourceCircle.UpdateEliteDragon() end)
+  hooksecurefunc(ResourceCircle, "AnimateVisibility", function(show) Elite.OnCircleVisibility(show) end)
+  -- Apercu du GUI : le cercle est affiche sans AnimateVisibility, le dragon doit revenir aussi
+  hooksecurefunc(ResourceCircle, "SetPreview", function(on) if on then Elite.OnCircleVisibility(true) end end)
 end

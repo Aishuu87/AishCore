@@ -116,14 +116,16 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
   preview:SetPoint("TOPRIGHT", pin, "TOPRIGHT", 0, -(PIN_TOP_H + 6))
   preview:SetHeight(PREVIEW_H)
   preview:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-  preview:SetBackdropColor(0.02, 0.02, 0.025, 0.9)
   preview:SetBackdropBorderColor(unpack(Theme.border))
   preview:SetClipsChildren(true)
+  SW.ApplyPreviewScreen(preview)   -- capture d'ecran du jeu en fond
   local grid = CreateFrame("Frame", nil, preview)
   -- Rappel des tags suivis, en bas à gauche de l'encart
   local tagsText = preview:CreateFontString(nil, "OVERLAY")
   tagsText:SetFont(ns.Media.fontGui, 10)
-  tagsText:SetTextColor(unpack(Theme.textDim))
+  tagsText:SetTextColor(1, 1, 1, 1)   -- blanc pur, ombre : lisible sur la capture d'ecran du fond
+  tagsText:SetShadowColor(0, 0, 0, 0.9)
+  tagsText:SetShadowOffset(1, -1)
   tagsText:SetPoint("BOTTOMLEFT", preview, "BOTTOMLEFT", 8, 6)
   tagsText:SetPoint("RIGHT", preview, "RIGHT", -8, 0)
   tagsText:SetJustifyH("LEFT")
@@ -204,131 +206,150 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
   end
   ctx:Add(tagBox)
 
-  -- Blacklist ------------------------------------------------------------------------------------
-  ctx:Spacer(6)
-  ctx:Add(SW.CreateSectionHeader(container, L["EXTRABARS_SEC_BLACKLIST"], W))
-  local blHint = container:CreateFontString(nil, "OVERLAY")
-  blHint:SetFont(ns.Media.fontGui, 10)
-  blHint:SetTextColor(0.55, 0.55, 0.55, 1)
-  blHint:SetJustifyH("LEFT")
-  blHint:SetWordWrap(true)
-  blHint:SetSize(W - 10, 28)
-  blHint:SetText(L["EXTRABARS_BL_HINT"])
-  ctx:Add(blHint)
+  -- Listes d'objets d'une barre (blacklist / whitelist) : ID d'objet, lien colle, ou objet glisse depuis les sacs.
+  -- o = { header, hint, empty, remove, list = function(bc) -> table, set = function(bc, id, on) }
+  local function ItemListSection(o)
+    ctx:Spacer(6)
+    ctx:Add(SW.CreateSectionHeader(container, o.header, W))
+    local hint = container:CreateFontString(nil, "OVERLAY")
+    hint:SetFont(ns.Media.fontGui, 10)
+    hint:SetTextColor(0.55, 0.55, 0.55, 1)
+    hint:SetJustifyH("LEFT")
+    hint:SetWordWrap(true)
+    hint:SetSize(W - 10, 28)
+    hint:SetText(o.hint)
+    ctx:Add(hint)
 
-  local blRow = CreateFrame("Frame", nil, container)
-  blRow:SetSize(W, 24)
-  local blInput = CreateFrame("EditBox", nil, blRow, "InputBoxTemplate")
-  SW.StyleEditBox(blInput)
-  blInput:SetSize(W - 126, 20)
-  blInput:SetPoint("LEFT", blRow, "LEFT", 6, 0)
-  blInput:SetAutoFocus(false)
-  local blAdd = SW.CreateActionBtn(blRow, L["EXTRABARS_BL_ADD"], 110)
-  blAdd:SetPoint("RIGHT", blRow, "RIGHT", 0, 0)
-  ctx:Add(blRow)
+    local row = CreateFrame("Frame", nil, container)
+    row:SetSize(W, 24)
+    local input = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
+    SW.StyleEditBox(input)
+    input:SetSize(W - 126, 20)
+    input:SetPoint("LEFT", row, "LEFT", 6, 0)
+    input:SetAutoFocus(false)
+    local addBtn = SW.CreateActionBtn(row, L["EXTRABARS_BL_ADD"], 110)
+    addBtn:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    ctx:Add(row)
 
-  local BL_PER_ROW, BL_H = 3, 24
-  local blChipW = math.floor((W - (BL_PER_ROW - 1) * GAP) / BL_PER_ROW)
-  local blList = CreateFrame("Frame", nil, container)
-  blList:SetSize(W, BL_H)
-  local blEmpty = blList:CreateFontString(nil, "OVERLAY")
-  blEmpty:SetFont(ns.Media.fontGui, 10)
-  blEmpty:SetTextColor(0.55, 0.55, 0.55, 1)
-  blEmpty:SetPoint("LEFT", blList, "LEFT", 6, 0)
-  blEmpty:SetText(L["EXTRABARS_BL_EMPTY"])
-  ctx:Add(blList)
+    local PER_ROW, CH = 3, 24
+    local chipW = math.floor((W - (PER_ROW - 1) * GAP) / PER_ROW)
+    local list = CreateFrame("Frame", nil, container)
+    list:SetSize(W, CH)
+    local empty = list:CreateFontString(nil, "OVERLAY")
+    empty:SetFont(ns.Media.fontGui, 10)
+    empty:SetTextColor(0.55, 0.55, 0.55, 1)
+    empty:SetPoint("LEFT", list, "LEFT", 6, 0)
+    empty:SetText(o.empty)
+    ctx:Add(list)
 
-  local blChips = {}
-  local function NewChip()
-    local chip = NewPill(blList, "", blChipW)
-    chip.icon = chip:CreateTexture(nil, "ARTWORK")
-    chip.icon:SetSize(16, 16)
-    chip.icon:SetPoint("LEFT", chip, "LEFT", 4, 0)
-    chip.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    chip.fs:ClearAllPoints()
-    chip.fs:SetPoint("LEFT", chip.icon, "RIGHT", 5, 0)
-    chip.fs:SetPoint("RIGHT", chip, "RIGHT", -6, 0)
-    chip.fs:SetJustifyH("LEFT")
-    chip.fs:SetWordWrap(false)
-    chip:SetActive(false)
-    chip:SetScript("OnClick", function(self)
-      if EB and self.itemID then EB.SetBlacklisted(Bar(), self.itemID, false) end
-      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
-      GameTooltip:Hide()
-      RefreshBlacklist()
-      RefreshPreview(Bar())
-    end)
-    chip:HookScript("OnEnter", function(self)
-      GameTooltip:SetOwner(self, "ANCHOR_TOP")
-      GameTooltip:SetItemByID(self.itemID)
-      GameTooltip:AddLine(L["EXTRABARS_BL_REMOVE"], 1, 0.82, 0)
-      GameTooltip:Show()
-    end)
-    chip:HookScript("OnLeave", function() GameTooltip:Hide() end)
-    return chip
-  end
+    local chips = {}
+    local Refresh
+    local function NewChip()
+      local chip = NewPill(list, "", chipW)
+      chip.icon = chip:CreateTexture(nil, "ARTWORK")
+      chip.icon:SetSize(16, 16)
+      chip.icon:SetPoint("LEFT", chip, "LEFT", 4, 0)
+      chip.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+      chip.fs:ClearAllPoints()
+      chip.fs:SetPoint("LEFT", chip.icon, "RIGHT", 5, 0)
+      chip.fs:SetPoint("RIGHT", chip, "RIGHT", -6, 0)
+      chip.fs:SetJustifyH("LEFT")
+      chip.fs:SetWordWrap(false)
+      chip:SetActive(false)
+      chip:SetScript("OnClick", function(self)
+        if EB and self.itemID then o.set(Bar(), self.itemID, false) end
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+        GameTooltip:Hide()
+        Refresh()
+        RefreshPreview(Bar())
+      end)
+      chip:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetItemByID(self.itemID)
+        GameTooltip:AddLine(o.remove, 1, 0.82, 0)
+        GameTooltip:Show()
+      end)
+      chip:HookScript("OnLeave", function() GameTooltip:Hide() end)
+      return chip
+    end
 
-  RefreshBlacklist = function()
-    local ids = {}
-    for id in pairs(EB and EB.Blacklist(Bar()) or {}) do ids[#ids + 1] = id end
-    table.sort(ids)
-    for _, chip in ipairs(blChips) do chip:Hide() end
-    for i, id in ipairs(ids) do
-      local chip = blChips[i] or NewChip()
-      blChips[i] = chip
-      chip.itemID = id
-      chip.icon:SetTexture(C_Item.GetItemIconByID(id) or 134400)
-      local name = C_Item.GetItemNameByID(id)
-      if not name then
-        -- Objet pas encore en cache : nom affiché dès son chargement
-        Item:CreateFromItemID(id):ContinueOnItemLoad(function()
-          if chip.itemID == id then chip.fs:SetText(C_Item.GetItemNameByID(id) or ("#" .. id)) end
-        end)
+    Refresh = function()
+      local ids = {}
+      for id in pairs(EB and o.list(Bar()) or {}) do ids[#ids + 1] = id end
+      table.sort(ids)
+      for _, chip in ipairs(chips) do chip:Hide() end
+      for i, id in ipairs(ids) do
+        local chip = chips[i] or NewChip()
+        chips[i] = chip
+        chip.itemID = id
+        chip.icon:SetTexture(C_Item.GetItemIconByID(id) or 134400)
+        local name = C_Item.GetItemNameByID(id)
+        if not name then
+          -- Objet pas encore en cache : nom affiché dès son chargement
+          Item:CreateFromItemID(id):ContinueOnItemLoad(function()
+            if chip.itemID == id then chip.fs:SetText(C_Item.GetItemNameByID(id) or ("#" .. id)) end
+          end)
+        end
+        chip.fs:SetText(name or ("#" .. id))
+        local col, r = (i - 1) % PER_ROW, math.floor((i - 1) / PER_ROW)
+        chip:ClearAllPoints()
+        chip:SetPoint("TOPLEFT", list, "TOPLEFT", col * (chipW + GAP), -r * (CH + GAP))
+        chip:Show()
       end
-      chip.fs:SetText(name or ("#" .. id))
-      local col, row = (i - 1) % BL_PER_ROW, math.floor((i - 1) / BL_PER_ROW)
-      chip:ClearAllPoints()
-      chip:SetPoint("TOPLEFT", blList, "TOPLEFT", col * (blChipW + GAP), -row * (BL_H + GAP))
-      chip:Show()
+      empty:SetShown(#ids == 0)
+      local rows = math.max(1, math.ceil(#ids / PER_ROW))
+      local h = rows * CH + (rows - 1) * GAP
+      if math.abs(list:GetHeight() - h) > 0.5 then
+        list:SetHeight(h)
+        if ctx._finalized then ctx:Relayout() end
+      end
     end
-    blEmpty:SetShown(#ids == 0)
-    local rows = math.max(1, math.ceil(#ids / BL_PER_ROW))
-    local h = rows * BL_H + (rows - 1) * GAP
-    if math.abs(blList:GetHeight() - h) > 0.5 then
-      blList:SetHeight(h)
-      if ctx._finalized then ctx:Relayout() end
+
+    local function AddItem(itemID)
+      if not (EB and itemID and C_Item.GetItemInfoInstant(itemID)) then
+        print("|cff00ccff[AishCore]|r " .. L["EXTRABARS_BL_INVALID"])
+        return
+      end
+      o.set(Bar(), itemID, true)
+      input:SetText("")
+      input:ClearFocus()
+      Refresh()
+      RefreshPreview(Bar())
     end
+    local function AddFromInput()
+      local text = input:GetText() or ""
+      AddItem(tonumber(text:match("item:(%d+)") or text:match("^%s*(%d+)%s*$")))
+    end
+    local function AddFromCursor()
+      local kind, itemID = GetCursorInfo()
+      if kind == "item" then
+        ClearCursor()
+        AddItem(itemID)
+      end
+    end
+    addBtn:SetScript("OnClick", AddFromInput)
+    input:SetScript("OnEnterPressed", AddFromInput)
+    input:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    input:SetScript("OnReceiveDrag", AddFromCursor)
+    input:HookScript("OnMouseDown", AddFromCursor)
+    Refresh()
+    return Refresh
   end
 
-  -- ID d'objet, lien d'objet collé, ou objet glissé depuis les sacs
-  local function AddItem(itemID)
-    if not (EB and itemID and C_Item.GetItemInfoInstant(itemID)) then
-      print("|cff00ccff[AishCore]|r " .. L["EXTRABARS_BL_INVALID"])
-      return
-    end
-    EB.SetBlacklisted(Bar(), itemID, true)
-    blInput:SetText("")
-    blInput:ClearFocus()
-    RefreshBlacklist()
-    RefreshPreview(Bar())
-  end
-  local function AddFromInput()
-    local text = blInput:GetText() or ""
-    AddItem(tonumber(text:match("item:(%d+)") or text:match("^%s*(%d+)%s*$")))
-  end
-  local function AddFromCursor()
-    local kind, itemID = GetCursorInfo()
-    if kind == "item" then
-      ClearCursor()
-      AddItem(itemID)
-    end
-  end
-  blAdd:SetScript("OnClick", AddFromInput)
-  blInput:SetScript("OnEnterPressed", AddFromInput)
-  blInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-  blInput:SetScript("OnReceiveDrag", AddFromCursor)
-  blInput:HookScript("OnMouseDown", AddFromCursor)
-  RefreshBlacklist()
+  -- Whitelist : objets forces sur la barre (ratees par la detection automatique) ; Blacklist : jamais affiches
+  local RefreshWhitelist = ItemListSection({
+    header = L["EXTRABARS_SEC_WHITELIST"], hint = L["EXTRABARS_WL_HINT"],
+    empty = L["EXTRABARS_WL_EMPTY"], remove = L["EXTRABARS_WL_REMOVE"],
+    list = function(bc) return EB.Whitelist(bc) end,
+    set = function(bc, id, on) EB.SetWhitelisted(bc, id, on) end,
+  })
+  local RefreshBlacklistSection = ItemListSection({
+    header = L["EXTRABARS_SEC_BLACKLIST"], hint = L["EXTRABARS_BL_HINT"],
+    empty = L["EXTRABARS_BL_EMPTY"], remove = L["EXTRABARS_BL_REMOVE"],
+    list = function(bc) return EB.Blacklist(bc) end,
+    set = function(bc, id, on) EB.SetBlacklisted(bc, id, on) end,
+  })
+  RefreshBlacklist = function() RefreshWhitelist(); RefreshBlacklistSection() end
 
   -- Visibilité -----------------------------------------------------------------------------------
   ctx:Spacer(6)
@@ -486,9 +507,6 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
     local pw = preview:GetWidth()
     if not pw or pw < 50 then pw = W end
     grid:SetScale(math.min(1, (pw - 24) / (gw + 2 * padX), (PREVIEW_H - 34) / (gh + 2 * padY)))
-    -- Fond de l'encart : couleur d'accent assombrie (pas du noir) pour juger fonds et transparences
-    local g = Gold()
-    preview:SetBackdropColor(g[1] * 0.13, g[2] * 0.13, g[3] * 0.13, 1)
     grid:ClearAllPoints()
     grid:SetPoint("CENTER", preview, "CENTER", 0, 7)
     for j = 1, n do

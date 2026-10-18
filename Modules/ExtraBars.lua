@@ -23,15 +23,42 @@ ExtraBars.NUM_BARS = NUM_BARS
 -- Tags -------------------------------------------------------------------------------------------
 -- Sous-classes de Enum.ItemClass.Consumable (valeurs stables depuis Dragonflight)
 local CONSUMABLE = Enum.ItemClass and Enum.ItemClass.Consumable or 0
-local SUB = { explosive = 0, potion = 1, elixir = 2, flask = 3, food = 5, enhancement = 6, bandage = 7, vantus = 9 }
+-- scroll = 4 : "Parchemin" (anciens clients / Forever), complete par STAT_SCROLLS ci-dessous
+local SUB = { explosive = 0, potion = 1, elixir = 2, flask = 3, scroll = 4, food = 5, enhancement = 6, bandage = 7, vantus = 9 }
+
+-- Parchemins de caracteristiques (Agilite, Intelligence, Protection, Endurance, Force ; rangs I a IX) : seuls les
+-- rangs d'origine sont en sous-categorie "Parchemin" sur Forever ; les rangs suivants, et tous en Retail, sont en
+-- "Autre" (8). Reconnus par leur ID, independant de la langue.
+local STAT_SCROLLS = {}
+for _, id in ipairs({
+  3012, 1477, 4425, 10309, 27498, 33457, 43463, 43464, 63303,          -- Agilite
+  955, 2290, 4419, 10308, 27499, 33458, 37091, 37092, 63305,           -- Intelligence
+  3013, 1478, 4421, 10305, 27500, 33459, 43467, 43468, 63308, 116411,  -- Protection
+  1180, 1711, 4422, 10307, 27502, 33461, 37093, 37094, 63306,          -- Endurance
+  954, 2289, 4426, 10310, 27503, 33462, 43465, 43466, 63304,           -- Force
+}) do STAT_SCROLLS[id] = true end
+
+-- Classes d'objets jamais classees en Gadgets (cf. ItemTags)
+local GADGET_EXCLUDED_CLASS = {}
+-- (Tradegoods / Reagent : composants d'artisanat, ex. "Utiliser : combine 10 particules...")
+for _, k in ipairs({ "Weapon", "Armor", "Recipe", "Tradegoods", "Reagent" }) do
+  local v = Enum.ItemClass and Enum.ItemClass[k]
+  if v then GADGET_EXCLUDED_CLASS[v] = true end
+end
+
+-- Composant d'artisanat d'une autre classe (marque "Composant d'artisanat" : 17e retour de GetItemInfo)
+local function IsCraftingReagent(itemID)
+  local get = C_Item and C_Item.GetItemInfo or GetItemInfo
+  return select(17, get(itemID)) == true
+end
 
 -- Pierres de soins : rien ne les distingue des autres consommables dans les catégories du jeu
 local HEALTHSTONES = { [5512] = true, [224464] = true }
 
 -- Ordre d'affichage des tags (et de la grille de la page de réglages)
 ExtraBars.TAGS = {
-  "potion", "healthstone", "flask", "elixir", "food", "conjured", "vantus",
-  "enhancement", "bandage", "explosive", "knowledge", "openable", "quest", "trinket",
+  "potion", "healthstone", "flask", "elixir", "scroll", "food", "conjured", "vantus",
+  "enhancement", "bandage", "explosive", "knowledge", "openable", "quest", "trinket", "teleport", "gadget",
 }
 
 -- Icône représentative de chaque tag : aperçu dans le GUI quand les sacs ne contiennent rien
@@ -40,6 +67,7 @@ ExtraBars.TAG_ICONS = {
   healthstone = "Interface\\Icons\\INV_Stone_04",
   flask       = "Interface\\Icons\\INV_Potion_62",
   elixir      = "Interface\\Icons\\INV_Potion_32",
+  scroll      = "Interface\\Icons\\INV_Scroll_02",
   food        = "Interface\\Icons\\INV_Misc_Food_15",
   conjured    = "Interface\\Icons\\INV_Misc_Food_73CinnamonRoll",
   vantus      = "Interface\\Icons\\INV_Misc_Rune_01",
@@ -50,6 +78,8 @@ ExtraBars.TAG_ICONS = {
   openable    = "Interface\\Icons\\INV_Box_02",
   quest       = "Interface\\Icons\\INV_Misc_Note_01",
   trinket     = "Interface\\Icons\\INV_Jewelry_Talisman_07",
+  teleport    = "Interface\\Icons\\Spell_Arcane_TeleportStormWind",
+  gadget      = "Interface\\Icons\\INV_Gizmo_02",
 }
 
 -- Libellés des tags suivis par une barre, dans l'ordre des tags ("Potions, Élixirs")
@@ -119,6 +149,96 @@ local function IsKnowledge(itemID)
   return c
 end
 
+-- Ameliorations d'arme que le client ne range pas en "Amelioration d'objet" (Forever : pierres a aiguiser, pierres de
+-- poids, huiles = "Consommable : autre") : leur ligne "Utiliser :" parle de l'arme. Mot-cle par langue du client.
+local WEAPON_WORD = ({
+  frFR = "arme", deDE = "waffe", esES = "arma", esMX = "arma", itIT = "arma", ptBR = "arma",
+  ruRU = "оруж", koKR = "무기", zhCN = "武器", zhTW = "武器",
+})[GetLocale()] or "weapon"
+-- Le mot doit COMMENCER un mot ("l'arme", "une arme", "armes"), sinon "réarmez" passerait pour une arme.
+-- Debut de mot : debut de ligne, ou caractere precedent ni lettre ni octet UTF-8 (lettre accentuee, cyrillique),
+-- sauf l'apostrophe typographique (E2 80 99). Langues sans espaces (coreen, chinois) : pas de controle.
+local NO_WORD_BOUNDARY = ({ koKR = true, zhCN = true, zhTW = true })[GetLocale()]
+local function StartsWord(low, word)
+  if NO_WORD_BOUNDARY then return low:find(word, 1, true) ~= nil end
+  local from = 1
+  while true do
+    local s = low:find(word, from, true)
+    if not s then return false end
+    if s == 1 or low:sub(s - 3, s - 1) == "\226\128\153" then return true end
+    local b = low:byte(s - 1)
+    if b < 128 and not string.char(b):find("%a") then return true end
+    from = s + 1
+  end
+end
+
+local weaponEnhCache = {}
+local function IsWeaponEnhancement(itemID)
+  local c = weaponEnhCache[itemID]
+  if c ~= nil then return c end
+  local ok, data = pcall(C_TooltipInfo.GetItemByID, itemID)
+  if not (ok and data and data.lines) then return false end -- pas encore en cache : retenté plus tard
+  if C_Item.IsItemDataCachedByID and not C_Item.IsItemDataCachedByID(itemID) then
+    C_Item.RequestLoadItemDataByID(itemID)
+    return false
+  end
+  c = false
+  local use = ITEM_SPELL_TRIGGER_ONUSE or "Use:"
+  for _, line in ipairs(data.lines) do
+    local text = line.leftText
+    if type(text) == "string" and text:sub(1, #use) == use and StartsWord(text:lower(), WEAPON_WORD) then
+      c = true
+      break
+    end
+  end
+  weaponEnhCache[itemID] = c
+  return c
+end
+
+-- Teleportations (bagues du Kirin Tor, capes, tabards...) : leur ligne "Utiliser :" parle de teleportation, ou
+-- renvoie aupres d'un maitre de vol. Mots-cles par langue du client. Les pierres de foyer ("Vous renvoie a...")
+-- n'en parlent pas : reconnues par leur ID.
+local TELEPORT_WORDS = ({
+  frFR = { "téléport", "maître de vol" }, deDE = { "teleport", "flugmeister" },
+  esES = { "teletransport", "maestro de vuelo" }, esMX = { "teletransport", "maestro de vuelo" },
+  itIT = { "teletrasport", "maestro di volo" }, ptBR = { "teleport", "mestre de voo" },
+  ruRU = { "телепорт", "распорядител" }, koKR = { "순간이동" }, zhCN = { "传送" }, zhTW = { "傳送" },
+})[GetLocale()] or { "teleport", "flight master" }
+local HEARTHSTONE_IDS = {
+  [6948] = true,     -- Pierre de foyer
+  [110560] = true,   -- Pierre de foyer de fief
+  [140192] = true,   -- Pierre de foyer de Dalaran
+}
+local teleportCache = {}
+local function IsTeleport(itemID)
+  if HEARTHSTONE_IDS[itemID] then return true end
+  local c = teleportCache[itemID]
+  if c ~= nil then return c end
+  local ok, data = pcall(C_TooltipInfo.GetItemByID, itemID)
+  if not (ok and data and data.lines) then return false end -- pas encore en cache : retenté plus tard
+  if C_Item.IsItemDataCachedByID and not C_Item.IsItemDataCachedByID(itemID) then
+    C_Item.RequestLoadItemDataByID(itemID)
+    return false
+  end
+  c = false
+  local use = ITEM_SPELL_TRIGGER_ONUSE or "Use:"
+  for _, line in ipairs(data.lines) do
+    local text = line.leftText
+    if type(text) == "string" and text:sub(1, #use) == use then
+      local low = text:lower()
+      for _, w in ipairs(TELEPORT_WORDS) do
+        if low:find(w, 1, true) then c = true; break end
+      end
+      if c then break end
+    end
+  end
+  teleportCache[itemID] = c
+  return c
+end
+
+-- Utilise aussi par les Buffs manquants (pierres a aiguiser / huiles a appliquer sur l'arme)
+function ExtraBars.IsWeaponEnhancementItem(itemID) return IsWeaponEnhancement(itemID) end
+
 local function HasUseSpell(itemID)
   local ok, spellName = pcall(C_Item.GetItemSpell, itemID)
   return ok and spellName ~= nil
@@ -135,11 +255,26 @@ local function ItemTags(itemID, bag, slot)
   if HasUseSpell(itemID) and IsKnowledge(itemID) then tags.knowledge = true end
   local _, _, _, _, _, classID, subClassID = C_Item.GetItemInfoInstant(itemID)
   if classID == CONSUMABLE and HasUseSpell(itemID) then
+    local typed = false
     for tag, sub in pairs(SUB) do
-      if subClassID == sub then tags[tag] = true end
+      if subClassID == sub then tags[tag] = true; typed = true end
     end
+    if STAT_SCROLLS[itemID] then tags.scroll = true; typed = true end
     if tags.food and IsConjured(itemID) then tags.conjured = true; tags.food = nil end
+    -- Sous-categorie non reconnue ("autre") mais amelioration d'arme d'apres l'infobulle : Huiles & pierres
+    -- (sous-categorie 0 comprise : "Explosifs & appareils" en Retail, simple "autre" sur Forever)
+    if (not typed or subClassID == SUB.explosive) and not tags.healthstone and IsWeaponEnhancement(itemID) then
+      tags.enhancement = true
+      tags.explosive = nil
+    end
     if tags.healthstone then tags.potion = nil end
+  end
+  -- Teleportations : toutes classes d'objets (une bague ou une cape du sac s'equipe au clic)
+  if not next(tags) and HasUseSpell(itemID) and IsTeleport(itemID) then tags.teleport = true end
+  -- Gadgets : tout objet utilisable du sac qu'aucune autre categorie ne prend. Hors armes / armures (bijoux et
+  -- equipements a "Utiliser" ne s'utilisent qu'equipes) et recettes (apprises une fois).
+  if not next(tags) and HasUseSpell(itemID) and not GADGET_EXCLUDED_CLASS[classID] and not IsCraftingReagent(itemID) then
+    tags.gadget = true
   end
   return tags
 end
@@ -153,7 +288,7 @@ end
 ExtraBars.BarCfg = BarCfg
 
 -- Réglages copiables d'une barre à l'autre : tout sauf l'activation, les tags et la position
-local NOT_COPIED = { enabled = true, tags = true, blacklist = true, x = true, y = true }
+local NOT_COPIED = { enabled = true, tags = true, blacklist = true, whitelist = true, x = true, y = true }
 function ExtraBars.CopySettings(from, to)
   local src, dst = BarCfg(from), BarCfg(to)
   if not (src and dst) or from == to then return end
@@ -167,6 +302,15 @@ function ExtraBars.Blacklist(bc)
   if not bc then return {} end
   bc.blacklist = bc.blacklist or {}
   return bc.blacklist
+end
+
+-- Whitelist propre a chaque barre : bc.whitelist[itemID] = true. Un objet de la whitelist present dans les sacs
+-- est affiche quels que soient les tags coches (objets que la detection automatique rate : pierres a aiguiser...),
+-- en tete de barre. La blacklist reste prioritaire.
+function ExtraBars.Whitelist(bc)
+  if not bc then return {} end
+  bc.whitelist = bc.whitelist or {}
+  return bc.whitelist
 end
 
 -- Ancienne blacklist commune (ns.DB.extraBars.blacklist) : recopiée dans chaque barre, une fois
@@ -184,12 +328,13 @@ end
 -- Collecte des objets d'une barre : liste { itemID, invSlot? }, dans l'ordre des tags
 local function Collect(bc)
   local blacklist = ExtraBars.Blacklist(bc)
+  local whitelist = ExtraBars.Whitelist(bc)
   local wanted = bc and bc.tags or {}
   local rank, entries, seen = {}, {}, {}
   for i, tag in ipairs(ExtraBars.TAGS) do if wanted[tag] then rank[tag] = i end end
 
   local function Add(entry, tags)
-    local best
+    local best = tags.__forced and 0 or nil   -- whitelist : toujours affiche, en tete
     for tag in pairs(tags) do
       if rank[tag] and (not best or rank[tag] < best) then best = rank[tag] end
     end
@@ -201,7 +346,9 @@ local function Collect(bc)
       local itemID = C_Container.GetContainerItemID(bag, slot)
       if itemID and not seen[itemID] and not blacklist[itemID] then
         seen[itemID] = true
-        Add({ itemID = itemID }, ItemTags(itemID, bag, slot))
+        local tags = ItemTags(itemID, bag, slot)
+        if whitelist[itemID] then tags.__forced = true end
+        Add({ itemID = itemID }, tags)
       end
     end
   end
@@ -209,6 +356,17 @@ local function Collect(bc)
     for _, invSlot in ipairs({ 13, 14 }) do
       local itemID = GetInventoryItemID("player", invSlot)
       if itemID and not blacklist[itemID] and HasUseSpell(itemID) then Add({ invSlot = invSlot, itemID = itemID }, { trinket = true }) end
+    end
+  end
+  -- Equipement porte qui teleporte (bague, cape, tabard...) ; les bijoux equipes restent dans leur categorie
+  if wanted.teleport then
+    for invSlot = 1, 19 do
+      local itemID = GetInventoryItemID("player", invSlot)
+      if itemID and invSlot ~= 13 and invSlot ~= 14 and not seen[itemID] and not blacklist[itemID]
+         and HasUseSpell(itemID) and IsTeleport(itemID) then
+        seen[itemID] = true
+        Add({ invSlot = invSlot, itemID = itemID }, { teleport = true })
+      end
     end
   end
   table.sort(entries, function(a, b)
@@ -246,6 +404,13 @@ ExtraBars.Collect = CollectCached
 function ExtraBars.SetBlacklisted(bc, itemID, on)
   if not bc then return end
   ExtraBars.Blacklist(bc)[itemID] = on and true or nil
+  bagGen = bagGen + 1
+  ExtraBars.Layout()
+end
+
+function ExtraBars.SetWhitelisted(bc, itemID, on)
+  if not bc then return end
+  ExtraBars.Whitelist(bc)[itemID] = on and true or nil
   bagGen = bagGen + 1
   ExtraBars.Layout()
 end
@@ -599,24 +764,40 @@ local function IsBandage(b)
     b._bandageFor = b.itemID
     local _, _, _, _, _, classID, subClassID = C_Item.GetItemInfoInstant(b.itemID)
     b._isBandage = (classID == CONSUMABLE and subClassID == BANDAGE_SUB) or false
+    -- Sort du bandage : sert a reperer sa pose en combat (cf. OnBandageChannel)
+    local okS, _, sid = pcall(C_Item.GetItemSpell, b.itemID)
+    b._bandageSpell = okS and sid or nil
   end
   return b._isBandage
 end
+
+-- Debuff connu : en combat, sa lecture echoue (valeurs secretes) et le swipe retombait sur le cooldown de l'objet
+-- (nul), d'ou un timer efface en entrant en combat. On retient donc sa fin, lue hors combat ou deduite de la pose.
+local BANDAGE_DEBUFF_DUR = 60
+local bandageStart, bandageDur = 0, 0
 
 -- true si le swipe du debuff a ete pose
 local function ShowBandageCooldown(b)
   local bc = b.__bc
   if bc and bc.bandageCooldown == false then return false end
   local okA, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, RECENTLY_BANDAGED)
-  if not okA or not aura then return false end
-  -- Objet de duree natif (valeurs secretes en combat), sinon calcul depuis l'expiration
-  if C_UnitAuras.GetAuraDuration and aura.auraInstanceID then
-    local okD, dur = pcall(C_UnitAuras.GetAuraDuration, "player", aura.auraInstanceID)
-    if okD and dur and pcall(b.cooldown.SetCooldownFromDurationObject, b.cooldown, dur) then return true end
+  if okA and aura then
+    pcall(function()   -- valeurs lisibles (hors combat) : memorisees
+      if aura.duration > 0 then bandageStart, bandageDur = aura.expirationTime - aura.duration, aura.duration end
+    end)
+    -- Objet de duree natif (valeurs secretes en combat), sinon calcul depuis l'expiration
+    if C_UnitAuras.GetAuraDuration and aura.auraInstanceID then
+      local okD, dur = pcall(C_UnitAuras.GetAuraDuration, "player", aura.auraInstanceID)
+      if okD and dur and pcall(b.cooldown.SetCooldownFromDurationObject, b.cooldown, dur) then return true end
+    end
+    if pcall(function() b.cooldown:SetCooldown(aura.expirationTime - aura.duration, aura.duration) end) then return true end
   end
-  return pcall(function()
-    b.cooldown:SetCooldown(aura.expirationTime - aura.duration, aura.duration)
-  end)
+  -- Debuff illisible (combat) mais connu et pas encore termine : on garde son timer
+  if bandageDur > 0 and GetTime() < bandageStart + bandageDur then
+    pcall(b.cooldown.SetCooldown, b.cooldown, bandageStart, bandageDur)
+    return true
+  end
+  return false
 end
 
 -- Compteurs et cooldowns : non protégés, mis à jour aussi en combat
@@ -879,7 +1060,22 @@ ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:RegisterEvent("UPDATE_BINDINGS")
 ev:RegisterUnitEvent("UNIT_HEALTH", "player")
 ev:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
-ev:SetScript("OnEvent", function(_, event)
+-- Bandage pose : le debuff commence avec la canalisation (lisible meme en combat, contrairement a l'aura)
+ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
+ev:SetScript("OnEvent", function(_, event, _, _, spellID)
+  if event == "UNIT_SPELLCAST_CHANNEL_START" then
+    if issecretvalue and issecretvalue(spellID) then return end
+    for _, bar in pairs(bars) do
+      for _, b in ipairs(bar.buttons) do
+        if b.itemID and IsBandage(b) and b._bandageSpell == spellID then
+          bandageStart, bandageDur = GetTime(), BANDAGE_DEBUFF_DUR
+          RefreshStates()
+          return
+        end
+      end
+    end
+    return
+  end
   if event == "BAG_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_COOLDOWN" or event == "UNIT_AURA" then
     RefreshStates()
   elseif event == "UPDATE_BINDINGS" then

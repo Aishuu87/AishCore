@@ -325,6 +325,25 @@ end
 local HEADER_FONT_SIZE = 11
 local TITLE_FONT_SIZE  = 13
 local TITLE_HEIGHT     = 26
+-- Filet d'1 pixel physique : un trait de 1 unite d'interface tombe souvent a cheval sur deux pixels ecran (trait
+-- flou, ou de 2 px d'epaisseur selon sa position). Epaisseur = exactement 1 pixel, rendu cale sur la grille ;
+-- recalculee a chaque affichage du parent (l'echelle peut changer). vertical = trait vertical (largeur).
+function SharedWidgets.PixelLine(tex, vertical)
+  if not tex then return tex end
+  if tex.SetSnapToPixelGrid then tex:SetSnapToPixelGrid(true); tex:SetTexelSnappingBias(0) end
+  local function Fit()
+    local _, ph = GetPhysicalScreenSize()
+    local ok, es = pcall(tex.GetEffectiveScale, tex)
+    if not (ok and es and es > 0 and ph and ph > 0) then return end
+    local px = 768 / ph / es
+    if vertical then tex:SetWidth(px) else tex:SetHeight(px) end
+  end
+  Fit()
+  local p = tex:GetParent()
+  if p and p.HookScript then p:HookScript("OnShow", Fit) end
+  return tex
+end
+
 function SharedWidgets.CreateSectionHeader(parent, text, width, colorOverride)
   width = width or 280
   local f = CreateFrame("Frame", nil, parent)
@@ -344,6 +363,17 @@ function SharedWidgets.CreateSectionHeader(parent, text, width, colorOverride)
   local lbl = f:CreateFontString(nil, "OVERLAY")
   lbl:SetFont(ns.Media.fontGui, HEADER_FONT_SIZE)
   lbl:SetPoint("LEFT", 14, 0)
+  -- Nouveaute du dernier patch : l'icone remplace le point (cf. Data/PatchNotes.lua)
+  if ns.IsNewHeader and ns.IsNewHeader(text) then
+    local badge = ns.CreateNewBadge(f, 16)
+    if badge then
+      badge:SetPoint("LEFT", 0, 0)
+      ns.RegisterNewBadge(badge, function(shown)
+        dot:SetShown(not shown)
+        lbl:SetPoint("LEFT", shown and (badge:GetWidth() + 3) or 14, 0)
+      end)
+    end
+  end
   local tc = colorOverride or Theme.accentText or { 0.776, 0.710, 0.471 }
   lbl:SetTextColor(tc[1], tc[2], tc[3], 1)
   -- Libelle "nu", sans le prefixe +/- d'un en-tete repliable : SetHeaderCollapsedState
@@ -355,6 +385,7 @@ function SharedWidgets.CreateSectionHeader(parent, text, width, colorOverride)
   -- Hairline or dégradé (du bord droit du texte jusqu'à la fin)
   local line = f:CreateTexture(nil, "ARTWORK")
   line:SetHeight(1)
+  SharedWidgets.PixelLine(line)
   line:SetPoint("LEFT",  lbl,  "RIGHT", 10, 0)
   line:SetPoint("RIGHT", f,    "RIGHT", -2, 0)
   line:SetColorTexture(1, 1, 1, 1)
@@ -422,16 +453,47 @@ function SharedWidgets.MakeHeaderCollapsible(f, onToggle)
   hitbox:SetScript("OnLeave", function() hl:Hide() end)
   hitbox:SetScript("OnClick", function()
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-    if onToggle then onToggle() end
+    SharedWidgets.HeaderClick(f, onToggle)
   end)
   f._hitbox = hitbox
 
   return f
 end
 
+-- Clic sur un en-tete pliable. Double clic (f._onSetAll(collapsed), pose par l'appelant) : plie / deplie
+-- toutes les sections de la page dans le sens du 1er clic. Un repli attend FOLD_DELAY s pour laisser
+-- venir le 2e clic ; un depli est immediat. Un 2e clic arrive apres le repli (entre FOLD_DELAY et
+-- DOUBLE_CLICK) n'a rien a annuler : il etend simplement le repli aux autres sections.
+-- Partage avec Modules/Auras/UI/SharedWidgets.lua.
+local DOUBLE_CLICK = 0.25
+local FOLD_DELAY   = 0.15
+function SharedWidgets.HeaderClick(f, onToggle)
+  local now = GetTime()
+  local double = f._lastClick and (now - f._lastClick) < DOUBLE_CLICK
+  if double and f._onSetAll then
+    if f._pendingFold then f._pendingFold:Cancel(); f._pendingFold = nil end
+    f._lastClick = nil
+    f._onSetAll(f._lastClickFolds)
+    return
+  end
+  f._lastClick = now
+  f._lastClickFolds = not f._collapsed
+  if f._onSetAll and not f._collapsed then
+    if f._pendingFold then f._pendingFold:Cancel() end
+    f._pendingFold = C_Timer.NewTimer(FOLD_DELAY, function()
+      f._pendingFold = nil
+      if onToggle then onToggle() end
+    end)
+  elseif onToggle then
+    onToggle()
+  end
+end
+
 --- Met a jour le seul prefixe +/- (aucun effet sur un header non pliable).
 function SharedWidgets.SetHeaderCollapsedState(f, collapsed)
-  if not f or not f._collapseReady or not f._lbl then return end
+  if not f then return end
+  f._collapsed = collapsed
+  if not f._collapseReady or not f._lbl then return end
   f._lbl:SetText((collapsed and "+ " or "- ") .. (f._baseText or ""))
 end
 
@@ -589,6 +651,39 @@ function SharedWidgets.CreateColorSwatch(parent, label, tooltip, width)
   return row
 end
 
+-- Molette fluide : chaque cran deplace une cible, le defilement la rejoint en ease-out.
+-- Un SetVerticalScroll venu d'ailleurs (changement de page, drag du curseur) annule l'animation.
+-- Retourne false si le cadre n'a rien a defiler (l'appelant peut relayer la molette).
+function SharedWidgets.SmoothScroll(sf, delta, step)
+  local max = sf:GetVerticalScrollRange() or 0
+  if max <= 0 then return false end
+  local cur = sf:GetVerticalScroll() or 0
+  local d = sf._ssDriver
+  local running = d and d:IsShown() and sf._ssLast and math.abs(cur - sf._ssLast) < 0.5
+  local target = math.max(0, math.min(max, (running and sf._ssTarget or cur) - delta * step))
+  if SharedWidgets.animEnabled == false then
+    sf:SetVerticalScroll(target)
+    return true
+  end
+  sf._ssTarget, sf._ssLast = target, cur
+  if not d then
+    d = CreateFrame("Frame")
+    d:Hide()
+    d:SetScript("OnUpdate", function(self, elapsed)
+      local now = sf:GetVerticalScroll() or 0
+      if math.abs(now - (sf._ssLast or now)) > 0.5 then self:Hide() return end
+      local t = math.min(sf._ssTarget, sf:GetVerticalScrollRange() or 0)
+      local v = now + (t - now) * math.min(1, elapsed * 14)
+      if math.abs(t - v) < 0.5 then v = t; self:Hide() end
+      sf:SetVerticalScroll(v)
+      sf._ssLast = v
+    end)
+    sf._ssDriver = d
+  end
+  d:Show()
+  return true
+end
+
 -- Bouton fermer (X)
 function SharedWidgets.CreateCloseButton(parent, size)
   size = size or 20
@@ -596,7 +691,7 @@ function SharedWidgets.CreateCloseButton(parent, size)
   btn:SetSize(size, size)
 
   btn.text = btn:CreateFontString(nil, "OVERLAY")
-  btn.text:SetFont(ns.Media.fontGui, 15)
+  btn.text:SetFont(ns.Media.fontGui, math.floor(15 * size / 20 + 0.5))
   btn.text:SetPoint("CENTER")
   btn.text:SetText("x")
   btn.text:SetTextColor(unpack(Theme.textDim))
@@ -647,6 +742,32 @@ function SharedWidgets.ApplyPanelBackground(frame)
   eRight:SetPoint("TOPRIGHT",    frame, "TOPRIGHT",    0, 0)
   eRight:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
   eRight:SetWidth(1)
+  frame._edges = { eTop, eBot, eLeft, eRight }
+end
+
+-- Bords "parchemin" : masque dechire (gamepad-map-texture-mask, etire sur tout le cadre) applique au fond du cadre
+-- et aux textures `extra` (fonds d'autres sous-cadres, separateurs). Un masque ne decoupe que des textures, et
+-- seulement celles de son propre cadre : un masque par cadre parent, ancre sur `frame`. Les bordures droites de
+-- 1 px (ApplyPanelBackground) sont retirees, elles casseraient l'effet.
+local PARCHMENT_MASK = "Interface\\AddOns\\AishCore\\Media\\UI\\gamepad-map-texture-mask.png"
+function SharedWidgets.ApplyParchmentMask(frame, extra)
+  local masks = {}
+  local function MaskFor(owner)
+    local m = masks[owner]
+    if not m then
+      m = owner:CreateMaskTexture()
+      m:SetTexture(PARCHMENT_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+      m:SetAllPoints(frame)
+      masks[owner] = m
+    end
+    return m
+  end
+  local list = { frame._bg }
+  for _, t in ipairs(extra or {}) do list[#list + 1] = t end
+  for _, t in ipairs(list) do
+    if t then t:AddMaskTexture(MaskFor(t:GetParent())) end
+  end
+  for _, e in ipairs(frame._edges or {}) do e:Hide() end
 end
 
 -- Title bar (barre de titre en haut)
@@ -837,6 +958,7 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
   menuContent:SetHeight(1)
 
   local scrollOffset = 0
+  local SB_W = 7                -- barre de defilement (listes de plus de MAX_VISIBLE entrees)
 
   local function GetMaxScroll()
     local n = #container._options
@@ -844,10 +966,89 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
     return math.max(0, (n - v) * ITEM_H_PX)
   end
 
+  -- Barre de defilement cliquable : clic sur la piste = saut a cet endroit, poignee a glisser.
+  local track = CreateFrame("Button", nil, menu)
+  track:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -2, -TOP_PAD - 1)
+  track:SetPoint("BOTTOMRIGHT", menu, "BOTTOMRIGHT", -2, TOP_PAD + 1)
+  track:SetWidth(SB_W - 2)
+  track:SetFrameLevel(menu:GetFrameLevel() + 5)
+  local trackBg = track:CreateTexture(nil, "BACKGROUND")
+  trackBg:SetAllPoints()
+  trackBg:SetColorTexture(1, 1, 1, 0.06)
+  local thumb = CreateFrame("Button", nil, track)
+  thumb:SetWidth(SB_W - 2)
+  thumb:SetFrameLevel(track:GetFrameLevel() + 1)
+  local thumbTex = thumb:CreateTexture(nil, "ARTWORK")
+  thumbTex:SetAllPoints()
+  local function ThumbColor(hover)
+    local a = Theme.accentText or Theme.gold or { 0.78, 0.62, 0.30 }
+    thumbTex:SetColorTexture(a[1], a[2], a[3], hover and 0.95 or 0.6)
+  end
+  ThumbColor(false)
+  track:Hide()
+
+  local function TrackMetrics()
+    local trackH = track:GetHeight() or 0
+    local n = math.max(1, #container._options)
+    local thumbH = math.max(14, trackH * math.min(1, MAX_VISIBLE / n))
+    return trackH, thumbH
+  end
+
+  local function UpdateThumb()
+    local maxS = GetMaxScroll()
+    if maxS <= 0 then track:Hide(); return end
+    track:Show()
+    local trackH, thumbH = TrackMetrics()
+    thumb:SetHeight(thumbH)
+    thumb:ClearAllPoints()
+    thumb:SetPoint("TOP", track, "TOP", 0, -(trackH - thumbH) * (scrollOffset / maxS))
+  end
+
   local function ApplyScroll()
     menuContent:ClearAllPoints()
     menuContent:SetPoint("TOPLEFT", scrollClip, "TOPLEFT", 0, scrollOffset - TOP_PAD)
+    UpdateThumb()
   end
+
+  -- Ordonnee du curseur dans la piste (0 = haut), en unites de la piste
+  local function CursorInTrack()
+    local _, cy = GetCursorPosition()
+    local sc = track:GetEffectiveScale()
+    return (track:GetTop() or 0) - cy / sc
+  end
+
+  local function ScrollToTrackY(y, grabOffset)
+    local maxS = GetMaxScroll()
+    local trackH, thumbH = TrackMetrics()
+    local range = trackH - thumbH
+    if range <= 0 then return end
+    local top = math.max(0, math.min(range, y - (grabOffset or thumbH / 2)))
+    scrollOffset = math.floor(maxS * top / range + 0.5)
+    ApplyScroll()
+  end
+
+  local dragGrab
+  local function StopDrag() dragGrab = nil; track:SetScript("OnUpdate", nil) end
+  local function StartDrag(grab)
+    dragGrab = grab
+    track:SetScript("OnUpdate", function()
+      if not IsMouseButtonDown("LeftButton") then StopDrag(); return end
+      ScrollToTrackY(CursorInTrack(), dragGrab)
+    end)
+  end
+  -- Clic sur la piste : la poignee saute sous le curseur (centree) puis suit la souris tant que le bouton est enfonce
+  track:SetScript("OnMouseDown", function()
+    local _, thumbH = TrackMetrics()
+    ScrollToTrackY(CursorInTrack(), thumbH / 2)
+    StartDrag(thumbH / 2)
+  end)
+  -- Clic sur la poignee : elle suit la souris depuis le point saisi
+  thumb:SetScript("OnMouseDown", function()
+    StartDrag(CursorInTrack() - ((thumb:GetTop() and track:GetTop()) and (track:GetTop() - thumb:GetTop()) or 0))
+  end)
+  thumb:SetScript("OnEnter", function() ThumbColor(true) end)
+  thumb:SetScript("OnLeave", function() ThumbColor(false) end)
+  track:EnableMouseWheel(true)
 
   local function DoScroll(delta)
     scrollOffset = math.max(0, math.min(GetMaxScroll(),
@@ -856,6 +1057,7 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
   end
 
   menu:SetScript("OnMouseWheel", function(_, delta) DoScroll(delta) end)
+  track:SetScript("OnMouseWheel", function(_, delta) DoScroll(delta) end)
 
   container._btn     = btn
   container._menu    = menu
@@ -876,14 +1078,16 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
     local visCount = math.min(numOpts, MAX_VISIBLE)
     local menuH    = visCount * ITEM_H_PX + TOP_PAD * 2
     menu:SetHeight(math.max(menuH, BTN_H))
-    menuContent:SetWidth(width - 2)
+    -- Liste plus longue que la zone visible : place pour la barre de defilement a droite
+    local itemW = (numOpts > MAX_VISIBLE) and (width - 2 - SB_W) or (width - 2)
+    menuContent:SetWidth(itemW)
     menuContent:SetHeight(numOpts * ITEM_H_PX + TOP_PAD * 2)
     ApplyScroll()
 
     local yOff = 0
     for _, opt in ipairs(container._options) do
       local item = CreateFrame("Button", nil, menuContent)
-      item:SetSize(width - 2, ITEM_H_PX)
+      item:SetSize(itemW, ITEM_H_PX)
       item:SetPoint("TOPLEFT", menuContent, "TOPLEFT", 1, yOff)
       item:EnableMouseWheel(true)
       item:SetScript("OnMouseWheel", function(_, delta) DoScroll(delta) end)
@@ -1049,7 +1253,13 @@ function SharedWidgets.CreateColorButton(parent, label, width)
     swatchBorder:SetColorTexture(unpack(Theme.border))
   end)
 
-  swatch:SetScript("OnClick", function()
+  -- Clic droit : reinitialisation laissee a l'appelant (container.onReset), meme convention que les Modes
+  swatch:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  swatch:SetScript("OnClick", function(_, button)
+    if button == "RightButton" then
+      if container.onReset then container.onReset() end
+      return
+    end
     local r, g, b, a = unpack(container.currentColor)
     local info = {}
     info.r = r
@@ -1308,6 +1518,41 @@ end
 -- Action Button (bouton d'action avec backdrop) — style AishUI
 -- Usage : btn = SW.CreateActionBtn(parent, "Texte", width, bgColor, borderColor, textColor)
 -- Defaults : dark bg + theme border + white text
+-- Fond des encarts d'apercu (toast de niveau, barre de menu, barres dynamiques) : capture d'ecran du jeu (1280 x 720),
+-- posee a sa taille reelle et centree dans un cadre qui rogne ce qui depasse de l'encart : on n'en voit qu'une bande,
+-- jamais etiree ni comprimee (un recadrage par coordonnees de texture dependait de la taille de l'encart au moment du
+-- calcul et pouvait rester inapplique). Encart plus grand que l'image : elle est agrandie juste assez pour le couvrir.
+-- Le fond de la backdrop devient transparent, la bordure reste.
+local PREVIEW_SCREEN = "Interface\\AddOns\\AishCore\\Media\\UI\\previewscreen.png"
+local PREVIEW_W, PREVIEW_IH = 1280, 720
+function SharedWidgets.ApplyPreviewScreen(frame)
+  if not frame or frame._previewScreen then return end
+  if frame.SetBackdropColor then frame:SetBackdropColor(0, 0, 0, 0) end
+  -- Meme niveau que l'encart : ses enfants (contenu de l'apercu, un niveau au-dessus) restent devant
+  local lvl = frame:GetFrameLevel()
+  local clip = CreateFrame("Frame", nil, frame)
+  clip:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -1)
+  clip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -1, 1)
+  clip:SetClipsChildren(true)
+  clip:SetFrameLevel(lvl)
+  local holder = CreateFrame("Frame", nil, clip)
+  holder:SetSize(PREVIEW_W, PREVIEW_IH)
+  holder:SetPoint("CENTER", clip, "CENTER", 0, 0)
+  holder:SetFrameLevel(lvl)
+  local t = holder:CreateTexture(nil, "BACKGROUND")
+  t:SetTexture(PREVIEW_SCREEN)
+  t:SetAllPoints(holder)
+  frame._previewScreen = t
+  local function Fit()
+    local w, h = frame:GetWidth(), frame:GetHeight()
+    local k = 1
+    if w and h and w > 0 and h > 0 then k = math.max(1, w / PREVIEW_W, h / PREVIEW_IH) end
+    holder:SetSize(PREVIEW_W * k, PREVIEW_IH * k)
+  end
+  frame:HookScript("OnSizeChanged", Fit)
+  Fit()
+end
+
 function SharedWidgets.CreateActionBtn(parent, text, width, bgColor, borderColor, textColor)
   width = width or 160
   local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
@@ -1401,6 +1646,7 @@ function SharedWidgets.CreateSupportNag(parent, width, template)
   local underline = html:CreateTexture(nil, "OVERLAY")
   underline:SetColorTexture(ar, ag, ab, 1)
   underline:SetHeight(1)
+  SharedWidgets.PixelLine(underline)
   underline:Hide()
   html:SetScript("OnHyperlinkEnter", function(_, _, _, region)
     if not region then return end
@@ -1554,7 +1800,7 @@ function SharedWidgets.CreateCarousel(parent, width, height, images, autoInterva
   -- slide, reste synchro avec la barre de progression. Annule sur OnHide
   -- pour ne pas tourner indefiniment en arriere-plan.
   if n > 1 then
-    local ticker = C_Timer.NewTicker(0.1, function()
+    local ticker = ns.NewTicker(0.1, function()
       if GetTime() - slideStartTime >= pendingWait then
         pendingWait = autoInterval
         ShowSlide(current + 1)

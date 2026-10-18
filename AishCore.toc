@@ -2,7 +2,7 @@
 ## Title: AishCore
 ## Notes: Custom UI overlay - resource & health circles, spell effects, auras & procs
 ## Author: Aishuu
-## Version: 4.4.2
+## Version: 4.5
 ## X-Curse-Project-ID: 1689788
 ## SavedVariables: AishaddonDB AishUIAuraDB
 ## SavedVariablesPerCharacter: AishUILearnDB, AishUISetupCharDB
@@ -13,6 +13,7 @@ Libs\LibDeflate\LibDeflate.lua
 Libs\LibSerialize\LibSerialize.lua
 
 # Core
+MemTrace.lua
 Core.lua
 Debug.lua
 Config\Defaults.lua
@@ -32,6 +33,7 @@ Data\PatchNotes.lua
 Data\SearchIndex.lua
 Data\ClassSpellLevels.lua
 Data\LevelGains.lua
+Data\MapOverlays.lua
 
 # Engine
 CircularProgress.lua
@@ -41,12 +43,15 @@ Modules\ResourceCircle.lua
 Modules\HealthCircle.lua
 Modules\OutOfCombatResourceCircle.lua
 Modules\WellFedCircle.lua
+Modules\MovementBuffs.lua
+Modules\PixelSnap.lua
 Modules\SpellEffects.lua
 Modules\RotationHelper.lua
 Modules\PriorityBar.lua
 Modules\CooldownManagerEnhanced.lua
 Modules\CDMLayout.lua
 Modules\XPBar.lua
+Modules\LevelUpToast.lua
 Modules\UnitBars.lua
 Modules\BlizzardUnitFrames.lua
 Modules\AddonFonts.lua
@@ -64,12 +69,14 @@ Modules\Visibility.lua
 Modules\CharacterArmory.lua
 Modules\AFKMode.lua
 Modules\BigCursor.lua
+Modules\MapReveal.lua
 Modules\Comfort.lua
 Modules\StealthMode.lua
 Modules\MenuBar.lua
 Modules\MinimapNodes.lua
 Modules\EllesmereRaidGrowth.lua
 Modules\AishUISetup.lua
+Modules\MemDiag.lua
 
 # Auras & Procs — Core
 Modules\Auras\Core\Config.lua

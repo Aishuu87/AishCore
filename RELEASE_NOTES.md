@@ -1,5 +1,100 @@
 # AishCore
 
+## [v4.5](https://github.com/Aishuu87/AishCore/tree/v4.5) (2026-10-18)
+
+- New general optimization pass on the addon, about 30-35% faster
+
+### Settings panel
+- Subtle textured backgrounds in the settings panel, with a parchment-style border
+- New Minimize button: clicking it collapses the panel
+- New icons flagging every new category, and every new section inside another module
+- The new feature icons can be hidden or shown by clicking the text to the right of the logo
+  - New features cover the last 2 major patches (the current version and the one before it). Minor patches (e.g. 4.2.2) are not counted
+  - New features stop being new after a month. "Hide new features" is then turned on automatically
+  - Clicking "Show new features" brings back the new features of the last 2 versions at any time
+- Scrolling in a window now moves smoothly instead of abruptly jumping up or down
+- Clicking a page title expands/collapses all its sections at once
+- Double-clicking a section expands/collapses all the other sections at once too
+
+### Central Circle
+- [Forever] Dual-wield support for the auto-attack Swing Timer
+- [Forever] New option to track ranged auto-attacks only
+- [Forever] New option to ignore the off-hand and track only the main-hand weapon when dual-wielding
+- [Forever] In "Bar" mode, Left/Right fills create a second bar, while Mirror fills send the main hand and off-hand to either side of a single bar
+- New option to show a dragon decoration (Elite Dragons) when the target is elite, rare, rare elite or a world boss
+
+### XP Bar
+- The "Next Level" info now uses the XP Bar colors
+- Holding SHIFT also shows your active quests and the XP they give (Retail only)
+- On Retail, the next level shows the next 6 unlockable spells, with their level
+- [Forever] New abilities show a "+" icon, while upgrades of abilities you already know show a "^" chevron
+- [Forever] Polearms training at level 20 added for the relevant classes
+- [Forever] Shows the city where you can find the Weapon Masters to learn your weapon skills
+- New Level Up notification:
+  - It shows your stat gains
+  - It shows the newly unlocked abilities
+  - Its display can be adjusted in the AishCore options
+  - An option waits for the end of combat before showing it
+
+### Unit Frames
+- New, more complete visibility system
+  - The "Options per role" option sets different conditions depending on the spec you play
+  - New visibility conditions: "Friendly target / Attackable target", "In a group", "In an instance"
+  - When "Always" is checked, only "Hide when mounted" / "Hide in rest areas" can still decide whether the health bars are shown
+  - This visibility system will be adapted to other modules in a future update
+
+### Missing buffs
+- New "General" category:
+  - If you carry sharpening stones or oils, an alert offers to apply one to your weapon
+  - If you carry food that gives a buff, an alert offers to eat it
+  - If you carry flasks, an alert can also be shown
+- New "Talent Points & Heritage" category: when you have points to spend, clicking the alert opens the matching panel
+- New "Bags Full" alert, warning when your bags are full or almost full. A threshold sets when it shows up
+- New "Find Herbs/Minerals" alert when your character has the profession but no gathering tracking active
+- Sections and alerts reorganized
+- Crusader Aura is suggested while mounted, even with "Ignore while mounted" on
+- In combat with no aura, or with Crusader Aura, Concentration Aura and Devotion Aura are suggested (clicks are disabled in combat: you can't just click their icon)
+
+### Movement Buffs
+- This new module shows your movement and speed buffs as simple bars
+- It can be shown independently from the regular "Auras to Track"
+- [Forever] The Tauren racial "Plainsrunning" is supported too
+
+### Dynamic Bars
+- [Forever] FIX: sharpening stones were not detected correctly
+- New whitelist to add specific items that escaped the Dynamic Bars detection or don't fit any category
+- New "Teleports" category
+- New "Scrolls" category
+- New "Gadgets" category
+
+### QoL
+- New checkbox to easily turn on quest auto turn-in
+- New option to hide the red error messages in the middle of the screen (Not enough mana, You can't do that yet, etc.)
+- New option to reveal the fog of war (undiscovered areas) on your map
+- New option to set a target as your focus with Ctrl + click
+
+### 3D Animations
+- New "Random" option that plays one of the listed FX at random when the spell / aura triggers
+
+### Fixes & Misc
+- Many auras reclassified into their proper Buff/Debuff/Totem category
+- Scrollbar added to dropdown menus (fonts, textures, etc.)
+- New options to set the Cast Bar text color
+- Drinks are now supported by the Well Fed Circle
+- Herb and ore icons on the minimap optimized: the feature no longer uses any performance when neither tracking is active
+- [Forever] The Menu Bar did not open the First Aid page correctly with Ctrl+Alt+click on the Professions icon
+- Previews in menus now use a background image
+- Element placement is now pixel perfect, and small objects render much sharper
+- [Forever] The Outlaw spec has been renamed "Combat"
+- [Forever] Fire and Frost specs correctly show mana in the Central Circle
+- [Forever] Removed the Warrior "Ignore Pain" secondary resource circle, which doesn't exist in this version of the game
+- FIX: secondary professions are named correctly in the tooltip of the Menu Bar Professions button
+- FIX: heal prediction no longer worked with the new fill types of the Out-of-Combat Health Circle
+- FIX: heal prediction was not shown in the Out-of-Combat Health Circle with a radial fill
+- [Forever] FIX: the Cast Bar correctly shows "Opening" instead of "Opening - No text"
+- FIX: custom textures (SharedMedia_MyMedia) were not picked up
+- FIX: the bandage cooldown keeps showing correctly when entering combat
+
 ## [v4.4.2](https://github.com/Aishuu87/AishCore/tree/v4.4.2) (2026-10-14)
 
 - Full patch notes are now published with each release (4.4 notes included below)

@@ -385,6 +385,16 @@ local function CreateTargetBar()
     f.hpFrame = hpFrame
     f.hpTxt   = hpTxt
 
+    -- Décoration élite : ornement centré sur le bas du fond, par-dessus les barres (cf. UpdateEliteDeco)
+    local deco = CreateFrame("Frame", nil, f)
+    deco:SetFrameLevel(bar:GetFrameLevel() + 5)
+    deco:SetSize(76, 24)
+    deco:SetPoint("CENTER", bgFull, "BOTTOM", 0, -2)
+    deco.tex = deco:CreateTexture(nil, "OVERLAY")
+    deco.tex:SetAllPoints(deco)
+    deco:Hide()
+    f.deco = deco
+
     f:Hide()
     return f
 end
@@ -559,7 +569,37 @@ local function _UpdateTTName()
     end
 end
 
+-- Décoration élite : argent pour rare / rare élite, or pour élite / boss mondial (option "Décoration élite")
+local DECO_PATH = "Interface\\AddOns\\" .. addonName .. "\\Media\\UI\\"
+local DECO_TEX = { rare = "silverdetailtop", rareelite = "silverdetailtop", elite = "golddetailtop", worldboss = "golddetailtop" }
+local function _DecoKey()
+    local c = UnitClassification("target")
+    if issecretvalue and issecretvalue(c) then return nil end
+    return DECO_TEX[c]
+end
+local function UpdateEliteDeco()
+    local d = f_target and f_target.deco
+    if not d then return end
+    local db = ns.GetCfg("topTargetBar")
+    local key
+    if not (db and (db.enabled == false or db.eliteDeco == false)) then
+        if UnitExists("target") then
+            local ok, k = pcall(_DecoKey)
+            key = ok and k or nil
+        elseif ttbPreviewMode then
+            key = "golddetailtop"
+        end
+    end
+    if key then
+        d.tex:SetTexture(DECO_PATH .. key .. ".png")
+        d:Show()
+    else
+        d:Hide()
+    end
+end
+
 local function UpdateTarget()
+    UpdateEliteDeco()
     if not f_target then return end
     local _db = ns.GetCfg("topTargetBar")
     if _db and _db.enabled == false then
@@ -711,6 +751,7 @@ function TopTargetBar.Create()
                     if f_tt then RegisterStateDriver(f_tt, "visibility", "show") end
                 end
                 ttbPreviewMode = true
+                UpdateEliteDeco()
                 pcall(_UpdateTargetName)
                 pcall(_UpdateTTName)
                 -- Barre HP à 75 % pour la preview
@@ -812,7 +853,7 @@ local function _TickTargetPower()
     ns.SmoothBarValue(f_target.powerBar, cur)
 end
 
-C_Timer.NewTicker(0.1, function()
+ns.NewTicker(0.1, function()
     if f_target and f_target:IsShown() and UnitExists("target") then
         pcall(_TickTargetHP)
         pcall(_TickTargetPower)
@@ -834,6 +875,7 @@ end
 
 function TopTargetBar.ApplySettings()
     local db = ns.GetCfg("topTargetBar")
+    UpdateEliteDeco()
 
     -- Module désactivé → StateDriver "hide" (sécurisé en combat)
     -- Module activé → StateDriver normal (géré en fin de fonction)
@@ -1047,7 +1089,7 @@ evtFrame:SetScript("OnEvent", function(self, event, arg1)
 end)
 
 -- Ticker : mise à jour visibilité + couleurs toutes les 500ms (rattrape un event manqué : cible morte, sortie combat, transition de zone)
-C_Timer.NewTicker(0.5, function()
+ns.NewTicker(0.5, function()
     if not f_target then return end
     -- UnitExists plutôt que IsVisible() : ce dernier peut être false si un parent est temporairement masqué
     if not UnitExists("target") then return end

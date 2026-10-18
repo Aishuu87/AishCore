@@ -16,6 +16,8 @@ local STEP       = 10    -- ecart entre deux points essayes (unites de minimap)
 local PER_FRAME  = 20    -- points essayes par image
 local SCAN_WAIT  = 2.0   -- secondes entre deux balayages
 local IDLE_WAIT  = 4.0   -- idem quand rien n'est a chercher (pas de pistage, combat...)
+local STILL      = 4     -- verges : en deca, le joueur est considere immobile (pas de nouveau balayage)
+local STILL_SCAN = 12.0  -- secondes : balayage quand meme si on reste immobile (repousse, point ramasse par un autre)
 local MERGE      = 15    -- verges : un endroit revu a moins que ca garde sa place (moyennee)
 local SINGLE_MAX = 9     -- au plus de points qu'un seul point de minimap donne (au dela : plusieurs)
 
@@ -260,16 +262,35 @@ local function HideFrom(i)
 end
 
 -- Place les icones : depuis la position actuelle (coordonnees du monde), sinon depuis le balayage
-local lastKey
+local lastKey, lastMap, lastX, lastY, lastR, lastF
+local lastUX, lastUY, lastUF, lastZoom
+-- Position du joueur sans allocation (nil en instance ou valeur secrete)
+local function UnitXY()
+  local y, x = UnitPosition("player")
+  if not x or IsSecret(x) or IsSecret(y) then return nil end
+  return x, y
+end
 local function Follow(force)
   if not markers[1] then HideFrom(1); lastKey = nil; return end
+  -- Ni deplacement, ni rotation, ni zoom : rien a replacer (evite la table de GetPlayerMapPosition a chaque passage)
+  local ux, uy = UnitXY()
+  local uf = GetPlayerFacing and GetPlayerFacing() or 0
+  if IsSecret(uf) then uf = nil end
+  local zoom = Minimap:GetZoom()
+  if not force and lastKey and ux and uf and ux == lastUX and uy == lastUY and uf == lastUF and zoom == lastZoom then
+    return
+  end
+  lastUX, lastUY, lastUF, lastZoom = ux, uy, uf, zoom
   local map, px, py, ww, wh = MapPosition()
   local radius = C_Minimap and C_Minimap.GetViewRadius and C_Minimap.GetViewRadius()
+  if IsSecret(radius) then radius = nil end
   local half = Minimap:GetWidth() / 2
   local facing = Rotating() and GetPlayerFacing() or 0
-  local key = map and (map .. ":" .. px .. ":" .. py .. ":" .. tostring(radius) .. ":" .. facing) or "static"
-  if not force and key == lastKey then return end
-  lastKey = key
+  -- Rien n'a bouge : rien a replacer (comparaison directe, sans chaine construite a chaque passage)
+  if not force and lastKey and map == lastMap and px == lastX and py == lastY and radius == lastR and facing == lastF then
+    return
+  end
+  lastKey, lastMap, lastX, lastY, lastR, lastF = true, map, px, py, radius, facing
   local n = 0
   local sin, cos = math.sin(facing), math.cos(facing)
   for _, m in ipairs(markers) do
@@ -293,6 +314,8 @@ end
 -- Balayage -------------------------------------------------------------------------------------------------
 local scan, grid, gridWidth
 local nextScan = 0
+local scanForce = true                 -- prochain balayage sans condition (zoom, pistage, reglages)
+local scanX, scanY, scanT = nil, nil, 0
 
 local function BuildGrid(width)
   if gridWidth == width then return end
@@ -306,6 +329,7 @@ local function BuildGrid(width)
   end
 end
 
+local seen = {}
 local function Probe(left, bottom, scale, p, hits)
   Minimap:UpdateMouseoverAtPoint((left + p[1]) * scale, (bottom + p[2]) * scale)
   local d = MN._dbg
@@ -317,7 +341,7 @@ local function Probe(left, bottom, scale, p, hits)
   -- Une ligne d'infobulle peut empiler plusieurs noms (un par point sous la souris, plus des objectifs de quete :
   -- "Mage royal\nFleur de serpent\n- Fleur de serpent : 0/10"). Chaque nom compte a part, sinon une plante
   -- superposee a un marqueur de quete est lue comme un seul "nom" et son endroit est decale.
-  local seen = {}
+  wipe(seen)
   for _, line in ipairs(lines) do
     local raw = line.leftText
     if raw and not IsSecret(raw) then
@@ -542,6 +566,8 @@ local function ScanSome()
   end
 end
 
+local UpdateDriver   -- plus bas : coupe la boucle par image sans Denicher actif
+
 local function StartScan()
   local cfg = Cfg()
   nextScan = GetTime() + IDLE_WAIT
@@ -550,10 +576,20 @@ local function StartScan()
     return
   end
   local active, finders, only, finderKind = Trackers()
-  if active == 0 then                            -- aucun pistage actif : rien a chercher
+  if active == 0 or finders == 0 then            -- ni Denicher les herbes ni les mineraux : rien a chercher
     if markers[1] then markers = {}; Follow(true) end
+    if finders == 0 then UpdateDriver() end     -- pistages connus apres la connexion : on arrete la boucle
     return
   end
+  -- Immobile depuis le dernier balayage : les points n'ont pas bouge, on ne relit pas toute la minimap (chaque point
+  -- sonde rend une infobulle neuve) ; un balayage de controle a lieu quand meme toutes les STILL_SCAN s
+  local ux, uy = UnitXY()
+  local now = GetTime()
+  if not scanForce and ux and scanX and (ux - scanX) ^ 2 + (uy - scanY) ^ 2 < STILL * STILL and now - scanT < STILL_SCAN then
+    nextScan = now + SCAN_WAIT
+    return
+  end
+  scanForce, scanX, scanY, scanT = false, ux, uy, now
   if indexMissing then BuildIndex() end
   BuildGrid(Minimap:GetWidth())
   scan = { next = 1, hits = {}, only = only, finderKind = finderKind }
@@ -583,14 +619,28 @@ local function OnUpdate(_, el)
   end
 end
 
+-- Boucle par image seulement si un Denicher (herbes / mineraux) est actif : sans lui (pistage coupe, ou ni herboriste
+-- ni mineur), aucun point ne peut apparaitre. Le client qui tait ses pistages (Trackers() = nil) garde la boucle.
+function UpdateDriver()
+  local _, finders = Trackers()
+  if finders == 0 then
+    driver:SetScript("OnUpdate", nil)
+    scan = nil
+    if markers[1] then markers = {}; HideFrom(1) end
+  elseif not driver:GetScript("OnUpdate") then
+    driver:SetScript("OnUpdate", OnUpdate)
+    nextScan, scanForce = 0, true
+  end
+end
+
 function MN.ApplySettings()
   local cfg = Cfg()
   if cfg.enabled == true and MN.Available() then
-    driver:SetScript("OnUpdate", OnUpdate)
     for _, f in ipairs(pool) do f._styled = nil end
     if Minimap.SetIconScale then Minimap:SetIconScale((cfg.dotScale or 100) / 100) end
     lastKey = nil
-    nextScan = 0
+    nextScan, scanForce = 0, true
+    UpdateDriver()
   else
     driver:SetScript("OnUpdate", nil)
     scan, markers = nil, {}
@@ -611,8 +661,9 @@ ev:SetScript("OnEvent", function(_, event)
     markers = {}
     MN.ApplySettings()
   else
-    nextScan = 0        -- pistage ou zoom change : balayer tout de suite
+    nextScan, scanForce = 0, true   -- pistage ou zoom change : balayer tout de suite
     lastKey = nil
+    if event == "MINIMAP_UPDATE_TRACKING" and Cfg().enabled == true and MN.Available() then UpdateDriver() end
   end
 end)
 
@@ -653,5 +704,5 @@ SlashCmdList["AISHNODES"] = function()
   print(P .. "noms connus : " .. table.concat(loaded, ", "))
   -- Remise a zero : le prochain balayage remplit des chiffres frais
   d.probes, d.withData, d.names, d.sample = 0, 0, {}, {}
-  nextScan = 0
+  nextScan, scanForce = 0, true
 end

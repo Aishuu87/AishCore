@@ -40,7 +40,11 @@ local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_Food_15"
 local EAT_IDS = { [433] = true, [434] = true, [435] = true, [1131] = true, [192002] = true, [396920] = true }
 local FED_IDS = { [19705] = true, [19706] = true, [19708] = true, [19709] = true, [19710] = true, [19711] = true,
                   [24869] = true, [104280] = true, [462179] = true }
-local eatNames, fedNames = {}, {}
+-- Boissons ("Boisson" 430, "Rafraichissement" 167152 : nourriture / eau invoquees du mage) : suivies seulement avec
+-- l'option "showWithoutBuff", comme une nourriture sans buff (jamais de passage au vert, sauf si l'infobulle de l'objet
+-- annonce "Bien nourri"). Reconnues surtout par leur nom localise, qui couvre tous les rangs.
+local DRINK_IDS = { [430] = true, [167152] = true }
+local eatNames, fedNames, drinkNames = {}, {}, {}
 local function FillNames(ids, out)
   if not (C_Spell and C_Spell.GetSpellName) then return end
   for id in pairs(ids) do
@@ -68,6 +72,7 @@ local function Cfg()
 end
 
 -- Arc radial natif (meme systeme que OutOfCombatResourceCircle.lua)
+
 local function SetupRadialArc(sb)
   ns.SetSmoothStatusBarTexture(sb, ns.Media.circle)
   sb:SetRenderMode(Enum.StatusBarRenderMode.Radial)
@@ -517,6 +522,9 @@ local function ParseStats(text)
   text = text:lower()
   text = text:gsub("%d+%s*s%f[%A]", ""):gsub("%d+%s*sec%a*", ""):gsub("%d+%s*heures?", ""):gsub("%d+%s*hours?", "")
              :gsub("%d+%s*min%a*", ""):gsub("%d+%s*h%f[%A]", ""):gsub("%d+%s*%%", "")
+  -- Soins / mana rendus par le repas ("Rend 58 points de vie", "restores 58 health") : pas une stat du buff
+  text = text:gsub("%d+%s*points?%s*de%s*vie", ""):gsub("%d+%s*points?%s*de%s*mana", "")
+             :gsub("%d+%s*health", ""):gsub("%d+%s*mana", ""):gsub("%d+%s*life", "")
   local nums = {}
   for pos, n in text:gmatch("()(%d+)") do nums[#nums + 1] = { pos = pos, v = n } end
   local stats, seen = {}, {}
@@ -530,15 +538,14 @@ local function ParseStats(text)
   end
   table.sort(stats, function(a, b) return a.pos < b.pos end)
   local out = {}
+  -- Un meme nombre peut servir a plusieurs stats : "bonus de 2 a l'Endurance et a l'Esprit" = +2 a chacune
   for _, st in ipairs(stats) do
     local best, bd
     for _, n in ipairs(nums) do
-      if not n.used then
-        local d = math.abs(n.pos - st.pos)
-        if not bd or d < bd then best, bd = n, d end
-      end
+      local d = math.abs(n.pos - st.pos)
+      if not bd or d < bd then best, bd = n, d end
     end
-    if best then best.used = true; out[#out + 1] = { v = best.v, label = st.label, key = st.key } end
+    if best then out[#out + 1] = { v = best.v, label = st.label, key = st.key } end
   end
   return #out > 0 and out or nil
 end
@@ -649,8 +656,11 @@ local function Scan()
   if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return false, false, nil, nil, 0, nil, nil end
   if not next(eatNames) then FillNames(EAT_IDS, eatNames) end
   if not next(fedNames) then FillNames(FED_IDS, fedNames) end
+  if not next(drinkNames) then FillNames(DRINK_IDS, drinkNames) end
   local eating, fed, icon, newBuffIcon, fedExp = false, false, nil, nil, 0
   local eatDur, eatExp, eatIcon, fedInst, eatInst
+  local withDrinks = (Cfg() or {}).showWithoutBuff
+  local drink   -- aura de boisson (seulement si aucune aura de nourriture)
   local issecret = issecretvalue
   local fresh = {}
   for i = 1, 40 do
@@ -672,6 +682,8 @@ local function Scan()
         fedExp = tonumber(a.expirationTime) or 0
         fedInst = inst
         fedNameSeen = tostring(name) .. " #" .. tostring(sid)
+      elseif withDrinks and not drink and (DRINK_IDS[sid] or (name and drinkNames[name])) then
+        drink = a
       elseif inst then
         fresh[inst] = true
         if state == "eating" and not knownAuras[inst] then newBuffIcon = a.icon end
@@ -679,7 +691,54 @@ local function Scan()
     end
   end
   knownAuras = fresh
-  return eating, fed, icon, newBuffIcon, fedExp, eatDur, eatExp, eatIcon, fedInst, eatInst
+  -- Boisson seule : traitee comme un repas (drinkOnly = jamais "Bien nourri" sauf objet qui l'annonce)
+  local drinkOnly = false
+  if not eating and drink then
+    eating, drinkOnly = true, true
+    eatNameSeen = tostring(drink.name) .. " #" .. tostring(drink.spellId)
+    eatIcon, eatInst = drink.icon, drink.auraInstanceID
+    local d, e = drink.duration, drink.expirationTime
+    if type(d) == "number" and type(e) == "number" and not (issecret and (issecret(d) or issecret(e))) and d > 0 then
+      eatDur, eatExp = d, e
+    end
+  end
+  return eating, fed, icon, newBuffIcon, fedExp, eatDur, eatExp, eatIcon, fedInst, eatInst, drinkOnly
+end
+
+-- Pour les Buffs manquants (sans effet de bord sur le suivi du repas) : buff "Bien nourri" actif ? en train de manger ?
+-- sids / names / n optionnels : buffs deja lus par l'appelant (cache des Buffs manquants), sans relecture des auras
+function WellFedCircle.FedState(sids, names, n)
+  if not next(eatNames) then FillNames(EAT_IDS, eatNames) end
+  if not next(fedNames) then FillNames(FED_IDS, fedNames) end
+  local fed, eating = false, false
+  local issecret = issecretvalue
+  if sids then
+    for i = 1, n do
+      local sid, name = sids[i], names[i]
+      if not (issecret and (issecret(sid) or issecret(name))) then
+        if EAT_IDS[sid] or (name and eatNames[name]) then eating = true
+        elseif FED_IDS[sid] or IsFedName(name) then fed = true end
+      end
+    end
+    return fed, eating
+  end
+  if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return false, false end
+  for i = 1, 40 do
+    local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
+    if not ok or not a then break end
+    local sid, name = a.spellId, a.name
+    if not (issecret and (issecret(sid) or issecret(name))) then
+      if EAT_IDS[sid] or (name and eatNames[name]) then eating = true
+      elseif FED_IDS[sid] or IsFedName(name) then fed = true end
+    end
+  end
+  return fed, eating
+end
+
+-- Nourriture qui donne "Bien nourri" (infobulle de l'objet ; nil = objet pas encore en cache)
+function WellFedCircle.FoodGivesWellFed(itemID)
+  local info = ItemFoodInfo(itemID)
+  return info and info.fed or false
 end
 
 function WellFedCircle.Refresh(updateInfo)
@@ -690,7 +749,7 @@ function WellFedCircle.Refresh(updateInfo)
     if state then SetState(nil) end
     return
   end
-  local eating, fed, icon, newBuffIcon, fedExp, eatDur, eatExp, eatIcon, fedInst, eatInst = Scan()
+  local eating, fed, icon, newBuffIcon, fedExp, eatDur, eatExp, eatIcon, fedInst, eatInst, drinkOnly = Scan()
   if not eating then
     skipEat, sessionNoBuff = false, false
     sessionEatInst, sessionEatExp = nil, nil
@@ -712,6 +771,8 @@ function WellFedCircle.Refresh(updateInfo)
     if info and info.fed == false then
       if cfg.showWithoutBuff then sessionNoBuff = true else skipEat = true; return end
     end
+    -- Boisson : comme une nourriture sans buff, sauf si l'objet bu annonce "Bien nourri"
+    if drinkOnly and not (info and info.fed) then sessionNoBuff = true end
     sessionKnownFed = info ~= nil and info.fed == true
     sessionStats = info and info.stats or nil
     sessionDelay = (info and info.delay) or FED_DELAY
@@ -930,7 +991,7 @@ function WellFedCircle.SetPreview(on, forced)
   SetState("eating")
   local total = EAT_TOTAL
   local t0 = GetTime()
-  previewTicker = C_Timer.NewTicker(0.1, function()
+  previewTicker = ns.NewTicker(0.1, function()
     local t = (GetTime() - t0) % total   -- cycle continu : le cercle ne disparait jamais
     if t < FED_DELAY then
       if state ~= "eating" then SetState(nil); SetState("eating") end

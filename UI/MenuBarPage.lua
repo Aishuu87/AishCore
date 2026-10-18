@@ -33,13 +33,13 @@ function ns.BuildMenuBarPage(container, W, NewLayout)
   -- Apercu epingle ---------------------------------------------------------------------------------
   local pin = CreateFrame("Frame", nil, container, "BackdropTemplate")
   pin:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-  pin:SetBackdropColor(0.07, 0.065, 0.055, 1)
   pin:SetBackdropBorderColor(unpack(Theme.border))
   pin:SetClipsChildren(true)
+  SW.ApplyPreviewScreen(pin)   -- capture d'ecran du jeu en fond
   local strip = MB and MB.NewStrip(pin, true)
   local hint = pin:CreateFontString(nil, "OVERLAY")
   hint:SetFont(ns.Media.fontGui, 10)
-  hint:SetTextColor(unpack(Theme.textDim))
+  hint:SetTextColor(0.28, 0.17, 0.07, 1)   -- marron fonce, lisible sur la capture d'ecran du fond
   hint:SetPoint("BOTTOM", pin, "BOTTOM", 0, 6)
   hint:SetText(L["MENUBAR_PREVIEW_HINT"])
 

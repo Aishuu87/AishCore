@@ -90,6 +90,15 @@ for _, e in ipairs(STATIC_ENTRIES) do
   end
 end
 
+-- Buffs de deplacement : cadre d'une rangee, present meme sans buff actif
+STATIC_ENTRIES[#STATIC_ENTRIES + 1] = {
+  category = "movementBuffs",
+  getFrame = function()
+    local MVB = ns.Modules and ns.Modules.MovementBuffs
+    return MVB and MVB.GetHoverFrame and MVB.GetHoverFrame()
+  end,
+}
+
 -- Barre de menu
 STATIC_ENTRIES[#STATIC_ENTRIES + 1] = {
   category = "menuBar",
@@ -252,6 +261,7 @@ local function EnsureWidgets()
   local gBorder = gearBtn:CreateTexture(nil, "BORDER")
   gBorder:SetPoint("TOPLEFT", -1, 1); gBorder:SetPoint("BOTTOMRIGHT", 1, -1)
   gBorder:SetColorTexture(0.35, 0.75, 1, 0.9)
+  highlight._gBorder = gBorder
   local gIcon = gearBtn:CreateTexture(nil, "ARTWORK")
   gIcon:SetPoint("TOPLEFT", 3, -3); gIcon:SetPoint("BOTTOMRIGHT", -3, 3)
   gIcon:SetTexture("Interface\\Icons\\Trade_Engineering")
@@ -275,6 +285,12 @@ local function ShowHighlight(frame, category, gearAnchor)
   hoveredFrame    = frame
   hoveredCategory = category
   highlight.nameText:SetText(EntryName(hoveredEntry))
+  -- Couleur des hitbox : "cercle de puissance" des Couleurs Thematiques, sinon le bleu d'origine (ns.HitboxColor)
+  local r, g, b = ns.HitboxColor()
+  highlight:SetBackdropColor(r, g, b, 0.16)
+  highlight:SetBackdropBorderColor(r, g, b, 0.9)
+  highlight._gBorder:SetColorTexture(r, g, b, 0.9)
+  highlight.nameText:SetTextColor(r + (1 - r) * 0.35, g + (1 - g) * 0.35, b + (1 - b) * 0.35, 1)   -- un ton plus clair
   highlight:ClearAllPoints()
   highlight:SetPoint("TOPLEFT", frame, "TOPLEFT", -HL_PAD, HL_PAD)
   highlight:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", HL_PAD, -HL_PAD)
@@ -382,17 +398,21 @@ local function EntryMatches(e, id)
 end
 
 local function StyleBox(b, lit)
-  if b._lit == lit then return end
-  b._lit = lit
   if lit then
+    if b._lit == true then return end
+    b._lit, b._cr = true, nil
     b:SetBackdropColor(1, 0.85, 0.3, 0.22)
     b:SetBackdropBorderColor(1, 0.85, 0.3, 1)
     b._glow:Show(); b._glowAG:Play()
-  else
-    b:SetBackdropColor(0.2, 0.6, 1, 0.05)
-    b:SetBackdropBorderColor(0.35, 0.75, 1, 0.55)
-    b._glowAG:Stop(); b._glow:Hide()
+    return
   end
+  -- Etat normal : couleur des hitbox (Couleurs Thematiques, sinon bleu), reappliquee si elle change (spe, reglage)
+  local r, g, bl = ns.HitboxColor()
+  if b._lit == false and b._cr == r and b._cg == g and b._cb == bl then return end
+  if b._lit then b._glowAG:Stop(); b._glow:Hide() end
+  b._lit, b._cr, b._cg, b._cb = false, r, g, bl
+  b:SetBackdropColor(r, g, bl, 0.05)
+  b:SetBackdropBorderColor(r, g, bl, 0.55)
 end
 
 local function HideBoxes()
@@ -483,7 +503,7 @@ end
 
 local function Start()
   if ticker then return end
-  ticker = C_Timer.NewTicker(TICK_INTERVAL, Tick)
+  ticker = ns.NewTicker(TICK_INTERVAL, Tick)
 end
 
 local function Stop()

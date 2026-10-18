@@ -193,10 +193,10 @@ local HEAL_SPECS = {
 }
 
 local function GetSpecID()
-  if not GetSpecialization then return nil end
-  local idx = GetSpecialization()
+  if not ns.GetSpecialization then return nil end
+  local idx = ns.GetSpecialization()
   if not idx then return nil end
-  local id = GetSpecializationInfo(idx)
+  local id = ns.GetSpecializationInfo(idx)
   return id
 end
 
@@ -665,7 +665,7 @@ function OutOfCombatResourceCircle.DetectSecondaryDots()
   OutOfCombatResourceCircle.UpdateSecDotColors()
 
   local secSkip = 0
-  secUpdateTicker = C_Timer.NewTicker(0.016, function()
+  secUpdateTicker = ns.NewTicker(0.016, function()
     if lastVisibilityState ~= true then
       secSkip = secSkip + 1
       if secSkip % 15 ~= 0 then return end
@@ -952,7 +952,7 @@ function OutOfCombatResourceCircle.SetPreview(on)
     if bar.overlayFrame then bar.overlayFrame:Show(); bar.overlayFrame:SetAlpha(1); bar.overlayFrame:SetScale(1) end
     ApplyArcValue(72)
     bar.text:SetText("72")
-    previewTicker = C_Timer.NewTicker(0.03, function()
+    previewTicker = ns.NewTicker(0.03, function()
       if not (bar and previewMode and bar:IsShown()) then return StopPreviewAnim() end
       previewPct = PreviewSweep()
       ApplyArcValue(previewPct)

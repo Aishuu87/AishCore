@@ -42,7 +42,7 @@ function ns.FadeTo(frame, targetAlpha, duration, delay)
     if math.abs(startAlpha - targetAlpha) < 0.01 then frame:SetAlpha(targetAlpha); return end
     local startTime = GetTime() + delay
     local ticker
-    ticker = C_Timer.NewTicker(0.016, function()
+    ticker = _addon.NewTicker(0.016, function()
         local now = GetTime()
         if now < startTime then return end
         local progress = math.min((now - startTime) / duration, 1)

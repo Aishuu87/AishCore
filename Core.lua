@@ -62,13 +62,16 @@ function ns.FireSpecChanged()
 	end
 end
 
--- FOREVER UNIQUEMENT. En Retail, reassigner ces globals depuis un addon les marquerait (taint)
--- et contaminerait le code securise de Blizzard qui les appelle : le bloc ne s'execute pas.
--- Globals de specialisation : sur le client Forever ils ne sont plus exposes dans le namespace
--- global, et surtout le personnage n'a PAS de specialisation -- seulement trois arbres de talents.
--- On reconstitue donc la notion de spe a partir des points investis : l'arbre le plus fourni fait
--- la spe. Tout le reste de l'addon (couleurs thematiques, profils par spe, barre de rotation)
--- continue alors de fonctionner sans une seule modification, puisqu'il interroge ces globals.
+-- Specialisation, version AishCore : TOUT l'addon passe par ns.GetSpecialization / ns.GetSpecializationInfo /
+-- ns.GetSpecializationRole, jamais par les globals du jeu. En Retail ce sont les fonctions natives.
+-- FOREVER : le personnage n'a PAS de specialisation -- seulement trois arbres de talents. On reconstitue la notion
+-- de spe a partir des points investis (l'arbre le plus fourni fait la spe), mais UNIQUEMENT pour AishCore : les
+-- globals du jeu ne sont plus remplaces. Remplaces, le Cooldown Manager de Blizzard (qui les appelle pour choisir la
+-- disposition de la spe) recevait une spe "retail" inventee et restait vide (barres sans icones, CDM qui ne
+-- s'active pas sur le druide, build CDM du paladin jamais verifiable).
+ns.GetSpecialization     = _G.GetSpecialization
+ns.GetSpecializationInfo = _G.GetSpecializationInfo
+ns.GetSpecializationRole = _G.GetSpecializationRole
 if ns.IsForever then
 	local CSI = C_SpecializationInfo
 
@@ -93,7 +96,7 @@ if ns.IsForever then
 		WARRIOR     = { 71, 72, 73 },
 	}
 
-	-- Roles, pour GetSpecializationRole (detection healer/tank ailleurs dans l'addon).
+	-- Roles, pour ns.GetSpecializationRole (detection healer/tank ailleurs dans l'addon).
 	local SPEC_ROLES = {
 		[65] = "HEALER", [256] = "HEALER", [257] = "HEALER", [264] = "HEALER",
 		[105] = "HEALER", [270] = "HEALER",
@@ -108,7 +111,7 @@ if ns.IsForever then
 	-- Une lecture geometrique (decoupage des colonnes aux plus grands ecarts) sert de dernier
 	-- recours, pour le cas ou une classe n'exposerait pas ce rattachement.
 	-- Cache du parcours lui-meme. Il a DEUX appelants : DominantTalentTab et
-	-- GetSpecializationInfo (qui y cherche le nom et l'icone de la branche). Cacher seulement
+	-- ns.GetSpecializationInfo (qui y cherche le nom et l'icone de la branche). Cacher seulement
 	-- le premier laissait le second relancer un scan complet -- ~100 appels C_Traits.GetNodeInfo,
 	-- soit ~100 Ko -- a chaque resolution de spe, plusieurs fois par seconde.
 	local TRAIT_SCAN_TTL = 60
@@ -250,7 +253,7 @@ if ns.IsForever then
 				elseif p == bestPoints and p > 0 then tied = true end
 			end
 			-- Egalite entre branches (ou aucun point) : pas de spe. La spe par defaut choisie dans les
-			-- couleurs thematiques prend alors le relais (cf. GetSpecialization plus bas) -- le dernier
+			-- couleurs thematiques prend alors le relais (cf. ns.GetSpecialization plus bas) -- le dernier
 			-- point investi ne tranche plus.
 			if tied then bestBranch = nil end
 			cachedTab = bestBranch
@@ -323,7 +326,7 @@ if ns.IsForever then
 		return nil
 	end
 
-	-- Ce client EXPOSE GetSpecialization et GetSpecializationInfo, mais elles ne decrivent aucune
+	-- Ce client EXPOSE ns.GetSpecialization et ns.GetSpecializationInfo, mais elles ne decrivent aucune
 	-- specialisation reelle : l'ID renvoye (1489) n'appartient a aucune specialisation connue.
 	-- Tester leur simple existence ne suffit donc pas.
 	-- Critere retenu : l'ID designe-t-il une specialisation que l'addon sait interpreter, c'est-a-dire
@@ -332,9 +335,9 @@ if ns.IsForever then
 	-- build suffirait a faire croire a de vraies specialisations et desactiverait la detection.
 	-- Les fonctions natives restent utilisees des qu'elles sont valides : comportement retail
 	-- strictement inchange.
-	local rawGetSpecialization     = GetSpecialization
-	local rawGetSpecializationInfo = GetSpecializationInfo
-	local rawGetSpecializationRole = GetSpecializationRole
+	local rawGetSpecialization     = ns.GetSpecialization
+	local rawGetSpecializationInfo = ns.GetSpecializationInfo
+	local rawGetSpecializationRole = ns.GetSpecializationRole
 
 	local nativeOK, nativeAt = nil, -1
 	local function NativeSpecsAreReal()
@@ -371,7 +374,7 @@ if ns.IsForever then
 		return DominantTalentTab() == nil and DefaultTalentTab() ~= nil
 	end
 
-	GetSpecialization = function(...)
+	ns.GetSpecialization = function(...)
 		if NativeSpecsAreReal() then
 			if type(rawGetSpecialization) == "function" then return rawGetSpecialization(...) end
 			if CSI and CSI.GetSpecialization then return CSI.GetSpecialization(...) end
@@ -379,7 +382,7 @@ if ns.IsForever then
 		return DominantTalentTab() or DefaultTalentTab()
 	end
 
-	GetSpecializationInfo = function(index, ...)
+	ns.GetSpecializationInfo = function(index, ...)
 		if NativeSpecsAreReal() then return rawGetSpecializationInfo(index, ...) end
 		local specID = TabSpecID(index)
 		if not specID then return nil end
@@ -397,7 +400,7 @@ if ns.IsForever then
 		return specID, name, nil, icon, role
 	end
 
-	GetSpecializationRole = function(index, ...)
+	ns.GetSpecializationRole = function(index, ...)
 		if NativeSpecsAreReal() and type(rawGetSpecializationRole) == "function" then
 			return rawGetSpecializationRole(index, ...)
 		end
@@ -405,6 +408,17 @@ if ns.IsForever then
 		if ns.IsSpecDefaulted() and index == DefaultTalentTab() then return specID and "DAMAGER" or nil end
 		return specID and (SPEC_ROLES[specID] or "DAMAGER") or nil
 	end
+end
+
+-- Nombre de specialisations a lister dans les reglages. Sur Forever, GetNumSpecializations compte les builds
+-- de talents (1 le plus souvent) : on compte les branches de l'arbre (cf. TALENT_TAB_SPECS).
+function ns.GetNumSpecs()
+	if ns.IsForever and ns.GetTalentTabSpecID and not (ns.NativeSpecsAreReal and ns.NativeSpecsAreReal()) then
+		local n = 0
+		while ns.GetTalentTabSpecID(n + 1) do n = n + 1 end
+		if n > 0 then return n end
+	end
+	return GetNumSpecializations and GetNumSpecializations() or 0
 end
 
 -- /aishspec : ce que l'addon deduit de tes arbres de talents, et ce que les API repondent.
@@ -435,8 +449,8 @@ SlashCmdList["AISHSPEC"] = function()
 			end
 		end
 	end
-	local idx = GetSpecialization and GetSpecialization()
-	local sid = idx and GetSpecializationInfo and GetSpecializationInfo(idx)
+	local idx = ns.GetSpecialization and ns.GetSpecialization()
+	local sid = idx and ns.GetSpecializationInfo and ns.GetSpecializationInfo(idx)
 	print(P .. "arbre dominant=" .. tostring(idx) .. "  specID deduit=" .. tostring(sid))
 	print(P .. "cle de spe=" .. tostring(ns.Auras and ns.Auras.GetSpecKey and ns.Auras.GetSpecKey()))
 	local CLR = ns.Modules and ns.Modules.Colors
@@ -546,15 +560,16 @@ end
 -- Specialisations qui jouent sur des cibles alliees. Le role Blizzard "HEALER" les
 -- couvre toutes sauf Augmentation (1473), classee DAMAGER mais qui cible ses allies.
 local HEALER_LIKE_SPECS = { [1473] = true }
+ns.HEALER_LIKE_SPECS = HEALER_LIKE_SPECS   -- Augmentation (evocateur) : traitee comme une spe de soin
 
 --- Vrai en spe de soin (ou assimilee, cf. HEALER_LIKE_SPECS).
 function ns.IsHealerLikeSpec()
-  local idx = GetSpecialization and GetSpecialization()
+  local idx = ns.GetSpecialization and ns.GetSpecialization()
   if not idx or idx == 0 then return false end
-  if GetSpecializationRole and GetSpecializationRole(idx) == "HEALER" then return true end
+  if ns.GetSpecializationRole and ns.GetSpecializationRole(idx) == "HEALER" then return true end
   local specID = ns._specID
-  if not specID and GetSpecializationInfo then
-    specID = select(1, GetSpecializationInfo(idx))
+  if not specID and ns.GetSpecializationInfo then
+    specID = select(1, ns.GetSpecializationInfo(idx))
   end
   return (specID and HEALER_LIKE_SPECS[specID]) and true or false
 end
@@ -598,6 +613,19 @@ end
 function ns.GetCfg(key)
   if ns.DB and ns.DB[key] ~= nil then return ns.DB[key] end
   return ns.Defaults[key]
+end
+
+-- Couleur des cadres de hitbox (survol des modules, page Modules, zone cliquable des barres d'unite) : "cercle de
+-- puissance" des Couleurs Thematiques ; avec les couleurs de base (colors.useClassDefaults), le bleu d'origine.
+ns.HITBOX_BLUE = { 0.35, 0.75, 1 }
+function ns.HitboxColor()
+  local C = ns.Modules and ns.Modules.Colors
+  if C and C.Get and ns.DB and ns.DB.colors and not ns.DB.colors.useClassDefaults then
+    local c = C.Get("powercircle")
+    if c and c[1] then return c[1], c[2], c[3] end
+  end
+  local b = ns.HITBOX_BLUE
+  return b[1], b[2], b[3]
 end
 
 -- Prefixe une cle "resourceCircle" pour la rendre specifique a la spec active
@@ -1037,8 +1065,17 @@ end
 
 --- Chemin de texture pour une cle de ns.BAR_TEXTURES. Une cle inconnue, ou connue mais
 --- devenue introuvable (media pack desinstallee), retombe sur la texture par defaut.
+-- Cle "lsm:<nom>" : texture de barre enregistree dans LibSharedMedia par une media pack (SharedMedia_MyMedia...)
+-- et absente de la liste ci-dessus (cf. ns.GetBarTextureList).
+local LSM_PREFIX = "lsm:"
 function ns.ResolveBarTexFromKey(texKey)
     local LSM = GetLSM()
+    if type(texKey) == "string" and texKey:sub(1, #LSM_PREFIX) == LSM_PREFIX then
+        local p = LSM and LSM:Fetch("statusbar", texKey:sub(#LSM_PREFIX + 1), true)
+        if p then return p end
+        local def = FindBarTexEntry(ns.BAR_TEXTURE_DEFAULT)
+        return (def and BarTexEntryPath(def, LSM)) or ns.Media.fallbackBar
+    end
     local entry = FindBarTexEntry(texKey)
     local path = entry and BarTexEntryPath(entry, LSM)
     if path then return path end
@@ -1051,13 +1088,20 @@ end
 -- n'apparaissent que si LibSharedMedia les fournit -- c'est le bonus pour qui installe
 -- une media pack (SharedMedia, SharedMedia_MyMedia, ElvUI...).
 local _barTexListCache
+local _barTexListLsmCount = -1
 function ns.GetBarTextureList()
-    if _barTexListCache then return _barTexListCache end
     local LSM = GetLSM()
+    local lsmNames = LSM and LSM:List("statusbar") or {}
+    -- Cache invalide des que LSM connait une texture de plus (media pack chargee apres nous)
+    if _barTexListCache and _barTexListLsmCount == #lsmNames then return _barTexListCache end
     local out, complete = {}, true
+    local seenLsm, seenPath = {}, {}
     for _, e in ipairs(ns.BAR_TEXTURES) do
-        if BarTexEntryPath(e, LSM) then
+        local p = BarTexEntryPath(e, LSM)
+        if p then
             out[#out + 1] = { value = e.value, text = e.text }
+            if e.lsm then seenLsm[e.lsm] = true end
+            seenPath[tostring(p):lower():gsub("/", "\\")] = true
         else
             complete = false
         end
@@ -1065,9 +1109,22 @@ function ns.GetBarTextureList()
     if #out == 0 then
         out[1] = { value = ns.BAR_TEXTURE_DEFAULT, text = "Flat (WoW)" }
     end
+    -- Toutes les autres textures de barre connues de LibSharedMedia (SharedMedia_MyMedia, ElvUI...), triees par nom,
+    -- sans doublon avec la liste ci-dessus (meme nom LSM ou meme fichier).
+    local extra = {}
+    for _, name in ipairs(lsmNames) do
+        if not seenLsm[name] then
+            local p = LSM:Fetch("statusbar", name, true)
+            if p and not seenPath[tostring(p):lower():gsub("/", "\\")] then
+                extra[#extra + 1] = { value = LSM_PREFIX .. name, text = name }
+            end
+        end
+    end
+    table.sort(extra, function(a, b) return a.text:lower() < b.text:lower() end)
+    for _, e in ipairs(extra) do out[#out + 1] = e end
     -- LSM peut encore se charger apres nous : on ne met en cache que si la liste est
     -- complete, sinon on reconstruit au prochain appel.
-    if complete then _barTexListCache = out end
+    if complete then _barTexListCache = out; _barTexListLsmCount = #lsmNames end
     return out
 end
 
@@ -1241,6 +1298,62 @@ end
 local _fontObjs = {}
 -- `path`/`size` peuvent etre des fonctions : relues a chaque tentative (le profil peut changer apres le login).
 ns._fontDebug = {}
+
+-- Garde de police : si un appel exterieur (autre addon, objet Font de repli...) repose une autre police sur un
+-- texte suivi, la police voulue est reposee a la frame suivante. L'origine de l'appel est notee pour /aishfont.
+local _guarding = false
+local function CheckGuard(fs)
+  local w = fs._aishWant
+  if not w then return end
+  local ok, cur = pcall(fs.GetFont, fs)
+  if not ok or (cur and cur:lower():gsub("/", "\\") == w[1]:lower():gsub("/", "\\")) then return end
+  _guarding = true
+  pcall(fs.SetFont, fs, w[1], w[2], w[3])
+  _guarding = false
+end
+local function OnGuardedFont(fs)
+  if _guarding or not fs._aishWant then return end
+  local d = ns._fontDebug[fs._aishWant.key]
+  if d then
+    local ok, st = pcall(debugstack, 3, 2, 0)
+    if ok and type(st) == "string" and not (issecretvalue and issecretvalue(st)) then d.lastCaller = st:gsub("\n", " / ") end
+  end
+  C_Timer.After(0, function() CheckGuard(fs) end)
+end
+function ns.GuardFont(fs, key, path, size, flags)
+  if not (fs and type(path) == "string" and size) then return end
+  local w = fs._aishWant
+  if w then w[1], w[2], w[3], w.key = path, size, flags or "", key
+  else
+    fs._aishWant = { path, size, flags or "", key = key }
+    hooksecurefunc(fs, "SetFont", OnGuardedFont)
+    hooksecurefunc(fs, "SetFontObject", OnGuardedFont)
+  end
+  if not ns._fontDebug[key] then ns._fontDebug[key] = { fs = fs, wanted = path, used = path .. " (garde)", ok = true } end
+end
+
+-- Controle periodique (hors combat, toutes les 2 s) : un texte suivi peut retomber en 2002 sans passer par SetFont /
+-- SetFontObject (constate en jeu sur le texte du cercle de ressource hors combat, aucun appel exterieur note), donc
+-- hors de portee du garde. La police voulue est alors reposee ; /aishfont compte ces reparations silencieuses.
+ns.NewTicker(2, function()
+  if InCombatLockdown() then return end
+  for _, d in pairs(ns._fontDebug) do
+    local fs = d.fs
+    local w = fs and fs._aishWant
+    if w then
+      local ok, cur = pcall(fs.GetFont, fs)
+      -- Egalite stricte d'abord : la normalisation (lower / gsub) cree des chaines, seulement si elles different
+      if ok and cur and cur ~= w[1] and cur:lower():gsub("/", "\\") ~= w[1]:lower():gsub("/", "\\") then
+        d.silentFix = (d.silentFix or 0) + 1
+        d.silentFrom, d.silentAt = cur, GetTime()
+        _guarding = true
+        pcall(fs.SetFont, fs, w[1], w[2], w[3])
+        _guarding = false
+      end
+    end
+  end
+end)
+
 function ns.ApplyFontReliable(fs, key, path, size, flags)
     if not fs then return end
     flags = flags or ""
@@ -1250,10 +1363,19 @@ function ns.ApplyFontReliable(fs, key, path, size, flags)
         -- Pose directe d'abord (flags "" explicite, comme les textes qui marchent) ; l'objet Font ne sert que
         -- si le texte ne porte pas la police demandee ensuite.
         if p and fs.SetFont then
+            _guarding = true
             pcall(fs.SetFont, fs, p, sz, flags)
+            _guarding = false
+            ns.GuardFont(fs, key, p, sz, flags)
             local cur = fs:GetFont()
             if cur and cur:lower():gsub("/", "\\") == p:lower():gsub("/", "\\") then
-                ns._fontDebug[key] = { fs = fs, wanted = p, used = p .. " (direct)", ok = true, at = GetTime() }
+                -- Objet Font de repli pose lors d'une tentative precedente : on l'aligne aussi, sinon il peut
+                -- ramener la 2002 par-dessus la pose directe.
+                local fo = _fontObjs[key]
+                if fo then pcall(fo.SetFont, fo, p, sz, flags) end
+                local prev = ns._fontDebug[key]
+                ns._fontDebug[key] = { fs = fs, wanted = p, used = p .. " (direct)", ok = true, at = GetTime(),
+                                       lastCaller = prev and prev.lastCaller }
                 return
             end
         end
@@ -1265,8 +1387,12 @@ function ns.ApplyFontReliable(fs, key, path, size, flags)
             pcall(fo.SetFont, fo, "Fonts\\2002.TTF", sz, flags)
             used = "Fonts\\2002.TTF (repli)"
         end
+        _guarding = true
         fs:SetFontObject(fo)
-        ns._fontDebug[key] = { fs = fs, wanted = p, used = used, ok = ok, res = res, at = GetTime() }
+        _guarding = false
+        local prev = ns._fontDebug[key]
+        ns._fontDebug[key] = { fs = fs, wanted = p, used = used, ok = ok, res = res, at = GetTime(),
+                               lastCaller = prev and prev.lastCaller }
     end
     apply()
     -- Retail aussi : une police d'un autre addon (SharedMedia) peut ne pas etre encore enregistree
@@ -1287,14 +1413,29 @@ do
   local okMeta, meta = pcall(function() return getmetatable(UIParent:CreateFontString(nil, "BACKGROUND")).__index end)
   if okMeta and meta and debugstack then
     local isSecret = issecretvalue or function() return false end
+    -- Le crochet voit les SetFont de TOUS les addons (barres de nom, compteurs...) : la pile d'appels (longue chaine) n'est
+    -- lue qu'une fois par texte, et le verdict "texte d'AishCore ou non" est memorise. La relire a chaque appel produisait
+    -- des centaines de Ko de garbage par seconde, comptes dans la memoire d'AishCore.
+    local origin = setmetatable({}, { __mode = "k" })   -- fs -> true (AishCore) / false (autre addon)
+    local stats = { calls = 0, stacks = 0 }
+    ns._fontHookStats = stats
+    local function IsMine(st) return st:lower():gsub("\\", "/"):find("aishcore/", 1, true) ~= nil end
     hooksecurefunc(meta, "SetFont", function(fs, path, size, flags)
+      stats.calls = stats.calls + 1
+      local o = origin[fs]
+      if o == false then return end
       -- Combat : rien a memoriser (polices posees hors combat) et la pile d'appels y est souvent secrete.
       if InCombatLockdown() then return end
       if type(path) ~= "string" or not size or isSecret(path) or isSecret(size) then return end
-      local ok, st = pcall(debugstack, 2, 10, 0)
-      if not (ok and type(st) == "string") or isSecret(st) then return end
-      local okF, mine = pcall(function() return st:lower():gsub("\\", "/"):find("aishcore/", 1, true) ~= nil end)
-      if not (okF and mine) then return end
+      if o == nil then
+        stats.stacks = stats.stacks + 1
+        local ok, st = pcall(debugstack, 2, 10, 0)
+        if not (ok and type(st) == "string") or isSecret(st) then return end
+        local okF, mine = pcall(IsMine, st)
+        if not okF then return end
+        origin[fs] = mine and true or false
+        if not mine then return end
+      end
       local r = want[fs]
       if r then r[1], r[2], r[3] = path, size, flags else want[fs] = { path, size, flags } end
     end)
@@ -1343,7 +1484,10 @@ SlashCmdList["AISHFONT"] = function()
         any = true
         local cur = d.fs and d.fs.GetFont and select(1, d.fs:GetFont())
         print(P .. string.format("%s : demande=%s | pose=%s | SetFont ok=%s res=%s | texte porte=%s",
-            key, tostring(d.wanted), tostring(d.used), tostring(d.ok), tostring(d.res), tostring(cur)))
+            key, tostring(d.wanted), tostring(d.used), tostring(d.ok), tostring(d.res), tostring(cur))
+            .. (d.lastCaller and (" | dernier appel exterieur : " .. d.lastCaller) or "")
+            .. (d.silentFix and string.format(" | |cffff8800repare %d fois sans appel (trouve %s, il y a %.0f s)|r",
+                d.silentFix, tostring(d.silentFrom), GetTime() - (d.silentAt or 0)) or ""))
     end
     if not any then print(P .. "aucun texte suivi.") end
 end
@@ -1378,18 +1522,51 @@ end
 
 --- Cree 8 FontStrings d'ombre en anneau autour de `target`. Ne fonctionne que si
 --- `target` n'est jamais animé directement (anime un frame parent commun a la place).
-function ns.CreateSlugRing(parent, target, layer)
-    local ring = {}
-    for i, off in ipairs(SLUG_RING_OFFSETS) do
-        local fs = parent:CreateFontString(nil, layer or "ARTWORK")
+-- Decalages de l'anneau en PIXELS PHYSIQUES : un decalage de 1 unite d'interface vaut 0,8 ou 1,2 pixel selon
+-- l'echelle de l'interface, et le contour devenait flou / baveux. Recalcule a chaque affichage du parent.
+local function PlaceSlugRing(ring, target)
+    local _, ph = GetPhysicalScreenSize()
+    local ok, es = pcall(target.GetEffectiveScale, target)
+    local px = (ok and es and es > 0 and ph and ph > 0) and (768 / ph / es) or 1
+    for i, fs in ipairs(ring) do
+        local off = SLUG_RING_OFFSETS[i]
+        fs:ClearAllPoints()
         -- Ancre TOPLEFT+BOTTOMRIGHT (toute la boite, pas juste CENTER) pour reproduire
         -- exactement le meme rendu de glyphe qu'un texte justifie LEFT/RIGHT.
-        fs:SetPoint("TOPLEFT", target, "TOPLEFT", off[1], off[2])
-        fs:SetPoint("BOTTOMRIGHT", target, "BOTTOMRIGHT", off[1], off[2])
+        fs:SetPoint("TOPLEFT", target, "TOPLEFT", off[1] * px, off[2] * px)
+        fs:SetPoint("BOTTOMRIGHT", target, "BOTTOMRIGHT", off[1] * px, off[2] * px)
+    end
+end
+ns.PlaceSlugRing = PlaceSlugRing
+
+-- Tous les anneaux crees, pour les replacer quand l'echelle change : au login l'echelle de l'interface est souvent
+-- appliquee APRES la creation des textes, et un cadre deja visible ne repasse jamais par OnShow.
+local _slugRings = setmetatable({}, { __mode = "k" })   -- ring -> target
+local function ReplaceAllSlugRings()
+    for ring, target in pairs(_slugRings) do pcall(PlaceSlugRing, ring, target) end
+end
+do
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    ev:RegisterEvent("UI_SCALE_CHANGED")
+    ev:RegisterEvent("DISPLAY_SIZE_CHANGED")
+    ev:SetScript("OnEvent", function()
+        ReplaceAllSlugRings()
+        C_Timer.After(1, ReplaceAllSlugRings)
+    end)
+end
+
+function ns.CreateSlugRing(parent, target, layer)
+    local ring = {}
+    for i in ipairs(SLUG_RING_OFFSETS) do
+        local fs = parent:CreateFontString(nil, layer or "ARTWORK")
         fs:SetJustifyH(target:GetJustifyH())
         fs:SetJustifyV(target:GetJustifyV())
         ring[i] = fs
     end
+    PlaceSlugRing(ring, target)
+    _slugRings[ring] = target
+    if parent.HookScript then parent:HookScript("OnShow", function() PlaceSlugRing(ring, target) end) end
     -- Auto-synchronise texte + justification avec `target`
     hooksecurefunc(target, "SetText", function(_, text) ns.SetSlugRingText(ring, text) end)
     hooksecurefunc(target, "SetJustifyH", function(_, justify)
@@ -1415,6 +1592,9 @@ function ns.ApplyTextOutlineStyle(fontString, ring, fontPath, size, style, apply
     if type(size) ~= "number" or size <= 0 then size = 12 end
     local ok = pcall(function() fontString:SetFont(safePath, size, flags) end)
     if not ok then fontString:SetFont("Fonts\\FRIZQT__.TTF", size, flags) end
+    -- SLUG : jamais d'ombre portee sous l'anneau (meme si l'appelant ne gere pas l'ombre) -- un decalage d'ombre en
+    -- unites d'interface tombe entre deux pixels et brouille le contour
+    if style == "SLUG" then fontString:SetShadowOffset(0, 0) end
     if applyDefaultShadow then
         if style == "SLUG" then
             fontString:SetShadowOffset(0, 0)
@@ -1424,6 +1604,8 @@ function ns.ApplyTextOutlineStyle(fontString, ring, fontPath, size, style, apply
         end
     end
     if ring then
+        -- Replace l'anneau a chaque application de style (taille, police) : l'echelle a pu changer depuis sa creation
+        pcall(PlaceSlugRing, ring, fontString)
         local slugOn = (style == "SLUG")
         for _, fs in ipairs(ring) do
             local rok = pcall(function() fs:SetFont(safePath, size, "") end)
@@ -1519,7 +1701,7 @@ do
   f:SetScript("OnEvent", function()
     C_Timer.After(4, function() ns.IncrementalGC(900) end)
     if not f._ticker then
-      f._ticker = C_Timer.NewTicker(15, function()
+      f._ticker = ns.NewTicker(15, function()
         if not InCombatLockdown() then ns.IncrementalGC(120) end
       end)
     end
@@ -1710,7 +1892,7 @@ function ns.AnimateStagger(elements, shouldShow, duration, staggerInterval, onCo
   end
 
   local ticker
-  ticker = C_Timer.NewTicker(0.016, function()
+  ticker = ns.NewTicker(0.016, function()
     local elapsed = GetTime() - startTime
 
     for _, item in ipairs(elements) do

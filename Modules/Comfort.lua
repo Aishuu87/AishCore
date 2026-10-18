@@ -47,6 +47,8 @@ local function GetDevice()
   AishaddonDB._device[k] = AishaddonDB._device[k] or {}
   return AishaddonDB._device[k]
 end
+-- Partage avec les autres reglages "du compte, jamais du profil" (ex. icones de nouveautes, Data/PatchNotes.lua)
+ns.GetDeviceSettings = GetDevice
 
 -- Ancien emplacement (profil) : on recupere la valeur du profil actif une fois, puis on la retire du profil.
 local function MigrateFromProfile()
@@ -583,8 +585,160 @@ local function ApplyMinimapTracking()
   end)
 end
 
+-- Messages d'erreur rouges au centre de l'ecran ("Pas assez de mana", "Hors de portee"...) : UIErrorsFrame cesse
+-- d'ecouter UI_ERROR_MESSAGE. Les messages jaunes d'information (progression de quete...) restent affiches.
+local errorsHidden = false
+local function ApplyHideErrors()
+  local f = _G.UIErrorsFrame
+  if not f then return end
+  local want = Cfg().hideErrors == true
+  if want == errorsHidden then return end
+  errorsHidden = want
+  if want then f:UnregisterEvent("UI_ERROR_MESSAGE") else f:RegisterEvent("UI_ERROR_MESSAGE") end
+end
+
+-- Ctrl + clic gauche sur une unite (dans le monde) : la met en focalisation. Bouton securise "/focus mouseover" lie a
+-- CTRL-BUTTON1 par une liaison prioritaire, posee hors combat seulement. Client sans focalisation (pas de FocusFrame) :
+-- rien.
+local focusBtn, focusPending = nil, false
+local function ApplyCtrlFocus()
+  if not _G.FocusFrame then return end
+  if InCombatLockdown() then focusPending = true; return end
+  focusPending = false
+  if not focusBtn then
+    focusBtn = CreateFrame("Button", "AishCoreFocusButton", UIParent, "SecureActionButtonTemplate")
+    focusBtn:SetAttribute("type1", "macro")
+    focusBtn:SetAttribute("macrotext1", "/focus mouseover")
+    focusBtn:RegisterForClicks("AnyUp", "AnyDown")
+  end
+  ClearOverrideBindings(focusBtn)
+  if Cfg().ctrlFocus then SetOverrideBindingClick(focusBtn, true, "CTRL-BUTTON1", "AishCoreFocusButton") end
+end
+
+-- Rendu automatique des quetes : case carree a l'ecran, affichee en permanence quand l'option est active, deplacable
+-- a tout moment (glisser) et de taille reglable. Cochee (clic), les quetes terminees sont rendues d'elles-memes pendant
+-- une discussion avec un PNJ (recompense prise s'il n'y a pas de choix ; avec un choix, la fenetre reste ouverte).
+-- Maj enfoncee : rien d'automatique. Etat : comfort.autoTurnIn ; position : comfort.questTurnInX / questTurnInY.
+local turnBox
+local DEFAULT_X, DEFAULT_Y = 16, -16   -- depuis le coin haut gauche de l'ecran
+
+local function PlaceTurnBox()
+  local c = Cfg()
+  turnBox:ClearAllPoints()
+  turnBox:SetPoint("TOPLEFT", UIParent, "TOPLEFT", c.questTurnInX or DEFAULT_X, c.questTurnInY or DEFAULT_Y)
+end
+
+local function RefreshTurnBox()
+  if not turnBox then return end
+  local c = Cfg()
+  local sz = c.questTurnInSize or 22
+  turnBox:SetSize(sz, sz)
+  -- Cochee : carre rempli de la couleur de spe "Decorations A" + petit texte a sa droite
+  local on = c.autoTurnIn == true
+  local CLR = ns.Modules and ns.Modules.Colors
+  local col = (CLR and CLR.Get and CLR.Get("powerdotsa")) or { 0.776, 0.710, 0.471, 1 }
+  turnBox.fill:SetColorTexture(col[1], col[2], col[3], 1)
+  turnBox.fill:SetShown(on)
+  turnBox.label:SetShown(on)
+  PlaceTurnBox()
+  turnBox:SetShown(c.questTurnInBox == true)
+end
+
+local function EnsureTurnBox()
+  if turnBox then return turnBox end
+  local L = ns.L
+  local b = CreateFrame("Button", "AishCoreQuestTurnInBox", UIParent, "BackdropTemplate")
+  b:SetFrameStrata("DIALOG")
+  b:SetClampedToScreen(true)
+  b:SetMovable(true)
+  b:RegisterForDrag("LeftButton")
+  b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+  b:SetBackdropColor(0, 0, 0, 0.6)
+  b:SetBackdropBorderColor(0.776, 0.710, 0.471, 0.8)
+  b.fill = b:CreateTexture(nil, "ARTWORK")
+  b.fill:SetPoint("TOPLEFT", 2, -2)
+  b.fill:SetPoint("BOTTOMRIGHT", -2, 2)
+  b.label = b:CreateFontString(nil, "OVERLAY")
+  b.label:SetFont("Fonts\\2002.TTF", 11, "OUTLINE")
+  b.label:SetPoint("LEFT", b, "RIGHT", 5, 0)
+  b.label:SetTextColor(1, 1, 1, 1)
+  b.label:SetText(L["SETTINGS_TURNIN_LABEL"])
+  b:SetScript("OnClick", function(self)
+    local c = ns.GetCfg("comfort")
+    if c then c.autoTurnIn = not c.autoTurnIn end
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    RefreshTurnBox()
+    if self:IsMouseOver() then self:GetScript("OnEnter")(self) end
+  end)
+  b:SetScript("OnDragStart", function(self) self:StartMoving() end)
+  b:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    local c = ns.GetCfg("comfort")
+    if c then
+      local sc = self:GetEffectiveScale() / UIParent:GetEffectiveScale()
+      c.questTurnInX = math.floor(self:GetLeft() * sc + 0.5)
+      c.questTurnInY = math.floor(self:GetTop() * sc - UIParent:GetHeight() + 0.5)
+    end
+    PlaceTurnBox()
+  end)
+  b:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
+    GameTooltip:SetText(L["SETTINGS_COMFORT_AUTO_TURNIN_BOX"], 1, 1, 1)
+    GameTooltip:AddLine(Cfg().autoTurnIn and L["SETTINGS_TURNIN_ON"] or L["SETTINGS_TURNIN_OFF"], 0.776, 0.710, 0.471)
+    GameTooltip:AddLine(L["SETTINGS_TURNIN_HINT"], 0.7, 0.7, 0.7, true)
+    GameTooltip:Show()
+  end)
+  b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  turnBox = b
+  return b
+end
+
+function Comfort.ResetTurnInBox()
+  local c = ns.GetCfg("comfort")
+  if c then c.questTurnInX, c.questTurnInY = nil, nil end
+  RefreshTurnBox()
+end
+
+local function ApplyTurnBox()
+  if Cfg().questTurnInBox then EnsureTurnBox() end
+  RefreshTurnBox()
+end
+
+local function AutoTurnInWanted()
+  local c = Cfg()
+  return c.questTurnInBox == true and c.autoTurnIn == true and not IsShiftKeyDown()
+end
+
+local function OnQuestEvent(event)
+  if not AutoTurnInWanted() then return end
+  if event == "GOSSIP_SHOW" and C_GossipInfo and C_GossipInfo.GetActiveQuests then
+    for _, q in ipairs(C_GossipInfo.GetActiveQuests() or {}) do
+      if q.isComplete then C_GossipInfo.SelectActiveQuest(q.questID); return end
+    end
+  elseif event == "QUEST_GREETING" and GetNumActiveQuests then
+    for i = 1, GetNumActiveQuests() do
+      local _, isComplete = GetActiveTitle(i)
+      if isComplete then SelectActiveQuest(i); return end
+    end
+  elseif event == "QUEST_PROGRESS" then
+    if IsQuestCompletable() then CompleteQuest() end
+  elseif event == "QUEST_COMPLETE" then
+    if (GetNumQuestChoices() or 0) <= 1 then GetQuestReward(1) end
+  end
+end
+
+local questEv = CreateFrame("Frame")
+for _, e in ipairs({ "GOSSIP_SHOW", "QUEST_GREETING", "QUEST_PROGRESS", "QUEST_COMPLETE" }) do
+  pcall(questEv.RegisterEvent, questEv, e)
+end
+questEv:SetScript("OnEvent", function(_, event) OnQuestEvent(event) end)
+
 function Comfort.ApplySettings()
   MigrateFromProfile()
+  ApplyHideErrors()
+  ApplyCtrlFocus()
+  ApplyTurnBox()
+  if ns.Modules.MapReveal then ns.Modules.MapReveal.ApplySettings() end
   ApplyMinimapTracking()
   ApplyCVars()
   ApplySlashes()
@@ -601,6 +755,10 @@ local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("MODIFIER_STATE_CHANGED")
+ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:SetScript("OnEvent", function(_, event)
-  if event == "MODIFIER_STATE_CHANGED" then ApplySpellIDCVar() else Comfort.ApplySettings() end
+  if event == "MODIFIER_STATE_CHANGED" then ApplySpellIDCVar()
+  elseif event == "PLAYER_REGEN_ENABLED" then
+    if focusPending then ApplyCtrlFocus() end   -- liaison differee : posee a la sortie du combat
+  else Comfort.ApplySettings() end
 end)

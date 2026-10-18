@@ -854,6 +854,7 @@ function Skyriding.ApplySettings()
   -- Texte
   if speedText then
     speedText:SetFont(cfg.font or FONT_SPEED_DEFAULT, txtSize, "")
+    if ns.GuardFont then ns.GuardFont(speedText, "SkySpeed", cfg.font or FONT_SPEED_DEFAULT, txtSize, "") end
   end
 
   -- Speed cap marker repositionné en fonction du bgSize

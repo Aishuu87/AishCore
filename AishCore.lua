@@ -372,7 +372,7 @@ SlashCmdList["AISHCORE"] = function(msg)
       if animTicker then animTicker:Cancel(); animTicker = nil end
       lbl:SetText(label)
       local elapsed = 0
-      animTicker = C_Timer.NewTicker(TICK_RATE, function()
+      animTicker = ns.NewTicker(TICK_RATE, function()
         elapsed = elapsed + TICK_RATE
         local t = math.min(elapsed / ANIM_DURATION, 1)
         -- ease-out expo : démarre vite, s'écrase net à la fin
@@ -393,7 +393,7 @@ SlashCmdList["AISHCORE"] = function(msg)
       end)
     end
     Step()
-    ns._testBarTicker = C_Timer.NewTicker(2.2, function()
+    ns._testBarTicker = ns.NewTicker(2.2, function()
       if ns._testBar then Step() end
     end)
     print("|cff00ccff[AishCore]|r testbar ouvert — /aish testbar pour fermer")
@@ -431,10 +431,10 @@ local function CachePlayerSpec()
   if cls and cls ~= "" then
     ns._playerClass = cls
   end
-  local idx = GetSpecialization and GetSpecialization() or nil
+  local idx = ns.GetSpecialization and ns.GetSpecialization() or nil
   if idx then
     ns._specIndex = idx
-    local sid = GetSpecializationInfo and select(1, GetSpecializationInfo(idx)) or nil
+    local sid = ns.GetSpecializationInfo and select(1, ns.GetSpecializationInfo(idx)) or nil
     if sid then
       ns._specID = sid
     end
@@ -445,7 +445,7 @@ end
 local visibilityTicker = nil
 local function StartVisibilityTicker()
   if visibilityTicker then return end
-  visibilityTicker = C_Timer.NewTicker(0.2, function()
+  visibilityTicker = ns.NewTicker(0.2, function()
     RC.UpdateVisibility()
     RC.Update()
     HC.UpdateVisibility()  -- doit précéder HC.Update() car Update() ne fait que les valeurs
@@ -535,6 +535,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     SafeCall("HealthCircle",              "Create", UIParent)
     SafeCall("OutOfCombatResourceCircle", "Create", UIParent)
     SafeCall("WellFedCircle",             "Create", UIParent)
+    SafeCall("MovementBuffs",             "Create", UIParent)
     SafeCall("SpellEffects",              "Init")
     SafeCall("RotationHelper",            "Init")
     SafeCall("PriorityBar",               "Init")

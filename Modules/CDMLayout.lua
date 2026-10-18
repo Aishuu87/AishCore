@@ -33,9 +33,61 @@ local function Cfg()
   return c
 end
 
+-- Spe AishCore (sur Forever : deduite des talents) ; si aucune (Forever : aucun point ou egalite entre arbres), la
+-- "spe" native du client, celle que le Cooldown Manager de Blizzard utilise lui-meme (ex. "Druide - Druide").
+-- Renvoie specID, nom.
+-- Forever : le Cooldown Manager est par CLASSE (une seule disposition, "Druide - Druide"), comme la barre de rotation
+-- et les auras a tracker. Les builds sont donc ranges sous "class:<CLASSE>". Les builds d'avant (un par spe deduite
+-- des talents) sont repris une fois : celui de la spe courante, sinon le premier des arbres de la classe.
+local _cdmClassMigrated = {}
+local function MigrateToClassKey(key)
+  if _cdmClassMigrated[key] then return end
+  local c = ns.DB and ns.DB.cdmLayout
+  if not (c and c.specs) then return end      -- DB pas encore prete : on retentera
+  _cdmClassMigrated[key] = true
+  local cands = {}
+  local idx = ns.GetSpecialization and ns.GetSpecialization()
+  local cur = idx and ns.GetSpecializationInfo(idx)
+  if cur then cands[#cands + 1] = cur end
+  for i = 1, 3 do
+    local sid = ns.GetTalentTabSpecID and ns.GetTalentTabSpecID(i)
+    if sid then cands[#cands + 1] = sid end
+  end
+  if c.specs[key] == nil then
+    for _, sid in ipairs(cands) do
+      if c.specs[sid] ~= nil then c.specs[key] = CopyTable(c.specs[sid]); break end
+    end
+  end
+  -- Dernier build applique sur ce personnage : meme reprise (sinon statut "non applique" a tort)
+  AishUISetupCharDB = AishUISetupCharDB or {}
+  local la = AishUISetupCharDB.cdmLastApplied
+  if la and la[key] == nil then
+    for _, sid in ipairs(cands) do
+      if la[sid] ~= nil then la[key] = la[sid]; break end
+    end
+  end
+end
+
 function CDMLayout.CurrentSpecID()
-  local idx = GetSpecialization and GetSpecialization()
-  return idx and GetSpecializationInfo(idx)
+  if ns.IsForever then
+    local className, classFile = UnitClass("player")
+    if classFile then
+      local key = "class:" .. classFile
+      MigrateToClassKey(key)
+      return key, className
+    end
+  end
+  local idx = ns.GetSpecialization and ns.GetSpecialization()
+  local id, name
+  if idx then id, name = ns.GetSpecializationInfo(idx) end
+  if not id and _G.GetSpecialization and _G.GetSpecializationInfo then
+    local okI, nidx = pcall(_G.GetSpecialization)
+    if okI and nidx then
+      local okS, nid, nname = pcall(_G.GetSpecializationInfo, nidx)
+      if okS and type(nid) == "number" then id, name = nid, nname end
+    end
+  end
+  return id, name
 end
 
 CDMLayout.OFFICIAL = "AishUI"
@@ -73,8 +125,8 @@ end
 function CDMLayout.DefaultConf()
   local conf = { cats = {}, order = {} }
   for _, e in ipairs(CDMLayout.ListCooldowns()) do
-    if e.defaultCategory ~= 0 then conf.cats[e.cooldownID] = e.defaultCategory end
-    if e.defaultCategory == ESSENTIAL then conf.order[#conf.order + 1] = e.cooldownID end
+    if e.defaultCategory ~= 0 or e.racial then conf.cats[KeyOf(e)] = e.defaultCategory end
+    if e.defaultCategory == ESSENTIAL then conf.order[#conf.order + 1] = KeyOf(e) end
   end
   return conf
 end
@@ -182,11 +234,12 @@ local function DisplayData()
   -- Categorie COURANTE et ordre : lus sur les frames des deux viewers (simple lecture de champs, rien
   -- n'est appele cote Blizzard). Les sets de l'API C donnent, eux, la classification par defaut et pas
   -- la disposition du joueur.
-  local found = 0
+  local found, built = 0, false
   for _, v in ipairs({ { "EssentialCooldownViewer", Cat("Essential") }, { "UtilityCooldownViewer", Cat("Utility") } }) do
     local viewer, cat = _G[v[1]], v[2]
     local pool = viewer and viewer.itemFramePool
     if cat and pool and pool.EnumerateActive then
+      built = true
       local items = {}
       for f in pool:EnumerateActive() do
         local cid = f.cooldownID
@@ -201,7 +254,23 @@ local function DisplayData()
     end
   end
   -- Viewers pas encore construits : donnees indisponibles (et non "tout non suivi")
-  if found == 0 then return nil end
+  if not built then return nil end
+  -- Viewers construits mais sans icone active (viewer masque, spe dont les cadres n'ont pas ete peuples...) :
+  -- on repart de la classification de l'API (sets Essentiels / Utilitaires) plutot que de declarer le CDM absent.
+  if found == 0 then
+    -- Classement par defaut de Blizzard, PAS la disposition du joueur : lecture approximative, jamais comparee
+    -- pour proposer d'appliquer un build (cf. CheckSpec)
+    dd.approx = true
+    for _, name in ipairs({ "Essential", "Utility" }) do
+      local cat = Cat(name)
+      if cat then
+        local ok, ids = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat, false)
+        if ok and type(ids) == "table" then
+          for _, cid in ipairs(ids) do Add(cid, cat); found = found + 1 end
+        end
+      end
+    end
+  end
   -- Le reste de ce que connait le CDM : non suivi (categorie de repos, ni Essentiel ni Utilitaire)
   local rest = Cat("HiddenActive") or -1
   for _, name in ipairs({ "Essential", "Utility", "HiddenActive", "EquipSlotEssential", "SpecAgnosticEssential" }) do
@@ -216,6 +285,12 @@ local function DisplayData()
   return dd
 end
 
+-- true si la disposition lue est la vraie (icones presentes dans les barres), pas le classement par defaut
+function CDMLayout.IsExact()
+  local dd = DisplayData()
+  return dd ~= nil and not dd.approx
+end
+
 function CDMLayout.IsAvailable()
   if not (C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo) then return false end
   if C_CooldownViewer.IsCooldownViewerAvailable then
@@ -226,6 +301,43 @@ function CDMLayout.IsAvailable()
 end
 
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
+
+-- Raciaux : un build ne retient pas LE sort racial (son cooldown change d'une race a l'autre) mais un emplacement
+-- generique "racial" : categorie et position dans les Essentiels. Sans cela, la meme classe sur une autre race voyait
+-- le build "different" en boucle. Detection par le sous-texte du sort ("Raciale", "Racial"...), toutes langues.
+local RACIAL_KEY = "racial"
+CDMLayout.RACIAL_KEY = RACIAL_KEY
+local RACIAL_WORDS = { "racial", "raciale", "razziale", "volksf", "расов", "종족", "种族", "種族" }
+local _racialCache = {}
+local function IsRacial(spellID)
+  if not spellID then return false end
+  local c = _racialCache[spellID]
+  if c ~= nil then return c end
+  local sub
+  if C_Spell and C_Spell.GetSpellSubtext then sub = C_Spell.GetSpellSubtext(spellID)
+  elseif GetSpellSubtext then sub = GetSpellSubtext(spellID) end
+  local r = false
+  if type(sub) == "string" and sub ~= "" then
+    local low = sub:lower()
+    for _, w in ipairs(RACIAL_WORDS) do
+      if low:find(w, 1, true) then r = true; break end
+    end
+  end
+  _racialCache[spellID] = r
+  return r
+end
+
+-- Cle d'un cooldown dans un build : "racial" pour un racial, son cooldownID sinon
+local function KeyOf(e) return e.racial and RACIAL_KEY or e.cooldownID end
+CDMLayout.KeyOf = KeyOf
+
+-- Categorie voulue par un build pour une entree ; nil = le build ne dit rien (racial d'une autre race, build ancien)
+function CDMLayout.CatOf(conf, e)
+  local c = conf.cats[KeyOf(e)]
+  if c == nil and e.racial then c = conf.cats[e.cooldownID] end   -- builds d'avant l'emplacement generique
+  return c
+end
+local CatOf = CDMLayout.CatOf
 
 -- Cooldowns gérés par le module pour la spé active, dans l'ordre du CDM :
 -- { cooldownID, spellID, equipSlot, isKnown, current (1/2/0), restCategory, defaultCategory (1/2/0) }
@@ -248,6 +360,7 @@ function CDMLayout.ListCooldowns()
         spellID = Readable(info.overrideSpellID) and info.overrideSpellID or info.spellID,
         equipSlot = Readable(static.equipSlot) and static.equipSlot or nil,
         isKnown = info.isKnown ~= false,
+        racial = IsRacial(Readable(info.overrideSpellID) and info.overrideSpellID or info.spellID),
         current = (cur == essential and ESSENTIAL) or (cur == utility and UTILITY) or 0,
         restCategory = domain[static.category],
         defaultCategory = (static.category == essential and ESSENTIAL)
@@ -275,8 +388,9 @@ function CDMLayout.CaptureCurrent()
   if not CDMLayout.IsAvailable() then return nil end
   local b = { cats = {}, order = {} }
   for _, e in ipairs(CDMLayout.ListCooldowns()) do
-    if e.current ~= 0 then b.cats[e.cooldownID] = e.current end
-    if e.current == ESSENTIAL then b.order[#b.order + 1] = e.cooldownID end
+    -- le racial est toujours note, meme non suivi (0) : "non suivi" doit se distinguer de "inconnu"
+    if e.current ~= 0 or e.racial then b.cats[KeyOf(e)] = e.current end
+    if e.current == ESSENTIAL then b.order[#b.order + 1] = KeyOf(e) end
   end
   return b
 end
@@ -295,16 +409,31 @@ function CDMLayout.SaveCurrentAs(specID, name)
 end
 
 -- Essentiels de la config, dans l'ordre voulu (order d'abord, puis ceux qui n'y figurent pas)
+-- Renvoie des cooldownIDs ; l'ordre du build peut contenir la cle "racial" (le racial de CE personnage).
 function CDMLayout.OrderedEssentials(conf, list)
-  local present, out, seen = {}, {}, {}
-  for _, e in ipairs(list) do present[e.cooldownID] = true end
-  for _, cid in ipairs(conf.order or {}) do
-    if conf.cats[cid] == ESSENTIAL and present[cid] and not seen[cid] then out[#out + 1] = cid; seen[cid] = true end
+  local byKey, byCid, out, seen = {}, {}, {}, {}
+  for _, e in ipairs(list) do
+    byKey[KeyOf(e)] = e
+    byCid[e.cooldownID] = e
+  end
+  for _, k in ipairs(conf.order or {}) do
+    local e = byKey[k] or byCid[k]
+    if e and CatOf(conf, e) == ESSENTIAL and not seen[e.cooldownID] then
+      out[#out + 1] = e.cooldownID; seen[e.cooldownID] = true
+    end
   end
   for _, e in ipairs(list) do
-    if conf.cats[e.cooldownID] == ESSENTIAL and not seen[e.cooldownID] then out[#out + 1] = e.cooldownID; seen[e.cooldownID] = true end
+    if CatOf(conf, e) == ESSENTIAL and not seen[e.cooldownID] then out[#out + 1] = e.cooldownID; seen[e.cooldownID] = true end
   end
   return out
+end
+
+-- Cle de build d'un cooldownID (pour la page : "racial" si c'est le racial du personnage)
+function CDMLayout.KeyForCid(cid)
+  for _, e in ipairs(CDMLayout.ListCooldowns()) do
+    if e.cooldownID == cid then return KeyOf(e) end
+  end
+  return cid
 end
 
 -- Écarts entre le CDM et la config de la spé : liste de { entry, want, current } (catégories), plus
@@ -316,10 +445,13 @@ function CDMLayout.Diff(specID)
   local list = CDMLayout.ListCooldowns()
   local currentEss = {}
   for _, e in ipairs(list) do
-    local want = conf.cats[e.cooldownID] or 0
+    local want = CatOf(conf, e)
+    -- Racial dont le build ne dit rien (autre race, ancien build) : pas un ecart
+    local ignore = e.racial and want == nil
+    want = want or 0
     -- Cooldown pas appris : le viewer ne l'affiche pas (aucune frame), sa categorie courante est donc
     -- illisible depuis les frames. On ne le compare pas ; Apply, lui, le range quand meme.
-    if e.isKnown and want ~= e.current then diffs[#diffs + 1] = { entry = e, want = want, current = e.current } end
+    if e.isKnown and not ignore and want ~= e.current then diffs[#diffs + 1] = { entry = e, want = want, current = e.current } end
     if e.current == ESSENTIAL then currentEss[#currentEss + 1] = e.cooldownID end
   end
   local orderDiffers = false
@@ -352,8 +484,13 @@ end
 function CDMLayout.Status(specID)
   local name = CDMLayout.GetActiveName(specID)
   if not name then return "none" end
-  if not CDMLayout.IsApplied(specID) then return "pending" end
   local last = LastAppliedTable()[specID]
+  -- Lecture approximative (barres du CDM vides : classement par defaut de Blizzard, pas la vraie disposition) :
+  -- aucune comparaison possible, on se fie au dernier build applique sur ce personnage
+  if not CDMLayout.IsExact() then
+    return (last == nil or last == name) and "applied" or "pending"
+  end
+  if not CDMLayout.IsApplied(specID) then return "pending" end
   -- Données d'avant ce suivi : le build qui correspond est considéré comme l'appliqué
   if last == nil then CDMLayout.SetLastApplied(specID, name); return "applied" end
   return last == name and "applied" or "same"
@@ -382,9 +519,10 @@ function CDMLayout.Apply(specID)
   local essential, utility = Cat("Essential"), Cat("Utility")
   local failures = {}
   for _, e in ipairs(list) do
-    local want = conf.cats[e.cooldownID]
+    local want = CatOf(conf, e)
     local target = (want == ESSENTIAL and essential) or (want == UTILITY and utility) or e.restCategory
-    if (want or 0) ~= e.current then
+    -- racial dont le build ne dit rien : laisse tel quel
+    if not (e.racial and want == nil) and (want or 0) ~= e.current then
       local ok, status = pcall(dp.SetCooldownToCategory, dp, e.cooldownID, target)
       if not ok or (Enum.CooldownLayoutStatus and status ~= Enum.CooldownLayoutStatus.Success) then
         local name = e.spellID and C_Spell.GetSpellName(e.spellID) or ("#" .. e.cooldownID)
@@ -456,6 +594,8 @@ CheckSpec = function(tries)
   if not CDMLayout.GetSpecConfig(specID) then return end
   if not CDMLayout.IsAvailable() then RetryLater(tries); return end
   if InCombatLockdown() then pendingCheck = true; return end
+  -- Barres du CDM vides (masquees, pas encore peuplees) : la vraie disposition est illisible, on ne propose rien
+  if not CDMLayout.IsExact() then RetryLater(tries); return end
   if CDMLayout.IsApplied(specID) then return end
   askedThisSession[specID] = true
   if not ns.ShowSetupPopup then return end
@@ -478,8 +618,8 @@ SlashCmdList["AISHCDMDIFF"] = function()
   local conf = specID and CDMLayout.GetSpecConfig(specID)
   if not conf then print(P .. "aucun build pour cette spe (specID=" .. tostring(specID) .. ")"); return end
   local list = CDMLayout.ListCooldowns()
-  print(P .. string.format("spe=%s build=%s | cooldowns lus=%d | dispo=%s", tostring(specID),
-    tostring(CDMLayout.GetActiveName(specID)), #list, tostring(CDMLayout.IsAvailable())))
+  print(P .. string.format("spe=%s build=%s | cooldowns lus=%d | dispo=%s | lecture exacte=%s", tostring(specID),
+    tostring(CDMLayout.GetActiveName(specID)), #list, tostring(CDMLayout.IsAvailable()), tostring(CDMLayout.IsExact())))
   local diffs, orderDiffers = CDMLayout.Diff(specID)
   print(P .. string.format("categories differentes=%d | ordre different=%s", #diffs, tostring(orderDiffers)))
   local function nm(e) return (e.spellID and C_Spell.GetSpellName(e.spellID)) or ("#" .. e.cooldownID) end

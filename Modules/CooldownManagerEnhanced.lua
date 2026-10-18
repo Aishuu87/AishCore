@@ -814,7 +814,7 @@ end
 -- en dehors de tout evenement que l'on ecoute. On reaffirme donc la cible periodiquement.
 -- Sans risque de relancer un fondu en boucle : SetFrameAlpha ignore une cible deja en
 -- cours et purge un fondu obsolete quand l'opacite est deja bonne.
-C_Timer.NewTicker(0.2, function()
+ns.NewTicker(0.2, function()
   for _, frameName in ipairs(VIEWER_NAMES) do
     local cfg = GetCfgFor(frameName)
     if cfg and cfg.enabled and cfg.useFading then RefreshFade(frameName) end

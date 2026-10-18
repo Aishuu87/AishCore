@@ -1,5 +1,5 @@
 -- AishUIAura/UI/Menus/MissingBuffs.lua
--- Ecran de reglages "Buffs manquants" : onglet General + une section par classe (buffs de groupe)
+-- Ecran de reglages "Buffs manquants" : reglages generaux, apparence, alertes (colonnes General + classes), seuils
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local L = _addon.L
 ns.SettingsPanel = ns.SettingsPanel or {}
@@ -69,7 +69,8 @@ local function CreateBuffRow(parent, entry, y, W)
     icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     if entry.icon then icon:SetTexture(entry.icon) end  -- Forever : entree sans spellID fixe
     pcall(function()
-        local t = entry.spellId and C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(entry.spellId)
+        local sid = entry.spellId or entry.iconSpell
+        local t = sid and C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sid)
         if t then icon:SetTexture(t) end
     end)
 
@@ -78,6 +79,7 @@ local function CreateBuffRow(parent, entry, y, W)
     label:SetPoint("LEFT", icon, "RIGHT", 6, 0)
     label:SetPoint("RIGHT", -4, 0)
     label:SetJustifyH("LEFT")
+    label:SetWordWrap(false)   -- borne a la ligne : "..." plutot que deborder sur la colonne voisine
     label:SetTextColor(unpack(Theme.textNormal))
     local name = entry.displayName or ("?" .. tostring(entry.spellId))
     pcall(function()
@@ -87,14 +89,31 @@ local function CreateBuffRow(parent, entry, y, W)
     if entry.casts or entry.kind then name = ForeverEntryLabel(entry) or name end
     label:SetText(name)
 
+    -- entry.dbKey : ligne liee a une cle "ignoreX" de ns.db.missingBuffs (cochee si absente) au lieu d'un spell ;
+    -- entry.dbKeyOn : cle d'activation (cochee si vraie), entry.onToggle(valeur) appele apres le clic
+    local function IsIgnored()
+        if entry.dbKeyOn then return not Cfg()[entry.dbKeyOn] end
+        if entry.dbKey then return Cfg()[entry.dbKey] and true or false end
+        return ns.MissingBuffs.IsIgnored(entry.settingsId)
+    end
     local function Refresh()
-        local ignored = ns.MissingBuffs.IsIgnored(entry.settingsId)
+        local ignored = IsIgnored()
         box:SetColorTexture(unpack(ignored and Theme.checkboxOff or Theme.checkboxOn))
         check:SetShown(not ignored)
     end
     Refresh()
     row:SetScript("OnClick", function()
-        ns.MissingBuffs.SetIgnored(entry.settingsId, not ns.MissingBuffs.IsIgnored(entry.settingsId))
+        if entry.dbKeyOn then
+            local v = not Cfg()[entry.dbKeyOn]
+            Cfg()[entry.dbKeyOn] = v
+            if entry.onToggle then entry.onToggle(v) end
+            ns.MissingBuffs.RequestCheck()
+        elseif entry.dbKey then
+            Cfg()[entry.dbKey] = not IsIgnored()
+            ns.MissingBuffs.RequestCheck()
+        else
+            ns.MissingBuffs.SetIgnored(entry.settingsId, not IsIgnored())
+        end
         Refresh()
     end)
     row:SetScript("OnEnter", function() label:SetTextColor(1, 1, 1) end)
@@ -102,182 +121,209 @@ local function CreateBuffRow(parent, entry, y, W)
     return row
 end
 
--- Case a cocher generique liee a une cle de ns.db.missingBuffs
-local function AddDbCheckbox(sub, y, W, label, key, invert)
-    local SW = ns.SharedWidgets
-    local cb = SW.CreateCheckbox(sub, label, W)
-    cb:SetPoint("TOPLEFT", 0, -y)
-    local cfg = Cfg()
-    local v = cfg[key] and true or false
-    cb:SetChecked(invert and not v or v)
-    cb.onChanged = function(checked)
-        local c = Cfg()
-        c[key] = invert and (not checked) or checked
-        if ns.MissingBuffs then ns.MissingBuffs.RequestCheck() end
-    end
-    return cb, y + 26
+-- Section "Alertes" : une colonne "General" puis une par classe (ordre des Couleurs Thematiques), 5 colonnes par
+-- rangee. Chaque ligne = une alerte (cochee = affichee) : buffs de classe, et interrupteurs propres a la classe
+-- (postures, auras, familier...) en tete de colonne. Listes lues a l'ouverture : ns.MISSING_CLASS_BUFFS est
+-- remplacee par sa version Forever au chargement des donnees.
+local I = "Interface\\Icons\\"
+
+local function Append(out, list)
+    for _, e in ipairs(Existing(list)) do out[#out + 1] = e end
+    return out
 end
 
--- Curseur de seuil (Forever : fragments d'ame / munitions), stocke dans ns.db.missingBuffs[key]
-local function AddThresholdSlider(sub, y, W, label, key, minV, maxV, step, default)
-    local SW = ns.SharedWidgets
-    local sl = SW.CreateSlider(sub, label, minV, maxV, step, W - 20)
-    sl:SetPoint("TOPLEFT", 0, -y)
-    sl:SetValue(Cfg()[key] or default)
-    sl.onChanged = function(v)
-        Cfg()[key] = v
-        if ns.MissingBuffs then ns.MissingBuffs.RequestCheck() end
-    end
-    return y + 56
-end
-
--- Sections par classe : buffs de groupe + toggles specifiques (stances/auras/attunements/pets/poisons)
-local function BuildGenericClassSection(entries)
-    return function(sub, W)
-        local y = 0
-        for _, entry in ipairs(Existing(entries)) do
-            CreateBuffRow(sub, entry, y, W)
-            y = y + 24
-        end
-        sub:SetHeight(math.max(y, 1))
-    end
-end
-
-local function BuildWarriorSection(sub, W)
-    local y = 0
-    local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_STANCES"] or "Ignorer les postures", "ignoreWarriorStances")
-    y = y2
-    for _, entry in ipairs(ns.MISSING_CLASS_BUFFS.WARRIOR) do
-        CreateBuffRow(sub, entry, y, W); y = y + 24
-    end
-    sub:SetHeight(math.max(y, 1))
-end
-
-local function BuildPaladinSection(sub, W)
-    local y = 0
-    local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_AURAS"] or "Ignorer les auras", "ignorePaladinAuras")
-    y = y2
-    for _, entry in ipairs(Existing(ns.MISSING_CLASS_BUFFS.PALADIN)) do
-        CreateBuffRow(sub, entry, y, W); y = y + 24
-    end
-    -- Forever : une ligne par aura proposable (decochee = jamais proposee, mais compte comme active)
+local function GeneralRows()
+    local rows = {
+        { dbKey = "ignoreBagsFull",       displayName = L["MISSINGBUFFS_BAGS_FULL"],      icon = I .. "INV_Misc_Bag_08" },
+        { dbKey = "ignoreWellFedFood",    displayName = L["MISSINGBUFFS_WELLFED_FOOD"],   icon = I .. "INV_Misc_Food_15" },
+        { dbKey = "ignoreFlasks",         displayName = L["MISSINGBUFFS_FLASKS"],         icon = I .. "INV_Potion_62" },
+        { dbKey = "ignoreWeaponStones",   displayName = L["MISSINGBUFFS_WEAPON_STONES"],  icon = I .. "INV_Stone_SharpeningStone_05" },
+        { dbKey = "ignoreGatherTracking", displayName = L["MISSINGBUFFS_GATHER_TRACKING"], icon = I .. "INV_Misc_Flower_02" },
+        { dbKey = "ignoreTalentPoints",   displayName = L["MISSINGBUFFS_TALENT_POINTS"],  icon = I .. "Ability_Marksmanship" },
+    }
     if _addon.IsForever then
-        for _, entry in ipairs(Existing(ns.MISSING_PALADIN_AURAS)) do
-            if entry.settingsId then CreateBuffRow(sub, entry, y, W); y = y + 24 end
+        rows[#rows + 1] = { dbKey = "ignoreLegacyPoints", displayName = L["MISSINGBUFFS_LEGACY_POINTS"], icon = I .. "INV_Misc_Book_11" }
+    end
+    return rows
+end
+
+-- Ruee ardente (Retail) : alerte "presence" inverse, resynchronise SpellEffects tout de suite
+local function BurningRushToggled(checked)
+    -- Epingle au CDM : sans ca, la detection retombe sur GetPlayerAuraBySpellID (nil en combat)
+    if checked and ns.PinAuraToCDM and ns.MISSING_WARLOCK_BURNING_RUSH then
+        local ok = ns.PinAuraToCDM(ns.MISSING_WARLOCK_BURNING_RUSH, true)
+        if not ok then ns.PinAuraToCDM(ns.MISSING_WARLOCK_BURNING_RUSH, false) end
+    end
+    -- Ancre le combo tout de suite : action protegee, impossible en combat
+    if checked and ns.MissingBuffs and ns.MissingBuffs.PrepareBurningRushAnchor then
+        ns.MissingBuffs.PrepareBurningRushAnchor()
+    end
+    if ns.MissingBuffs and ns.MissingBuffs.SyncBurningRush then ns.MissingBuffs.SyncBurningRush() end
+end
+
+local CLASS_COLUMNS = {
+    { class = "DRUID", rows = function()
+        return Append({ { dbKey = "ignoreDruidForms", displayName = L["MISSINGBUFFS_ROW_FORM"], icon = I .. "Ability_Druid_CatForm" } },
+            ns.MISSING_CLASS_BUFFS.DRUID)
+    end },
+    { class = "EVOKER", rows = function()
+        return Append({ { dbKey = "ignoreEvokerAttunements", displayName = L["MISSINGBUFFS_ROW_ATTUNEMENT"], iconSpell = 403264 } },
+            ns.MISSING_CLASS_BUFFS.EVOKER)
+    end },
+    { class = "HUNTER", rows = function()
+        return Append({ { dbKey = "ignoreHunterPets", displayName = L["MISSINGBUFFS_ROW_PET"], icon = I .. "Ability_Hunter_BeastCall" } },
+            ns.MISSING_CLASS_BUFFS.HUNTER)
+    end },
+    { class = "MAGE", rows = function() return Append({}, ns.MISSING_CLASS_BUFFS.MAGE) end },
+    { class = "PALADIN", rows = function()
+        local r = Append({ { dbKey = "ignorePaladinAuras", displayName = L["MISSINGBUFFS_ROW_AURA"], icon = I .. "Spell_Holy_DevotionAura" } },
+            ns.MISSING_CLASS_BUFFS.PALADIN)
+        -- Forever : une ligne par aura proposable (decochee = jamais proposee, mais compte comme active)
+        if _addon.IsForever then
+            for _, e in ipairs(Existing(ns.MISSING_PALADIN_AURAS)) do
+                if e.settingsId then r[#r + 1] = e end
+            end
         end
-    end
-    sub:SetHeight(math.max(y, 1))
-end
-
-local function BuildEvokerSection(sub, W)
-    local y = 0
-    local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_ATTUNEMENTS"] or "Ignorer les accords", "ignoreEvokerAttunements")
-    y = y2
-    for _, entry in ipairs(ns.MISSING_CLASS_BUFFS.EVOKER) do
-        CreateBuffRow(sub, entry, y, W); y = y + 24
-    end
-    sub:SetHeight(math.max(y, 1))
-end
-
-local function BuildHunterSection(sub, W)
-    local y = 0
-    local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_PET"] or "Ignorer le familier", "ignoreHunterPets")
-    y = y2
-    for _, entry in ipairs(Existing(ns.MISSING_CLASS_BUFFS.HUNTER)) do
-        CreateBuffRow(sub, entry, y, W); y = y + 24
-    end
-    if _addon.IsForever then
-        y = AddThresholdSlider(sub, y + 6, W, L["MISSINGBUFFS_AMMO_THRESHOLD"] or "Ammo alert threshold",
-            "ammoThreshold", 20, 1000, 20, 200)
-    end
-    sub:SetHeight(math.max(y, 1))
-end
-
-local function BuildWarlockSection(sub, W)
-    local y = 0
-    local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_PET"] or "Ignorer le familier", "ignoreWarlockPets")
-    y = y2
-    if not _addon.IsForever then
-        _, y = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_HEALTHSTONE"] or "Ignorer la pierre de soins", "ignoreHealthstoneAlert")
-        _, y = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_SOULSTONE"] or "Ignorer la pierre d'âme", "ignoreSoulstoneAlert")
-    end
-
-    -- Cas special "presence" (inverse) : resynchronise SpellEffects immediatement au clic
-    -- Ruee ardente : n'existe pas sur Forever
-    local SW = ns.SharedWidgets
-    if not _addon.IsForever then
-    local cbBurningRush = SW.CreateCheckbox(sub, L["MISSINGBUFFS_BURNING_RUSH_ALERT"] or "Alerte Ruée Ardente", W)
-    cbBurningRush:SetPoint("TOPLEFT", 0, -y)
-    cbBurningRush:SetChecked(Cfg().burningRushAlert and true or false)
-    cbBurningRush.onChanged = function(checked)
-        Cfg().burningRushAlert = checked
-        -- Epingle au CDM : sans ca, la detection retombe sur GetPlayerAuraBySpellID (nil en combat)
-        if checked and ns.PinAuraToCDM and ns.MISSING_WARLOCK_BURNING_RUSH then
-            local ok = ns.PinAuraToCDM(ns.MISSING_WARLOCK_BURNING_RUSH, true)
-            if not ok then ns.PinAuraToCDM(ns.MISSING_WARLOCK_BURNING_RUSH, false) end
+        return r
+    end },
+    { class = "PRIEST", rows = function() return Append({}, ns.MISSING_CLASS_BUFFS.PRIEST) end },
+    { class = "ROGUE", rows = function()
+        return {
+            { dbKey = "ignoreLethalPoisons",    displayName = L["MISSINGBUFFS_ROW_LETHAL"],    iconSpell = 2823 },
+            { dbKey = "ignoreNonlethalPoisons", displayName = L["MISSINGBUFFS_ROW_NONLETHAL"], iconSpell = 3408 },
+        }
+    end },
+    { class = "SHAMAN", rows = function() return Append({}, ns.MISSING_CLASS_BUFFS.SHAMAN) end },
+    { class = "WARLOCK", rows = function()
+        local r = { { dbKey = "ignoreWarlockPets", displayName = L["MISSINGBUFFS_ROW_PET"], icon = I .. "Spell_Shadow_SummonImp" } }
+        if not _addon.IsForever then
+            r[#r + 1] = { dbKey = "ignoreHealthstoneAlert", displayName = L["MISSINGBUFFS_ROW_HEALTHSTONE"], icon = I .. "INV_Stone_04" }
+            r[#r + 1] = { dbKey = "ignoreSoulstoneAlert",   displayName = L["MISSINGBUFFS_ROW_SOULSTONE"],   icon = I .. "Spell_Shadow_SoulGem" }
+            r[#r + 1] = { dbKeyOn = "burningRushAlert", spellId = ns.MISSING_WARLOCK_BURNING_RUSH,
+                          displayName = L["MISSINGBUFFS_BURNING_RUSH_ALERT"], onToggle = BurningRushToggled }
         end
-        -- Ancre le combo tout de suite : action protegee, impossible en combat
-        if checked and ns.MissingBuffs and ns.MissingBuffs.PrepareBurningRushAnchor then
-            ns.MissingBuffs.PrepareBurningRushAnchor()
-        end
-        if ns.MissingBuffs and ns.MissingBuffs.SyncBurningRush then ns.MissingBuffs.SyncBurningRush() end
-    end
-    y = y + 26
-    end
-
-    for _, entry in ipairs(Existing(ns.MISSING_CLASS_BUFFS.WARLOCK)) do
-        CreateBuffRow(sub, entry, y, W); y = y + 24
-    end
-    if _addon.IsForever then
-        y = AddThresholdSlider(sub, y + 6, W, L["MISSINGBUFFS_SHARDS_THRESHOLD"] or "Soul shards alert threshold",
-            "shardsThreshold", 1, 20, 1, 3)
-    end
-    sub:SetHeight(math.max(y, 1))
-end
-
-local function BuildDruidSection(sub, W)
-    local y = 0
-    local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_FORMS"] or "Ignorer le changement de forme", "ignoreDruidForms")
-    y = y2
-    for _, entry in ipairs(Existing(ns.MISSING_CLASS_BUFFS.DRUID)) do
-        CreateBuffRow(sub, entry, y, W); y = y + 24
-    end
-    sub:SetHeight(math.max(y, 1))
-end
-
-local function BuildRogueSection(sub, W)
-    local y = 0
-    local _, y2 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_LETHAL"] or "Ignorer les poisons letaux", "ignoreLethalPoisons")
-    y = y2
-    local _, y3 = AddDbCheckbox(sub, y, W, L["MISSINGBUFFS_IGNORE_NONLETHAL"] or "Ignorer les poisons non-letaux", "ignoreNonlethalPoisons")
-    y = y3
-    sub:SetHeight(math.max(y, 1))
-end
-
--- Ordre d'affichage des classes + leur builder de section
-local CLASS_SECTIONS = {
-    { class = "WARRIOR", build = BuildWarriorSection },
-    { class = "PALADIN", build = BuildPaladinSection },
-    { class = "HUNTER",  build = BuildHunterSection },
-    { class = "ROGUE",   build = BuildRogueSection },
-    { class = "PRIEST",  build = BuildGenericClassSection(ns.MISSING_CLASS_BUFFS.PRIEST) },
-    { class = "SHAMAN",  build = BuildGenericClassSection(ns.MISSING_CLASS_BUFFS.SHAMAN) },
-    { class = "MAGE",    build = BuildGenericClassSection(ns.MISSING_CLASS_BUFFS.MAGE) },
-    { class = "WARLOCK", build = BuildWarlockSection },
-    { class = "DRUID",   build = BuildDruidSection },
-    { class = "EVOKER",  build = BuildEvokerSection },
+        return Append(r, ns.MISSING_CLASS_BUFFS.WARLOCK)
+    end },
+    { class = "WARRIOR", rows = function()
+        return Append({ { dbKey = "ignoreWarriorStances", displayName = L["MISSINGBUFFS_ROW_STANCE"], icon = I .. "Ability_Warrior_DefensiveStance" } },
+            ns.MISSING_CLASS_BUFFS.WARRIOR)
+    end },
 }
-
--- Forever : pas d'evocateur
-if _addon.IsForever then
-    for i = #CLASS_SECTIONS, 1, -1 do
-        if CLASS_SECTIONS[i].class == "EVOKER" then table.remove(CLASS_SECTIONS, i) end
-    end
-end
 
 local function ClassLabel(token)
     local name = _G.LOCALIZED_CLASS_NAMES_MALE and _G.LOCALIZED_CLASS_NAMES_MALE[token]
     return name or token
+end
+
+local COLS, COL_GAP, LINE_GAP, ROW_H, HEAD_H, MINI_H = 5, 8, 12, 24, 22, 18
+local GENERAL_COLOR = { 0.78, 0.62, 0.30 }   -- ocre des titres de section
+
+-- Seuil d'une alerte de quantite, affiche en ligne compacte juste sous elle : { cle, min, max, pas, defaut }
+local function ThresholdOf(entry)
+    if entry.dbKey == "ignoreBagsFull" then return { "bagsFreeThreshold", 0, 30, 1, 2 } end
+    if entry.kind == "ammo" then return { "ammoThreshold", 20, 1000, 20, 200 } end
+    if entry.kind == "item" then return { "shardsThreshold", 1, 20, 1, 3 } end
+end
+
+-- "Seuil : 2 |----|" : libelle en petit et curseur etroit, decales sous l'icone de la ligne d'alerte
+local function CreateMiniThreshold(parent, y, W, t)
+    local Theme = ns.THEME
+    local key, minV, maxV, step, default = t[1], t[2], t[3], t[4], t[5]
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(W, MINI_H)
+    f:SetPoint("TOPLEFT", 0, -y)
+    local lbl = f:CreateFontString(nil, "OVERLAY")
+    ns.ApplyFont(lbl, ns.Media.font, 9)
+    lbl:SetPoint("LEFT", 22, 0)
+    lbl:SetWidth(54)
+    lbl:SetJustifyH("LEFT")
+    lbl:SetTextColor(unpack(Theme.textDim or Theme.textNormal))
+    local sl = CreateFrame("Slider", nil, f)
+    sl:SetOrientation("HORIZONTAL")
+    sl:SetHeight(12)
+    sl:SetPoint("LEFT", lbl, "RIGHT", 2, 0)
+    sl:SetPoint("RIGHT", f, "RIGHT", -8, 0)
+    local track = sl:CreateTexture(nil, "BACKGROUND")
+    track:SetHeight(2)
+    track:SetPoint("LEFT"); track:SetPoint("RIGHT")
+    track:SetColorTexture(1, 1, 1, 0.22)
+    sl:SetThumbTexture("Interface\\Buttons\\WHITE8x8")
+    local thumb = sl:GetThumbTexture()
+    thumb:SetSize(5, 10)
+    local g = Theme.gold or GENERAL_COLOR
+    thumb:SetVertexColor(g[1], g[2], g[3], 1)
+    sl:SetMinMaxValues(minV, maxV)
+    sl:SetValueStep(step)
+    sl:SetObeyStepOnDrag(true)
+    local function Txt(v) lbl:SetText(string.format(L["MISSINGBUFFS_THRESHOLD_SHORT"] or "Seuil : %d", v)) end
+    local v0 = Cfg()[key] or default
+    sl:SetValue(v0); Txt(v0)
+    sl:SetScript("OnValueChanged", function(_, v)
+        v = math.floor(v / step + 0.5) * step
+        if Cfg()[key] == v then return end
+        Cfg()[key] = v
+        Txt(v)
+        if ns.MissingBuffs then ns.MissingBuffs.RequestCheck() end
+    end)
+    return f
+end
+
+-- Titre de colonne : nom (couleur de classe, ocre pour "General") + filet fin dessous, comme la page Modules
+local function CreateColumnHeader(parent, x, y, W, text, color)
+    local Theme = ns.THEME
+    local h = CreateFrame("Frame", nil, parent)
+    h:SetSize(W, HEAD_H - 4)
+    h:SetPoint("TOPLEFT", x, -y)
+    local fs = h:CreateFontString(nil, "OVERLAY")
+    ns.ApplyFont(fs, ns.Media.font, 12)
+    fs:SetPoint("LEFT", 4, 1)
+    fs:SetPoint("RIGHT", -2, 1)
+    fs:SetJustifyH("LEFT")
+    fs:SetWordWrap(false)
+    fs:SetTextColor(color[1], color[2], color[3], 1)
+    fs:SetText(text)
+    local line = h:CreateTexture(nil, "ARTWORK")
+    line:SetHeight(1)
+    local MSW = _addon.SharedWidgets
+    if MSW and MSW.PixelLine then MSW.PixelLine(line) end
+    line:SetPoint("BOTTOMLEFT", 4, 0)
+    line:SetPoint("BOTTOMRIGHT", 0, 0)
+    line:SetColorTexture(unpack(Theme.separator or { 1, 1, 1, 0.12 }))
+    return h
+end
+
+local function BuildAlertsSection(c, w)
+    local columns = { { label = L["MISSINGBUFFS_COL_GENERAL"] or "Général", color = GENERAL_COLOR, rows = GeneralRows() } }
+    for _, cc in ipairs(CLASS_COLUMNS) do
+        if not (_addon.IsForever and cc.class == "EVOKER") then   -- Forever : pas d'evocateur
+            local rows = cc.rows()
+            if #rows > 0 then
+                local rc = RAID_CLASS_COLORS and RAID_CLASS_COLORS[cc.class]
+                columns[#columns + 1] = { label = ClassLabel(cc.class), rows = rows,
+                                          color = rc and { rc.r, rc.g, rc.b } or { 1, 1, 1 } }
+            end
+        end
+    end
+    local colW = math.floor((w - (COLS - 1) * COL_GAP) / COLS)
+    local y, lineH = 0, 0
+    for i, col in ipairs(columns) do
+        local ci = (i - 1) % COLS
+        if ci == 0 and i > 1 then y = y + lineH + LINE_GAP; lineH = 0 end
+        local x = ci * (colW + COL_GAP)
+        CreateColumnHeader(c, x, y, colW, col.label, col.color)
+        local holder = CreateFrame("Frame", nil, c)
+        holder:SetPoint("TOPLEFT", x, -(y + HEAD_H))
+        local cy = 0
+        for _, entry in ipairs(col.rows) do
+            CreateBuffRow(holder, entry, cy, colW)
+            cy = cy + ROW_H
+            local t = ThresholdOf(entry)
+            if t then CreateMiniThreshold(holder, cy - 4, colW, t); cy = cy + MINI_H - 4 end
+        end
+        holder:SetSize(colW, math.max(1, cy))
+        lineH = math.max(lineH, HEAD_H + cy)
+    end
+    c:SetHeight(math.max(1, y + lineH))
 end
 
 -- Builder principal
@@ -475,10 +521,8 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     local sections = {
         { name = L["MISSINGBUFFS_ICON_HEADER"] or "Apparence de l'icone", build = BuildIconSection },
         { name = L["MISSINGBUFFS_TEXT_HEADER"] or "Apparence du texte",   build = BuildTextSection },
+        { name = L["MISSINGBUFFS_SEC_ALERTS"], build = BuildAlertsSection },
     }
-    for _, cs in ipairs(CLASS_SECTIONS) do
-        sections[#sections + 1] = { name = ClassLabel(cs.class), build = cs.build }
-    end
     SW.CreateSectionStack(p, sections, cw, -y, "missingbuffs")
 
     return p

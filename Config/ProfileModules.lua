@@ -68,6 +68,7 @@ ns.ProfileTree = {
         { id = "aurasTotems", label = "SETTINGS_CAT_TOTEMS", auras = { "totems", "totemsEnabled" } },
       } },
     { id = "aurasMissingBuffs", label = "AURASDATA_SEC_MISSINGBUFFS_LABEL", auras = { "missingBuffs" } },
+    { id = "movementBuffs", label = "SETTINGS_CAT_MOVEMENT_BUFFS", core = { "movementBuffs" }, apply = { "MovementBuffs" } },
   } },
   -- Section porteuse de données : réglages communs de spellEffects (activation globale, taille des
   -- modèles, coupure raid / groupe), chaque type d'animation étant un élément à part.

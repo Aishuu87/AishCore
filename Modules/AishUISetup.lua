@@ -488,6 +488,8 @@ local function SwitchUiFlavor(target)
         enable = (KEEP[name] or SKIP[name]) and true or false   -- meme liste que le setup auto
       elseif name == "ElvUI_SLE" then
         enable = nil   -- Shadow & Light : jamais active par la commande (on ne touche pas a son etat)
+      elseif name == "ElvUI_WindTools" then
+        enable = false -- WindTools ne fait plus partie d'AishUI (fonctions reprises par AishCore) : jamais active
       else
         enable = true
       end

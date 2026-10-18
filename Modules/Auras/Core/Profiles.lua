@@ -116,6 +116,35 @@ local function PushActive(raw)
     if p and p == ns.db then PushDiscovery(raw, p) end
 end
 
+-- Creation des sorts manquants A LA DEMANDE, spe par spe (ns.GetSpecSpells) : les creer d'un coup pour
+-- toutes les spes du registre (40 sur un compte multi-classes) gardait ~1 Mo d'entrees jamais lues.
+local _pulledKeys = setmetatable({}, { __mode = "k" })   -- [profil] = { [specKey] = true }
+function ns.PullDiscoveryKey(key)
+    local raw, p = AishUIAuraDB, ns.db
+    if not (raw and type(p) == "table" and key) then return end
+    local done = _pulledKeys[p]
+    if not done then done = {}; _pulledKeys[p] = done end
+    if done[key] then return end
+    done[key] = true
+    local reg = type(raw.discovery) == "table" and raw.discovery[key]
+    if type(reg) ~= "table" then return end
+    if type(p.discoveredSpells) ~= "table" then p.discoveredSpells = {} end
+    local spells = p.discoveredSpells[key]
+    if type(spells) ~= "table" then spells = {}; p.discoveredSpells[key] = spells end
+    local profileName = raw.activeProfile or "Default"
+    for sid, d in pairs(reg) do
+        if type(spells[sid]) ~= "table" and type(d) == "table" then
+            local info = ns.NewSpellEntry()
+            info.priority = sid
+            ns.ApplyAutoColor(info, profileName, sid)
+            info.source = d.source
+            if d.name then info.name = d.name end
+            if type(d.linkedSpellIDs) == "table" then info.linkedSpellIDs = ns.DeepCopy(d.linkedSpellIDs) end
+            spells[sid] = info
+        end
+    end
+end
+
 local function EnsureProfile(raw, name)
     raw.profiles = raw.profiles or {}
     local p = raw.profiles[name]
@@ -125,7 +154,9 @@ local function EnsureProfile(raw, name)
     if type(p) ~= "table" then p = ns.DeepCopy(ns.ProfileTemplate or ns.Defaults); raw.profiles[name] = p end
     ns.MergeDefaults(p, ns.Defaults)
     local active = (name == raw.activeProfile)
-    PullDiscovery(raw, p, name, active)
+    -- Pas de creation ici : ns.PullDiscoveryKey s'en charge pour la spe lue (cf. ns.GetSpecSpells)
+    _pulledKeys[p] = nil
+    PullDiscovery(raw, p, name, false)
     if not active then ns.DropUncustomizedSpells(p.discoveredSpells) end
     ns.HydrateSpellLists(p.discoveredSpells, true)
     return p

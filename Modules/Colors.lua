@@ -127,7 +127,7 @@ Colors.CLASSES = {
     { key = "priest", file = "PRIEST", name = L["COLORSMOD_CLASS_PRIEST"],
       specs = { {id=256,name=L["COLORSMOD_SPEC_DISCIPLINE"]}, {id=257,name=L["COLORSMOD_SPEC_SACRE"]}, {id=258,name=L["COLORSMOD_SPEC_OMBRE"]} } },
     { key = "rogue", file = "ROGUE", name = L["COLORSMOD_CLASS_ROGUE"],
-      specs = { {id=259,name=L["COLORSMOD_SPEC_ASSASSINAT"]}, {id=260,name=L["COLORSMOD_SPEC_OUTLAW"]},
+      specs = { {id=259,name=L["COLORSMOD_SPEC_ASSASSINAT"]}, {id=260,name=L[ns.IsForever and "COLORSMOD_SPEC_COMBAT" or "COLORSMOD_SPEC_OUTLAW"]},
                 {id=261,name=L["COLORSMOD_SPEC_SUBTILITE"]} } },
     { key = "shaman", file = "SHAMAN", name = L["COLORSMOD_CLASS_SHAMAN"],
       specs = { {id=262,name=L["COLORSMOD_SPEC_ELEMENTAIRE"]}, {id=263,name=L["COLORSMOD_SPEC_AMELIORATION"]},
@@ -205,8 +205,8 @@ function Colors.Get(element)
     end
     local specID = ns._specID
     if not specID then
-        local idx = GetSpecialization and GetSpecialization() or nil
-        specID = idx and GetSpecializationInfo and select(1, GetSpecializationInfo(idx)) or nil
+        local idx = ns.GetSpecialization and ns.GetSpecialization() or nil
+        specID = idx and ns.GetSpecializationInfo and select(1, ns.GetSpecializationInfo(idx)) or nil
     end
     -- Spe absente, ou inconnue de la table des couleurs (spe "initiale" d'un perso de bas niveau sur
     -- Retail, dont l'ID n'est celui d'aucune vraie spe) : on la traite comme "aucune spe".

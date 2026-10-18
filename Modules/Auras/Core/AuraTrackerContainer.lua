@@ -912,7 +912,7 @@ local function ProcGlowTick()
         end
     end
 end
-C_Timer.NewTicker(0.2, ProcGlowTick)
+_addon.NewTicker(0.2, ProcGlowTick)
 
 -- Spark natif : contrairement au glow, le spark doit suivre le bord mobile d'une StatusBar dont le
 -- remplissage est pilote par Blizzard en interne (SetDurationBar, valeur secrete, illisible en Lua).
@@ -988,6 +988,18 @@ local iconsPerSpellGroups = {}
 -- Print de secours : n'affiche que les echecs reels, pas de trace de fonctionnement normal (pollution
 -- du chat a chaque /reload). Diagnostic complet a la demande via /aishdebug iconsflow.
 local function DBG(s) print("|cff33aaff[IconsFlow]|r " .. tostring(s)) end
+
+-- Vrai si la destination suit au moins un buff du joueur (ni debuff cible, ni aura de familier). Sans buff, les
+-- grilles cible prennent la place de la grille joueur au lieu de s'empiler dessous (cf. Reposition*Target) :
+-- la grille joueur garde sa taille meme vide, les debuffs apparaissaient loin de l'emplacement montre par le GUI.
+local function DestHasPlayerBuffs(dest)
+    local wl = ns.whitelistByDest and ns.whitelistByDest[dest]
+    if not wl then return false end
+    for id, info in pairs(wl) do
+        if info.source ~= "debuff" and not (ns.GetPetAuraUnit and ns.GetPetAuraUnit(id)) then return true end
+    end
+    return false
+end
 
 -- Conteneur natif "icons" (peut etre nil). Utilise par Animation.lua (ns.UpdateRenderFade) pour
 -- rediriger le fade combat/hors-combat sur le VRAI conteneur affiche : ns.renderFrames.icons.container
@@ -1723,7 +1735,11 @@ function ns.RepositionIconsNativeGridTarget()
     local rg = cfg.rowGap or 2
     -- Empile la rangee cible SOUS la rangee joueur (ou a sa position
     -- habituelle decalee si le conteneur joueur n'existe pas encore).
-    if cPlayer then
+    if cPlayer and not DestHasPlayerBuffs("icons") then
+        -- Aucun buff suivi : les debuffs prennent la place de la rangee joueur
+        if growth == "UP" then c:SetPoint("BOTTOM", cPlayer, "BOTTOM", 0, 0)
+        else c:SetPoint("TOP", cPlayer, "TOP", 0, 0) end
+    elseif cPlayer then
         if growth == "UP" then
             c:SetPoint("BOTTOM", cPlayer, "TOP", 0, rg)
         else
@@ -2746,7 +2762,7 @@ function ns.DebugCircleBarsWatchToggle()
     end
     wipe(circleBarsWatchLastState)
     P(string.format("DEMARRE -- force UpdateAllAuras toutes les 0.5s et log les changements sur %d bouton(s). /aishdebug circlebarswatch pour arreter.", #circleBarsFlowButtons))
-    circleBarsWatchTicker = C_Timer.NewTicker(0.5, function()
+    circleBarsWatchTicker = _addon.NewTicker(0.5, function()
         local c = circleBarsFlowContainer
         if not c then return end
         local okUpd, errUpd = pcall(c.UpdateAllAuras, c)
@@ -2892,7 +2908,9 @@ function ns.RepositionCircleBarsNativeGridTarget()
     pcall(c.SetSize, c, rowW, maxBars * (bh + rg))
 
     c:ClearAllPoints()
-    if circleBarsFlowContainer then
+    if circleBarsFlowContainer and not DestHasPlayerBuffs("freebars") then
+        c:SetPoint("TOP", circleBarsFlowContainer, "TOP", 0, 0)   -- aucun buff suivi : place de la grille joueur
+    elseif circleBarsFlowContainer then
         c:SetPoint("TOP", circleBarsFlowContainer, "BOTTOM", 0, -rg)
     else
         c:SetPoint("CENTER", UIParent, "CENTER", cfg.x or 0, (cfg.y or -218) - maxBars * (bh + rg))
@@ -3962,7 +3980,13 @@ function ns.RepositionFreeBarsNativeGridTarget()
     else pcall(c.SetSize, c, rowW, maxBars * (rowH + rg)) end
 
     c:ClearAllPoints()
-    if freeBarsFlowContainer then
+    if freeBarsFlowContainer and not DestHasPlayerBuffs("circlebars") then
+        -- Aucun buff suivi : les debuffs prennent la place de la grille joueur
+        if growth == "UP" then c:SetPoint("BOTTOM", freeBarsFlowContainer, "BOTTOM", 0, 0)
+        elseif growth == "LEFT" then c:SetPoint("RIGHT", freeBarsFlowContainer, "RIGHT", 0, 0)
+        elseif growth == "RIGHT" then c:SetPoint("LEFT", freeBarsFlowContainer, "LEFT", 0, 0)
+        else c:SetPoint("TOP", freeBarsFlowContainer, "TOP", 0, 0) end
+    elseif freeBarsFlowContainer then
         if growth == "UP" then c:SetPoint("BOTTOM", freeBarsFlowContainer, "TOP", 0, rg)
         elseif growth == "LEFT" then c:SetPoint("RIGHT", freeBarsFlowContainer, "LEFT", -rg, 0)
         elseif growth == "RIGHT" then c:SetPoint("LEFT", freeBarsFlowContainer, "RIGHT", rg, 0)
@@ -5288,7 +5312,15 @@ function ns.RepositionIconListNativeGridTarget()
     end
 
     c:ClearAllPoints()
-    if iconListFlowContainer then
+    if iconListFlowContainer and not DestHasPlayerBuffs("iconlist") then
+        -- Aucun buff suivi : les debuffs prennent la place de la grille joueur
+        if isDual and growth == "UP" then c:SetPoint("BOTTOMRIGHT", iconListFlowContainer, "BOTTOMRIGHT", 0, 0)
+        elseif isDual then c:SetPoint("TOPRIGHT", iconListFlowContainer, "TOPRIGHT", 0, 0)
+        elseif growth == "UP" then c:SetPoint("BOTTOM", iconListFlowContainer, "BOTTOM", 0, 0)
+        elseif growth == "LEFT" then c:SetPoint("RIGHT", iconListFlowContainer, "RIGHT", 0, 0)
+        elseif growth == "RIGHT" then c:SetPoint("LEFT", iconListFlowContainer, "LEFT", 0, 0)
+        else c:SetPoint("TOP", iconListFlowContainer, "TOP", 0, 0) end
+    elseif iconListFlowContainer then
         -- Double icone : colonne gauche cible sous la colonne gauche joueur
         if isDual and growth == "UP" then c:SetPoint("BOTTOMRIGHT", iconListFlowContainer, "TOPRIGHT", 0, 0)
         elseif isDual then c:SetPoint("TOPRIGHT", iconListFlowContainer, "BOTTOMRIGHT", 0, 0)
@@ -5314,8 +5346,12 @@ function ns.RepositionIconListNativeGridTarget()
         if r then
             IL.ColumnFlow(r, growth, "LEFT", a, b, ih, rg)
             r:ClearAllPoints()
-            -- Colonne droite cible sous la colonne droite joueur (chaque colonne reste continue)
-            if pr and growth == "UP" then r:SetPoint("BOTTOMLEFT", pr, "TOPLEFT", 0, 0)
+            -- Colonne droite cible sous la colonne droite joueur (chaque colonne reste continue) ; sans buff suivi,
+            -- a la place de la colonne joueur, comme la colonne gauche plus haut
+            local noBuff = not DestHasPlayerBuffs("iconlist")
+            if pr and noBuff and growth == "UP" then r:SetPoint("BOTTOMLEFT", pr, "BOTTOMLEFT", 0, 0)
+            elseif pr and noBuff then r:SetPoint("TOPLEFT", pr, "TOPLEFT", 0, 0)
+            elseif pr and growth == "UP" then r:SetPoint("BOTTOMLEFT", pr, "TOPLEFT", 0, 0)
             elseif pr then r:SetPoint("TOPLEFT", pr, "BOTTOMLEFT", 0, 0)
             elseif growth == "UP" then r:SetPoint("BOTTOMLEFT", c, "BOTTOMRIGHT", pg, 0)
             else r:SetPoint("TOPLEFT", c, "TOPRIGHT", pg, 0) end

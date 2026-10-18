@@ -48,15 +48,15 @@ local inTankSpec = false
 local inCombat   = false
 
 --- Met a jour `inTankSpec`. Renvoie false si la spe n'a PAS pu etre resolue.
---- Distinction importante : juste apres un /reload, GetSpecialization() repond nil
+--- Distinction importante : juste apres un /reload, ns.GetSpecialization() repond nil
 --- pendant quelques instants. L'ancienne version passait alors 0 a
---- GetSpecializationInfo, recevait nil, et en concluait "pas tank" -- les barres
+--- ns.GetSpecializationInfo, recevait nil, et en concluait "pas tank" -- les barres
 --- gardaient donc leur geometrie non-tank jusqu'au prochain changement de spe.
 --- On ne touche plus a inTankSpec tant que la reponse n'est pas fiable.
 local function UpdateTankSpec()
-    local idx = GetSpecialization and GetSpecialization()
+    local idx = ns.GetSpecialization and ns.GetSpecialization()
     if not idx or idx == 0 then return false end
-    local ok, specID = pcall(GetSpecializationInfo, idx)
+    local ok, specID = pcall(ns.GetSpecializationInfo, idx)
     if not ok or not specID or specID == 0 then return false end
     -- spe issue de la seule "spe par defaut" des couleurs : ce n'est pas une vraie spe tank
     if ns.IsSpecDefaulted and ns.IsSpecDefaulted() then inTankSpec = false; return true end
@@ -269,9 +269,75 @@ local function ComputeNoTolMount()
     return false
 end
 
+-- Regles de visibilite : cases cumulables (l'une suffit a montrer la barre), en combat toujours visibles.
+--   always     Toujours (prime sur les 5 suivantes)      hover      Au survol
+--   friendly   cible alliee                              attackable cible attaquable
+--   group      en groupe                                 instance   en instance
+--   hideMount  cacher en monture                         hideRest   cacher en zone de repos
+-- Invariant : always ou hover (decocher l'un coche l'autre, cf. UnitBars.SetVisRule). "Options par role"
+-- (roleVisibility) : un jeu de regles par role de la spe active (DAMAGER / HEALER / TANK), sinon visRules.
+-- Profil sans regles : derivees de l'ancien reglage (visibilityMode / alwaysInInstance), sans rien ecrire.
+UnitBars.VIS_KEYS = { "always", "hover", "friendly", "attackable", "group", "instance", "hideMount", "hideRest" }
+
+local function LegacyVisRules(db)
+    local mode = db.visibilityMode or (db.hideOutOfCombat and "combat") or "combat"
+    return {
+        always = (mode == "always"), hover = true, friendly = false, attackable = (mode == "target"),
+        group = false, instance = db.alwaysInInstance == true, hideMount = false, hideRest = false,
+    }
+end
+
+--- Regles d'un role ("DAMAGER" / "HEALER" / "TANK"), ou les regles simples (role nil). Lecture seule.
+function UnitBars.GetVisRules(role)
+    local db = ns.GetCfg("unitBars") or {}
+    if role then
+        local t = db.visRulesRole and db.visRulesRole[role]
+        if t then return t end
+    end
+    return db.visRules or LegacyVisRules(db)
+end
+
+--- Role dont les regles s'appliquent maintenant (nil = options par role coupees).
+function UnitBars.ActiveVisRole()
+    local db = ns.GetCfg("unitBars")
+    if not (db and db.roleVisibility) then return nil end
+    -- Augmentation (et toute spe de ns.HEALER_LIKE_SPECS) : colonne Soigneur
+    if ns.IsHealerLikeSpec and ns.IsHealerLikeSpec() then return "HEALER" end
+    local idx = ns.GetSpecialization and ns.GetSpecialization()
+    local role = idx and ns.GetSpecializationRole and ns.GetSpecializationRole(idx)
+    return (role == "HEALER" or role == "TANK") and role or "DAMAGER"
+end
+
+--- Ecrit une case (cree le jeu de regles a la premiere modification) et tient l'invariant always / hover.
+function UnitBars.SetVisRule(role, key, value)
+    ns.DB.unitBars = ns.DB.unitBars or {}
+    local db = ns.DB.unitBars
+    local t
+    if role then
+        db.visRulesRole = db.visRulesRole or {}
+        t = db.visRulesRole[role]
+        if not t then t = CopyTable(UnitBars.GetVisRules(nil)); db.visRulesRole[role] = t end
+    else
+        t = db.visRules
+        if not t then t = CopyTable(LegacyVisRules(db)); db.visRules = t end
+    end
+    t[key] = value and true or false
+    if key == "always" and not value then t.hover = true end
+    if key == "hover" and not value then t.always = true end
+end
+
+local function ActiveVisRules() return UnitBars.GetVisRules(UnitBars.ActiveVisRole()) end
+
+-- Survol utile seulement s'il peut reveler la barre : sans "Toujours" (qui la montre deja), ou avec un "Cacher"
+-- (le survol passe avant eux)
+local function HoverRevealActive()
+    local r = ActiveVisRules()
+    return r.hover and (not r.always or r.hideMount or r.hideRest) and true or false
+end
+
 local function ConfiguredHoverTol()
     local db = ns.GetCfg("unitBars")
-    if not (db and db.hoverReveal) then return 0 end
+    if not (db and HoverRevealActive()) then return 0 end
     -- Monture a PNJ / a passagers : pas de zone elargie, elle masquait les PNJ de la monture.
     -- Le pad est de toute facon retire en combat.
     if noTolMount then return 0 end
@@ -325,6 +391,7 @@ local function EnsureHitboxFrame(frame)
         t:SetColorTexture(unpack(HITBOX_COLOR))
         edges[i] = t
     end
+    f._edges = edges
     edges[1]:SetPoint("TOPLEFT");     edges[1]:SetPoint("TOPRIGHT");    edges[1]:SetHeight(1)
     edges[2]:SetPoint("BOTTOMLEFT");  edges[2]:SetPoint("BOTTOMRIGHT"); edges[2]:SetHeight(1)
     edges[3]:SetPoint("TOPLEFT");     edges[3]:SetPoint("BOTTOMLEFT");  edges[3]:SetWidth(1)
@@ -346,6 +413,8 @@ function UnitBars.FlashHitbox()
         if f._hitPreview then f._hitPreview:Hide() end
         if Cfg(key).enabled ~= false then
             local p = EnsureHitboxFrame(f)
+            local r, g, b = ns.HitboxColor()   -- couleur des hitbox (Couleurs Thematiques, sinon bleu)
+            for _, t in ipairs(p._edges) do t:SetColorTexture(r, g, b, HITBOX_COLOR[4]) end
             p:ClearAllPoints()
             p:SetPoint("TOPLEFT",     f, "TOPLEFT",     -tol,  tol)
             p:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT",  tol, -tol)
@@ -361,7 +430,7 @@ function UnitBars.FlashHitbox()
     hitboxTimer = C_Timer.NewTimer(HITBOX_HOLD, function()
         hitboxTimer = nil
         local t0 = GetTime()
-        hitboxTicker = C_Timer.NewTicker(0.03, function()
+        hitboxTicker = ns.NewTicker(0.03, function()
             local a = 1 - math.min((GetTime() - t0) / HITBOX_FADE, 1)
             for _, fr in ipairs(shown) do fr:SetAlpha(a) end
             if a <= 0 then
@@ -397,25 +466,23 @@ local function ShouldShowBar(frame)
     if inVehicle                then return false end
     if inPetBattle              then return false end
     local unit  = frame._def.unit
-    -- "Au survol" : le curseur sur la barre (tolerance comprise) la fait sortir quel que soit
-    -- le mode de visibilite. Vient apres les masquages durs (skyriding, vehicule, pet battle) :
-    -- ceux-la ne se laissent pas rouvrir a la souris.
-    if db and db.hoverReveal and ubHovered[frame._def.key] and UnitExists(unit) then return true end
-    -- "Toujours actif en instance" : ignore les transitions combat en donjon/raid, mais le unit doit exister
-    if db and db.alwaysInInstance and ns.inInstance then return UnitExists(unit) end
-    local vMode = (db and db.visibilityMode)
-    if not vMode then
-        vMode = (db and db.hideOutOfCombat) and "combat" or "target"
-    end
-    if vMode == "always" then
-        return UnitExists(unit)
-    elseif vMode == "combat" then
-        return UnitAffectingCombat("player") and UnitExists(unit)
-    else  -- "target" : regle commune, cf. ns.ShouldShowForTargetMode (combat sans cible,
-          -- cible attaquable hors combat, spe de soin hors combat). La barre d'une unite
-          -- inexistante reste masquee : en combat sans cible, seule celle du joueur sort.
-        return ns.ShouldShowForTargetMode() and UnitExists(unit)
-    end
+    if not UnitExists(unit) then return false end
+    -- En combat : toujours visible (regle de base, aucune case ne la desactive)
+    if UnitAffectingCombat("player") then return true end
+    local r = ActiveVisRules()
+    -- Survol : prime sur les "Cacher" (monture, repos), mais reste apres les masquages durs (skyriding, vehicule,
+    -- pet battle), qui ne se rouvrent pas a la souris
+    if r.hover and ubHovered[frame._def.key] then return true end
+    -- Les "Cacher" passent avant "Toujours" et les autres conditions
+    if r.hideMount and IsMounted() then return false end
+    if r.hideRest and IsResting() then return false end
+    if r.always then return true end
+    local hasTarget = UnitExists("target") and not UnitIsDeadOrGhost("target")
+    if r.attackable and hasTarget and UnitCanAttack("player", "target") then return true end
+    if r.friendly and hasTarget and not UnitCanAttack("player", "target") and UnitIsFriend("player", "target") then return true end
+    if r.group and IsInGroup() then return true end
+    if r.instance and ns.inInstance then return true end
+    return false
 end
 
 local function GetBgColor()
@@ -845,6 +912,17 @@ local function UpdateBarHealth(frame)
     local barCfg = Cfg(frame._def.key)
     if barCfg.enabled == false then return end
     if not UnitExists(unit) then return end
+
+    -- Apercu (GUI ouvert) : barre du joueur figee a 75 %, comme les barres sans unite (cible...)
+    if ubPreviewMode and frame._def.key == "player" then
+        frame.bar:SetMinMaxValues(0, 100)
+        ns.SmoothBarValue(frame.bar, 75)
+        if frame.hpText then
+            local _mode = (ns.GetCfg("unitBars") or {}).hpDisplayMode or "pct"
+            frame.hpText:SetText(_mode == "value" and "75K" or "75")
+        end
+        return
+    end
 
     -- Calculateur (WithAbsorbs) en mode normal, C-side pur en mode miroir (absorbReversed) pour éviter un gap
     local calcUpdated = false
@@ -1377,7 +1455,7 @@ local function AnimateBar(frame, shouldShow)
         if startA >= 1 then UpdateBarHealth(frame); return end
         frame._aishAnimBusyDir = true
         local _t0 = GetTime()
-        ubFadeTickers[key] = C_Timer.NewTicker(0.016, function()
+        ubFadeTickers[key] = ns.NewTicker(0.016, function()
             local elapsed = GetTime() - _t0
             local p = math.min(elapsed / FADE_DURATION, 1)
             local eased = EaseOut(p)
@@ -1434,7 +1512,7 @@ local function AnimateBar(frame, shouldShow)
         if startA <= 0 then return end
         frame._aishAnimBusyDir = false
         local _t0 = GetTime()
-        ubFadeTickers[key] = C_Timer.NewTicker(0.016, function()
+        ubFadeTickers[key] = ns.NewTicker(0.016, function()
             local elapsed = GetTime() - _t0
             -- Cascade de sortie = LIFO exact de la cascade d'entree (nom part en premier, bar+dot3 en dernier)
             local barDelay = LEAVE_DELAY_BAR * DOT_STAGGER_OUT
@@ -1569,7 +1647,7 @@ end
 --- PLAYER_ENTERING_WORLD etait donc avalee par ce garde : seul un changement de spe
 --- manuel, qui arrive une fois les barres creees, mettait `inTankSpec` a jour.
 --- On surveille au lieu de s'arreter au premier succes : juste apres un /reload,
---- GetSpecialization() peut rendre un index perime avant de se stabiliser.
+--- ns.GetSpecialization() peut rendre un index perime avant de se stabiliser.
 local function WatchTankSpec()
     local tries, appliedTank = 0, nil
     local function Tick()
@@ -1619,6 +1697,7 @@ function UnitBars.Create(parent)
                 -- Mode preview : ShouldShowBar renvoie true pour toutes les barres.
                 ubPreviewMode = true
                 UnitBars.UpdateAllVisibility()
+                if bars.player then UpdateBarHealth(bars.player) end   -- figee a 75 % (cf. UpdateBarHealth)
                 -- Injecter noms + HP de test sur les barres sans unité réelle
                 for _, f in pairs(bars) do
                     local u = f._def.unit
@@ -1647,6 +1726,7 @@ function UnitBars.Create(parent)
                     end
                 end
                 UnitBars.UpdateAllVisibility()
+                if bars.player then UpdateBarHealth(bars.player) end   -- retour a la vie reelle
             end)
         end
     end)
@@ -1671,7 +1751,7 @@ eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 ns.TrackSpecFrame(eventFrame)
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 -- ACTIVE_TALENT_GROUP_CHANGED se declenche aussi au login, quand le serveur confirme
--- la spe active : c'est le signal fiable que GetSpecialization() devient exploitable,
+-- la spe active : c'est le signal fiable que ns.GetSpecialization() devient exploitable,
 -- la ou PLAYER_ENTERING_WORLD arrive trop tot.
 eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
@@ -1680,14 +1760,18 @@ eventFrame:RegisterEvent("UNIT_ENTERED_VEHICLE")
 eventFrame:RegisterEvent("UNIT_EXITED_VEHICLE")
 eventFrame:RegisterEvent("PET_BATTLE_OPENING_START")
 eventFrame:RegisterEvent("PET_BATTLE_CLOSE")
+-- Regles de visibilite (zone de repos, groupe, monture)
+eventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
+eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 
 -- Debug : /ubtank, etat de la hauteur tank (pourquoi une barre ne prend pas sa taille)
 SLASH_UBTANK1 = "/ubtank"
 SlashCmdList["UBTANK"] = function()
     local function p(msg) DEFAULT_CHAT_FRAME:AddMessage("|cff88ccff[UBTank]|r " .. tostring(msg)) end
-    local idx = GetSpecialization and GetSpecialization()
-    local okS, sid = pcall(GetSpecializationInfo, idx or 0)
-    p(string.format("GetSpecialization()=%s  specID(ok=%s)=%s  TANK_SPECS[specID]=%s",
+    local idx = ns.GetSpecialization and ns.GetSpecialization()
+    local okS, sid = pcall(ns.GetSpecializationInfo, idx or 0)
+    p(string.format("ns.GetSpecialization()=%s  specID(ok=%s)=%s  TANK_SPECS[specID]=%s",
         tostring(idx), tostring(okS), tostring(sid), tostring(sid and TANK_SPECS[sid])))
     p(string.format("inTankSpec=%s  (UpdateTankSpec() vient de renvoyer %s)",
         tostring(inTankSpec), tostring(UpdateTankSpec())))
@@ -1774,6 +1858,11 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
 
+    if event == "PLAYER_UPDATE_RESTING" or event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_MOUNT_DISPLAY_CHANGED" then
+        UnitBars.UpdateAllVisibility()
+        return
+    end
+
     if event == "PLAYER_SPECIALIZATION_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM"
        or event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_LOGIN" then
         local wasTank = inTankSpec
@@ -1804,14 +1893,14 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         --      fichier est enregistre en premier (UnitBars.lua est charge avant
         --      AishCore.lua dans le .toc), donc on passe ici AVANT que les barres
         --      existent -- la boucle ci-dessus ne s'applique a rien.
-        --   2. juste apres un /reload, GetSpecialization() repond nil un court instant,
+        --   2. juste apres un /reload, ns.GetSpecialization() repond nil un court instant,
         --      donc inTankSpec vaut encore false quand AishCore cree puis configure les
         --      barres dans la foulee.
         -- On repasse donc apres coup des que la spe est lisible, sans condition sur un
         -- changement d'etat : c'est le seul passage qui voit a la fois les barres creees
         -- et la spe resolue.
         -- On SURVEILLE pendant quelques secondes au lieu de s'arreter a la premiere
-        -- resolution : juste apres un /reload, GetSpecialization() peut d'abord rendre
+        -- resolution : juste apres un /reload, ns.GetSpecialization() peut d'abord rendre
         -- un index perime (resolu, mais pas la bonne spe) avant de se stabiliser. Un
         -- retry qui s'arrete au premier succes fige alors la mauvaise hauteur -- d'ou un
         -- comportement intermittent d'un reload a l'autre.
@@ -1923,7 +2012,7 @@ local function _TickUBTargetHP()
 end
 
 -- Ticker 0.1s : fill + absorb pour target ET les autres barres avec calculateur.
-C_Timer.NewTicker(0.1, function()
+ns.NewTicker(0.1, function()
     if not next(bars) then return end
     -- Target : mise à jour dédiée (tainted health, tickrate élevé)
     local tg = bars.target
@@ -1950,18 +2039,18 @@ local function RefreshSeatHud()
     seatHudWas = now
     for _, f in pairs(bars) do ApplyHitPad(f, ConfiguredHoverTol()) end
 end
-C_Timer.NewTicker(0.5, function()
+ns.NewTicker(0.5, function()
     if next(bars) then RefreshSeatHud() end
 end)
 
 -- Ticker de survol (0.05 s) : detecte l'entree/sortie du curseur dans la zone tolerante de
 -- chaque barre, puis reevalue la visibilite et/ou le texte HP. Ne coute rien quand les deux
 -- options sont eteintes -- c'est le cas par defaut.
-C_Timer.NewTicker(0.05, function()
+ns.NewTicker(0.05, function()
     if not next(bars) then return end
     local db = ns.GetCfg("unitBars")
     if not db then return end
-    local reveal   = db.hoverReveal == true
+    local reveal   = HoverRevealActive()
     local hoverVal = db.hpHoverValue == true
 
     if not (reveal or hoverVal) then
@@ -1997,7 +2086,7 @@ end)
 
 -- Nom du personnage au survol de sa barre de vie (option showPlayerNameHover), jamais en combat. Meme zone de survol que
 -- la reveal "Au survol" (tolerance comprise).
-C_Timer.NewTicker(0.1, function()
+ns.NewTicker(0.1, function()
     local f = bars.player
     if not f then return end
     local db = ns.GetCfg("unitBars")
@@ -2015,7 +2104,7 @@ end)
 -- position du curseur, zone tolerante comprise (meme zone que la reveal "Au survol"), et non par OnEnter / OnLeave : la
 -- zone elargie est un autre cadre, et passer de l'un a l'autre ferait clignoter l'affichage.
 local petHoverOn = false
-C_Timer.NewTicker(0.1, function()
+ns.NewTicker(0.1, function()
     if not ns.IsForever then return end
     local f = bars.pet
     local hovered = false
@@ -2030,7 +2119,7 @@ C_Timer.NewTicker(0.1, function()
 end)
 
 -- Ticker 0.5s : targettarget + texte HP% target + masquage si unité disparue
-C_Timer.NewTicker(0.5, function()
+ns.NewTicker(0.5, function()
     if not next(bars) then return end
     local guiOpen = _G["AishCoreSettingsPanel"] and _G["AishCoreSettingsPanel"]:IsShown()
     local tg = bars.target

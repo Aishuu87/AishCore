@@ -900,9 +900,9 @@ end
 -- Basculement automatique lors d'un changement de spécialisation
 local function ApplySpecProfile()
   if not P.GetSpecProfilesEnabled() then return end
-  local specIndex = GetSpecialization()
+  local specIndex = ns.GetSpecialization()
   if not specIndex then return end
-  local specID = GetSpecializationInfo(specIndex)
+  local specID = ns.GetSpecializationInfo(specIndex)
   if not specID then return end
   local targetProfile = P.GetSpecProfile(specID)
   if targetProfile and targetProfile ~= P.GetActive() then
