@@ -1,5 +1,9 @@
 # AishCore
 
+## [v4.5.1](https://github.com/Aishuu87/AishCore/tree/v4.5.1) (2026-10-18)
+
+- [Forever] FIX: Lua error from MemTrace.lua ("attempt to index a secret string value")
+
 ## [v4.5](https://github.com/Aishuu87/AishCore/tree/v4.5) (2026-10-18)
 
 - New general optimization pass on the addon, about 30-35% faster

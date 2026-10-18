@@ -18,7 +18,9 @@ local wrappers = setmetatable({}, { __mode = "k" })  -- nos enveloppes
 
 -- Premier fichier:ligne d'AishCore dans la pile (hors ce fichier)
 local function Site()
-  local s = debugstack(3, 8, 0) or ""
+  local ok, s = pcall(debugstack, 3, 8, 0)
+  -- Pile secrete (appel venu d'un contexte protege) : illisible, le handler est traite comme etranger
+  if not ok or type(s) ~= "string" or (issecretvalue and issecretvalue(s)) then return nil end
   for line in s:gmatch("[^\n]+") do
     if not line:find("MemTrace", 1, true) then
       local file, n = line:match("AddOns[\\/]" .. addonName .. "[\\/]([^:\"]-)%.lua\"?%]?:(%d+)")
