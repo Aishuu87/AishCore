@@ -123,6 +123,117 @@ function Visibility.ApplySettings()
       frameStates[f] = nil
     end
   end
+  if Visibility.ApplyEuiBars then Visibility.ApplyEuiBars() end
+end
+
+-- ═══ Barres d'action EllesmereUI (1, 2, 3) ═══════════════════════════════════════════════════════
+-- Attenuees a cfg.euiBarsAlpha ; opacite d'origine (celle posee par EllesmereUI, son reglage d'opacite de barre) en
+-- monture, en combat, avec une cible, au survol d'une des barres, grimoire ouvert ou blesse (meme detection que le
+-- cercle de vie hors combat). SetAlpha n'est pas bloque en combat. Une barre qu'EllesmereUI met lui-meme a 0
+-- (visibilite "jamais", vehicule...) lui est rendue, comme la zone de buffs plus haut.
+local EUI_BARS = { "EABBar_MainBar", "EABBar_Bar2", "EABBar_Bar3", "EABPagingFrame" }
+-- Cle de la barre dans les reglages d'EllesmereUI (fleches de pagination : celles de la barre 1)
+local EUI_BAR_KEY = { EABBar_MainBar = "MainBar", EABBar_Bar2 = "Bar2", EABBar_Bar3 = "Bar3", EABPagingFrame = "MainBar" }
+local euiStates = {}   -- [frame] = { alpha, host, written, hostOff }
+
+-- Reglages de la barre dans le profil actif d'EllesmereUI
+local function EuiBarSettings(barKey)
+  local db = _G.EllesmereUIDB
+  local prof = db and db.profiles and db.activeProfile and db.profiles[db.activeProfile]
+  local bars = prof and prof.addons and prof.addons.EllesmereUIActionBars and prof.addons.EllesmereUIActionBars.bars
+  return bars and bars[barKey]
+end
+
+-- Barre reglee sur "Toujours", sans survol : seule celle-la est attenuee (une barre en survol, en combat seulement, etc.
+-- reste entierement a EllesmereUI)
+local function EuiBarAlways(barKey)
+  local s = EuiBarSettings(barKey)
+  if not s then return false end
+  return (s.barVisibility or "always") == "always" and not s.mouseoverEnabled
+end
+
+-- Barre rendue a EllesmereUI. Integration coupee : opacite d'origine. Barre passee dans un autre mode (changement de
+-- profil "Show Bars" -> "Hide Bars"...) : en mode survol, EllesmereUI la veut a 0 hors survol mais ne la remet a 0 qu'a la
+-- sortie de la souris -> posee a 0 tout de suite ; dans les autres modes, rien n'est ecrit (EllesmereUI gere).
+local function EuiRelease(f, barKey)
+  local st = euiStates[f]
+  if not st then return end
+  if not st.hostOff then
+    local s = barKey and EuiBarSettings(barKey)
+    if not barKey then
+      pcall(f.SetAlpha, f, st.host or 1)
+    elseif s and s.mouseoverEnabled then
+      pcall(f.SetAlpha, f, 0)
+    end
+  end
+  euiStates[f] = nil
+end
+
+local function EuiShowFull()
+  if IsMounted and IsMounted() then return true end
+  if InCombatLockdown() or UnitAffectingCombat("player") then return true end
+  if UnitExists("target") then return true end
+  if (PlayerSpellsFrame and PlayerSpellsFrame:IsShown()) or (SpellBookFrame and SpellBookFrame:IsShown()) then return true end
+  local HC = ns.Modules.HealthCircle
+  if HC and HC.IsPlayerInjured then
+    local ok, injured = pcall(HC.IsPlayerInjured)
+    if ok and injured == true then return true end
+  end
+  for i = 1, 3 do
+    local f = _G[EUI_BARS[i]]
+    if f and f:IsVisible() and EuiBarAlways(EUI_BAR_KEY[EUI_BARS[i]]) then
+      local ok, over = pcall(f.IsMouseOver, f)
+      if ok and over == true then return true end
+    end
+  end
+  return false
+end
+
+local euiTicker = CreateFrame("Frame")
+local euiAcc = 0
+euiTicker:SetScript("OnUpdate", function(_, elapsed)
+  local cfg = ns.GetCfg("visibility")
+  if not (cfg and cfg.euiBarsEnabled) then return end
+  euiAcc = euiAcc + elapsed
+  if euiAcc < TICK_INTERVAL then return end
+  local dt = euiAcc
+  euiAcc = 0
+  local full = EuiShowFull()
+  for _, name in ipairs(EUI_BARS) do
+    local f = _G[name]
+    if f and not EuiBarAlways(EUI_BAR_KEY[name]) then
+      EuiRelease(f, EUI_BAR_KEY[name])
+    elseif f then
+      local st = euiStates[f]
+      local okA, cur = pcall(f.GetAlpha, f)
+      cur = (okA and type(cur) == "number" and not (issecretvalue and issecretvalue(cur))) and cur or nil
+      if not st then
+        st = { alpha = cur or 1, host = cur or 1 }
+        euiStates[f] = st
+      end
+      -- Ecriture d'EllesmereUI depuis notre dernier passage : nouvelle opacite d'origine (ou barre masquee par lui)
+      if cur and st.written and math.abs(cur - st.written) > 0.01 then
+        if cur <= 0.001 then st.hostOff = true else st.hostOff = false; st.host = cur; st.alpha = cur end
+      end
+      if not st.hostOff then
+        local target = full and st.host or math.min(st.host, cfg.euiBarsAlpha or 0.2)
+        if math.abs(st.alpha - target) > 0.002 then
+          st.alpha = st.alpha + (target - st.alpha) * (1 - math.exp(-FADE_SPEED * dt))
+        else
+          st.alpha = target
+        end
+        pcall(f.SetAlpha, f, st.alpha)
+        st.written = st.alpha
+      end
+    end
+  end
+end)
+
+-- Integration coupee : opacite d'origine rendue
+function Visibility.ApplyEuiBars()
+  local cfg = ns.GetCfg("visibility")
+  if cfg and cfg.euiBarsEnabled then return end
+  for f in pairs(euiStates) do EuiRelease(f) end
 end
 
 -- Diagnostic : /aishdebug buffs (tostring() fonctionne meme sur une valeur secrete).

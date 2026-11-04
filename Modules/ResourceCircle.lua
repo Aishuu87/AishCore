@@ -682,6 +682,9 @@ function ResourceCircle.ShouldShow()
   if ns.skyridingActive and ns.GetCfg("skyriding").hideResourceCircle ~= false then return false end
   local cfg = ns.GetCfg("resourceCircle")
   if cfg.enabled == false then return false end
+  -- Furtivite : la visibilite du Mode furtif remplace les regles ci-dessous
+  local ov = ns.StealthVisOverride and ns.StealthVisOverride("circle")
+  if ov ~= nil then return ov end
   -- "Toujours actif en instance" : ignore les transitions combat en donjon/raid.
   if cfg.alwaysInInstance and ns.inInstance then return true end
   local vMode = cfg.visibilityMode or "combat"
@@ -1324,12 +1327,12 @@ function ResourceCircle.ApplySettings()
 end
 
 -- Couleur de l'arriere plan : fond du cercle et tous les masques qui doivent lui ressembler (masque central, masques des
--- arcs de stagger / de duree, fond du texte, fond des orbes secondaires). Reglage cfg.bgColor.
+-- arcs de stagger / de duree, fond du texte, fond des orbes secondaires). Reglage cfg.bgColor, applique avec ou sans
+-- couleurs thematiques.
 local DEFAULT_BG = { 0x0e/255, 0x0e/255, 0x0e/255, 1 }
 local function GetBgColor()
   local cfg = ns.GetCfg("resourceCircle")
-  if not cfg or cfg.themedColors ~= false then return DEFAULT_BG end   -- couleurs thematiques : fond d'origine
-  return cfg.bgColor or DEFAULT_BG
+  return cfg and cfg.bgColor or DEFAULT_BG
 end
 
 -- Met a jour les couleurs (arcs, texte, dots) selon la ressource primaire du joueur
@@ -1360,6 +1363,11 @@ function ResourceCircle.UpdateResourceColors()
   local cfgC = ns.GetCfg("resourceCircle")
   if cfgC and cfgC.themedColors == false then
     arcC  = cfgC.arcColor  or arcC
+  end
+  -- Texte : interrupteur propre (textThemedColors) ; sans choix enregistre, l'ancien reglage commun fait foi
+  local textThemed = cfgC and cfgC.textThemedColors
+  if textThemed == nil then textThemed = not (cfgC and cfgC.themedColors == false) end
+  if not textThemed then
     textC = cfgC.textColor or textC
   end
   local bgC = GetBgColor()
@@ -1835,6 +1843,91 @@ function ResourceCircle.Create(parent)
   pcall(ResourceCircle.Update)
 
   return bar
+end
+
+-- Cercle fige et grise pour l'apercu de la Barre de rotation (UI/PriorityBarPage.lua) : reglages du profil "Default"
+-- (taille, arc, points de deco ; defauts sinon), arc plein, sans texte. Seul le fond reste noir. f:Apply() les relit.
+function ResourceCircle.NewPreviewDisc(parent)
+  local GRAY, BG = { 0.42, 0.42, 0.42 }, DEFAULT_BG
+  local f = CreateFrame("Frame", nil, parent)
+  local bg = f:CreateTexture(nil, "BACKGROUND")
+  ns.SetSmoothTexture(bg, ns.Media.circle)
+  bg:SetPoint("CENTER")
+  bg:SetVertexColor(BG[1], BG[2], BG[3], 1)
+  local arc = CreateFrame("StatusBar", nil, f)
+  arc:SetFrameLevel(f:GetFrameLevel() + 1)
+  arc:SetPoint("CENTER")
+  SetupRadialArc(arc)
+  arc:SetMinMaxValues(0, 100)
+  arc:SetStatusBarColor(GRAY[1], GRAY[2], GRAY[3], 1)
+  local arc2 = CreateFrame("StatusBar", nil, arc)   -- seconde moitie des remplissages miroir
+  arc2:SetAllPoints(arc)
+  arc2:SetFrameLevel(arc:GetFrameLevel())
+  SetupRadialArc(arc2)
+  arc2:SetMinMaxValues(0, 100)
+  arc2:SetStatusBarColor(GRAY[1], GRAY[2], GRAY[3], 1)
+  local top = CreateFrame("Frame", nil, f)
+  top:SetAllPoints()
+  top:SetFrameLevel(arc:GetFrameLevel() + 1)
+  local ov = top:CreateTexture(nil, "ARTWORK")
+  ns.SetSmoothTexture(ov, ns.Media.circle)
+  ov:SetPoint("CENTER")
+  ov:SetVertexColor(BG[1], BG[2], BG[3], 1)
+  local dots = {}
+  for i = 1, 5 do
+    local dot = top:CreateTexture(nil, "OVERLAY")
+    dot:SetTexture(ns.Media.circle)
+    local k = (i == 3) and 1.25 or 1
+    dot:SetVertexColor(GRAY[1] * k, GRAY[2] * k, GRAY[3] * k, 1)
+    dots[i] = dot
+  end
+
+  function f.Apply()
+    local d = ns.Defaults.resourceCircle
+    local root = AishaddonDB and AishaddonDB._profiles
+    local prof = root and root.Default and root.Default.resourceCircle or {}
+    local function C(k) if prof[k] ~= nil then return prof[k] end return d[k] end
+    local cfg = { size = C("size") or 80, arcSizeRatio = C("arcSizeRatio"), arcThickness = C("arcThickness") }
+    if not prof.arcGeomV2 and next(prof) then   -- ancien profil pas encore migre (cf. EnsureArcSettings)
+      cfg.arcSizeRatio = (cfg.arcSizeRatio or 1.0) / 1.1
+      cfg.arcThickness = math.max(0.01, math.min(1, 1.073 - (C("overlayRatio") or 0.75)))
+    end
+    local size = cfg.size
+    f:SetSize(size, size)
+    bg:SetSize(size * 1.1, size * 1.1)
+    local arcPx = ArcPx(cfg)
+    arc:SetSize(arcPx, arcPx)
+    local mode = C("arcFillMode") or (C("arcReverse") and "ccw" or "cw")
+    local mirror = (mode == "mirror_out" or mode == "mirror_in")
+    arc2:SetShown(mirror)
+    if mirror then
+      local a0 = tonumber(C("arcStartAngle")) or 220
+      local half = math.max(1, math.min(tonumber(C("arcEndAngle")) or 140, 180))
+      SetArcAngle(arc, a0, a0 + half, false)
+      SetArcAngle(arc2, a0 - half, a0, false)
+    else
+      SetArcAngle(arc, C("arcStartAngle"), C("arcEndAngle"), false)
+    end
+    arc:SetValue(100)
+    arc2:SetValue(100)
+    local ovPx = OverlayPx(cfg, arcPx)
+    ov:SetSize(math.max(ovPx, 0.01), math.max(ovPx, 0.01))
+    ov:SetShown(ovPx >= 2)
+    local scale = size / d.size
+    for i, dot in ipairs(dots) do
+      dot:SetSize(d.dotSizes[i] * scale, d.dotSizes[i] * scale)
+      dot:ClearAllPoints()
+      dot:SetPoint("BOTTOM", f, "BOTTOM", d.dotPositions[i][1] * scale, d.dotPositions[i][2] * scale)
+    end
+  end
+  -- Mise en retrait : seuls l'arc et les points s'estompent ; le fond et le cache de l'arc restent opaques, sinon
+  -- le disque plein de l'arc transparait a travers le cache.
+  function f.SetDim(a)
+    arc:SetAlpha(a)
+    for _, dot in ipairs(dots) do dot:SetAlpha(a) end
+  end
+  f.Apply()
+  return f
 end
 
 -- Applique pct (0-100) a l'arc, interpole nativement (ns.SmoothBarValue).
@@ -4465,12 +4558,14 @@ Elite.ease = {
   quintIn  = function(t) return t ^ 5 end,
 }
 
+-- f._dir = -1 : dragon a gauche (reglage eliteDragonsLeft), arrivee / depart et rotation en miroir
 function Elite.Apply()
   local f, tx, c = Elite.frame, Elite.texture, Elite.cur
+  local dir = f._dir or 1
   tx:ClearAllPoints()
-  tx:SetPoint("CENTER", bar, "CENTER", f._ox + c.dx, f._oy + c.dy)
+  tx:SetPoint("CENTER", bar, "CENTER", f._ox + c.dx * dir, f._oy + c.dy)
   tx:SetSize(f._w * c.s, f._h * c.s)
-  tx:SetRotation(c.r)
+  tx:SetRotation(c.r * dir)
   tx:SetAlpha(c.a)
 end
 
@@ -4503,6 +4598,7 @@ function Elite.Play(to, dur, easeName, done)
 end
 
 function Elite.Kind(cfg)
+  if Elite.forced then return Elite.forced end   -- apercu du GUI (cf. SetElitePreview)
   if not cfg.eliteDragons or not UnitExists("target") then return nil end
   local ok, c = pcall(UnitClassification, "target")
   if not ok or c == nil or (issecretvalue and issecretvalue(c)) then return nil end
@@ -4517,8 +4613,11 @@ function Elite.Layout(t, cfg)
   local size = cfg.size or 100
   f._w = size * t.scale * (t.w / 160)
   f._h = f._w * t.h / t.w
-  f._ox, f._oy = size * t.x, size * t.y
+  -- A gauche : texture retournee sur son axe vertical, decalage horizontal inverse
+  f._dir = cfg.eliteDragonsLeft and -1 or 1
+  f._ox, f._oy = size * t.x * f._dir, size * t.y
   tx:SetTexture(t.file)
+  if f._dir < 0 then tx:SetTexCoord(1, 0, 0, 1) else tx:SetTexCoord(0, 1, 0, 1) end
 end
 
 function ResourceCircle.UpdateEliteDragon()
@@ -4585,4 +4684,295 @@ do
   hooksecurefunc(ResourceCircle, "AnimateVisibility", function(show) Elite.OnCircleVisibility(show) end)
   -- Apercu du GUI : le cercle est affiche sans AnimateVisibility, le dragon doit revenir aussi
   hooksecurefunc(ResourceCircle, "SetPreview", function(on) if on then Elite.OnCircleVisibility(true) end end)
+end
+
+
+-- Apercu du dragon depuis le GUI (bouton de la page Cercle Central) : "elite" / "rareelite" / "worldboss" / "rare", meme
+-- reglage coupe et sans cible ; nil rend la main a la cible reelle.
+-- Ressource secondaire suivie pour la spe active (apercu du GUI : attenuee sinon)
+function ResourceCircle.HasSecRes()
+  return secResDef ~= nil
+end
+
+function ResourceCircle.SetElitePreview(kind)
+  Elite.forced = kind
+  ResourceCircle.UpdateEliteDragon()
+end
+
+-- Replique d'apercu pour le GUI (page Cercle Central) : memes geometrie, couleurs et textes que le vrai cercle, lus
+-- dans le profil courant, sans logique de jeu (le vrai cercle reste a l'ecran). g.Apply(opts) relit les reglages ;
+-- opts.elite = type de dragon affiche (nil : aucun), opts.secResDim = texte secondaire attenue (spe sans ressource
+-- secondaire), opts.secArc = arc secondaire de la spe ("duration" / "stagger", nil : aucun), anime par g.SetSecValue. Tout est local a la fonction : le chunk est a la limite des 200 locales.
+function ResourceCircle.NewGhost(parent)
+  local g = CreateFrame("Frame", nil, parent)
+  g.glow = g:CreateTexture(nil, "BACKGROUND", nil, -1)
+  ns.SetSmoothTexture(g.glow, "Interface\\AddOns\\AishCore\\Media\\Wheel\\Circle_Smooth2.tga")
+  g.glow:SetBlendMode("ADD")
+  g.glow:SetDesaturated(true)
+  g.glow:SetPoint("CENTER")
+  g.bg = g:CreateTexture(nil, "BACKGROUND")
+  ns.SetSmoothTexture(g.bg, ns.Media.circle)
+  g.bg:SetPoint("CENTER")
+  local function Radial(p)
+    local a = CreateFrame("StatusBar", nil, p)
+    a:SetPoint("CENTER", g, "CENTER")
+    SetupRadialArc(a)
+    a:SetMinMaxValues(0, 100)
+    a:SetValue(72)
+    return a
+  end
+  g.arc = Radial(g)
+  g.arc:SetFrameLevel(g:GetFrameLevel() + 1)
+  g.arc2 = Radial(g.arc)
+  g.arcV = CreateFrame("StatusBar", nil, g.arc)
+  g.arcV:SetFrameLevel(g.arc:GetFrameLevel())
+  ns.SetSmoothStatusBarTexture(g.arcV, "Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
+  g.arcV:SetOrientation("VERTICAL")
+  g.arcV:SetMinMaxValues(0, 100)
+  g.arcV:SetValue(72)
+  g.top = CreateFrame("Frame", nil, g)
+  g.top:SetAllPoints()
+  g.top:SetFrameLevel(g.arc:GetFrameLevel() + 2)
+  g.ov = g.top:CreateTexture(nil, "ARTWORK")
+  ns.SetSmoothTexture(g.ov, ns.Media.circle)
+  g.ov:SetPoint("CENTER")
+  -- Arc secondaire (arc de duree / de Report) : dans le trou de l'anneau, avec son propre masque (cf. Create)
+  g.secArcF = CreateFrame("Frame", nil, g)
+  g.secArcF:SetAllPoints()
+  g.secArcF:SetFrameLevel(g.top:GetFrameLevel() + 1)
+  g.secArc = Radial(g.secArcF)
+  g.secArc:SetFrameLevel(g.secArcF:GetFrameLevel())
+  -- Barre verticale (sources a plage secrete, cf. durArcVert) : meme mise en place que bar.durationArcV
+  g.secArcV = CreateFrame("StatusBar", nil, g.secArcF)
+  g.secArcV:SetFrameLevel(g.secArcF:GetFrameLevel())
+  ns.SetSmoothStatusBarTexture(g.secArcV, "Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
+  g.secArcV:SetOrientation("VERTICAL")
+  g.secArcV:SetMinMaxValues(0, 100)
+  -- Zone de l'arc secondaire (clic droit du GUI) : carre de son diametre
+  g.secHit = CreateFrame("Frame", nil, g.secArcF)
+  g.secHit:SetPoint("CENTER")
+  g.secOvF = CreateFrame("Frame", nil, g)
+  g.secOvF:SetAllPoints()
+  g.secOvF:SetFrameLevel(g.secArcF:GetFrameLevel() + 1)
+  g.secOv = g.secOvF:CreateTexture(nil, "ARTWORK")
+  ns.SetSmoothTexture(g.secOv, ns.Media.circle)
+  g.secOv:SetPoint("CENTER")
+  g.txt = CreateFrame("Frame", nil, g)
+  g.txt:SetAllPoints()
+  g.txt:SetFrameLevel(g.secOvF:GetFrameLevel() + 1)
+  g.textBd = g.txt:CreateTexture(nil, "BACKGROUND")
+  g.textBd:SetTexture(ns.Media.circle)
+  g.textBd:SetPoint("CENTER")
+  g.text = g.txt:CreateFontString(nil, "OVERLAY")
+  g.text:SetFont(ns.Media.font, 14, "")
+  g.text:SetPoint("CENTER")
+  g.text:SetText("72")
+  g.dots = {}
+  for i = 1, 5 do
+    g.dots[i] = g.txt:CreateTexture(nil, "OVERLAY")
+    g.dots[i]:SetTexture(ns.Media.circle)
+  end
+  -- Meme montage que le vrai cercle : texte centre dans un cadre de 120 x 18 accroche sous le texte principal
+  g.secResBox = CreateFrame("Frame", nil, g.txt)
+  g.secResBox:SetSize(120, 18)
+  g.secRes = g.txt:CreateFontString(nil, "OVERLAY")
+  g.secRes:SetPoint("CENTER", g.secResBox, "CENTER", 0, 0)
+  g.secRes:SetFont(FONT_SECRES_DEFAULT, 11, "")
+  g.secRes:SetText("3")
+  g.dashL = g.txt:CreateFontString(nil, "OVERLAY")
+  g.dashR = g.txt:CreateFontString(nil, "OVERLAY")
+  for _, d in ipairs({ g.dashL, g.dashR }) do
+    d:SetFont(FONT_SECRES_DEFAULT, 11, "")
+    d:SetTextColor(1, 1, 1, 1)
+  end
+  g.secDots = {}
+  g.eliteF = CreateFrame("Frame", nil, g)
+  g.eliteF:SetAllPoints()
+  g.eliteF:SetFrameLevel(g:GetFrameLevel() + 30)
+  g.elite = g.eliteF:CreateTexture(nil, "OVERLAY", nil, 7)
+
+  function g.SetSecValue(pct)
+    pcall(g.secArc.SetValue, g.secArc, pct)
+    pcall(g.secArcV.SetValue, g.secArcV, pct)
+  end
+
+  function g.SetValue(pct)
+    for _, sb in ipairs({ g.arc, g.arc2, g.arcV }) do pcall(sb.SetValue, sb, pct) end
+    g.text:SetText(tostring(pct))
+  end
+
+  function g.Apply(opts)
+    opts = opts or {}
+    local cfg = ns.GetCfg("resourceCircle") or {}
+    local size = cfg.size or 100
+    local bgSize = size * 1.1
+    g:SetSize(size, size)
+    g.bg:SetSize(bgSize, bgSize)
+    local gp = math.floor(bgSize * (cfg.glowSize or 1.0) + 0.5)
+    g.glow:SetSize(gp, gp)
+    g.glow:SetAlpha(cfg.glowOpacity or 0.85)
+    g.glow:SetShown(cfg.glowEnabled ~= false)
+    local arcPx = ArcPx(cfg)
+    g.arc:SetSize(arcPx, arcPx)
+    g.arcV:ClearAllPoints()
+    g.arcV:SetPoint("TOP", g, "CENTER", 0, arcPx / 2)
+    g.arcV:SetSize(arcPx, arcPx * VERTICAL_CROP_H)
+    local ovPx = OverlayPx(cfg, arcPx)
+    g.ov:SetSize(math.max(ovPx, 0.01), math.max(ovPx, 0.01))
+    g.ov:SetShown(ovPx >= 2)
+    local tb = math.max(1, cfg.textBackdropSize or 35)
+    g.textBd:SetSize(tb, tb)
+    -- Remplissage (cf. ApplyArcAngles)
+    local mode = cfg.arcFillMode or (cfg.arcReverse and "ccw" or "cw")
+    local mirror = (mode == "mirror_out" or mode == "mirror_in")
+    local vertical = (mode == "vertical")
+    g.arc2:SetShown(mirror)
+    g.arcV:SetShown(vertical)
+    local tex = g.arc:GetStatusBarTexture()
+    if tex then tex:SetAlpha(vertical and 0 or 1) end
+    if mirror then
+      local a0 = tonumber(cfg.arcStartAngle) or 220
+      local half = math.max(1, math.min(tonumber(cfg.arcEndAngle) or 140, 180))
+      local out = (mode == "mirror_out")
+      SetArcAngle(g.arc, a0, a0 + half, not out)
+      SetArcAngle(g.arc2, a0 - half, a0, out)
+    else
+      SetArcAngle(g.arc, cfg.arcStartAngle, cfg.arcEndAngle, mode == "ccw")
+    end
+    -- Couleurs (cf. UpdateResourceColors)
+    local CLR = ns.Modules.Colors
+    local colors = ns.GetResourceColors(ns.GetPlayerResource())
+    local arcC = (CLR and CLR.Get("powercircle")) or colors.bar
+    local textC = (CLR and CLR.Get("powertext")) or colors.text
+    if cfg.themedColors == false then arcC = cfg.arcColor or arcC end
+    local textThemed = cfg.textThemedColors
+    if textThemed == nil then textThemed = cfg.themedColors ~= false end
+    if not textThemed then textC = cfg.textColor or textC end
+    local bgC = GetBgColor()
+    for _, t in ipairs({ g.bg, g.ov, g.textBd }) do t:SetVertexColor(bgC[1], bgC[2], bgC[3], bgC[4] or 1) end
+    for _, sb in ipairs({ g.arc, g.arc2, g.arcV }) do sb:SetStatusBarColor(arcC[1], arcC[2], arcC[3], arcC[4] or 1) end
+    local glowC = (CLR and CLR.Get("glow")) or { 1, 1, 1, 1 }
+    g.glow:SetVertexColor(glowC[1], glowC[2], glowC[3], 1)
+    pcall(g.text.SetFont, g.text, cfg.font or ns.Media.font, cfg.fontSize or 14, "")
+    g.text:SetTextColor(textC[1], textC[2], textC[3], textC[4] or 1)
+    -- Points decoratifs (toujours les valeurs par defaut, a l'echelle du cercle)
+    local d = ns.Defaults.resourceCircle
+    local k = size / d.size
+    local dotsA = (CLR and CLR.Get("powerdotsa")) or colors.bar
+    local dotsB = (CLR and CLR.Get("powerdotsb")) or colors.bar
+    for i, dot in ipairs(g.dots) do
+      local c = (i == 3) and dotsA or dotsB
+      dot:SetSize(d.dotSizes[i] * k, d.dotSizes[i] * k)
+      dot:ClearAllPoints()
+      dot:SetPoint("BOTTOM", g, "BOTTOM", d.dotPositions[i][1] * k, d.dotPositions[i][2] * k)
+      dot:SetVertexColor(c[1], c[2], c[3], 1)
+    end
+    -- Globes secondaires du joueur (cf. LayoutSecDots / UpdateSecDotColors), pleins
+    local n = secDotType and secDotCount or 0
+    local pfx = secDotType and ("secondaryDots_" .. secDotType .. "_") or ""
+    local function pv(key, fb) local v = pfx ~= "" and cfg[pfx .. key] or nil; return v ~= nil and v or cfg[fb] end
+    local dotSize = size * (pv("size", "secondaryDotsSize") or 0.16)
+    local radius = size * (pv("radius", "secondaryDotsRadius") or 0.62)
+    local center = pv("rotation", "secondaryDotsRotation") or 90
+    local spread = pv("spread", "secondaryDotsSpread") or 24
+    local rev = cfg[pfx .. "reversed"]
+    if rev == nil then rev = cfg.secondaryDotsReversed end
+    local sc = SEC_COLORS[secDotType or ""]
+    local col = sc and (sc.default or sc) or { 1, 1, 1 }
+    if type(col[1]) ~= "number" then col = { 1, 1, 1 } end
+    for i = 1, n do
+      local f = g.secDots[i]
+      if not f then
+        f = CreateFrame("Frame", nil, g)
+        f:SetFrameLevel(g.txt:GetFrameLevel())
+        f.bg = f:CreateTexture(nil, "BACKGROUND")
+        f.bg:SetTexture(SEC_DOT_TEX)
+        f.bg:SetAllPoints()
+        f.fill = f:CreateTexture(nil, "ARTWORK")
+        f.fill:SetTexture(SEC_DOT_TEX)
+        f.fill:SetAllPoints()
+        g.secDots[i] = f
+      end
+      local idx = rev and (n + 1 - i) or i
+      local ang = math.rad(center + (idx - (n + 1) / 2) * spread)
+      f:SetSize(dotSize, dotSize)
+      f:ClearAllPoints()
+      f:SetPoint("CENTER", g, "CENTER", math.cos(ang) * radius, math.sin(ang) * radius)
+      f.bg:SetVertexColor(bgC[1], bgC[2], bgC[3], bgC[4] or 1)
+      f.fill:SetVertexColor(col[1], col[2], col[3], 1)
+      f:Show()
+    end
+    for i = n + 1, #g.secDots do g.secDots[i]:Hide() end
+    -- Texte de ressource secondaire (cf. RefreshSecResSpecGeometry)
+    local spec = ns._specID
+    local secSize = ns.GetSecResCfg("secResTextSize", spec) or 11
+    pcall(g.secRes.SetFont, g.secRes, ns.GetSecResCfg("secResFont", spec) or FONT_SECRES_DEFAULT, secSize, "")
+    local r = ns.GetSecResCfg("secResColorR", spec)
+    local c = r and { r, ns.GetSecResCfg("secResColorG", spec) or 1, ns.GetSecResCfg("secResColorB", spec) or 1 }
+      or (secResDef and secResDef.color) or dotsB
+    g.secRes:SetTextColor(c[1], c[2], c[3], 1)
+    g.secResBox:ClearAllPoints()
+    g.secResBox:SetPoint("TOP", g.text, "BOTTOM", ns.GetSecResCfg("secResTextOffsetX", spec) or 0, ns.GetSecResCfg("secResTextOffsetY", spec) or -2)
+    g.secRes:SetAlpha(opts.secResDim and 0.3 or 1)
+    -- Deco "- N -" (cf. RefreshSecResDeco)
+    local deco = GetSecResDeco(ns.GetSecResCfg("secResDecoStyle", spec))
+    local gap = ns.GetSecResCfg("secResDecoSpacing", spec) or 4
+    local decoFont = ns.GetSecResCfg("secResDecoFont", spec) or ns.GetSecResCfg("secResFont", spec) or FONT_SECRES_DEFAULT
+    for _, d in ipairs({ g.dashL, g.dashR }) do
+      pcall(d.SetFont, d, decoFont, secSize, "")
+      d:SetAlpha(opts.secResDim and 0.3 or 1)
+      d:ClearAllPoints()
+    end
+    g.dashL:SetText(deco.left or "")
+    g.dashR:SetText(deco.right or "")
+    g.dashL:SetPoint("RIGHT", g.secRes, "LEFT", -gap, 0)
+    g.dashR:SetPoint("LEFT", g.secRes, "RIGHT", gap, 0)
+    -- Arc secondaire de la spe (cf. Create / RefreshSecResSpecGeometry / ApplyArcAngles)
+    local kind = opts.secArc
+    g.secArcF:SetShown(kind ~= nil)
+    g.secOvF:SetShown(kind ~= nil)
+    if kind then
+      local px, hole, ac
+      local vert = false
+      if kind == "stagger" then
+        px = arcPx * (cfg.staggerArcRatio or STAGGER_ARC_RATIO)
+        hole = StaggerHole(cfg)
+        SetArcAngle(g.secArc, cfg.staggerArcStartAngle, cfg.staggerArcEndAngle, cfg.staggerArcReverse)
+        ac = STAGGER_LIGHT
+      else
+        px = arcPx * (ns.GetSecResCfg("durationArcRatio", spec) or DURATION_ARC_RATIO)
+        hole = DurationHole(spec)
+        SetArcAngle(g.secArc, ns.GetSecResCfg("durationArcStartAngle", spec), ns.GetSecResCfg("durationArcEndAngle", spec),
+          ns.GetSecResCfg("durationArcReverse", spec))
+        -- Meme source que l'apercu du vrai cercle (SetPreview) : barre verticale ou arc radial, couleur reelle
+        local info = ns.Auras and ns.Auras.GetCenterArcPreview and ns.Auras.GetCenterArcPreview()
+        vert = info and info.vertical and true or false
+        ac = (info and info.color) or GetDurationArcColor(spec) or opts.secArcColor or { 1, 0.82, 0.1 }
+      end
+      g.secArc:SetShown(not vert)
+      g.secArcV:SetShown(vert)
+      g.secArc:SetSize(px, px)
+      g.secHit:SetSize(px, px)
+      g.secArcV:ClearAllPoints()
+      g.secArcV:SetPoint("TOP", g, "CENTER", 0, px / 2)
+      g.secArcV:SetSize(px, px * ARC_CROP_V)
+      g.secArc:SetStatusBarColor(ac[1], ac[2], ac[3], 1)
+      g.secArcV:SetStatusBarColor(ac[1], ac[2], ac[3], 1)
+      local ovs = math.max(px * hole, 0.01)
+      g.secOv:SetSize(ovs, ovs)
+      g.secOv:SetVertexColor(bgC[1], bgC[2], bgC[3], bgC[4] or 1)
+    end
+    -- Dragon elite (cf. Elite.Layout)
+    g.elite:SetShown(opts.elite ~= nil)
+    local t = Elite.tex[opts.elite or "elite"] or Elite.tex.elite
+    local w = size * t.scale * (t.w / 160)
+    local edir = cfg.eliteDragonsLeft and -1 or 1
+    g.elite:SetTexture(t.file)
+    if edir < 0 then g.elite:SetTexCoord(1, 0, 0, 1) else g.elite:SetTexCoord(0, 1, 0, 1) end
+    g.elite:SetSize(w, w * t.h / t.w)
+    g.elite:ClearAllPoints()
+    g.elite:SetPoint("CENTER", g, "CENTER", size * t.x * edir, size * t.y)
+  end
+  g.Apply()
+  return g
 end

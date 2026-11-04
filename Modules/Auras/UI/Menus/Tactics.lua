@@ -568,14 +568,17 @@ local function CreateSpellRow(par,sid,info,y,W,onChg,rebuildFn)
     -- Le tooltip est supplanté naturellement quand on entre sur un bouton enfant
     -- (badge destination, glow, desat, couleur) qui ont leur propre OnEnter.
     row:EnableMouse(true)
+    local MSW = _addon.SharedWidgets
     row:SetScript("OnEnter", function()
         rBg:SetColorTexture(Theme.accent[1], Theme.accent[2], Theme.accent[3], 0.03)
+        if MSW and MSW.HoverGlow then MSW.HoverGlow(nm, true) end
         GameTooltip:SetOwner(row, "ANCHOR_CURSOR")
         pcall(function() GameTooltip:SetSpellByID(sid) end)
         GameTooltip:Show()
     end)
     row:SetScript("OnLeave", function()
         rBg:SetColorTexture(0, 0, 0, 0)
+        if MSW and MSW.HoverGlow then MSW.HoverGlow(nm, false) end
         GameTooltip:Hide()
     end)
 

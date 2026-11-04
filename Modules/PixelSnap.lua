@@ -54,8 +54,14 @@ local function SnapRegion(r)
   pcall(r.SetPoint, r, point, rel, relPoint, (x or 0) + dx, (y or 0) + dy)
 end
 
-local function SnapTree(f, depth)
+local function SnapTree(f, depth, skipScaled)
   if not f or depth > 8 then return end
+  -- Globe en cours d'animation d'echelle (apparition, cf. ns.AnimateStagger) : a l'echelle 0,1 un pixel vaut dix fois
+  -- plus, l'arrondi deformait taille et ancre pour de bon et les globes finissaient par deriver
+  if skipScaled then
+    local okSc, sc = pcall(f.GetScale, f)
+    if okSc and sc and Plain(sc) and math.abs(sc - 1) > 0.001 then return end
+  end
   SnapRegion(f)
   local fill = f.GetStatusBarTexture and f:GetStatusBarTexture()
   local okR, regions = pcall(function() return { f:GetRegions() } end)
@@ -66,7 +72,7 @@ local function SnapTree(f, depth)
   end
   local okC, children = pcall(function() return { f:GetChildren() } end)
   if okC then
-    for _, c in ipairs(children) do SnapTree(c, depth + 1) end
+    for _, c in ipairs(children) do SnapTree(c, depth + 1, skipScaled) end
   end
 end
 
@@ -76,6 +82,7 @@ local function M(name) return ns.Modules and ns.Modules[name] end
 local TARGETS = {
   { mod = "CastBar",        roots = function() return { G("AishCoreCastBar") } end },
   { mod = "TargetCastBar",  roots = function() return { G("AishCoreTargetCastBar") } end },
+  { mod = "FocusCastBar",   roots = function() return { G("AishCoreFocusCastBar") } end },
   { mod = "TopTargetBar",   roots = function() return { G("AishCoreTopTarget"), G("AishCoreTopTargetTarget") } end },
   { mod = "UnitBars",       roots = function()
       local UB = M("UnitBars"); local out = {}
@@ -93,13 +100,13 @@ local TARGETS = {
   { mod = "Location",       roots = function() local LO = M("Location"); return { LO and LO.GetHoverFrame and LO.GetHoverFrame() } end },
   { mod = "RotationHelper", roots = function() return { G("AishCoreRotationHelperBar") } end },
   -- Cercles : seulement leurs dots / orbes (petits ronds), pas les arcs ni les animations du cercle
-  { mod = "ResourceCircle", fns = { "ApplySettings", "LayoutSecDots", "DetectSecondaryDots" }, roots = function()
+  { mod = "ResourceCircle", fns = { "ApplySettings", "LayoutSecDots", "DetectSecondaryDots" }, skipScaled = true, roots = function()
       local out, bar = {}, G("AishCoreRingBar")
       if bar then for i = 1, 5 do if bar["dot" .. i] then out[#out + 1] = bar["dot" .. i] end end end
       for i = 1, 10 do local d = G("AishCoreSecDot" .. i); if d then out[#out + 1] = d end end
       return out
     end },
-  { mod = "OutOfCombatResourceCircle", fns = { "ApplySettings", "LayoutSecDots", "DetectSecondaryDots" }, roots = function()
+  { mod = "OutOfCombatResourceCircle", fns = { "ApplySettings", "LayoutSecDots", "DetectSecondaryDots" }, skipScaled = true, roots = function()
       local out = {}
       for i = 1, 10 do local d = G("AishCoreOCSecDot" .. i); if d then out[#out + 1] = d end end
       return out
@@ -113,7 +120,7 @@ function PixelSnap.SnapAll()
   for _, t in ipairs(TARGETS) do
     local ok, roots = pcall(t.roots)
     if ok and roots then
-      for _, f in pairs(roots) do pcall(SnapTree, f, 0) end
+      for _, f in pairs(roots) do pcall(SnapTree, f, 0, t.skipScaled) end
     end
   end
 end

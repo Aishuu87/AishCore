@@ -163,9 +163,42 @@ local function RunProfile()
   end)
 end
 
+-- Debit rapide : 3 s, ramasse-miettes arrete (rien n'est libere pendant la mesure, donc chiffre exact meme court)
+local quickRunning = false
+local function QuickRate()
+  if quickRunning then return end
+  quickRunning = true
+  collectgarbage("stop")
+  local m0, t0 = AddonMem(), GetTime()
+  C_Timer.After(3, function()
+    local m1, dt = AddonMem(), GetTime() - t0
+    collectgarbage("restart")
+    quickRunning = false
+    print(P .. string.format("debit : %.1f Ko/s (%s)", (m1 - m0) / dt,
+      InCombatLockdown() and "combat pendant la mesure" or "hors combat"))
+  end)
+end
+
+-- /aishmem auto : mesure rapide lancee seule 30 s apres chaque login / reload (elimination de modules). Pas avant :
+-- l'initialisation differee (C_Timer.After etales jusqu'a ~15 s) gonfle le debit a plusieurs centaines de Ko/s.
+local autoEv = CreateFrame("Frame")
+autoEv:RegisterEvent("PLAYER_ENTERING_WORLD")
+autoEv:SetScript("OnEvent", function(_, _, isLogin, isReload)
+  if not ((isLogin or isReload) and AishaddonDB and AishaddonDB._memAuto) then return end
+  C_Timer.After(30, function() if not InCombatLockdown() then QuickRate() end end)
+end)
+
 SLASH_AISHMEM1 = "/aishmem"
 SlashCmdList["AISHMEM"] = function(msg)
   if InCombatLockdown() then print(P .. "hors combat seulement") return end
+  msg = strtrim((msg or ""):lower())
+  if msg == "d" then QuickRate() return end
+  if msg == "auto" then
+    AishaddonDB = AishaddonDB or {}
+    AishaddonDB._memAuto = not AishaddonDB._memAuto or nil
+    print(P .. "mesure auto apres chaque reload : " .. (AishaddonDB._memAuto and "|cff00ff00ON|r" or "|cffff4444OFF|r"))
+    return
+  end
   if msg and msg:lower():find("bench") then RunBench() return end
   if msg and msg:lower():find("prof") then RunProfile() return end
   if msg and msg:lower():find("trace") then

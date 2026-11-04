@@ -9540,3 +9540,13 @@ function ns.BuildModelList()
   end
   return list
 end
+
+-- Nombre de modeles de la liste (compte une seule fois)
+local modelCount
+function ns.ModelCount()
+  if not modelCount then
+    local _, n = DATA:gsub("\n%d+ ", "")
+    modelCount = n
+  end
+  return modelCount
+end

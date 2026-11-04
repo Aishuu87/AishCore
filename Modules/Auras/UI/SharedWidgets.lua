@@ -198,6 +198,7 @@ function SW.CreateSectionHeader(parent, text, width)
     if _addon.SharedWidgets and _addon.SharedWidgets.PixelLine then _addon.SharedWidgets.PixelLine(line) end
     line:SetPoint("LEFT", lbl,"RIGHT", 10, 0); line:SetPoint("RIGHT",-2,0)
     line:SetColorTexture(1,1,1,1)
+    f._line = line
     local function ApplyGradient(color)
         pcall(function()
             if CreateColor then
@@ -266,7 +267,7 @@ function SW.MakeSectionTitle(f)
     return f
 end
 
--- Rend un section header repliable : libelle prefixe de "+ " / "- " et bouton
+-- Rend un section header repliable : libelle suivi de "+" / "-" et bouton
 -- transparent par-dessus pour le clic et le survol. L'etat est pilote par l'appelant.
 function SW.MakeHeaderCollapsible(f, onToggle)
     if not f or f._collapseReady then return f end
@@ -279,8 +280,10 @@ function SW.MakeHeaderCollapsible(f, onToggle)
     hl:SetAllPoints()
     hl:SetColorTexture(1, 1, 1, 0.06)
     hl:Hide()
-    hitbox:SetScript("OnEnter", function() hl:Show() end)
-    hitbox:SetScript("OnLeave", function() hl:Hide() end)
+    -- Survol : libelle en couleur "Lueur" (meme helper que le GUI principal)
+    local function Glow(on) local M = _addon.SharedWidgets; if M and M.HoverGlow then M.HoverGlow(f._lbl, on) end end
+    hitbox:SetScript("OnEnter", function() hl:Show(); Glow(true) end)
+    hitbox:SetScript("OnLeave", function() hl:Hide(); Glow(false) end)
     hitbox:SetScript("OnClick", function()
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
         -- Double clic / repli differe : meme logique que le GUI principal
@@ -299,7 +302,7 @@ function SW.SetHeaderCollapsedState(f, collapsed)
     if not f then return end
     f._collapsed = collapsed
     if not f._collapseReady or not f._lbl then return end
-    f._lbl:SetText((collapsed and "+ " or "- ") .. (f._baseText or ""))
+    f._lbl:SetText((f._baseText or "") .. (collapsed and "  +" or "  -"))   -- signe apres le titre, avant le filet
 end
 
 -- TOGGLE (labeled ON/OFF pill in gold)
@@ -415,7 +418,7 @@ function SW.CreateAccordionStack(parent, sections, cw, startY)
 end
 
 -- SECTION STACK : empile les sections verticalement, chacune precedee d'un
--- CreateSectionHeader repliable ("+ " / "- " devant le libelle, cf. SW.MakeHeaderCollapsible).
+-- CreateSectionHeader repliable ("+" / "-" apres le libelle, cf. SW.MakeHeaderCollapsible).
 -- Remplace CreateAccordionStack pour les menus sans selecteur deroulant.
 --
 -- L'etat de pli vit UNIQUEMENT en memoire de session (jamais dans la config) : au /reload
@@ -480,7 +483,9 @@ function SW.CreateSectionStack(parent, sections, cw, startY, stackId)
         local entry = { hdr = hdr, sub = sub,
                         key = (stackId or "?").."@"..i.."@"..name }
         -- Replie par defaut : absent de la table = replie.
-        entry.collapsed = (_stackCollapsed[entry.key] ~= false)
+        -- Module coupe (interrupteur du titre) : tout replie
+        entry.collapsed = (parent._pageTitle and parent._pageTitle._moduleOff)
+                          or (_stackCollapsed[entry.key] ~= false)
         entries[i] = entry
 
         SW.MakeHeaderCollapsible(hdr, function()
@@ -519,11 +524,14 @@ function SW.CreateSectionStack(parent, sections, cw, startY, stackId)
         if SP and SP.SyncScrollTo then SP.SyncScrollTo(parent) end
     end
 
+    parent._stackSetAll = SetAll
+
     -- Clic sur le titre de la page : tout replier si une section est ouverte, sinon tout deplier.
     -- Le titre ne recoit jamais de prefixe +/- (SetHeaderCollapsedState n'y est pas appele).
     local title = parent._pageTitle
     if title and not title._collapseReady then
         SW.MakeHeaderCollapsible(title, function()
+            if title._moduleOff then return end
             local anyOpen = false
             for _, en in ipairs(entries) do if not en.collapsed then anyOpen = true end end
             SetAll(anyOpen)
@@ -579,9 +587,9 @@ do
         if M and M.CreateCheckbox then return M.CreateCheckbox(parent, label, nil, width) end
         return old.cb(parent, label, width)
     end
-    SW.CreateSlider = function(parent, label, minVal, maxVal, step, width)
+    SW.CreateSlider = function(parent, label, minVal, maxVal, step, width, grid)
         local M = Main()
-        if M and M.CreateSlider then return M.CreateSlider(parent, label, minVal, maxVal, step, width) end
+        if M and M.CreateSlider then return M.CreateSlider(parent, label, minVal, maxVal, step, width, grid) end
         return old.sl(parent, label, minVal, maxVal, step, width)
     end
     SW.CreateDropdown = function(parent, label, options, width)

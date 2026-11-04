@@ -2,7 +2,7 @@
 -- Volet "Auras & Procs" du template de profil : applique a la creation d'un nouveau
 -- profil ET au tout premier lancement (cf. EnsureProfile dans Core/Profiles.lua, qui
 -- complete ensuite les cles manquantes avec ns.Defaults).
--- Genere automatiquement depuis le profil de reference "Empty Template".
+-- Genere automatiquement depuis le profil de reference "Template".
 -- discoveredSpells en est volontairement exclu : cette liste est reconstruite a partir
 -- du registre de decouvertes du compte (PullDiscovery), elle n'a aucun sens en dur.
 -- NE PAS EDITER A LA MAIN : modifier le profil de reference en jeu, puis relancer
@@ -92,7 +92,7 @@ ns.ProfileTemplate = {
     x = -554,
     y = -35,
   },
-  circlebarsEnabled = true,
+  circlebarsEnabled = false,
   defaultGlowAlpha = 0.7,
   defaultGlowBySpec = {
     PALADIN_RETRIBUTION = {
@@ -114,6 +114,12 @@ ns.ProfileTemplate = {
       scale = 1,
     },
     SHAMAN_ENHANCEMENT = {
+      alpha = 0.7,
+      idx = 2,
+      procIdx = 1,
+      scale = 1,
+    },
+    SHAMAN_RESTORATION = {
       alpha = 0.7,
       idx = 2,
       procIdx = 1,
@@ -254,7 +260,7 @@ ns.ProfileTemplate = {
     x = 0,
     y = -218,
   },
-  freebarsEnabled = true,
+  freebarsEnabled = false,
   hideCDMBuffFrames = true,
   iconlist = {
     alpha = 1,
@@ -335,7 +341,7 @@ ns.ProfileTemplate = {
     x = 0,
     y = -240,
   },
-  iconlistEnabled = true,
+  iconlistEnabled = false,
   icons = {
     alpha = 1,
     barAlpha = 1,
@@ -411,7 +417,7 @@ ns.ProfileTemplate = {
     x = -199,
     y = -187,
   },
-  iconsEnabled = true,
+  iconsEnabled = false,
   missingBuffs = {
     borderColor = {1,0.15,0.15,0.9},
     borderEnabled = true,
@@ -432,6 +438,7 @@ ns.ProfileTemplate = {
     ignoreLethalPoisons = false,
     ignoreNonlethalPoisons = false,
     ignorePaladinAuras = false,
+    ignorePoisonStock = false,
     ignoreSoulstoneAlert = false,
     ignoreWarlockPets = false,
     ignoreWarriorStances = false,
@@ -439,6 +446,8 @@ ns.ProfileTemplate = {
     ignoredSettingsIds = {},
     locked = false,
     makeIconClickable = true,
+    poisonDurationThreshold = 5,
+    poisonStockThreshold = 5,
     showBuffsInCombat = false,
     textAnimBlink = false,
     textAnimBounce = false,
@@ -532,7 +541,7 @@ ns.ProfileTemplate = {
     x = -502,
     y = -209,
   },
-  totemsEnabled = true,
-  useNativeCDM = false,
+  totemsEnabled = false,
+  useNativeCDM = true,
   useSpellColors = true,
 }

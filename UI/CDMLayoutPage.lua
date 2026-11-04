@@ -327,13 +327,14 @@ function ns.BuildCDMLayoutPage(p, cw)
     r.down:SetScript("OnClick", function() Move(r.entry.cooldownID, 1) end)
     r:SetScript("OnEnter", function(self)
       hover:Show()
+      SW.HoverGlow(self.name, true)
       local e = self.entry
       GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
       if e.equipSlot then GameTooltip:SetInventoryItem("player", e.equipSlot)
       elseif e.spellID then GameTooltip:SetSpellByID(e.spellID) end
       GameTooltip:Show()
     end)
-    r:SetScript("OnLeave", function() hover:Hide(); GameTooltip:Hide() end)
+    r:SetScript("OnLeave", function(self) hover:Hide(); SW.HoverGlow(self.name, false); GameTooltip:Hide() end)
     rows[i] = r
     return r
   end

@@ -6,6 +6,7 @@ local BigCursor = {}
 ns.Modules.BigCursor = BigCursor
 
 local function Cfg()
+  if not ns.QoLEnabled() then return {} end
   return ns.GetCfg("bigCursor") or {}
 end
 

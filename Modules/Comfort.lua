@@ -20,6 +20,7 @@ local CVAR_TOGGLES = {
 }
 
 local function Cfg()
+  if not ns.QoLEnabled() then return {} end
   return ns.GetCfg("comfort") or {}
 end
 
@@ -338,23 +339,21 @@ local function LayoutMerchantItems()
   end)
 end
 
+-- Rachat : 12 cases sur toute la largeur (2 colonnes par page). Blizzard ne reaffiche que les
+-- cases 11-12, or LayoutMerchantItems a pu masquer les 1-10 (marchand avec peu ou pas d'articles).
 local function LayoutBuybackItems()
   if not merchantActive then return end
-  local n = GetNumBuybackItems()
-  for i = BUYBACK_ITEMS + 1, _G.MERCHANT_ITEMS_PER_PAGE do
+  local cols = MerchantPages() * 2
+  for i = 1, _G.MERCHANT_ITEMS_PER_PAGE do
     local b = _G["MerchantItem" .. i]
     if not b then break end
-    b:ClearAllPoints()
-    if i <= n then
-      local row, col = math.floor((i - 1) / 3), (i - 1) % 3
-      if row == 0 then
-        if col == 0 then
-          b:SetPoint("TOPLEFT", MerchantItem1, "TOPLEFT", 0, -60)
-        else
-          b:SetPoint("TOPLEFT", _G["MerchantItem" .. (i - 1)], "TOPRIGHT", 12, 0)
-        end
+    if i <= BUYBACK_ITEMS then
+      local col = (i - 1) % cols
+      b:ClearAllPoints()
+      if i == 1 then
+        b:SetPoint("TOPLEFT", MerchantFrame, "TOPLEFT", 11, -69)
       elseif col == 0 then
-        b:SetPoint("TOPLEFT", _G["MerchantItem" .. (i - 3)], "BOTTOMLEFT", 0, -15)
+        b:SetPoint("TOPLEFT", _G["MerchantItem" .. (i - cols)], "BOTTOMLEFT", 0, -15)
       else
         b:SetPoint("TOPLEFT", _G["MerchantItem" .. (i - 1)], "TOPRIGHT", 12, 0)
       end
@@ -389,10 +388,10 @@ local function ApplyMerchant()
     local b = _G["MerchantItem" .. i]
     if b then b:Hide() end
   end
-  -- Rachat colle au bouton "vendre la camelote", en bas a droite pres de l'argent
+  -- Rachat a la suite du bouton "vendre la camelote" (meme ligne que les reparations)
   MerchantBuyBackItem:ClearAllPoints()
   if MerchantSellAllJunkButton then
-    MerchantBuyBackItem:SetPoint("RIGHT", MerchantSellAllJunkButton, "LEFT", -10, 0)
+    MerchantBuyBackItem:SetPoint("LEFT", MerchantSellAllJunkButton, "RIGHT", 12, 0)
   else
     MerchantBuyBackItem:SetPoint("TOPLEFT", MerchantItem10, "BOTTOMLEFT", 30, -53)
   end
@@ -615,6 +614,68 @@ local function ApplyCtrlFocus()
   if Cfg().ctrlFocus then SetOverrideBindingClick(focusBtn, true, "CTRL-BUTTON1", "AishCoreFocusButton") end
 end
 
+-- Double clic droit dans le monde : lance la peche. Forever : canne equipee en main droite. Retail : Ctrl + double clic,
+-- sans canne (la canne est un outil de metier). Au 2e appui, BUTTON2 est lie (liaison prioritaire, hors combat) a un
+-- bouton securise "spell = Peche" : le relachement lance le sort, puis la liaison est retiree. Aucune API ne dit s'il y a
+-- de l'eau : sans eau, c'est le message d'erreur du jeu.
+local FISH_SPELL = ns.IsForever and 7620 or 131474
+local FISH_KEY = ns.IsForever and "BUTTON2" or "CTRL-BUTTON2"
+local DOUBLE_CLICK = 0.4
+local fishBtn, fishArmed, lastRightDown = nil, false, nil
+local GetItemInfoInstant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+local GetSpellName = (C_Spell and C_Spell.GetSpellName) or GetSpellInfo
+
+local function FishDisarm()
+  if not fishArmed or InCombatLockdown() then return end
+  fishArmed = false
+  ClearOverrideBindings(fishBtn)
+end
+
+local function PoleEquipped()
+  local id = GetInventoryItemID("player", 16)
+  if not id then return false end
+  local _, _, _, _, _, classID, subID = GetItemInfoInstant(id)
+  return classID == 2 and subID == 20   -- Arme / Canne a peche
+end
+
+local function FishReady()
+  if not Cfg().doubleClickFish or InCombatLockdown() then return false end
+  if UnitExists("mouseover") or IsMounted() or UnitInVehicle("player") then return false end
+  if ns.IsForever then return PoleEquipped() and not IsModifierKeyDown() end
+  return IsControlKeyDown() and not IsShiftKeyDown() and not IsAltKeyDown()
+end
+
+local function EnsureFishButton()
+  if fishBtn or InCombatLockdown() then return fishBtn end
+  -- Par nom : Forever lance ainsi le rang le plus haut connu
+  local spell = GetSpellName(FISH_SPELL) or FISH_SPELL
+  fishBtn = CreateFrame("Button", "AishCoreFishButton", UIParent, "SecureActionButtonTemplate")
+  fishBtn:SetAttribute("type", "spell")
+  fishBtn:SetAttribute("spell", spell)
+  fishBtn:RegisterForClicks("AnyUp", "AnyDown")
+  fishBtn:SetScript("PostClick", function() C_Timer.After(0, FishDisarm) end)
+  return fishBtn
+end
+
+local fishHooked = false
+local function ApplyDoubleClickFish()
+  if not Cfg().doubleClickFish then FishDisarm(); return end
+  if not EnsureFishButton() or fishHooked then return end
+  fishHooked = true
+  WorldFrame:HookScript("OnMouseDown", function(_, button)
+    if button ~= "RightButton" or not FishReady() then lastRightDown = nil; return end
+    local now = GetTime()
+    if lastRightDown and now - lastRightDown <= DOUBLE_CLICK then
+      lastRightDown = nil
+      fishArmed = true
+      SetOverrideBindingClick(fishBtn, true, FISH_KEY, "AishCoreFishButton")
+      C_Timer.After(1, FishDisarm)   -- secours si le relachement n'a pas declenche le bouton
+    else
+      lastRightDown = now
+    end
+  end)
+end
+
 -- Rendu automatique des quetes : case carree a l'ecran, affichee en permanence quand l'option est active, deplacable
 -- a tout moment (glisser) et de taille reglable. Cochee (clic), les quetes terminees sont rendues d'elles-memes pendant
 -- une discussion avec un PNJ (recompense prise s'il n'y a pas de choix ; avec un choix, la fenetre reste ouverte).
@@ -733,10 +794,19 @@ for _, e in ipairs({ "GOSSIP_SHOW", "QUEST_GREETING", "QUEST_PROGRESS", "QUEST_C
 end
 questEv:SetScript("OnEvent", function(_, event) OnQuestEvent(event) end)
 
+local lastQoL
 function Comfort.ApplySettings()
+  -- Interrupteur QoL bascule : le curseur et les noeuds de minimap suivent
+  local qol = ns.QoLEnabled()
+  if lastQoL ~= nil and qol ~= lastQoL then
+    if ns.Modules.BigCursor then ns.Modules.BigCursor.ApplySettings() end
+    if ns.Modules.MinimapNodes then ns.Modules.MinimapNodes.ApplySettings() end
+  end
+  lastQoL = qol
   MigrateFromProfile()
   ApplyHideErrors()
   ApplyCtrlFocus()
+  ApplyDoubleClickFish()
   ApplyTurnBox()
   if ns.Modules.MapReveal then ns.Modules.MapReveal.ApplySettings() end
   ApplyMinimapTracking()
@@ -756,9 +826,12 @@ ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("MODIFIER_STATE_CHANGED")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:SetScript("OnEvent", function(_, event)
   if event == "MODIFIER_STATE_CHANGED" then ApplySpellIDCVar()
+  elseif event == "PLAYER_REGEN_DISABLED" then FishDisarm()   -- dernier instant avant le verrouillage
   elseif event == "PLAYER_REGEN_ENABLED" then
     if focusPending then ApplyCtrlFocus() end   -- liaison differee : posee a la sortie du combat
+    if Cfg().doubleClickFish and not fishBtn then ApplyDoubleClickFish() end
   else Comfort.ApplySettings() end
 end)

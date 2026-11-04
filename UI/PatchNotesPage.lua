@@ -136,7 +136,7 @@ local function MakeItem(container, W, line, hex, tn, dim)
   local link = line.link
   if link then
     text = "|cff" .. hex .. text .. "|r"
-  else
+  elseif link == nil then
     local l, s, e = FindLink(text)
     if l then link = l; text = Colorize(text, s, e, hex) end
   end

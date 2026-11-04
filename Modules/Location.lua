@@ -133,6 +133,8 @@ end
 function Location.Update()
     if not frame then return end
     local cfg = Cfg()
+    -- Module desactive : ApplySettings n'a jamais pose de police, SetText leverait une erreur.
+    if cfg.enabled == false then return end
 
     local line = BuildLine(cfg)
     if line ~= lastLine then

@@ -39,7 +39,7 @@ function ns.BuildMenuBarPage(container, W, NewLayout)
   local strip = MB and MB.NewStrip(pin, true)
   local hint = pin:CreateFontString(nil, "OVERLAY")
   hint:SetFont(ns.Media.fontGui, 10)
-  hint:SetTextColor(0.28, 0.17, 0.07, 1)   -- marron fonce, lisible sur la capture d'ecran du fond
+  hint:SetTextColor(0.85, 0.8, 0.68, 0.9)   -- meme teinte que l'apercu de la Barre de rotation (fond voile)
   hint:SetPoint("BOTTOM", pin, "BOTTOM", 0, 6)
   hint:SetText(L["MENUBAR_PREVIEW_HINT"])
 
@@ -133,6 +133,7 @@ function ns.BuildMenuBarPage(container, W, NewLayout)
   local bound = {}
   local function Bind(w, key, kind)
     bound[#bound + 1] = { w = w, key = key, kind = kind }
+    w._subKey = key   -- cases maitresses / themees (cf. NewLayout), sans changer l'identifiant du mode disposition
     w.onChanged = function(v)
       if kind == "number" then v = tonumber(v) or v end
       DB()[key] = v
@@ -143,9 +144,10 @@ function ns.BuildMenuBarPage(container, W, NewLayout)
 
   -- Page ---------------------------------------------------------------------------------------------
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_MENU_BAR"], W))
-  local cbEnable = Bind(SW.CreateCheckbox(container, L["MENUBAR_ENABLE"], L["SETTINGS_CAT_MENU_BAR_TT"], W2), "enabled", "bool")
+  -- `pin` : l'apercu epingle est grise (et rendu) avec la page, meme une fois sorti de la zone defilante
+  local cbEnable = ctx:TitleToggle(Bind(SW.CreateCheckbox(container, L["MENUBAR_ENABLE"], L["SETTINGS_CAT_MENU_BAR_TT"], W2), "enabled", "bool"), pin)
   local cbHideBlizz = Bind(SW.CreateCheckbox(container, L["MENUBAR_HIDE_BLIZZARD"], L["MENUBAR_HIDE_BLIZZARD_TT"], W2), "hideBlizzard", "bool")
-  ctx:AddRow(8, cbEnable, cbHideBlizz)
+  ctx:Add(cbHideBlizz)
 
   local dragBtn = SW.CreateActionBtn(container, L["MENUBAR_MOVE"], W2)
   local function RefreshDragBtn()
@@ -177,14 +179,9 @@ function ns.BuildMenuBarPage(container, W, NewLayout)
     local col = Bind(SW.CreateColorButton(container, label, W2), key, "color")
     local tt = string.format(L["MENUBAR_THEMED_TT"], L[element])
     local cb = Bind(SW.CreateCheckbox(container, L["MENUBAR_THEMED"], tt, W2), themedKey, "bool")
-    local blocker = CreateFrame("Frame", nil, col)
-    blocker:SetAllPoints(col)
-    blocker:SetFrameLevel(col:GetFrameLevel() + 20)
-    blocker:EnableMouse(true)
-    local function State(on)
-      col:SetAlpha(on and 0.4 or 1)
-      blocker:SetShown(on)
-    end
+    -- Couleur sans effet tant que les Couleurs thematiques sont actives : grisee et inerte (grisage commun, qui tient
+    -- aux fondus du pli des sections)
+    local function State(on) SW.SetGrayReason(col, "spec", on and true or false) end
     local orig = cb.onChanged
     cb.onChanged = function(v)
       if orig then orig(v) end
@@ -197,12 +194,13 @@ function ns.BuildMenuBarPage(container, W, NewLayout)
   ctx:AddRowCentered(8, colIcon, cbIconThemed)
   local colHover, cbHoverThemed = ThemedRow(L["MENUBAR_HOVER_COLOR"], "hoverColor", "hoverThemed", "COLORSMOD_ELEM_POWERDOTSB")
   ctx:AddRowCentered(8, colHover, cbHoverThemed)
+  ctx:Depends(cbHover, { colHover, cbHoverThemed })
   ctx:Add(Bind(SW.CreateCheckbox(container, L["MENUBAR_HOVER_GROW"], nil, W), "hoverGrow", "bool"))
 
   -- Arriere-plan (memes reglages que les Barres dynamiques)
   ctx:Spacer(6)
   ctx:Add(SW.CreateSectionHeader(container, L["EXTRABARS_SEC_BACKGROUND"], W))
-  ctx:Add(Bind(SW.CreateCheckbox(container, L["EXTRABARS_BG_SHOW"], nil, W), "bgEnabled", "bool"))
+  ctx:Depends(ctx:Add(Bind(SW.CreateCheckbox(container, L["EXTRABARS_BG_SHOW"], nil, W), "bgEnabled", "bool")))
   local bgOpts = {}
   local EB = ns.Modules and ns.Modules.ExtraBars
   for _, d in ipairs(EB and EB.BG_TEXTURES or {}) do
@@ -228,11 +226,12 @@ function ns.BuildMenuBarPage(container, W, NewLayout)
   local cbMouse = Bind(SW.CreateCheckbox(container, L["EXTRABARS_MOUSEOVER"], L["EXTRABARS_MOUSEOVER_TT"], W2), "mouseover", "bool")
   local slMouseAlpha = Bind(SW.CreateSlider(container, L["EXTRABARS_MOUSEOVER_ALPHA"], 0, 1, 0.05, W2), "mouseoverAlpha", "number")
   ctx:AddRowCentered(8, cbMouse, slMouseAlpha)
+  ctx:Depends(cbMouse, { slMouseAlpha })
 
   -- Horloge
   ctx:Spacer(6)
   ctx:Add(SW.CreateSectionHeader(container, L["MENUBAR_SEC_CLOCK"], W))
-  ctx:Add(Bind(SW.CreateCheckbox(container, L["MENUBAR_CLOCK_ENABLE"], nil, W), "clockEnabled", "bool"))
+  ctx:Depends(ctx:Add(Bind(SW.CreateCheckbox(container, L["MENUBAR_CLOCK_ENABLE"], nil, W), "clockEnabled", "bool")))
   local ddPos = Bind(SW.CreateDropdown(container, L["MENUBAR_CLOCK_POS"], {
     { value = "left",   text = L["MENUBAR_POS_LEFT"] },
     { value = "center", text = L["MENUBAR_POS_CENTER"] },

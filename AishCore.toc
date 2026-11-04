@@ -2,7 +2,8 @@
 ## Title: AishCore
 ## Notes: Custom UI overlay - resource & health circles, spell effects, auras & procs
 ## Author: Aishuu
-## Version: 4.5.1
+## Version: 4.6
+## IconTexture: Interface\AddOns\AishCore\Media\logo_icon
 ## X-Curse-Project-ID: 1689788
 ## SavedVariables: AishaddonDB AishUIAuraDB
 ## SavedVariablesPerCharacter: AishUILearnDB, AishUISetupCharDB
@@ -26,6 +27,7 @@ Config\ForeverPrune.lua
 # Locales
 Locales\enUS.lua
 Locales\frFR.lua
+Locales\zhCN.lua
 
 # Data
 Data\ModelPaths.lua
@@ -34,6 +36,7 @@ Data\SearchIndex.lua
 Data\ClassSpellLevels.lua
 Data\LevelGains.lua
 Data\MapOverlays.lua
+Data\TownAreas.lua
 
 # Engine
 CircularProgress.lua
@@ -72,7 +75,9 @@ Modules\BigCursor.lua
 Modules\MapReveal.lua
 Modules\Comfort.lua
 Modules\StealthMode.lua
+Modules\Campfire.lua
 Modules\MenuBar.lua
+Modules\AddonCompartment.lua
 Modules\MinimapNodes.lua
 Modules\EllesmereRaidGrowth.lua
 Modules\AishUISetup.lua
@@ -125,10 +130,16 @@ Modules\Auras\UI\CategoryDispatcher.lua
 UI\SharedWidgets.lua
 UI\MinimapButton.lua
 UI\SettingsPanel.lua
+Data\GuiLayout.lua
+UI\LayoutEditor.lua
 UI\ProfileModulesUI.lua
 UI\CDMLayoutPage.lua
 UI\ExtraBarsPage.lua
+UI\UnitBarsPage.lua
+UI\CastBarsPage.lua
 UI\MenuBarPage.lua
+UI\PriorityBarPage.lua
+UI\AddonCompartmentPage.lua
 UI\PatchNotesPage.lua
 UI\ModuleHoverOverlay.lua
 

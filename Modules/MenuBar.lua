@@ -329,22 +329,38 @@ function Strip:StyleClock(cfg)
   local dw = c.h:GetStringWidth()
   local cw = c.c:GetStringWidth()
   c.dw, c.cw = dw, cw
-  c.c:ClearAllPoints()
-  c.c:SetPoint("LEFT", c, "LEFT", dw, 0)
-  c.h:ClearAllPoints()
-  c.h:SetPoint("RIGHT", c.c, "LEFT", 0, 0)
-  c.m:ClearAllPoints()
-  c.m:SetPoint("LEFT", c.c, "RIGHT", 0, 0)
+  -- Meme boite verticale pour les 4 textes (ancres TOP/BOTTOM sur le bouton) : sinon chaque
+  -- FontString est centree sur sa propre hauteur et l'arrondi au pixel decale les morceaux
+  local function Place(fs, point, x)
+    fs:ClearAllPoints()
+    fs:SetPoint("TOP" .. point, c, "TOPLEFT", x, 0)
+    fs:SetPoint("BOTTOM" .. point, c, "BOTTOMLEFT", x, 0)
+    fs:SetJustifyV("MIDDLE")
+  end
+  Place(c.h, "RIGHT", dw)
+  Place(c.c, "LEFT", dw)
+  Place(c.m, "LEFT", dw + cw)
   c.a:ClearAllPoints()
-  c.a:SetPoint("LEFT", c.m, "RIGHT", 3, 0)
+  c.a:SetPoint("TOPLEFT", c.m, "TOPRIGHT", 3, 0)
+  c.a:SetPoint("BOTTOMLEFT", c.m, "BOTTOMRIGHT", 3, 0)
+  c.a:SetJustifyV("MIDDLE")
   local width = dw * 2 + cw
   if cfg.clock24 == false then
     c.a:SetText("PM")
     width = width + 3 + c.a:GetStringWidth()
   end
   c.a:SetShown(cfg.clock24 == false)
+  c._h, c._m, c._ap = nil, nil, nil   -- textes ecrases ci-dessus : UpdateClock les repose
   return width, size + 4
 end
+
+-- Appele 4 fois par seconde (clignotement) : aucune allocation hors changement de minute. L'heure locale n'est
+-- relue (date("*t"), une table) qu'au passage de la minute ; les textes ne sont reposes que s'ils changent.
+local TWO = {}
+for i = 0, 59 do TWO[i] = string.format("%02d", i) end
+local H12 = {}
+for i = 1, 12 do H12[i] = tostring(i) end
+local localH, localM, nextMinute = 0, 0, 0
 
 function Strip:UpdateClock()
   local c, cfg = self.clock, Cfg()
@@ -353,18 +369,23 @@ function Strip:UpdateClock()
   if cfg.clockServer then
     h, m = GetGameTime()
   else
-    local t = date("*t")
-    h, m = t.hour, t.min
+    local now = time()
+    if now >= nextMinute then
+      local t = date("*t", now)
+      localH, localM, nextMinute = t.hour, t.min, now - t.sec + 60
+    end
+    h, m = localH, localM
   end
+  local ap
   if cfg.clock24 == false then
-    c.a:SetText(h >= 12 and "PM" or "AM")
+    ap = h >= 12 and "PM" or "AM"
     h = h % 12
     if h == 0 then h = 12 end
-    c.h:SetText(h)
-  else
-    c.h:SetText(string.format("%02d", h))
   end
-  c.m:SetText(string.format("%02d", m))
+  local hText = ap and H12[h] or TWO[h]
+  if c._h ~= hText then c._h = hText; c.h:SetText(hText) end
+  if c._m ~= m then c._m = m; c.m:SetText(TWO[m]) end
+  if ap and c._ap ~= ap then c._ap = ap; c.a:SetText(ap) end
   if cfg.clockBlink == false then
     c.c:SetAlpha(1)
   else
@@ -498,6 +519,23 @@ local function StopGhost()
   end
 end
 
+-- Recharge de la pierre de foyer sur le swipe du bouton
+local HEARTH_ITEM = 6948
+function MenuBar.UpdateCooldown(b)
+  if not b.cd then return end
+  if b.actionId ~= "hearthstone" then b.cd:Clear(); b.cd:Hide(); return end
+  local GetCD = (_G.C_Container and _G.C_Container.GetItemCooldown) or _G.GetItemCooldown
+  local start, duration = 0, 0
+  if GetCD then start, duration = GetCD(HEARTH_ITEM) end
+  if start and duration and duration > 0 then
+    b.cd:SetCooldown(start, duration)
+    b.cd:Show()
+  else
+    b.cd:Clear()
+    b.cd:Hide()
+  end
+end
+
 function Strip:NewSlot()
   local S = self
   local b = CreateFrame("Button", nil, self.content, (not self.preview) and "SecureActionButtonTemplate" or nil)
@@ -507,6 +545,14 @@ function Strip:NewSlot()
   b.vis:SetPoint("CENTER", b, "CENTER")
   b.icon = b.vis:CreateTexture(nil, "ARTWORK")
   b.icon:SetTexCoord(unpack(TEX_COORD))
+  if not self.preview then
+    -- Swipe de recharge (pierre de foyer)
+    b.cd = CreateFrame("Cooldown", nil, b.vis, "CooldownFrameTemplate")
+    b.cd:SetAllPoints(b.icon)
+    b.cd:SetDrawEdge(false)
+    b.cd:SetHideCountdownNumbers(true)
+    b.cd:Hide()
+  end
   if self.preview then
     b.hl = b.vis:CreateTexture(nil, "BACKGROUND")
     b.hl:SetColorTexture(1, 1, 1, 0.10)
@@ -547,6 +593,10 @@ function Strip:NewSlot()
       AddLines(Loc("MENUBAR_SLOT_HINT"))
     elseif not MenuBar.ActionAvailable(self2.actionId) then
       GameTooltip:AddLine(Loc("MENUBAR_UNAVAILABLE"), 1, 0.3, 0.3, true)
+    elseif self2.actionId == "hearthstone" then
+      -- Destination de la pierre de foyer
+      local bind = _G.GetBindLocation and _G.GetBindLocation()
+      if bind and bind ~= "" then GameTooltip:AddLine(bind, 1, 0.82, 0.2, true) end
     elseif self2.actionId == "talents" then
       AddLines(Loc("MENUBAR_TALENTS_TT"))
       local mods = ns.IsForever and {} or { "MENUBAR_MOD_SHIFT", "MENUBAR_MOD_CTRL", "MENUBAR_MOD_ALT", "MENUBAR_MOD_CTRLALT" }
@@ -715,6 +765,7 @@ function Strip:Layout()
       end
       it:Show()
       self:Paint(it)
+      MenuBar.UpdateCooldown(it)
     end
     x = x + w + gap
   end
@@ -919,7 +970,14 @@ end
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+ev:RegisterEvent("BAG_UPDATE_COOLDOWN")
 ev:SetScript("OnEvent", function(_, event)
+  if event == "BAG_UPDATE_COOLDOWN" then
+    for _, S in ipairs(strips) do
+      for _, b in ipairs(S.pool) do if b:IsShown() then MenuBar.UpdateCooldown(b) end end
+    end
+    return
+  end
   if event == "PLAYER_REGEN_ENABLED" and not pendingApply then return end
   MenuBar.ApplySettings()
 end)

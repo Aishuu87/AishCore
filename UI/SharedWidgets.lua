@@ -41,11 +41,12 @@ function SharedWidgets.CreateCheckbox(parent, label, tooltip, width, height)
 
   local row = CreateFrame("Button", nil, parent)
   row:SetSize(width, height)
+  row._gridKind = "check"
 
   -- Carré OFF/ON
   row.box = row:CreateTexture(nil, "ARTWORK")
   row.box:SetSize(12, 12)
-  row.box:SetPoint("LEFT", 8, 0)
+  row.box:SetPoint("LEFT", 0, 0)   -- cale sur le bord gauche : aligne avec menus deroulants et sliders
   row.box:SetColorTexture(unpack(Theme.checkboxOff))
 
   -- Coche Blizzard
@@ -104,26 +105,52 @@ function SharedWidgets.CreateCheckbox(parent, label, tooltip, width, height)
   return row
 end
 
--- Slider (valeur numerique) â€” Style ElvUI : track plat + thumb carre + EditBox
-function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width)
+-- Libelle plus large que maxW : coupe a maxW, les fadeW derniers pixels en fondu (au lieu de deborder sur la
+-- colonne voisine). A appeler apres SetFont / SetText.
+function SharedWidgets.FadeOverflow(fs, maxW, fadeW)
+  fadeW = fadeW or 20
+  local full = fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth()
+  if maxW <= fadeW or full <= maxW then return end
+  fs:SetWidth(maxW)
+  fs:SetWordWrap(false)
+  if not fs.SetAlphaGradient then return end
+  -- Index du caractere ou commence le fondu (le "..." de troncature tombe dans la zone transparente)
+  local m = SharedWidgets._measureFS
+  if not m then
+    m = UIParent:CreateFontString(nil, "BACKGROUND")
+    m:Hide()
+    SharedWidgets._measureFS = m
+  end
+  m:SetFont(fs:GetFont())
+  local limit, n, acc = maxW - fadeW, 0, ""
+  for ch in (fs:GetText() or ""):gmatch("[^\128-\191][\128-\191]*") do
+    acc = acc .. ch
+    m:SetText(acc)
+    if m:GetStringWidth() > limit then break end
+    n = n + 1
+  end
+  fs:SetAlphaGradient(n, fadeW)
+end
+
+-- Slider : meme gabarit qu'un menu deroulant (libelle de 18 px cale a gauche, puis une ligne de 22 px : piste a
+-- gauche, bornes min / max en petit dessous, champ de saisie a droite, a la hauteur du bouton d'un menu). Sans
+-- titre, pas de place reservee. Les elements suivent la largeur du cadre (SetWidth apres coup possible, cf. la
+-- grille de colonnes de NewLayout). `grid` : pas de plafond de largeur.
+function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width, grid)
   width = width or 260
-  -- Largeur maximale : Ã©vite qu'un slider en pleine largeur de panneau
-  -- (W = CONTENT_W potentiellement large) devienne immense.
+  -- Largeur maximale hors grille : evite qu'un slider en pleine largeur de panneau devienne immense
   local MAX_SLIDER_W = 220
-  width = math.min(width, MAX_SLIDER_W)
+  if not grid then width = math.min(width, MAX_SLIDER_W) end
   minVal = minVal or 0
   maxVal = maxVal or 100
   step   = step or 1
 
-  local TRACK_H    = 6       -- hauteur de la piste plate
-  local THUMB_W    = 10      -- largeur du curseur carre
-  local THUMB_H    = 16      -- hauteur du curseur carre
-  local EDIT_W     = 50      -- largeur de l'EditBox
-  local EDIT_H     = 18
-  local LABEL_H    = 14
-  local GAP        = 3
-  local BOTTOM_ROW = EDIT_H + 2
-  local height     = LABEL_H + GAP + THUMB_H + GAP + BOTTOM_ROW + 2
+  local TRACK_H = 6        -- hauteur de la piste plate
+  local THUMB   = 12       -- curseur rond
+  local EDIT_W  = 50       -- largeur du champ de saisie
+  local CTRL_H  = 22       -- hauteur du bouton d'un menu deroulant
+  local LABEL_H = (label == nil or label == "") and 0 or 18
+  local height  = LABEL_H + CTRL_H
 
   -- Nombre de decimales a afficher, base sur le pas
   local decimals = 0
@@ -134,19 +161,22 @@ function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width)
 
   local container = CreateFrame("Frame", nil, parent)
   container:SetSize(width, height)
+  container._gridKind = "slider"
 
-  -- Label (en haut, centre)
+  -- Libelle (en haut a gauche, comme celui d'un menu deroulant)
   container.label = container:CreateFontString(nil, "OVERLAY")
-  container.label:SetFont(ns.Media.fontGui, 11)
-  container.label:SetPoint("TOP", container, "TOP", 0, -1)
-  container.label:SetTextColor(unpack(Theme.textNormal))
+  container.label:SetFont(ns.Media.fontGui, 10)
+  container.label:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0)
+  local labelColor = Theme.textDim
+  container.label:SetTextColor(unpack(labelColor))
   container.label:SetText(label or "")
 
   -- Tooltip optionnel (`container.tooltipText`, renseigne par l'appelant), pose sur le
   -- LABEL uniquement : le survol du track et de l'EditBox reste libre pour le reglage.
   local labelHit = CreateFrame("Frame", nil, container)
-  labelHit:SetPoint("TOP", container, "TOP", 0, 0)
-  labelHit:SetSize(width, LABEL_H)
+  labelHit:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0)
+  labelHit:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 0)
+  labelHit:SetHeight(math.max(1, LABEL_H))
   labelHit:EnableMouse(true)
   labelHit:SetScript("OnEnter", function(self)
     if not container.tooltipText then return end
@@ -157,66 +187,94 @@ function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width)
     GameTooltip:Show()
   end)
   labelHit:SetScript("OnLeave", function()
-    container.label:SetTextColor(unpack(Theme.textNormal))
+    container.label:SetTextColor(unpack(labelColor))
     GameTooltip:Hide()
   end)
 
-  -- Slider frame (PAS de template Blizzard â€” look epure ElvUI)
+  -- Piste (PAS de template Blizzard) : haut aligne sur celui du champ de saisie, largeur = cadre - champ
   local slider = CreateFrame("Slider", nil, container)
-  slider:SetSize(width, THUMB_H)
-  slider:SetPoint("TOP", container.label, "BOTTOM", 0, -GAP)
+  -- Cadre plus haut que la piste (centree dedans) : la zone de prise du curseur ne se limite plus a la piste de 6 px,
+  -- encore elargie par les marges de clic
+  local SLIDER_H = 18
+  local sliderY = -(LABEL_H - (SLIDER_H - TRACK_H) / 2)
+  slider:SetHeight(SLIDER_H)
+  slider:SetPoint("TOPLEFT", container, "TOPLEFT", 0, sliderY)
+  slider:SetPoint("TOPRIGHT", container, "TOPRIGHT", -(EDIT_W + 2), sliderY)   -- 2 px avant le champ
+  slider:SetHitRectInsets(-4, -4, -4, -4)
   slider:SetMinMaxValues(minVal, maxVal)
   slider:SetValueStep(step)
   slider:SetObeyStepOnDrag(true)
   slider:SetOrientation("HORIZONTAL")
 
-  -- Piste plate (track)
   local track = slider:CreateTexture(nil, "BACKGROUND")
   track:SetPoint("LEFT")
   track:SetPoint("RIGHT")
   track:SetHeight(TRACK_H)
   track:SetColorTexture(unpack(Theme.sliderTrack))
 
-  -- Curseur circulaire (thumb AishUI — Circle_Smooth2)
+  -- Curseur rond, couleur "Decorations B" (module Couleurs), relue a chaque affichage (elle suit la spe).
+  -- Petite texture dediee (16 px, bord anticrenele) : une grande texture reduite a cette taille crenele
   local thumb = slider:CreateTexture(nil, "ARTWORK")
-  thumb:SetSize(THUMB_W, THUMB_H)
-  thumb:SetTexture("Interface\\AddOns\\AishCore\\Media\\Wheel\\Circle_Smooth2")
-  thumb:SetVertexColor(1, 1, 1, 1)
+  thumb:SetTexture("Interface\\AddOns\\AishCore\\Media\\UI\\SliderThumb.tga")
+  thumb:SetSize(THUMB, THUMB)
+  if thumb.SetSnapToPixelGrid then thumb:SetSnapToPixelGrid(false); thumb:SetTexelSnappingBias(0) end
   slider:SetThumbTexture(thumb)
+  local function ThumbColor()
+    local CLR = ns.Modules and ns.Modules.Colors
+    local c = CLR and CLR.Get and CLR.Get("powerdotsb")
+    if c then thumb:SetVertexColor(c[1], c[2], c[3], 1) else thumb:SetVertexColor(1, 1, 1, 1) end
+  end
+  ThumbColor()
+  container:HookScript("OnShow", ThumbColor)
 
-  -- Ligne sous le slider : min | EditBox | max
-  local minText = container:CreateFontString(nil, "OVERLAY")
-  minText:SetFont(ns.Media.fontGui, 10)
-  minText:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -GAP)
+  -- Bornes min / max, en petit sous la piste : visibles seulement pendant le reglage (clic maintenu sur la piste),
+  -- apparition / disparition en fondu
+  local bounds = CreateFrame("Frame", nil, container)
+  bounds:SetAllPoints(container)
+  bounds:SetAlpha(0)
+  local BOUNDS_FADE = 0.15
+  local function FadeBounds(to)
+    bounds:SetScript("OnUpdate", function(self, elapsed)
+      local a = self:GetAlpha()
+      local step = elapsed / BOUNDS_FADE
+      a = (to > a) and math.min(to, a + step) or math.max(to, a - step)
+      self:SetAlpha(a)
+      if a == to then self:SetScript("OnUpdate", nil) end
+    end)
+  end
+  slider:HookScript("OnMouseDown", function() FadeBounds(1) end)
+  slider:HookScript("OnMouseUp", function() FadeBounds(0) end)
+  container:HookScript("OnHide", function() bounds:SetScript("OnUpdate", nil); bounds:SetAlpha(0) end)
+
+  local minText = bounds:CreateFontString(nil, "OVERLAY")
+  minText:SetFont(ns.Media.fontGui, 8)
+  minText:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, (SLIDER_H - TRACK_H) / 2 - 2)   -- 2 px sous la piste
   minText:SetTextColor(unpack(Theme.textDim))
   minText:SetText(string.format(fmt, minVal))
 
-  local maxText = container:CreateFontString(nil, "OVERLAY")
-  maxText:SetFont(ns.Media.fontGui, 10)
-  maxText:SetPoint("TOPRIGHT", slider, "BOTTOMRIGHT", 0, -GAP)
+  local maxText = bounds:CreateFontString(nil, "OVERLAY")
+  maxText:SetFont(ns.Media.fontGui, 8)
+  maxText:SetPoint("TOPRIGHT", slider, "BOTTOMRIGHT", 0, (SLIDER_H - TRACK_H) / 2 - 2)
   maxText:SetTextColor(unpack(Theme.textDim))
   maxText:SetText(string.format(fmt, maxVal))
 
-  -- EditBox (centre, sous le slider, fond sombre integre)
+  -- Champ de saisie, a droite de la piste
   local editBox = CreateFrame("EditBox", nil, container)
-  editBox:SetSize(EDIT_W, EDIT_H)
-  editBox:SetPoint("TOP", slider, "BOTTOM", 0, -GAP + 1)
+  editBox:SetSize(EDIT_W, CTRL_H)
+  editBox:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -LABEL_H)
+  editBox:SetTextInsets(4, 4, 0, 0)
   editBox:SetAutoFocus(false)
   editBox:SetFont(ns.Media.fontGui, 11, "")
   editBox:SetTextColor(unpack(Theme.textHighlight))
   editBox:SetJustifyH("CENTER")
   editBox:SetNumeric(false)
 
-  -- Fond sombre de l'EditBox (style ElvUI)
   local editBg = editBox:CreateTexture(nil, "BACKGROUND")
-  editBg:SetPoint("TOPLEFT", -4, 2)
-  editBg:SetPoint("BOTTOMRIGHT", 4, -2)
+  editBg:SetAllPoints()
   editBg:SetColorTexture(0.06, 0.06, 0.08, 0.9)
 
-  -- Bordure fine autour de l'EditBox
   local editBorder = CreateFrame("Frame", nil, editBox, "BackdropTemplate")
-  editBorder:SetPoint("TOPLEFT", -4, 2)
-  editBorder:SetPoint("BOTTOMRIGHT", 4, -2)
+  editBorder:SetAllPoints()
   editBorder:SetBackdrop({
     edgeFile = "Interface\\Buttons\\WHITE8x8",
     edgeSize = 1,
@@ -389,6 +447,7 @@ function SharedWidgets.CreateSectionHeader(parent, text, width, colorOverride)
   line:SetPoint("LEFT",  lbl,  "RIGHT", 10, 0)
   line:SetPoint("RIGHT", f,    "RIGHT", -2, 0)
   line:SetColorTexture(1, 1, 1, 1)
+  f._line = line
   local function ApplyGradient(color)
     pcall(function()
       if CreateColor then
@@ -433,9 +492,54 @@ function SharedWidgets.CreateSectionHeader(parent, text, width, colorOverride)
   return f
 end
 
--- Transforme un section header en en-tete repliable : le libelle est prefixe de
--- "+ " / "- " (meme rendu que les sous-sections de l'Ecran AFK : point dore, puis
--- le signe, puis le titre) et un bouton transparent par-dessus capte clic et survol.
+-- Grisage d'un widget pour une ou plusieurs raisons cumulables (case maitresse de section, option qui rend un reglage
+-- sans effet...) : grise (0,35) et inerte (un cache capte la souris) tant qu'une raison au moins est active.
+-- Met aussi a jour la base des fondus du pli (_aishBaseA, cf. NewLayout).
+function SharedWidgets.SetGrayReason(w, reason, on)
+  if not w then return end
+  w._grayReasons = w._grayReasons or {}
+  w._grayReasons[reason] = on and true or nil
+  local gray = next(w._grayReasons) ~= nil
+  if not w._grayBlockSW then
+    local b = CreateFrame("Frame", nil, w)
+    b:SetAllPoints(w)
+    b:SetFrameLevel(w:GetFrameLevel() + 30)
+    b:EnableMouse(true)
+    w._grayBlockSW = b
+  end
+  w._grayBlockSW:SetShown(gray)
+  local target = gray and 0.35 or 1
+  w._aishBaseA = target
+  if w:GetAlpha() > 0 then w:SetAlpha(target) end
+end
+
+-- Couleur "Lueur" de la spe active (module Couleurs), relue a chaque appel ; repli sur l'accent du theme
+function SharedWidgets.GlowColor()
+  local CLR = ns.Modules and ns.Modules.Colors
+  return (CLR and CLR.Get and CLR.Get("glow")) or Theme.accent or { 1, 0.82, 0.2, 1 }
+end
+
+-- Survol d'un element de liste ou d'un en-tete : texte en couleur "Lueur", couleur d'origine rendue a la sortie,
+-- sauf si le proprietaire l'a recolore entre-temps (ligne selectionnee au clic...) : sa couleur est alors gardee.
+function SharedWidgets.HoverGlow(fs, on)
+  if not fs then return end
+  if on then
+    if not fs._glowSaved then fs._glowSaved = { fs:GetTextColor() } end
+    local c = SharedWidgets.GlowColor()
+    fs:SetTextColor(c[1], c[2], c[3], 1)
+    fs._glowSet = { fs:GetTextColor() }
+  elseif fs._glowSaved then
+    local c, g = fs._glowSaved, fs._glowSet
+    fs._glowSaved, fs._glowSet = nil, nil
+    local r, gg, b = fs:GetTextColor()
+    if g and math.abs(r - g[1]) < 0.01 and math.abs(gg - g[2]) < 0.01 and math.abs(b - g[3]) < 0.01 then
+      fs:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+    end
+  end
+end
+
+-- Transforme un section header en en-tete repliable : le libelle est suivi de "+" / "-" (avant le filet) et un
+-- bouton transparent par-dessus capte clic et survol (libelle en couleur "Lueur" au survol).
 -- Idempotent. L'etat n'est PAS stocke ici : l'appelant fournit onToggle et pilote
 -- l'affichage via SharedWidgets.SetHeaderCollapsedState.
 function SharedWidgets.MakeHeaderCollapsible(f, onToggle)
@@ -449,8 +553,8 @@ function SharedWidgets.MakeHeaderCollapsible(f, onToggle)
   hl:SetAllPoints()
   hl:SetColorTexture(1, 1, 1, 0.06)
   hl:Hide()
-  hitbox:SetScript("OnEnter", function() hl:Show() end)
-  hitbox:SetScript("OnLeave", function() hl:Hide() end)
+  hitbox:SetScript("OnEnter", function() hl:Show(); SharedWidgets.HoverGlow(f._lbl, true) end)
+  hitbox:SetScript("OnLeave", function() hl:Hide(); SharedWidgets.HoverGlow(f._lbl, false) end)
   hitbox:SetScript("OnClick", function()
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     SharedWidgets.HeaderClick(f, onToggle)
@@ -489,12 +593,13 @@ function SharedWidgets.HeaderClick(f, onToggle)
   end
 end
 
---- Met a jour le seul prefixe +/- (aucun effet sur un header non pliable).
+--- Met a jour le seul signe +/- apres le titre (aucun effet sur un header non pliable).
 function SharedWidgets.SetHeaderCollapsedState(f, collapsed)
   if not f then return end
   f._collapsed = collapsed
   if not f._collapseReady or not f._lbl then return end
-  f._lbl:SetText((collapsed and "+ " or "- ") .. (f._baseText or ""))
+  -- _displayText : titre renomme en mode disposition (UI/LayoutEditor.lua) ; _baseText reste la cle de la section
+  f._lbl:SetText((f._displayText or f._baseText or "") .. (collapsed and "  +" or "  -"))   -- signe apres le titre, avant le filet
 end
 
 -- Couleur du libelle d'un titre de section : "Cercle de puissance" de la spe active
@@ -900,6 +1005,7 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
 
   local container = CreateFrame("Frame", nil, parent)
   container:SetSize(width, height)
+  container._gridKind = "dropdown"
 
   -- Label au-dessus (optionnel)
   if hasLabel then
@@ -944,6 +1050,13 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
   menu:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -1)
   menu:SetSize(width, BTN_H)
   menu:Hide()
+  -- Largeur changee apres coup (grille de colonnes de NewLayout) : bouton et liste suivent
+  container:HookScript("OnSizeChanged", function(_, w)
+    if not w or w <= 0 or math.abs(w - width) < 0.5 then return end
+    width = w
+    btn:SetWidth(w)
+    menu:SetWidth(w)
+  end)
   menu:EnableMouseWheel(true)
   _ApplyBD(menu, { 0.08, 0.08, 0.10, 0.97 }, Theme.border)
 
@@ -1201,10 +1314,11 @@ function SharedWidgets.CreateColorButton(parent, label, width)
 
   local container = CreateFrame("Frame", nil, parent)
   container:SetSize(width, height)
+  container._gridKind = "color"
 
   local swatch = CreateFrame("Button", nil, container)
   swatch:SetSize(18, 18)
-  swatch:SetPoint("LEFT", container, "LEFT", 4, 0)
+  swatch:SetPoint("LEFT", container, "LEFT", 0, 0)   -- aligne avec les autres widgets
 
   container.label = container:CreateFontString(nil, "OVERLAY")
   container.label:SetFont(ns.Media.fontGui, 11)
@@ -1299,19 +1413,22 @@ end
 
 -- Ligne d'alignement/ancrage : 3 boutons exclusifs, label simple au-dessus.
 -- Partage entre Alignement (cast bars) et Ancrage (Top Target).
-function SharedWidgets.CreateAlignRow(parent, label, width, options)
+-- `fill` : les boutons se partagent toute la largeur (grille de colonnes) au lieu de 90 px chacun.
+function SharedWidgets.CreateAlignRow(parent, label, width, options, fill)
   options = options or {
     { k = "LEFT",   l = L["SETTINGS_ALIGN_LEFT"] },
     { k = "CENTER", l = L["SETTINGS_ALIGN_CENTER"] },
     { k = "RIGHT",  l = L["SETTINGS_ALIGN_RIGHT"] },
   }
-  local ABTN_W = 90
-  local LBL_H  = 14
-  local GAP    = 3
+  local ABTN_W = fill and math.floor(((width or 260) - (#options - 1) * 4) / #options) or 90
+  -- Memes hauteurs qu'un menu deroulant (libelle 18 + bouton 22), boutons alignes sur le sien
+  local LBL_H  = 18
+  local GAP    = 0
   local BTN_H  = 22
 
   local container = CreateFrame("Frame", nil, parent)
   container:SetSize(width or 260, LBL_H + GAP + BTN_H)
+  container._gridKind = "align"
 
   local lbl = container:CreateFontString(nil, "OVERLAY")
   lbl:SetFont(ns.Media.fontGui, 10)
@@ -1515,6 +1632,189 @@ function SharedWidgets.CreateToggle(parent, width)
   return f
 end
 
+-- Interrupteur du module dans le titre de page, a droite du libelle. `cb` est la case "Activer" de la page,
+-- jamais affichee : elle garde son binding et ses onChanged, l'interrupteur la pilote (et la suit : son SetChecked
+-- est enveloppe). Module coupe : le reste de la page est grise et un ecran capte la souris (la molette fait defiler
+-- le panneau) ; onOff(off) laisse l'appelant replier ses sections. Retourne apply(), a rappeler en fin de
+-- construction pour griser aussi les widgets crees apres coup.
+local TITLE_TOGGLE_DIM = 0.35
+local DOT_TEX = "Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2"
+
+-- Pastille ON/OFF : cercle plein (actif) ou vide (coupe), halo derriere tant qu'il est actif. `colorFn` et
+-- `glowColorFn` donnent les teintes a chaque rafraichissement (suivent le theme). Usage : t:SetValue(bool) ; t.onChanged = fn
+function SharedWidgets.CreateDotToggle(parent, size, colorFn, glowColorFn)
+  size = size or 13
+  local f = CreateFrame("Button", nil, parent)
+  f:SetSize(size + 6, size + 6)   -- zone de clic un peu plus large que le point
+  local function Dot(layer, sub, s)
+    local t = f:CreateTexture(nil, layer, nil, sub)
+    t:SetSize(s, s)
+    t:SetPoint("CENTER")
+    t:SetTexture(DOT_TEX)
+    return t
+  end
+  -- Halo du point actif (plus vif au survol) : degrade radial doux, en ADD au-dessus du creux opaque du cercle
+  -- vide (dessous, il n'apparaissait qu'autour de l'anneau), sous le remplissage
+  local glow = f:CreateTexture(nil, "ARTWORK", nil, 2)
+  glow:SetSize(size * 3, size * 3)
+  glow:SetPoint("CENTER")
+  glow:SetTexture("Interface\\AddOns\\AishCore\\Media\\UI\\SpotGlow.tga")
+  glow:SetBlendMode("ADD")
+  glow:SetAlpha(0)
+  local ring = Dot("ARTWORK", 0, size)
+  local hole = Dot("ARTWORK", 1, size - 3)
+  local fill = Dot("ARTWORK", 3, size - 5)
+  hole:SetVertexColor(Theme.bg[1], Theme.bg[2], Theme.bg[3], 1)
+  f._on, f._hover, f._fa = false, false, 0
+
+  local function Refresh()
+    local c = colorFn and colorFn() or Theme.gold or Theme.accent
+    local k = f._hover and 1.25 or 1
+    ring:SetVertexColor(math.min(1, c[1] * k), math.min(1, c[2] * k), math.min(1, c[3] * k), f._on and 1 or 0.75)
+    fill:SetVertexColor(c[1], c[2], c[3], 1)
+    fill:SetAlpha(f._fa)
+    local gc = glowColorFn and glowColorFn() or c
+    glow:SetVertexColor(gc[1], gc[2], gc[3], 1)
+  end
+
+  local function GlowTarget()
+    if f._on then return f._hover and 1 or 0.7 end
+    return f._hover and 0.5 or 0
+  end
+  local function Glow(animated)
+    local target = GlowTarget()
+    if not animated or not SharedWidgets.StartAnim then glow:SetAlpha(target); return end
+    local from = glow:GetAlpha()
+    SharedWidgets.StartAnim(glow, 0.15, function(e) glow:SetAlpha(from + (target - from) * e) end)
+  end
+
+  local function Fill(target, animated)
+    if not animated or not SharedWidgets.StartAnim then
+      f._fa = target; Refresh(); return
+    end
+    local from = f._fa
+    SharedWidgets.StartAnim(f, 0.15, function(e)
+      f._fa = from + (target - from) * e
+      fill:SetAlpha(f._fa)
+    end)
+  end
+
+  function f:SetValue(v)
+    self._on = v and true or false
+    Fill(self._on and 1 or 0, false)
+    Glow(false)
+  end
+  function f:GetValue() return self._on end
+
+  f:SetScript("OnClick", function(s)
+    s._on = not s._on
+    Refresh()
+    Fill(s._on and 1 or 0, true)
+    Glow(true)
+    if s.onChanged then s.onChanged(s._on) end
+    PlaySound(s._on and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON
+                     or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+  end)
+  f:SetScript("OnEnter", function(s) s._hover = true; Refresh(); Glow(true) end)
+  f:SetScript("OnLeave", function(s) s._hover = false; Refresh(); Glow(true) end)
+
+  Refresh()
+  return f
+end
+
+-- `extra` (facultatif) : bloc epingle hors de la page (titre + apercu, cf. ns.SettingsPin), grise et bloque de meme.
+function SharedWidgets.AttachTitleToggle(title, page, cb, onOff, extra)
+  -- Couleurs Thematiques : point en "Decorations A", halo en "Lueur" ; repli sur l'or du theme
+  local function ThemeColor(key)
+    local CLR = ns.Modules and ns.Modules.Colors
+    return CLR and CLR.Get and CLR.Get(key) or nil
+  end
+  local tg = SharedWidgets.CreateDotToggle(title, 13,
+    function() return ThemeColor("powerdotsa") end,
+    function() return ThemeColor("glow") end)
+  tg:SetPoint("LEFT", title._lbl, "RIGHT", 6, 0)
+  tg:SetFrameLevel(title:GetFrameLevel() + 5)
+  if title._line then title._line:SetPoint("LEFT", tg, "RIGHT", 10, 0) end
+  title._moduleToggle = tg
+  cb:Hide()
+
+  tg:HookScript("OnEnter", function(s)
+    GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+    GameTooltip:SetText(cb.label and cb.label:GetText() or "", 1, 1, 1)
+    if cb.tooltipText then GameTooltip:AddLine(cb.tooltipText, 0.8, 0.8, 0.8, true) end
+    GameTooltip:Show()
+  end)
+  tg:HookScript("OnLeave", function() GameTooltip:Hide() end)
+
+  -- Deux coins seulement : un ancrage TOP + LEFT surcontraint le cadre, qui remontait alors sur le titre
+  -- et passait par-dessus l'interrupteur (survol hache).
+  local tx = select(4, title:GetPoint(1)) or 0
+  local shields, pages = {}, { page, extra }
+  for _, p in ipairs(pages) do
+    local shield = CreateFrame("Frame", nil, p)
+    shield:SetPoint("TOPLEFT", title, "BOTTOMLEFT", -tx, 0)
+    shield:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT")
+    shield:SetFrameLevel(math.min(p:GetFrameLevel() + 500, 9000))
+    shield:EnableMouse(true)
+    shield:EnableMouseWheel(true)
+    shield:SetScript("OnMouseWheel", function(_, delta)
+      local sf = page:GetParent()
+      while sf and sf:GetObjectType() ~= "ScrollFrame" do sf = sf:GetParent() end
+      local fn = sf and sf:GetScript("OnMouseWheel")
+      if fn then fn(sf, delta) end
+    end)
+    shield:Hide()
+    shields[shield] = true
+  end
+
+  local dimmed = {}   -- enfant -> opacite d'origine
+  local function Apply()
+    local on = cb:GetChecked() and true or false
+    title._moduleOff = not on
+    for shield in pairs(shields) do shield:SetShown(not on) end
+    local children = { page:GetChildren() }
+    if extra then
+      for _, c in ipairs({ extra:GetChildren() }) do children[#children + 1] = c end
+    end
+    for _, c in ipairs(children) do
+      -- `extra` est encore enfant de la page tant qu'il n'est pas epingle : seuls ses enfants sont grises
+      if c ~= title and not shields[c] and c ~= cb and c ~= extra then
+        if not on and not dimmed[c] then
+          -- Base des fondus du pli (NewLayout) : un widget d'une section repliee est a 0 ; c'est sa base qui est
+          -- grisee, sinon il reapparaitrait a pleine opacite au premier depli
+          local base = c._aishBaseA or c:GetAlpha()
+          dimmed[c] = base
+          c._aishBaseA = base * TITLE_TOGGLE_DIM
+          c:SetAlpha(c:GetAlpha() * TITLE_TOGGLE_DIM)
+        end
+      end
+    end
+    -- Retour a l'opacite d'origine de TOUT ce qui a ete grise, y compris un enfant qui a change de parent entre-temps
+    -- (apercu epingle hors de la page par ns.SettingsPin : il n'est plus parmi ses enfants)
+    if on then
+      for c, a in pairs(dimmed) do
+        c:SetAlpha(a)
+        c._aishBaseA = a   -- base des fondus du pli (NewLayout), capturee grisee
+      end
+      wipe(dimmed)
+    end
+  end
+
+  local set = cb.SetChecked
+  function cb:SetChecked(v)
+    set(self, v)
+    tg:SetValue(v)
+    Apply()
+  end
+  tg.onChanged = function(v)
+    cb:SetChecked(v)
+    if cb.onChanged then cb.onChanged(v) end
+    if onOff then onOff(not v) end
+  end
+  cb:SetChecked(cb:GetChecked())
+  return Apply
+end
+
 -- Action Button (bouton d'action avec backdrop) — style AishUI
 -- Usage : btn = SW.CreateActionBtn(parent, "Texte", width, bgColor, borderColor, textColor)
 -- Defaults : dark bg + theme border + white text
@@ -1542,6 +1842,10 @@ function SharedWidgets.ApplyPreviewScreen(frame)
   local t = holder:CreateTexture(nil, "BACKGROUND")
   t:SetTexture(PREVIEW_SCREEN)
   t:SetAllPoints(holder)
+  -- Voile sombre : la capture est trop lumineuse derriere les elements apercus
+  local shade = holder:CreateTexture(nil, "BORDER")
+  shade:SetAllPoints(clip)
+  shade:SetColorTexture(0, 0, 0, 0.55)
   frame._previewScreen = t
   local function Fit()
     local w, h = frame:GetWidth(), frame:GetHeight()
@@ -1572,6 +1876,7 @@ function SharedWidgets.CreateActionBtn(parent, text, width, bgColor, borderColor
   end
   lbl:SetText(text or "")
   btn._lbl = lbl
+  btn._leKind = "button"   -- deplacable en mode disposition (UI/LayoutEditor.lua)
 
   local _bg = bgColor or { 0.08, 0.08, 0.12, 1 }
   btn:SetScript("OnEnter", function(s)

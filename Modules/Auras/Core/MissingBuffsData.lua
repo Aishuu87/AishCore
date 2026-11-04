@@ -25,6 +25,7 @@ local ALERT_TEXT_KEYS = {
     EXPIRING_SOON    = "MISSINGBUFFS_ALERT_EXPIRING_SOON",
     BUFF_ALLY        = "MISSINGBUFFS_ALERT_BUFF_ALLY",
     USE_FLASK        = "MISSINGBUFFS_ALERT_USE_FLASK",
+    USE_ELIXIR       = "MISSINGBUFFS_ALERT_USE_ELIXIR",
     EAT_FOOD         = "MISSINGBUFFS_ALERT_EAT_FOOD",
     USE_WEAPON_BUFF  = "MISSINGBUFFS_ALERT_USE_WEAPON_BUFF",
     LOW_AMMO         = "MISSINGBUFFS_ALERT_LOW_AMMO",
@@ -36,6 +37,7 @@ local ALERT_TEXT_KEYS = {
     BAGS_FULL        = "MISSINGBUFFS_ALERT_BAGS_FULL",
     TRACKING_OFF     = "MISSINGBUFFS_ALERT_TRACKING_OFF",
     APPLY_WEAPON_STONE = "MISSINGBUFFS_ALERT_APPLY_WEAPON_STONE",
+    LOW_POISONS      = "MISSINGBUFFS_ALERT_LOW_POISONS",
 }
 ns.MISSING_TEXT = setmetatable({}, {
     __index = function(_, key)
@@ -174,11 +176,12 @@ ns.MISSING_WARRIOR_STANCES = {
 }
 
 ns.MISSING_CRUSADER_AURA = 32223
+-- settingsId : une ligne par aura dans les reglages (decochee = jamais proposee, mais compte comme active)
 ns.MISSING_PALADIN_AURAS = {
-    { spellId = 465,    name = "Devotion",      text = "USE_AURA", default = true },
-    { spellId = 317920, name = "Concentration", text = "USE_AURA" },
-    { spellId = 32223,  name = "Crusader",      text = "USE_AURA" },
-    { spellId = 210323, name = "Vengeance",     text = "USE_AURA" },
+    { spellId = 465,    settingsId = 36, name = "Devotion",      text = "USE_AURA", default = true },
+    { spellId = 317920, settingsId = 37, name = "Concentration", text = "USE_AURA" },
+    { spellId = 32223,  settingsId = 38, name = "Crusader",      text = "USE_AURA" },
+    { spellId = 210323, settingsId = 39, name = "Vengeance",     text = "USE_AURA" },
 }
 
 ns.MISSING_EVOKER_ATTUNEMENTS = {
@@ -217,6 +220,9 @@ ns.MISSING_LEGACY_KEY      = 9000034  -- Forever : points d'Heritage
 ns.MISSING_BAGS_KEY        = 9000035  -- sacs pleins
 ns.MISSING_TRACKING_HERBS_KEY = 9000036  -- Decouverte des herbes desactivee
 ns.MISSING_TRACKING_ORE_KEY   = 9000037  -- Decouverte des mineraux desactivee
+ns.MISSING_ELIXIR_KEY         = 9000038
+ns.MISSING_POISON_APPLY_KEY   = 9000039  -- Forever : poison des sacs a appliquer sur l'arme
+ns.MISSING_POISON_STOCK_KEY   = 9000040  -- Forever : stock de poisons sous le seuil (a fabriquer)
 -- Sorts de pistage de recolte (cf. GatherTrackingChoices dans MissingBuffs.lua) ; une ligne de combo chacun
 ns.MISSING_GATHER_FINDERS = {
     { spellId = 2383, key = ns.MISSING_TRACKING_HERBS_KEY, icon = "Interface\\Icons\\INV_Misc_Flower_02" },     -- Denicher les herbes
@@ -408,12 +414,12 @@ if _addon.IsForever then
     ns.MISSING_WARRIOR_STANCES = {}
     ns.MISSING_EVOKER_ATTUNEMENTS = {}
 
-    -- Auras de paladin : seules Devotion/Concentration/Crusader sont proposees au lancement ; les
-    -- autres comptent seulement comme "une aura est active" (casts vide = jamais proposees).
+    -- Auras de paladin : seules Devotion/Concentration/Retribution/Crusader sont proposees au lancement
+    -- (si apprises) ; les autres comptent seulement comme "une aura est active" (casts vide = jamais proposees).
     ns.MISSING_PALADIN_AURAS = {
         { settingsId = 110, icon = I .. "Spell_Holy_DevotionAura", names = { 465, "Devotion Aura" },       casts = { 465, "Devotion Aura" },       default = true, text = "USE_AURA" },
         { settingsId = 111, icon = I .. "Spell_Holy_MindSooth", names = { 19746, "Concentration Aura" }, casts = { 19746, "Concentration Aura" }, text = "USE_AURA" },
-        { names = { 7294, "Retribution Aura" },        casts = {} },
+        { settingsId = 119, icon = I .. "Spell_Holy_AuraOfLight", names = { 7294, "Retribution Aura" },  casts = { 7294, "Retribution Aura" },  text = "USE_AURA" },
         { names = { 20218, "Sanctity Aura" },          casts = {} },
         { names = { 19876, "Shadow Resistance Aura" }, casts = {} },
         { names = { 19888, "Frost Resistance Aura" },  casts = {} },
@@ -436,15 +442,8 @@ if _addon.IsForever then
     ns.MISSING_WARLOCK_SACRIFICE_NAMES = { 18791, "Touch of Shadow", 18789, "Burning Wish",
                                            18790, "Fel Stamina", 18792, "Fel Energy" }
 
-    -- Poisons : sur ce client ce sont des enchantements d'arme (pas des auras), un par arme.
-    ns.MISSING_ROGUE_POISONS = {
-        nonlethal = {}, lethal = {},
-        forever = {
-            { casts = { 8681, "Instant Poison" }, default = true },
-            { casts = { 2823, "Deadly Poison" } },
-            { casts = { 13218, "Wound Poison" } },
-            { casts = { 3408, "Crippling Poison" } },
-            { casts = { 5761, "Mind-numbing Poison" } },
-        },
-    }
+    -- Poisons : metier (onglet des metiers secondaires, debloque par quete au niveau 20) qui fabrique des objets a
+    -- appliquer sur l'arme (enchantement temporaire). Proposes depuis les sacs, cf. CheckRoguePoisonsForever.
+    ns.MISSING_ROGUE_POISONS = { nonlethal = {}, lethal = {} }
+    ns.MISSING_ROGUE_POISON_PROFESSION = { casts = { 2842, "Poisons" } }
 end

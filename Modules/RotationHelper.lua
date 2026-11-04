@@ -485,7 +485,7 @@ local function ShouldShowIcons()
   if (ns.skyridingActive or (IsFlying and IsFlying())) and (ns.GetCfg("skyriding") or {}).hideRotationHelper ~= false then return false end
   local vMode = cfg.visibilityMode or "combat"
   -- Zone de repos : les modes "Cible uniquement"/"En combat" overrident ce masquage s'ils sont satisfaits, seul "Toujours" y reste soumis
-  if cfg.ignoreWhileResting and IsResting and IsResting() then
+  if cfg.ignoreWhileResting and ns.IsRestArea() then
     if vMode == "target" then
       -- En zone de repos, seul un vrai engagement leve le masquage : la tolerance
       -- "spe de soin hors combat" de ns.ShouldShowForTargetMode rendrait sinon ce

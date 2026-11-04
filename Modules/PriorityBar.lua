@@ -581,7 +581,7 @@ local function RebuildChargeCache()
   for i = 1, MAX_SLOTS do
     local slot = slotFrames[i]
     if slot and slot.spellIDs then
-      for _, sid in ipairs(slot.spellIDs) do
+      for _, sid in ipairs(slot._allIDs or slot.spellIDs) do
         if C_Spell and C_Spell.GetSpellCharges then
           local chargeInfo = C_Spell.GetSpellCharges(sid)
           if chargeInfo and chargeInfo.maxCharges then
@@ -681,7 +681,7 @@ local function RebuildCooldownCache()
   for i = 1, MAX_SLOTS do
     local slot = slotFrames[i]
     if slot and slot.spellIDs then
-      for _, sid in ipairs(slot.spellIDs) do
+      for _, sid in ipairs(slot._allIDs or slot.spellIDs) do
         -- Methode 1 : GetSpellBaseCooldown (retourne ms)
         if GetSpellBaseCooldown then
           local ok, ms = pcall(GetSpellBaseCooldown, sid)
@@ -820,7 +820,7 @@ local function SyncCooldownsOOC()
     for i = 1, MAX_SLOTS do
       local slot = slotFrames[i]
       if slot and slot.spellIDs then
-        for _, sid in ipairs(slot.spellIDs) do
+        for _, sid in ipairs(slot._allIDs or slot.spellIDs) do
           if not spellCDBase[sid] then
             local ok, cdInfo = pcall(C_Spell.GetSpellCooldown, sid)
             if ok and cdInfo and cdInfo.duration then
@@ -1056,7 +1056,7 @@ local function RebuildLearnedCache()
   for i = 1, MAX_SLOTS do
     local slot = slotFrames[i]
     if slot and slot.spellIDs then
-      for _, sid in ipairs(slot.spellIDs) do
+      for _, sid in ipairs(slot._allIDs or slot.spellIDs) do
         -- Test direct
         local ok, known = pcall(IsPlayerSpell, sid)
         if ok and known then
@@ -1079,6 +1079,15 @@ local function RebuildLearnedCache()
               learnedSpells[sid] = true   -- le sort de base est consideré appris via son override
               learnedSpells[ov]  = true
             end
+          end
+        end
+        -- Sort configure = override d'un sort de base (ex: Execute 281000 / base 163201) : si l'override
+        -- n'est pas actif (talent absent du loadout), le sort de base reste lancable et s'affiche a sa place
+        if not learnedSpells[sid] and FindBaseSpellByID then
+          local ok2, base = pcall(FindBaseSpellByID, sid)
+          if ok2 and base and base ~= sid and base > 0 then
+            local ok3, known3 = pcall(IsPlayerSpell, base)
+            if ok3 and known3 then learnedSpells[sid] = true end
           end
         end
       end
@@ -1279,20 +1288,24 @@ _pbTooltipWatcher:RegisterEvent("PLAYER_REGEN_DISABLED")
 _pbTooltipWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
 _pbTooltipWatcher:SetScript("OnEvent", RefreshPBTooltip)
 
--- Creation d'un slot
-local function CreateSlotFrame(index, parent)
+-- Creation d'un slot. preview = copie non securisee, sans nom global ni scripts de jeu, pour l'apercu du GUI
+-- (UI/PriorityBarPage.lua) : meme rendu que la vraie barre, puisque c'est le meme code.
+local function CreateSlotFrame(index, parent, preview)
   local cfg = ns.GetCfg("priorityBar") or {}
   local size = cfg.iconSize or 34
 
   -- SecureActionButton : cliquable pour caster le sort
-  local frame = CreateFrame("Button", "AishCorePriorityBarSlot" .. index, parent, "SecureActionButtonTemplate")
+  local frame = CreateFrame("Button", (not preview) and ("AishCorePriorityBarSlot" .. index) or nil, parent,
+    (not preview) and "SecureActionButtonTemplate" or nil)
   frame:SetSize(size, size)
-  frame:SetFrameStrata("MEDIUM")
-  frame:SetFrameLevel(60)
-  frame:RegisterForClicks("AnyDown", "AnyUp")
+  if not preview then
+    frame:SetFrameStrata("MEDIUM")
+    frame:SetFrameLevel(60)
+    frame:RegisterForClicks("AnyDown", "AnyUp")
+  end
 
   -- Conteneur interne (icone/cooldown/glows/charges) : c'est ce frame qu'on anime, la bordure reste sur le button frame
-  local inner = CreateFrame("Frame", "AishCorePBInner" .. index, frame)
+  local inner = CreateFrame("Frame", (not preview) and ("AishCorePBInner" .. index) or nil, frame)
   inner:SetAllPoints()
   inner:SetFrameLevel(frame:GetFrameLevel() + 1)
   frame.innerFrame = inner
@@ -1312,7 +1325,7 @@ local function CreateSlotFrame(index, parent)
   frame.slideAnimFrame = CreateFrame("Frame", nil, frame)
 
   -- Cooldown swipe – parente a inner pour suivre le slide
-  frame.cooldown = CreateFrame("Cooldown", "AishCorePBCD" .. index, inner, "CooldownFrameTemplate")
+  frame.cooldown = CreateFrame("Cooldown", (not preview) and ("AishCorePBCD" .. index) or nil, inner, "CooldownFrameTemplate")
   frame.cooldown:SetAllPoints()
   frame.cooldown:SetDrawSwipe(true)
   frame.cooldown:SetDrawEdge(false)
@@ -1321,7 +1334,7 @@ local function CreateSlotFrame(index, parent)
   frame.cooldown:SetFrameLevel(frame:GetFrameLevel() + 2)
 
   -- Callback fin de cooldown swipe : mécanisme principal pour savoir qu'un sort n'est plus en CD (secret numbers bloquent la lecture directe en combat)
-  frame.cooldown:SetScript("OnCooldownDone", function()
+  if not preview then frame.cooldown:SetScript("OnCooldownDone", function()
     frame._onCooldown = false
     frame._swipeSpellName = nil  -- swipe terminé → libérer pour restart
     -- Nettoyer _realCDEndTimes seulement si le CD est vraiment fini (préserve l'end-time si le swipe s'est arrêté prématurément)
@@ -1336,7 +1349,7 @@ local function CreateSlotFrame(index, parent)
         end
       end
     end
-  end)
+  end) end
 
   -- Bordure (4 textures + ombre optionnelle)
   frame.borderLines = {}
@@ -1582,6 +1595,10 @@ local function CreateSlotFrame(index, parent)
   ns.ApplyKeybindFontString(frame.keybindText, inner, cfg)
   frame.keybindText:Hide()
 
+  frame.slotIndex = index
+  frame.spellIDs = {}
+  if preview then return frame end
+
   -- Tooltip
   frame:EnableMouse(true)
   -- Glisser-deposer (cf. PBEdit) : recoit aussi un sort pris dans le grimoire
@@ -1694,6 +1711,14 @@ local function StopSlotGlow(slot)
   if slot.procStartTex then slot.procStartTex:SetAlpha(0); slot.procStartTex:Hide() end
   Debug("Slot " .. slot.slotIndex .. " GLOW OFF")
 end
+
+-- Apercu du GUI (UI/PriorityBarPage.lua) : slots non securises et glows, meme code que la vraie barre
+function PriorityBar.NewPreviewSlot(parent, index)
+  return CreateSlotFrame(index or 0, parent, true)
+end
+PriorityBar.StartSlotGlow = StartSlotGlow
+PriorityBar.StopSlotGlow  = StopSlotGlow
+PriorityBar.GetSpellIcon  = function(sid) return GetSpellIcon(sid) end
 
 -- Positionnement des slots
 local function LayoutSlots()
@@ -1831,6 +1856,7 @@ end
 local function ApplyEmptySlot(slot, index, withPlaceholder)
   if withPlaceholder and index <= LayoutSlotCount() then
     slot._placeholder = true
+    slot:SetAlpha(1)
     slot.icon:SetTexture(PLACEHOLDER_ICON)
     slot.icon:SetDesaturated(true)
     slot.icon:SetAlpha(0.55)
@@ -1938,6 +1964,8 @@ local function PlaySlideIn(slot)
     end
   end)
 end
+
+PriorityBar.PlaySlideIn = PlaySlideIn   -- apercu du GUI : meme animation au changement de sort
 
 -- Retrouve le slot d'action dans le cache pour un slot de la PriorityBar
 local function FindActionSlotForSpell(slot)
@@ -2610,8 +2638,31 @@ end
 
 -- Les slots portent des boutons securises : Show()/Hide() sont interdits en combat (ADDON_ACTION_BLOCKED).
 -- En combat on joue donc sur l'opacite, et le vrai Show/Hide est rattrape a la passe suivante hors combat.
+-- Sorts "Camouflage" (Voleur / Druide) : un slot qui en a n'affiche qu'eux en furtivite, et ses autres sorts hors
+-- furtivite. slot._allIDs = tous les sorts configures, slot._stealthSet = { [id] = true }, slot.spellIDs = la liste
+-- effective, lue par le reste du module (les caches parcourent _allIDs). Edition au grimoire : liste complete.
+-- La macro du bouton porte tous les sorts, departages par [stealth] (cf. BuildSlotMacro) : la furtivite peut changer
+-- en combat (Danse de l'ombre), ou la macro est figee.
+function PBEdit.HasStealth(slot)
+  return slot and slot._stealthSet and next(slot._stealthSet) ~= nil or false
+end
+
+function PBEdit.StealthFilter(slot)
+  local all = slot._allIDs or slot.spellIDs or {}
+  slot._allIDs = all
+  if not PBEdit.HasStealth(slot) or PBEdit.on then slot.spellIDs = all; return end
+  local st = PBEdit.stealthed == true
+  local out = {}
+  for _, sid in ipairs(all) do
+    if (slot._stealthSet[sid] == true) == st then out[#out + 1] = sid end
+  end
+  slot.spellIDs = out
+end
+
+-- Un slot a sorts Camouflage n'est jamais masque par Hide() : la furtivite peut revenir en combat, ou Show() est
+-- interdit sur un bouton securise. Il passe par l'opacite.
 local function SlotHide(slot)
-  if InCombatLockdown() then slot:SetAlpha(0) else slot:SetAlpha(1); slot:Hide() end
+  if InCombatLockdown() or PBEdit.HasStealth(slot) then slot:SetAlpha(0) else slot:SetAlpha(1); slot:Hide() end
 end
 local function SlotShow(slot)
   slot:SetAlpha(1)
@@ -2904,14 +2955,30 @@ end
 local pbLastVisState       = nil   -- true/false/nil — dernier état connu
 local pbHiddenForSkyriding = false -- masqué explicitement pour le skyriding
 local pbHiddenForGui       = false -- masqué quand le panneau Animations 3D est ouvert
+local pbForcedForGui       = false -- apercu force depuis le GUI (page Barres de vie) : passe outre les regles de visibilite
+
+-- Hors combat : rattrape les slots masques par opacite pendant le combat (encore affiches, donc cliquables)
+-- et la souris des slots, que le debounce de UpdateVisibility ne resynchronise pas si l'etat n'a pas change.
+local function SyncSlotsOOC()
+  if InCombatLockdown() then return end
+  for i = 1, MAX_SLOTS do
+    local slot = slotFrames[i]
+    if slot and slot._hidden and slot:IsShown() and not PBEdit.HasStealth(slot) then slot:SetAlpha(1); slot:Hide() end
+  end
+  SetSlotsMouseEnabled(pbLastVisState == true)
+end
 
 local function PBShouldShow()
   if pbHiddenForGui       then return false end
-  if pbHiddenForSkyriding then return false end
   local cfg = ns.GetCfg("priorityBar") or {}
   if cfg.enabled == false then return false end
+  if pbForcedForGui       then return true end
+  if pbHiddenForSkyriding then return false end
   if ns.IsInBlockedState() then return false end
   if dragEnabled or PBEdit.on then return true end
+  -- Furtivite : la visibilite du Mode furtif remplace les regles ci-dessous
+  local ov = ns.StealthVisOverride and ns.StealthVisOverride("priority")
+  if ov ~= nil then return ov end
   -- "Toujours actif en instance" : ignore les transitions combat tant qu'on
   -- est en donjon/raid (ns.inInstance, cf. Core.lua).
   if cfg.alwaysInInstance and ns.inInstance then return true end
@@ -3008,6 +3075,14 @@ function PriorityBar.SetGuiHidden(on)
   PriorityBar.UpdateVisibility()
 end
 
+-- Apercu force depuis le GUI : la barre reste visible quelles que soient ses regles (combat, cible, furtivite...)
+function PriorityBar.SetGuiForced(on)
+  if not leftContainer then return end
+  pbForcedForGui = on and true or false
+  pbLastVisState = nil
+  PriorityBar.UpdateVisibility()
+end
+
 function PriorityBar.UpdateVisibility()
   if not leftContainer then return end
   local shouldShow = PBShouldShow()
@@ -3027,8 +3102,18 @@ function PriorityBar.ConfigureSlots(slotConfigs)
   for i = 1, MAX_SLOTS do
     local slotCfg = slotConfigs and slotConfigs[i]
     if i <= totalSlots and slotCfg and slotFrames[i] then
-      local resolvedIDs = ResolveSlotSpellIDs(slotCfg.spellIDs or {})
-      slotFrames[i].spellIDs = resolvedIDs
+      local rawIDs = slotCfg.spellIDs or {}
+      local resolvedIDs = ResolveSlotSpellIDs(rawIDs)
+      -- Sorts Camouflage : reportes sur les IDs resolus (meme index), classes concernees seulement
+      local set
+      if slotCfg.stealth and PBEdit.StealthClass() then
+        for k, id in ipairs(rawIDs) do
+          if slotCfg.stealth[id] then set = set or {}; set[resolvedIDs[k]] = true end
+        end
+      end
+      slotFrames[i]._stealthSet = set
+      slotFrames[i]._allIDs = resolvedIDs
+      PBEdit.StealthFilter(slotFrames[i])
       slotFrames[i].slotName = slotCfg.name or ("Slot " .. i)
       -- Reset glow
       slotFrames[i].isHighlighted = true
@@ -3053,6 +3138,14 @@ function PriorityBar.ConfigureSlots(slotConfigs)
         end
         -- S'assurer que le slot est visible (peut avoir été caché sur un profil précédent)
         slotFrames[i]._hidden = false
+        slotFrames[i]:SetAlpha(1)
+        slotFrames[i]:Show()
+      elseif PBEdit.HasStealth(slotFrames[i]) then
+        -- Que des sorts Camouflage, hors furtivite : masque par l'opacite (cf. SlotHide)
+        ClearPlaceholder(slotFrames[i])
+        slotFrames[i].currentSpellID = nil
+        slotFrames[i]._hidden = true
+        slotFrames[i]:SetAlpha(0)
         slotFrames[i]:Show()
       else
         -- Slot sans sort : masque, ou icone neutre si le panneau de reglages est ouvert
@@ -3064,6 +3157,9 @@ function PriorityBar.ConfigureSlots(slotConfigs)
     elseif slotFrames[i] then
       -- Aucune config pour ce slot dans le profil courant : vider et cacher
       slotFrames[i].spellIDs       = {}
+      slotFrames[i]._allIDs        = nil
+      slotFrames[i]._stealthSet    = nil
+      slotFrames[i]:SetAlpha(1)
       slotFrames[i].slotName       = "Slot " .. i
       ClearSlotCDMSubscription(slotFrames[i])
       slotFrames[i].currentSpellID = nil
@@ -3174,7 +3270,11 @@ end
 -- Une zone de depot non securisee recouvre chaque slot pendant l'edition : elle intercepte les clics
 -- (sinon appuyer sur un slot pour le glisser lancerait le sort) et se cache en combat.
 local function BuildSlotMacro(slot, startAt)
-  local ids = slot.spellIDs or {}
+  local ids = slot._allIDs or slot.spellIDs or {}
+  -- Sorts Camouflage : chaque ligne ne vaut que dans son etat ([stealth] / [nostealth]). Voleur : Danse de l'ombre et
+  -- Subterfuge ne passent pas IsStealthed() mais activent la barre "bonus" (cf. ns.IsPlayerStealthed).
+  local stSet = PBEdit.HasStealth(slot) and slot._stealthSet or nil
+  local isRogue = (ns._playerClass or select(2, UnitClass("player"))) == "ROGUE"
   -- Ordre de PRIORITE de la config (le meme que celui du sort affiche par defaut). Un ordre calque sur le
   -- sort affiche au moment du calcul se figeait des l'entree en combat (SetAttribute est interdit) et le
   -- clic lancait alors un autre sort que celui montre. Les sorts non appris sont ecartes (cache des sorts
@@ -3192,7 +3292,14 @@ local function BuildSlotMacro(slot, startAt)
     local name = GetSpellName(sid)
     if name and name ~= ("Spell#" .. tostring(sid)) and not seen[name] then
       seen[name] = true
-      lines[#lines + 1] = "/cast [known:" .. name .. "] " .. name
+      local k = "known:" .. name
+      local cond = "[" .. k .. "]"
+      if stSet and stSet[sid] then
+        cond = isRogue and ("[" .. k .. ",stealth][" .. k .. ",bonusbar]") or ("[" .. k .. ",stealth]")
+      elseif stSet then
+        cond = isRogue and ("[" .. k .. ",nostealth,nobonusbar]") or ("[" .. k .. ",nostealth]")
+      end
+      lines[#lines + 1] = "/cast " .. cond .. " " .. name
       firstName = firstName or name
     end
   end
@@ -3234,9 +3341,36 @@ end
 function PBEdit.RefreshAllMacros()
   for i = 1, MAX_SLOTS do
     local slot = slotFrames[i]
-    if slot and slot.spellIDs and #slot.spellIDs > 0 then PBEdit.ApplyMacro(slot) end
+    local ids = slot and (slot._allIDs or slot.spellIDs)
+    if ids and #ids > 0 then PBEdit.ApplyMacro(slot) end
   end
 end
+
+--- Classe qui a des sorts Camouflage (Voleur, Druide)
+function PBEdit.StealthClass()
+  local cls = ns._playerClass or select(2, UnitClass("player"))
+  return cls == "ROGUE" or cls == "DRUID"
+end
+PriorityBar.StealthClass = PBEdit.StealthClass
+
+-- Entree / sortie de furtivite (cf. StealthMode.lua) : chaque slot a sorts Camouflage bascule de liste. Possible en
+-- combat : seul l'affichage change, la macro departage deja les deux etats.
+function PBEdit.OnStealthChanged(v)
+  PBEdit.stealthed = v and true or false
+  for i = 1, MAX_SLOTS do
+    local slot = slotFrames[i]
+    if PBEdit.HasStealth(slot) then
+      PBEdit.StealthFilter(slot)
+      if #slot.spellIDs == 0 then
+        SlotHide(slot); slot._hidden = true
+      elseif slot._hidden then
+        slot._hidden = false
+        SlotShow(slot)
+      end
+    end
+  end
+end
+if ns.CallbackRegistry then ns.CallbackRegistry:Register("StealthMode.Changed", PBEdit.OnStealthChanged) end
 
 local function CursorSpell()
   local kind, a, b, c, d = GetCursorInfo()
@@ -3255,12 +3389,28 @@ end
 local function CompatibleSpellID(sid, base)
   if not sid then return nil end
   local byID, byName = {}, {}
+  local byOverride = {}
   for _, e in ipairs(PriorityBar.GetSpecSpells()) do
     byID[e.id] = true
     if e.name then byName[e.name] = e.id end
+    -- Override actif de l'entree (talent Apex, ex. Malediction des satyres) : le curseur porte l'ID de
+    -- l'override, absent de la liste qui garde l'ID du grimoire
+    if C_Spell and C_Spell.GetOverrideSpell then
+      local ok, ov = pcall(C_Spell.GetOverrideSpell, e.id)
+      if ok and ov and ov ~= e.id and ov > 0 then
+        byOverride[ov] = e.id
+        local ovName = GetSpellName(ov)
+        if ovName and not byName[ovName] then byName[ovName] = e.id end
+      end
+    end
   end
   if byID[sid] then return sid end
   if base and byID[base] then return base end
+  if byOverride[sid] then return byOverride[sid] end
+  if FindBaseSpellByID then
+    local ok, b = pcall(FindBaseSpellByID, sid)
+    if ok and b and byID[b] then return b end
+  end
   local nm = GetSpellName(sid)
   return nm and byName[nm] or nil  -- rangs (Forever) / sorts remplaces par une aura
 end
@@ -3669,6 +3819,7 @@ function PBEdit.SetOn(on)
   local cfg = ns.GetCfg("priorityBar") or {}
   if on and cfg.enabled == false then return end
   PBEdit.on = on and true or false
+  PBEdit.OnStealthChanged(PBEdit.stealthed)   -- edition : liste complete des slots a sorts Camouflage
   ShowDropZones(PBEdit.on and not InCombatLockdown())
   ApplyBookStyle(PBEdit.on)
   if on then
@@ -3688,8 +3839,14 @@ end
 
 function PriorityBar.SetSpellBookOpen(open)
   PBEdit.bookOpen = open and true or false
-  if InCombatLockdown() then PBEdit.pending = true; return end
+  if InCombatLockdown() then
+    -- Ouverture en combat : ignoree, meme apres le combat (pas d'edition qui surgit grimoire ouvert).
+    -- Fermeture en combat d'une edition deja active : rattrapee a la sortie du combat.
+    PBEdit.pending = (not open and PBEdit.on) or nil
+    return
+  end
   PBEdit.pending = nil
+  if not open and not PBEdit.on then return end
   PBEdit.SetOn(PBEdit.bookOpen)
 end
 
@@ -4047,6 +4204,7 @@ function PriorityBar.Init()
     -- Fin de combat : UpdateVisibility calcule ShouldShow → false → AnimatePB fade-out
     if event == "PLAYER_REGEN_ENABLED" then
       PriorityBar.UpdateVisibility()  -- le debounce détecte le changement d'état
+      SyncSlotsOOC()
       -- Synchroniser les CD et charges depuis l'API (hors combat = clean)
       SyncCooldownsOOC()
       SyncChargesOOC()
@@ -4088,9 +4246,34 @@ function PriorityBar.Init()
   local specEventFrame = CreateFrame("Frame")
   specEventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
   specEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+  -- Sorts / talents modifies sans changement de spe (loadout change a l'entree d'instance, talent
+  -- reapplique au chargement) : sans rebuild, un sort de talent vu "non appris" pendant la transition
+  -- restait cache jusqu'au prochain changement de spe.
+  specEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+  specEventFrame:RegisterEvent("SPELLS_CHANGED")
+  specEventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
+  specEventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+  local learnedRebuildPending, learnedRebuildQueued = false, false
+  local function ScheduleLearnedRebuild()
+    if InCombatLockdown() then learnedRebuildPending = true; return end
+    if learnedRebuildQueued then return end
+    learnedRebuildQueued = true
+    C_Timer.After(0.5, function()
+      learnedRebuildQueued = false
+      if InCombatLockdown() then learnedRebuildPending = true; return end
+      learnedRebuildPending = false
+      RebuildLearnedCache()
+    end)
+  end
   specEventFrame:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_REGEN_ENABLED" then
       if specReloadPending then C_Timer.After(0.5, ReloadSlotsForSpec) end
+      if learnedRebuildPending then ScheduleLearnedRebuild() end
+      return
+    end
+    if event ~= "ACTIVE_TALENT_GROUP_CHANGED" then
+      if event == "PLAYER_ENTERING_WORLD" then C_Timer.After(3.0, ScheduleLearnedRebuild) end
+      ScheduleLearnedRebuild()
       return
     end
     if InCombatLockdown() then specReloadPending = true; return end
@@ -4909,6 +5092,68 @@ function PriorityBar.Init()
   end
 end
 
+-- Style d'un slot depuis les reglages (taille, bordure, glow, minuteur, charges, raccourci). Partage avec l'apercu du GUI.
+local function StyleSlot(slot, cfg)
+  local size = cfg.iconSize or 34
+  slot:SetSize(size, size)
+  slot.icon:ClearAllPoints()
+  slot.icon:SetAllPoints()
+
+  -- Bordure
+  if slot.ApplyBorder then slot.ApplyBorder() end
+
+  -- Glow config (type, couleur, taille)
+  if slot.ApplyGlowConfig then slot.ApplyGlowConfig() end
+
+  -- Cooldown swipe + texte
+  if slot.cooldown then
+    local showSwipe = cfg.showCooldownSwipe ~= false
+    local showText  = cfg.showCooldownText  ~= false
+    if showSwipe or showText then
+      slot.cooldown:Show()
+      slot.cooldown:SetDrawSwipe(showSwipe)
+      if showSwipe then
+        slot.cooldown:SetSwipeColor(0, 0, 0, 0.8)
+      end
+      slot.cooldown:SetHideCountdownNumbers(not showText)
+    else
+      slot.cooldown:Clear()
+      slot.cooldown:Hide()
+    end
+    -- Taille et couleur du texte du minuteur
+    if showText then
+      local cdFontSize = cfg.cooldownFontSize or 14
+      local cdColor = cfg.cooldownTextColor or { 1, 1, 1, 1 }
+      for _, region in pairs({slot.cooldown:GetRegions()}) do
+        if region:IsObjectType("FontString") then
+          SetFontSafe(region, cfg.cooldownFont, cdFontSize, "OUTLINE")
+          region:SetTextColor(cdColor[1], cdColor[2], cdColor[3], cdColor[4] or 1)
+        end
+      end
+    end
+  end
+
+  -- Charges
+  if slot.chargeText then
+    local pos = cfg.chargePosition or "BOTTOMRIGHT"
+    local cx  = cfg.chargeOffsetX or 0
+    local cy  = cfg.chargeOffsetY or 0
+    slot.chargeText:ClearAllPoints()
+    slot.chargeText:SetPoint(pos, slot.innerFrame or slot, pos, cx, cy)
+    SetFontSafe(slot.chargeText, cfg.chargeFont, cfg.chargeFontSize or 12, "OUTLINE")
+    local cc = cfg.chargeColor or { 1, 1, 1, 1 }
+    slot.chargeText:SetTextColor(cc[1], cc[2], cc[3], cc[4] or 1)
+    if not cfg.showCharges then slot.chargeText:Hide() end
+  end
+
+  -- Raccourci clavier
+  if slot.keybindText then
+    ns.ApplyKeybindFontString(slot.keybindText, slot.innerFrame or slot, cfg)
+    if not cfg.showKeybind then slot.keybindText:Hide() end
+  end
+end
+PriorityBar.StyleSlot = function(slot) StyleSlot(slot, ns.GetCfg("priorityBar") or {}) end
+
 function PriorityBar.ApplySettings()
   if InCombatLockdown() then
     -- Reporter l'application apres le combat
@@ -4922,68 +5167,9 @@ function PriorityBar.ApplySettings()
   end
 
   local cfg = ns.GetCfg("priorityBar") or {}
-  local size = cfg.iconSize or 34
 
   for i = 1, MAX_SLOTS do
-    local slot = slotFrames[i]
-    if slot then
-      slot:SetSize(size, size)
-      slot.icon:ClearAllPoints()
-      slot.icon:SetAllPoints()
-
-      -- Bordure
-      if slot.ApplyBorder then slot.ApplyBorder() end
-
-      -- Glow config (type, couleur, taille)
-      if slot.ApplyGlowConfig then slot.ApplyGlowConfig() end
-
-      -- Cooldown swipe + texte
-      if slot.cooldown then
-        local showSwipe = cfg.showCooldownSwipe ~= false
-        local showText  = cfg.showCooldownText  ~= false
-        if showSwipe or showText then
-          slot.cooldown:Show()
-          slot.cooldown:SetDrawSwipe(showSwipe)
-          if showSwipe then
-            slot.cooldown:SetSwipeColor(0, 0, 0, 0.8)
-          end
-          slot.cooldown:SetHideCountdownNumbers(not showText)
-        else
-          slot.cooldown:Clear()
-          slot.cooldown:Hide()
-        end
-        -- Taille et couleur du texte du minuteur
-        if showText then
-          local cdFontSize = cfg.cooldownFontSize or 14
-          local cdColor = cfg.cooldownTextColor or { 1, 1, 1, 1 }
-          for _, region in pairs({slot.cooldown:GetRegions()}) do
-            if region:IsObjectType("FontString") then
-              SetFontSafe(region, cfg.cooldownFont, cdFontSize, "OUTLINE")
-              region:SetTextColor(cdColor[1], cdColor[2], cdColor[3], cdColor[4] or 1)
-            end
-          end
-        end
-      end
-
-      -- Charges
-      if slot.chargeText then
-        local pos = cfg.chargePosition or "BOTTOMRIGHT"
-        local cx  = cfg.chargeOffsetX or 0
-        local cy  = cfg.chargeOffsetY or 0
-        slot.chargeText:ClearAllPoints()
-        slot.chargeText:SetPoint(pos, slot.innerFrame or slot, pos, cx, cy)
-        SetFontSafe(slot.chargeText, cfg.chargeFont, cfg.chargeFontSize or 12, "OUTLINE")
-        local cc = cfg.chargeColor or { 1, 1, 1, 1 }
-        slot.chargeText:SetTextColor(cc[1], cc[2], cc[3], cc[4] or 1)
-        if not cfg.showCharges then slot.chargeText:Hide() end
-      end
-
-      -- Raccourci clavier
-      if slot.keybindText then
-        ns.ApplyKeybindFontString(slot.keybindText, slot.innerFrame or slot, cfg)
-        if not cfg.showKeybind then slot.keybindText:Hide() end
-      end
-    end
+    if slotFrames[i] then StyleSlot(slotFrames[i], cfg) end
   end
 
   LayoutSlots()
@@ -5367,7 +5553,7 @@ function PriorityBar.GetCurrentSpecSlots()
     local result = {}
     for i, slotName in ipairs(allNames) do
       local data = slotMap[slotName]
-      result[i] = { spellIDs = (data and data.spellIDs) or {}, name = slotName }
+      result[i] = { spellIDs = (data and data.spellIDs) or {}, stealth = data and data.stealth, name = slotName }
     end
     return result, specID
   end
@@ -5395,27 +5581,53 @@ function PriorityBar.SaveCurrentSpecSlots()
   -- Sauvegarder uniquement les noms du layout actif, sans toucher aux autres
   for i, slotName in ipairs(allNames) do
     local frame = slotFrames[i]
-    existing[slotName] = { spellIDs = frame and frame.spellIDs and { unpack(frame.spellIDs) } or {} }
+    local ids = frame and (frame._allIDs or frame.spellIDs)
+    -- Sorts Camouflage : seulement ceux encore presents dans le slot
+    local stealth
+    if frame and PBEdit.HasStealth(frame) then
+      for _, sid in ipairs(ids) do
+        if frame._stealthSet[sid] then stealth = stealth or {}; stealth[sid] = true end
+      end
+    end
+    existing[slotName] = { spellIDs = ids and { unpack(ids) } or {}, stealth = stealth }
   end
   ns.DB.priorityBar.slotsBySpec[specID] = existing
   -- Retourner un tableau positionnel (compatible avec le code existant)
   local result = {}
   for i, slotName in ipairs(allNames) do
-    result[i] = { spellIDs = existing[slotName].spellIDs, name = slotName }
+    result[i] = { spellIDs = existing[slotName].spellIDs, stealth = existing[slotName].stealth, name = slotName }
   end
   return result
+end
+
+--- Marque / demarque un sort du slot comme sort Camouflage (Voleur, Druide)
+function PriorityBar.SetSlotSpellStealth(slotIndex, sid, on)
+  if InCombatLockdown() then return end
+  local slot = slotFrames[slotIndex]
+  if not slot then return end
+  slot._stealthSet = slot._stealthSet or {}
+  slot._stealthSet[sid] = on and true or nil
+  if not next(slot._stealthSet) then slot._stealthSet = nil end
+  PriorityBar.SetSlotSpells(slotIndex, slot._allIDs or slot.spellIDs or {})
 end
 
 function PriorityBar.SetSlotSpells(slotIndex, newSpellIDs)
   if InCombatLockdown() then return end
   local slot = slotFrames[slotIndex]
   if not slot then return end
-  slot.spellIDs = { unpack(newSpellIDs) }
+  slot._allIDs = { unpack(newSpellIDs) }
+  -- Sorts Camouflage : on garde le marquage des sorts encore presents
+  if slot._stealthSet then
+    local keep = {}
+    for _, sid in ipairs(slot._allIDs) do if slot._stealthSet[sid] then keep[sid] = true end end
+    slot._stealthSet = next(keep) and keep or nil
+  end
+  PBEdit.StealthFilter(slot)
   -- Mettre a jour la macro du SecureActionButton (sort affiche d'abord)
   PBEdit.ApplyMacro(slot)
   -- Mettre a jour l'icone et la visibilite du slot
-  if #newSpellIDs > 0 then
-    local defaultID = newSpellIDs[1]
+  if #slot.spellIDs > 0 then
+    local defaultID = slot.spellIDs[1]
     if C_Spell and C_Spell.GetOverrideSpell then
       local ok, ov = pcall(C_Spell.GetOverrideSpell, defaultID)
       if ok and ov and ov ~= defaultID and ov > 0 then defaultID = ov end
@@ -5427,6 +5639,13 @@ function PriorityBar.SetSlotSpells(slotIndex, newSpellIDs)
       slot.currentSpellID = defaultID
     end
     slot._hidden = false
+    slot:SetAlpha(1)
+    slot:Show()
+  elseif PBEdit.HasStealth(slot) then
+    -- Que des sorts Camouflage, hors furtivite : masque par l'opacite (cf. SlotHide)
+    slot.currentSpellID = nil
+    slot._hidden = true
+    slot:SetAlpha(0)
     slot:Show()
   else
     ClearSlotCDMSubscription(slot)

@@ -119,18 +119,6 @@ function CDMLayout.GetSpecData(specID, create)
 end
 
 -- Build actif de la spé (nil = aucun)
---- Config du build virtuel "Défaut" : chaque cooldown dans SA catégorie d'origine (côté Blizzard),
---- l'ordre restant celui du CDM courant (l'ordre d'origine n'est exposé nulle part). Table neuve a
---- chaque appel : la page la modifie en place des que l'utilisateur touche une categorie.
-function CDMLayout.DefaultConf()
-  local conf = { cats = {}, order = {} }
-  for _, e in ipairs(CDMLayout.ListCooldowns()) do
-    if e.defaultCategory ~= 0 or e.racial then conf.cats[KeyOf(e)] = e.defaultCategory end
-    if e.defaultCategory == ESSENTIAL then conf.order[#conf.order + 1] = KeyOf(e) end
-  end
-  return conf
-end
-
 function CDMLayout.GetSpecConfig(specID)
   local d = CDMLayout.GetSpecData(specID)
   if d and d.active == CDMLayout.DEFAULT then return CDMLayout.DefaultConf() end
@@ -329,6 +317,18 @@ end
 
 -- Cle d'un cooldown dans un build : "racial" pour un racial, son cooldownID sinon
 local function KeyOf(e) return e.racial and RACIAL_KEY or e.cooldownID end
+
+--- Config du build virtuel "Défaut" : chaque cooldown dans SA catégorie d'origine (côté Blizzard),
+--- l'ordre restant celui du CDM courant (l'ordre d'origine n'est exposé nulle part). Table neuve a
+--- chaque appel : la page la modifie en place des que l'utilisateur touche une categorie.
+function CDMLayout.DefaultConf()
+  local conf = { cats = {}, order = {} }
+  for _, e in ipairs(CDMLayout.ListCooldowns()) do
+    if e.defaultCategory ~= 0 or e.racial then conf.cats[KeyOf(e)] = e.defaultCategory end
+    if e.defaultCategory == ESSENTIAL then conf.order[#conf.order + 1] = KeyOf(e) end
+  end
+  return conf
+end
 CDMLayout.KeyOf = KeyOf
 
 -- Categorie voulue par un build pour une entree ; nil = le build ne dit rien (racial d'une autre race, build ancien)
@@ -452,7 +452,8 @@ function CDMLayout.Diff(specID)
     -- Cooldown pas appris : le viewer ne l'affiche pas (aucune frame), sa categorie courante est donc
     -- illisible depuis les frames. On ne le compare pas ; Apply, lui, le range quand meme.
     if e.isKnown and not ignore and want ~= e.current then diffs[#diffs + 1] = { entry = e, want = want, current = e.current } end
-    if e.current == ESSENTIAL then currentEss[#currentEss + 1] = e.cooldownID end
+    -- Meme filtre que l'ordre voulu : un cooldown "non appris" peut avoir une frame (ex. Haymaker)
+    if e.current == ESSENTIAL and e.isKnown then currentEss[#currentEss + 1] = e.cooldownID end
   end
   local orderDiffers = false
   if #diffs == 0 then
@@ -629,7 +630,7 @@ SlashCmdList["AISHCDMDIFF"] = function()
   end
   if orderDiffers then
     local cur, byId = {}, {}
-    for _, e in ipairs(list) do byId[e.cooldownID] = e; if e.current == ESSENTIAL then cur[#cur + 1] = e end end
+    for _, e in ipairs(list) do byId[e.cooldownID] = e; if e.current == ESSENTIAL and e.isKnown then cur[#cur + 1] = e end end
     local want = {}
     for _, cid in ipairs(CDMLayout.OrderedEssentials(conf, list)) do
       if byId[cid] and byId[cid].isKnown then want[#want + 1] = cid end

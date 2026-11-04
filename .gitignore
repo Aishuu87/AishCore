@@ -7,6 +7,11 @@ generate_profile_template.py
 generate_class_spell_levels.py
 generate_level_gains.py
 generate_map_overlays.py
+generate_town_areas.py
+locale_sheet.py
+
+# Feuilles de traduction exportees (echangees avec les traducteurs, hors depot)
+docs/translations/
 
 # Genere par le packager (BigWigsMods) a chaque release, livre dans le zip
 CHANGELOG.md

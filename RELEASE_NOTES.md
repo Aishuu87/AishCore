@@ -1,5 +1,151 @@
 # AishCore
 
+## [v4.6](https://github.com/Aishuu87/AishCore/tree/v4.6) (2026-11-04)
+
+### Settings panel
+- New button to enable/disable each module, right next to the page title
+- When a module is disabled, the rest of its page is inactive and grayed out
+- The Modules page can now enable/disable QoL settings
+- Profiles can now export/import/copy the features recently added to AishCore, and they are organized the same way as the Modules page
+- Improved sliders: easier to handle, in your current spec's theme color, and better aligned with the other settings
+- Slider min/max values are only shown while you use the slider
+- While the settings panel is minimized, elements are no longer interactive, so you can better see how they behave outside the settings
+- Many changes to page structures: settings elements have more consistent sizes, are grouped by feature, and were renamed to make more sense
+
+### General
+- Added Simplified Chinese localization (zhCN)
+
+### [Forever] Camping HUD
+- New Camping module
+- A diamond appears when you are near a campfire
+- Left-clicking the diamond makes you sit down
+- Right-clicking unpacks your camp gear and shows shortcuts for the 5 professions and up to 6 camp objects ready to be added to the site
+- Quickly hovering the objects placed around the fire "scans" the buffs they will grant after 1 minute spent sitting
+- Buffs are shown above the diamond (up to 10), and hovering their icons shows their details
+- A loading bar fills around the diamond. Once full (1 minute), a summary of the buffs you earned is shown above the diamond
+
+### Missing buffs
+- Missing buff alerts are no longer offered in safe zones, like villages or small towns. If the village is hostile to your faction, the alerts are still shown
+- Missing buff alerts now show the quality of the suggested consumables
+- Missing buff alerts can be hidden with a right-click until the next zone or condition refresh
+- New options to separate the missing aura alerts for Paladins (some players don't want the Crusader Aura alerts, for example)
+- Added Elixir reminders to Missing buffs
+- [Forever] Missing buff alerts for poisons now work correctly
+- [Forever] New threshold for how long before expiring you are reminded to refresh your poisons
+- [Forever] New alert with a threshold, warning you when your poison stock is about to run out
+- When several consumable alert icons are shown, each icon gets the same animation set in 3D Animations
+- Food buff animations are centered when several consumables are offered to click
+- Missing buff alerts no longer remind you to reapply consumable buffs early: they wait until their enhancements have fully expired
+- Hunter: the alert now correctly offers "REVIVE PET" when the pet is dead, including after an interrupted resurrection or the player's death
+- Hunter: the pet alert can be clicked in combat (Revive and Call)
+- Warlock: the pet alert can be clicked in combat, with a choice of demon
+
+### Unit Frames
+- The Unit Frames page has been completely rebuilt:
+  - A preview box lets you see the bar
+  - Each bar has its own settings
+  - Right-clicking an element directly opens its settings section
+  - Previews of the Central Circle, Priority Bar and Cast Bars (target and player) can be toggled
+- New Layout option with 3 choices:
+  - Free: position the bar independently
+  - Parenting: link its position to another bar. Moving one moves the other, as a single group
+  - Symmetry: link bars together and move them symmetrically, with the mirror axis at the center of the screen
+- New settings for:
+  - Bar background color
+  - HP frame: shape (round, diamond, square), color, position, anchor
+  - Decorative Shapes: shape (round, diamond, square, chevrons, and combinations of several), anchor (left/right/both sides), quantity
+  - The player name can be "Always shown"
+- New shadow option under the unit name, with adjustable size and opacity
+- New Fill direction option (left to right, right to left, top to bottom, bottom to top)
+- New Box width setting, to set a maximum displayed length for the unit name
+
+### Cast Bars
+- The Cast Bar: Player and Cast Bar: Target modules are now grouped in the same "Cast Bars" category
+- This new page has a preview, and a selector switches between the settings of each bar
+- Added Cast Bar: Focus
+- New anchor and position options for the spell name and the cast time
+- Right-clicking an element goes directly to its section
+- The preview now cycles through 3 spells to show the different colors and channel displays: Fireball / Frostbolt / Drain Life
+- Cast bars are now delayed when you get hit (pushback)
+- New options to show and adjust the spell icon on cast bars (player and target)
+
+### XP Bar
+- Reorganized the XP Bar settings page
+- Many new XP Bar settings (size, orientation, layout, etc.)
+- New Rested XP display
+
+### Priority Bar
+- New Preview section at the top of the page
+  - Clicking a slot lists all the spells assigned to it, and lets you add a new spell (green "+")
+  - Drag and drop a spell to move it to another slot, or to change its priority within the slot
+  - Dragging a spell outside a slot removes it from the Priority Bar
+  - Right-clicking a spell shows 3 options: change the glow color (left), remove the spell (right), set the spell as "Stealth" (top, Rogues and Druids only)
+- New option to set a spell as "Stealth"
+- A spell set as "Stealth" is only shown while stealthed. A small purple marker in the top left corner of the icon flags it
+
+### Stealth Mode
+- New Visibility options for the player health, target health, Central Circle and Priority Bar while in Stealth Mode
+- Example configuration:
+  - The player health bar shows as soon as you are outside a rest area/village
+  - The target health bar always shows when you are stealthed (and have a target)
+  - The Central Circle shows when you are in a group, in an instance, in a PvP zone or any other contested zone
+  - The Priority Bar shows as soon as your target can be attacked
+
+### Central Circle
+- New display for the options and settings of the 2 circles
+- Right-clicking an element of the circles opens its settings
+- New option to flip the Elite Dragon
+
+### Out-of-Combat Circles
+- New display for the options and settings of the 2 circles
+- Left-clicking one of the circles opens its settings
+- Right-clicking an element of a circle opens its settings
+- The Well Fed Circle now has its own dedicated section, with a preview built into the page
+
+### Cooldowns Appearance
+- The "Essential CDs" and "Utility CDs" modules are now grouped in this new category
+- Reworked settings page with a preview of the CDs
+- Right-clicking an element goes directly to its section
+
+### Addon Compartment
+- New customizable Addon Compartment
+- Many settings to change the size, the icon layout (list, grid) and the minimap anchor
+- An addon list lets you exclude some addons or mark them as favorites
+- The Favorites list can then be set up independently from the main list
+
+### QoL
+- New option: double right-click to cast your fishing rod ([Forever]), or Ctrl + double right-click on Retail
+- New options to change the font of Baganator sections and categories (Extras > Integration)
+
+### Menu Bar
+- The Hearthstone button now shows your Hearthstone's destination
+- The Hearthstone button shows the remaining cooldown when your Hearthstone is not available
+
+### Fixes
+- Added an AishCore logo in the Addon list
+- FIX: Thunder Focus Tea was not tracked correctly
+- FIX: Tigereye Brew removed from buff tracking (the aura is a passive and its bar stayed on screen permanently)
+- FIX: Some feasts were not covered by the Well Fed Circle (Harandar Celebration, Royal Roast, etc.)
+- FIX: When disabled, the player cast bar could still show up on an interrupted cast
+- FIX: When disabled, unit frames could still get in the way of clicks as if they were still interactive
+- FIX: The cast bar now correctly shows the delay when you get hit while casting
+- FIX: The sharpening stone alert only shows if you have a bladed weapon equipped
+- FIX: The clock text could appear offset on the Menu Bar
+- FIX: The Top Target HP text could have the wrong font when the character loaded
+- FIX: The EllesmereUI profile and module setup runs correctly again after a new AishUI installation
+- [Forever] FIX: Sharpening stones were not offered to Rogues. They are now, until they learn Poisons
+- [Forever] FIX: Tin veins did not show their icon on the minimap
+- [Forever] FIX: Added Form of the Moonstalker to the effects that trigger Stealth Mode
+- [Forever] FIX: Retribution Aura is now offered in Missing buffs on Forever
+- FIX: Lua error when the Location module was disabled
+- FIX: The buyback icon could show on top of the repair icons
+- FIX: Buyback pages did not show sold items
+- FIX: The customizable Priority Bar no longer shows when opening the spellbook in combat
+- FIX: Some spells could not be dragged from the spellbook to the Priority Bar (Apex talent in particular)
+- FIX: The Priority Bar could stay interactive even when hidden
+- FIX: Combo points around the out-of-combat circle were displayed erratically
+- FIX: Some conditions when leaving stealth could cause a position bug on the player health bar
+
 ## [v4.5.1](https://github.com/Aishuu87/AishCore/tree/v4.5.1) (2026-10-18)
 
 - [Forever] FIX: Lua error from MemTrace.lua ("attempt to index a secret string value")

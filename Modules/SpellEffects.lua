@@ -269,9 +269,19 @@ local function WellFedScale(anchor)
   return w / cfg.animRefSize
 end
 
+-- Camping HUD : meme principe, reference = taille du HUD quand les animations ont ete reglees
+local function CampfireScale(anchor)
+  local cfg = ns.GetCfg("campfire")
+  local w = anchor.GetWidth and anchor:GetWidth() or 0
+  if not cfg or w <= 0 then return 1 end
+  if not cfg.animRefSize then cfg.animRefSize = w end
+  return w / cfg.animRefSize
+end
+
 local function GetBaseSizeForAnchor(anchor)
   local anchorName = anchor and anchor.GetName and anchor:GetName() or ""
   if anchorName == "AishCoreWellFedRing" then return 200 * WellFedScale(anchor) end
+  if anchorName == "AishCoreCampfire" then return 200 * CampfireScale(anchor) end
   if anchorName:find("^AishCoreMissingBuff") then return 500 end
   -- Logos : un seul combo sert deux logos de tailles differentes (en-tete du panneau,
   -- 74 px fixes / mode AFK, dimensions configurables). La base suit donc la taille de
@@ -297,6 +307,7 @@ local function GetAnchorOffsetScale(anchor)
     return GetBaseSizeForAnchor(anchor) / 200
   end
   if anchorName == "AishCoreWellFedRing" then return WellFedScale(anchor) end
+  if anchorName == "AishCoreCampfire" then return CampfireScale(anchor) end
   return 1
 end
 
@@ -338,7 +349,7 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor, skipModel)
   local isOrb = anchorName:find("^AishCoreSecDot") or anchorName:find("^AishCoreOCSecDot")
   local isMissingBuff = anchorName:find("^AishCoreMissingBuff") ~= nil  -- frame global ou icone de proposition
   local isLogo = (anchorName == "AishCoreGuiLogoAnchor" or anchorName == "AishCoreAFKLogoAnchor")
-  local isWellFed = (anchorName == "AishCoreWellFedRing")
+  local isWellFed = (anchorName == "AishCoreWellFedRing" or anchorName == "AishCoreCampfire")   -- + Camping HUD
 
   local baseSize = GetBaseSizeForAnchor(pAnchor)
   local sz = (anim.scale or 1) * baseSize * reportScale
@@ -377,6 +388,17 @@ local function ApplyAnimConfig(f, anim, overrideAnchor, pointAnchor, skipModel)
       f:SetFrameLevel(targetLevel)
     else
       f:SetFrameStrata("BACKGROUND")
+    end
+  elseif (anchorName == "AishCoreCampfire" or anchorName == "AishCoreWellFedRing") and anchor:GetFrameStrata() ~= "MEDIUM" then
+    -- Camping HUD dans l'apercu epingle du GUI (strate au-dessus de la fenetre) : niveaux relatifs au HUD,
+    -- l'arriere-plan juste sous lui (BACKGROUND le ferait passer derriere la fenetre)
+    f:SetFrameStrata(anchor:GetFrameStrata())
+    if strata == "FOREGROUND" then
+      f:SetFrameLevel(anchor:GetFrameLevel() + 10)
+    elseif strata == "HIGH" or strata == "MEDIUM" then
+      f:SetFrameLevel(anchor:GetFrameLevel() + 1)
+    else
+      f:SetFrameLevel(math.max(1, anchor:GetFrameLevel() - 1))
     end
   elseif isWellFed then
     -- Cercle Bien Nourri : meme logique 3 niveaux, relative au cercle (arc +1, masque +2, texte +3)
@@ -1148,34 +1170,40 @@ function SpellEffects.StartMissingBuffSustained(spellID)
 
   local entries = {}
   sustainedMissingBuffEntries[spellID] = entries
-  -- Ancre = l'icone qui affiche CE sort (une icone par proposition), sinon le frame global
+  -- Ancres = les icones qui affichent CE sort (plusieurs consommables proposes : le meme combo
+  -- sur chacun), sinon le frame global
   local MBm = ns.Auras and ns.Auras.MissingBuffs
-  local anchor = (MBm and MBm.GetSlotForSpell and MBm.GetSlotForSpell(spellID))
-    or _G["AishCoreMissingBuffFrame"] or UIParent
+  local anchors = MBm and MBm.GetSlotsForSpell and MBm.GetSlotsForSpell(spellID)
+  if not anchors or #anchors == 0 then
+    anchors = { _G["AishCoreMissingBuffFrame"] or UIParent }
+  end
 
-  for _, anim in ipairs(combo) do
-    if anim.enabled ~= false then
-      local function spawn(attempt)
-        attempt = attempt or 1
-        if sustainedMissingBuffEntries[spellID] ~= entries then return end
-        local entry = AcquireModel()
-        if not entry then
-          if attempt < 20 then
-            C_Timer.After(0.25, function() spawn(attempt + 1) end)
+  for _, anchor in ipairs(anchors) do
+    for _, anim in ipairs(combo) do
+      if anim.enabled ~= false then
+        local function spawn(attempt)
+          attempt = attempt or 1
+          if sustainedMissingBuffEntries[spellID] ~= entries then return end
+          local entry = AcquireModel()
+          if not entry then
+            if attempt < 20 then
+              C_Timer.After(0.25, function() spawn(attempt + 1) end)
+            end
+            return
           end
-          return
+          entry.anim = anim
+          entry.anchor = anchor
+          entry.lastMid = tonumber(anim.modelID)
+          ApplyAnimConfig(entry.frame, anim, anchor)
+          entry.frame:Show()
+          entries[#entries + 1] = entry
         end
-        entry.anim = anim
-        entry.lastMid = tonumber(anim.modelID)
-        ApplyAnimConfig(entry.frame, anim, anchor)
-        entry.frame:Show()
-        entries[#entries + 1] = entry
-      end
-      local delay = anim.delay or 0
-      if delay > 0 then
-        C_Timer.After(delay, spawn)
-      else
-        spawn()
+        local delay = anim.delay or 0
+        if delay > 0 then
+          C_Timer.After(delay, spawn)
+        else
+          spawn()
+        end
       end
     end
   end
@@ -1196,7 +1224,7 @@ function SpellEffects.RefreshMissingBuffSustained(spellID)
       local mid = tonumber(anim.modelID)
       local sameModel = (mid == entry.lastMid)
       entry.lastMid = mid
-      ApplyAnimConfig(entry.frame, anim, anchor, nil, sameModel)
+      ApplyAnimConfig(entry.frame, anim, entry.anchor or anchor, nil, sameModel)
     end
   end
 end
@@ -1357,7 +1385,17 @@ function SpellEffects.PreviewLoop(anim, overrideAnchors)
       local isOoc = (anchorName == "AishCoreHealthRing")
       local isOrb = anchorName:find("^AishCoreSecDot") or anchorName:find("^AishCoreOCSecDot")
 
-      if anchorName == "AishCoreWellFedRing" then
+      if (anchorName == "AishCoreWellFedRing" or anchorName == "AishCoreCampfire") and anchor:GetFrameStrata() ~= "MEDIUM" then
+        -- Dans l'apercu epingle du GUI (strate au-dessus de la fenetre) : niveaux relatifs a l'ancre
+        ef:SetFrameStrata(anchor:GetFrameStrata())
+        if strata == "FOREGROUND" then
+          ef:SetFrameLevel(anchor:GetFrameLevel() + 10)
+        elseif strata == "HIGH" or strata == "MEDIUM" then
+          ef:SetFrameLevel(anchor:GetFrameLevel() + 1)
+        else
+          ef:SetFrameLevel(math.max(1, anchor:GetFrameLevel() - 1))
+        end
+      elseif anchorName == "AishCoreWellFedRing" or anchorName == "AishCoreCampfire" then
         if strata == "FOREGROUND" then
           ef:SetFrameStrata("MEDIUM")
           ef:SetFrameLevel(anchor:GetFrameLevel() + 10)
@@ -1654,6 +1692,7 @@ local function ReleaseDecoModel(entry)
   entry.tag = nil
   entry.anim = nil
   entry.anchor = nil
+  entry.campFade = nil
 end
 
 local function ReleaseDecoByTag(tag)
@@ -2284,12 +2323,100 @@ function SpellEffects.SetWellFedState(state)
   SpellEffects.StartWellFedDeco()
 end
 
+-- Camping HUD (Forever) : un combo par etat ("shown" : HUD affiche, "sitting" : minute assise, "buffs" : resume des
+-- bonus gagnes, cf. Campfire.lua), joue en boucle sur le HUD tant que l'etat dure.
+local campState  = nil
+local campActive = false
+
+-- Fondus des modeles du Camping HUD (1 s) aux changements d'etat ; entry.campFade = { from, to, t0, release }
+local CAMP_FADE = 1
+local campFader
+local function CampFadeTick()
+  local now, busy = GetTime(), false
+  for i = 1, decoPoolSize do
+    local e = decoPool[i]
+    local fd = e.inUse and e.campFade
+    if fd then
+      local u = math.min(1, (now - fd.t0) / CAMP_FADE)
+      e.frame:SetAlpha(fd.from + (fd.to - fd.from) * u)
+      if u >= 1 then
+        e.campFade = nil
+        if fd.release then ReleaseDecoModel(e) end
+      else
+        busy = true
+      end
+    end
+  end
+  if not busy then campFader:Hide() end
+end
+
+local function CampFade(e, from, to, release)
+  e.campFade = { from = from, to = to, t0 = GetTime(), release = release }
+  e.frame:SetAlpha(from)
+  if not campFader then
+    campFader = CreateFrame("Frame")
+    campFader:SetScript("OnUpdate", CampFadeTick)
+  end
+  campFader:Show()
+end
+
+-- Coupe net, modeles sortants compris
+function SpellEffects.StopCampfireDeco()
+  campActive = false
+  ReleaseDecoByTag("campfire")
+  ReleaseDecoByTag("campfire_out")
+end
+
+-- fadeIn : les modeles apparaissent en fondu (changement d'etat), sinon d'un coup
+function SpellEffects.StartCampfireDeco(fadeIn)
+  if campActive or not campState then return end
+  if guiSuppressDeco or #decoPreviewEntries > 0 then return end
+  if AnimationsBlockedByGroupState() then return end
+  local cfg = ns.GetCfg("spellEffects")
+  if not cfg or not cfg.enabled or cfg.campfireEnabled == false then return end
+  local combo = cfg.campfireCombos and cfg.campfireCombos[campState]
+  local anchor = _G["AishCoreCampfire"]
+  if not (combo and #combo > 0 and anchor and anchor:IsShown()) then return end
+  campActive = true
+  StartDecoLoop(combo, anchor, "campfire")
+  if fadeIn then
+    for i = 1, decoPoolSize do
+      local e = decoPool[i]
+      if e.inUse and e.tag == "campfire" then CampFade(e, 0, (e.anim and e.anim.alpha) or 1) end
+    end
+  end
+end
+
+--- Relance les modeles du HUD sans fondu (taille changee dans les reglages).
+function SpellEffects.RefreshCampfireDeco()
+  if not campActive then return end
+  SpellEffects.StopCampfireDeco()
+  SpellEffects.StartCampfireDeco()
+end
+
+--- Appele par Campfire : "shown", "sitting", "buffs" ou nil (HUD masque).
+--- Les modeles de l'etat precedent s'effacent en 1 s, ceux du nouvel etat apparaissent en 1 s (sauf "buffs" : d'un coup).
+function SpellEffects.SetCampfireState(state)
+  if state == campState and campActive then return end
+  for i = 1, decoPoolSize do
+    local e = decoPool[i]
+    if e.inUse and e.tag == "campfire" then
+      e.tag = "campfire_out"
+      CampFade(e, e.frame:GetAlpha(), 0, true)
+    end
+  end
+  campActive = false
+  campState = state
+  SpellEffects.StartCampfireDeco(state ~= "buffs")
+end
+
 --- Stoppe toutes les décorations.
 function SpellEffects.StopAllDeco()
   SpellEffects.StopOocDeco()
   SpellEffects.StopOrbDeco()
   SpellEffects.StopLogoDeco()
   SpellEffects.StopWellFedDeco()
+  SpellEffects.StopCampfireDeco()
 end
 
 -- Les globes d'un cercle qui vient d'apparaitre (sortie de furtivite + entree en combat, par exemple) sont affiches par
@@ -2324,6 +2451,7 @@ function SpellEffects.RefreshDecorations()
   -- Logos : StartLogoDeco ne retient que les ancres reellement visibles
   SpellEffects.StartLogoDeco()
   SpellEffects.StartWellFedDeco()
+  SpellEffects.StartCampfireDeco()
 end
 
 -- Deco Preview : modèles persistants 30 fps pour la preview OOC/Orbes du panneau Settings.
@@ -2408,7 +2536,17 @@ function SpellEffects.StartDecoPreview(combo, overrideAnchors)
       local isOoc = (anchorName == "AishCoreHealthRing")
       local isOrb = anchorName:find("^AishCoreSecDot") or anchorName:find("^AishCoreOCSecDot")
 
-      if anchorName == "AishCoreWellFedRing" then
+      if (anchorName == "AishCoreWellFedRing" or anchorName == "AishCoreCampfire") and anchor:GetFrameStrata() ~= "MEDIUM" then
+        -- Dans l'apercu epingle du GUI (strate au-dessus de la fenetre) : niveaux relatifs a l'ancre
+        ef:SetFrameStrata(anchor:GetFrameStrata())
+        if strata == "FOREGROUND" then
+          ef:SetFrameLevel(anchor:GetFrameLevel() + 10)
+        elseif strata == "HIGH" or strata == "MEDIUM" then
+          ef:SetFrameLevel(anchor:GetFrameLevel() + 1)
+        else
+          ef:SetFrameLevel(math.max(1, anchor:GetFrameLevel() - 1))
+        end
+      elseif anchorName == "AishCoreWellFedRing" or anchorName == "AishCoreCampfire" then
         if strata == "FOREGROUND" then
           ef:SetFrameStrata("MEDIUM")
           ef:SetFrameLevel(anchor:GetFrameLevel() + 10)
@@ -2465,6 +2603,7 @@ function SpellEffects.StopDecoPreview()
   -- sans attendre la sortie du mode GUI.
   SpellEffects.StartLogoDeco()
   SpellEffects.StartWellFedDeco()
+  SpellEffects.StartCampfireDeco()
 end
 
 --- Retourne true si une preview décorative est active.

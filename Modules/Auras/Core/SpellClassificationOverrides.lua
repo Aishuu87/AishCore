@@ -61,8 +61,10 @@ ns.SpellClassificationOverrides = {
     [81281]   = { source = "debuff" }, -- Croissance fongique
     [82691]   = { source = "debuff" }, -- Anneau de givre
     [98008]   = { source = "totem" }, -- Totem de lien d'esprit
+    [100780]  = { deleted = true }, -- Paume du tigre
     [102359]  = { source = "debuff" }, -- Enchevetrement de masse
     [105174]  = { deleted = true }, -- Main de Gul'dan
+    [107270]  = { deleted = true }, -- Coup tournoyant de la grue
     [108271]  = { source = "buff" }, -- Transfert astral
     [108280]  = { source = "totem" }, -- Totem de maree de soins
     [108287]  = { deleted = true }, -- Projection totemique
@@ -70,6 +72,7 @@ ns.SpellClassificationOverrides = {
     [114050]  = { source = "buff" }, -- Ascendance
     [115175]  = { source = "buff" }, -- Brume apaisante
     [115294]  = { source = "buff" }, -- The de mana
+    [116680]  = { source = "buff" }, -- The de concentration foudroyante
     [116849]  = { source = "buff" }, -- Cocon de vie
     [117405]  = { source = "debuff" }, -- Tir de lien
     [117526]  = { source = "debuff" }, -- Tir de lien
@@ -92,6 +95,7 @@ ns.SpellClassificationOverrides = {
     [192077]  = { source = "totem" }, -- Totem de bouffee de vent
     [193332]  = { source = "totem" }, -- Appel des traqueffrois
     [195645]  = { source = "debuff" }, -- Coupure d'ailes
+    [196733]  = { source = "debuff" }, -- Livraison speciale
     [198034]  = { source = "debuff" }, -- Marteau divin
     [199824]  = { source = "debuff" }, -- Demon psychique
     [200174]  = { source = "totem" }, -- Torve-esprit
@@ -150,7 +154,7 @@ ns.SpellClassificationOverrides = {
     [391191]  = { source = "debuff" }, -- Blessure brulante
     [392388]  = { source = "debuff" }, -- Poison atrophiant
     [392401]  = { source = "debuff" }, -- Garrot ameliore
-    [394095]  = { source = "debuff" }, -- Plaie des rois
+    [394095]  = { source = "buff" }, -- Plaie des rois
     [394119]  = { source = "debuff" }, -- Matraque
     [403516]  = { source = "debuff" }, -- Diviser pour mieux regner
     [406971]  = { source = "debuff" }, -- Rugissement oppressant

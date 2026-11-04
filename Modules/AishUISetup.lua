@@ -8,6 +8,7 @@ local addonName, ns = ...
 local L = ns.L
 
 -- Modules gardés actifs ; tout autre enfant de la suite est désactivé (y compris les futurs modules).
+-- KEEP + SKIP sont dupliquées dans l'installeur (EllesmereKeep, InstallService.cs) : les garder synchronisées.
 local KEEP = {
   EllesmereUIActionBars   = true,
   EllesmereUIUnitFrames   = true,
@@ -43,8 +44,9 @@ local GOLD = { 0.78, 0.62, 0.30 }
 
 -- Popups au thème du GUI. Strate TOOLTIP : passe au-dessus des popups d'Ellesmere (FULLSCREEN_DIALOG),
 -- et le voile plein écran bloque les clics sur celles-ci tant que la nôtre est ouverte.
--- buttons = { { text, primary, onClick }, ... } (1 à 3, centrés). Une popup par `name`, construite
--- une seule fois.
+-- buttons = { { text, primary, onClick }, ... } (1 à 3, centrés), avec en option buttons.width /
+-- buttons.height (libellés longs sur deux lignes), buttons.bottom (marge basse) et buttons.back
+-- (lien « < Retour » en bas à gauche). Une popup par `name`, construite une seule fois.
 --
 -- Plusieurs popups peuvent être demandées au même login (setup AishUI + Gestionnaire de temps de
 -- recharge sur une spé jamais configurée) : les superposer rendrait les deux illisibles. Une seule
@@ -64,8 +66,19 @@ end
 function DisplaySetupPopup(name, titleText, msgText, buttons)
   activeName = name
   local popup = popups[name]
-  -- Déjà construite : seul le texte peut changer (ex. nom du build dans la popup du CDM)
-  if popup then popup.msg:SetText(msgText); popup:Show(); return popup end
+  -- Déjà construite : texte et actions des boutons repris de la nouvelle demande. Les actions capturent
+  -- leur contexte (ex. spé du CDM) : garder celles de la 1re construction faisait que « Ne plus demander »
+  -- enregistrait la spé de la 1re popup de la session, et la popup revenait pour la spé courante.
+  if popup then
+    popup.msg:SetText(msgText)
+    popup.defs = buttons
+    for i, b in ipairs(popup.btns or {}) do
+      local def = buttons[i]
+      if def then b._text = def[1]; b:SetLabel(def[1]); b:Show() else b:Hide() end
+    end
+    popup:Show()
+    return popup
+  end
   local T = ns.Theme or {}
 
   popup = CreateFrame("Frame", name, UIParent)
@@ -148,7 +161,7 @@ function DisplaySetupPopup(name, titleText, msgText, buttons)
 
   local function MakeBtn(text, primary, w)
     local b = CreateFrame("Button", nil, box, "BackdropTemplate")
-    b:SetSize(w, 32)
+    b:SetSize(w, buttons.height or 32)
     b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
     local bgc = primary and { 0.16, 0.12, 0.05 } or { 0.08, 0.08, 0.09 }
     local edge = primary and GOLD or (T.border or { 0.18, 0.18, 0.195 })
@@ -165,10 +178,30 @@ function DisplaySetupPopup(name, titleText, msgText, buttons)
     fs:SetJustifyH("CENTER")
     fs:SetJustifyV("MIDDLE")
     if primary then fs:SetTextColor(at[1], at[2], at[3]) else fs:SetTextColor(tn[1], tn[2], tn[3]) end
-    fs:SetText(text or "")
     b.label = fs
+    -- 2e ligne éventuelle ("Titre\n(précision)") : 2 tailles en dessous, gris moyen
+    local sub = b:CreateFontString(nil, "OVERLAY")
+    sub:SetDrawLayer("OVERLAY", 7)
+    if not pcall(sub.SetFont, sub, FONT, 11, "") then sub:SetFont("Fonts\\FRIZQT__.TTF", 11, "") end
+    sub:SetPoint("TOP", fs, "BOTTOM", 0, -2)
+    sub:SetWidth(w - 8)
+    sub:SetJustifyH("CENTER")
+    sub:SetTextColor(0.55, 0.55, 0.57)
+    function b:SetLabel(t)
+      local main, rest = (t or ""):match("^([^\n]*)\n(.*)$")
+      fs:ClearAllPoints()
+      if main then
+        fs:SetPoint("CENTER", self, "CENTER", 0, 7)
+        fs:SetText(main); sub:SetText(rest); sub:Show()
+      else
+        fs:SetPoint("CENTER", self, "CENTER", 0, 0)
+        fs:SetText(t or ""); sub:Hide()
+      end
+    end
+    b:SetLabel(text)
     -- Relu a l'affichage : certains clients perdent le texte pose avant le 1er Show()
-    b:SetScript("OnShow", function(self) self.label:SetText(text or "") end)
+    b._text = text
+    b:SetScript("OnShow", function(self) self:SetLabel(self._text) end)
     if (text or "") ~= "" and fs:GetStringWidth() == 0 then
       print("|cff33aaffAishCore|r texte de bouton vide : '" .. tostring(text) .. "' (police " .. tostring(FONT) .. ")")
     end
@@ -178,17 +211,39 @@ function DisplaySetupPopup(name, titleText, msgText, buttons)
   end
 
   local n, gap = #buttons, 12
-  local bw = n >= 3 and 160 or 180
+  local bw = buttons.width or (n >= 3 and 160 or 180)
   local x0 = -((n * bw + (n - 1) * gap) / 2)
+  popup.defs, popup.btns = buttons, {}
   for i, def in ipairs(buttons) do
     local b = MakeBtn(def[1], def[2], bw)
-    b:SetPoint("BOTTOMLEFT", box, "BOTTOM", x0 + (i - 1) * (bw + gap), 24)
+    popup.btns[i] = b
+    b:SetPoint("BOTTOMLEFT", box, "BOTTOM", x0 + (i - 1) * (bw + gap), buttons.bottom or 24)
     -- L'action D'ABORD, Hide() après : un clic sur "Recharger" doit appeler ReloadUI() en tout
     -- premier, sans rien exécuter entre le clic et l'appel protégé. Hide() déclenche OnHide, qui
     -- peut à son tour afficher la popup suivante de la file (ProcessQueue) -- toute la création de
     -- frame que ça entraîne, intercalée avant ReloadUI(), suffit à faire échouer l'appel protégé
     -- sur certains clients (Forever : ADDON_ACTION_BLOCKED sur Reload()).
-    b:SetScript("OnClick", function() def[3](); popup:Hide() end)
+    b:SetScript("OnClick", function() local d = popup.defs[i] or def; d[3](); popup:Hide() end)
+  end
+
+  -- Lien « < Retour » en bas à gauche (buttons.back = action), même ordre action puis Hide()
+  if buttons.back then
+    local back = CreateFrame("Button", nil, box)
+    back:SetFrameLevel(box:GetFrameLevel() + 10)
+    back:SetPoint("BOTTOMLEFT", 14, 10)
+    local fs = back:CreateFontString(nil, "OVERLAY")
+    if not pcall(fs.SetFont, fs, FONT, 11, "") then fs:SetFont("Fonts\\FRIZQT__.TTF", 11, "") end
+    fs:SetPoint("LEFT")
+    fs:SetText("< " .. L["ROLE_BACK"])
+    back:SetSize(fs:GetStringWidth() + 6, 18)
+    local function Tone(v) fs:SetTextColor(v, v, v + 0.02) end
+    Tone(0.55)
+    back:SetScript("OnEnter", function() Tone(0.85) end)
+    back:SetScript("OnLeave", function() Tone(0.55) end)
+    back:SetScript("OnClick", function()
+      if popup.defs.back then popup.defs.back() end
+      popup:Hide()
+    end)
   end
 
   popup:Show()
@@ -218,7 +273,11 @@ ns.ShowSetupPopup = ShowSetupPopup
 -- plus bas (DisplaySetupPopup : l'action tourne avant Hide()). Après ce fix, plus aucune erreur de
 -- blocage constatée -- le souci suivant (modules pas désactivés) était un bug séparé côté
 -- SetupEllesmere, déjà réglé. Donc ReloadUI(), identique à Retail : à retester.
+-- Vrai dès que le setup a demandé un rechargement : la proposition de profil par rôle attend celui-ci.
+local setupPending = false
+
 local function ShowReloadPopup()
+  setupPending = true
   ShowSetupPopup("AishCoreEllesmereSetup", L["ELLESMERE_SETUP_TITLE"], L["ELLESMERE_SETUP_PROMPT"], {
     { L["ELLESMERE_SETUP_RELOAD"], true, ReloadUI },
     { L["CDM_RELOAD_LATER"], false, function() end },
@@ -526,6 +585,280 @@ SlashCmdList["AISHUISWITCH"] = function()
     { L["UISWITCH_CANCEL"], false, function() end },
   })
 end
+
+-- ── Profils ElvUI / EllesmereUI par rôle et barres d'action ──────────────────────────────────────────
+-- Profils livrés avec le pack : un par rôle, en deux variantes (barres montrées / cachées). Les noms
+-- diffèrent entre les deux UI, et EllesmereUI n'a pas de soigneur vertical (repli sur le soigneur).
+local ROLES = { "DPS", "HEALER", "HEALER_V", "TANK" }
+local PROFILE_FMT = {
+  ElvUI = {
+    DPS = "AishUI - DPS - %s", HEALER = "AishUI - HEALER - %s",
+    HEALER_V = "AishUI - HEALER Vertical - %s", TANK = "AishUI - TANK - %s",
+  },
+  Ellesmere = {
+    DPS = "AishUI - DPS %s", HEALER = "AishUI - Healer %s",
+    HEALER_V = "AishUI - Healer %s", TANK = "AishUI - Tank %s",
+  },
+}
+local BARS_SUFFIX = { [true] = "Show Bars", [false] = "Hide Bars" }
+
+local function ProfileName(flavor, role, show)
+  local fmt = PROFILE_FMT[flavor] and PROFILE_FMT[flavor][role]
+  return fmt and string.format(fmt, BARS_SUFFIX[show and true or false])
+end
+
+-- Accès au profil de l'UI chargée : { flavor, current(), exists(n), apply(n) }, ou nil.
+local function GetUiApi()
+  if C_AddOns.IsAddOnLoaded("ElvUI") and ElvUI then
+    local E = ElvUI[1]
+    local data = E and E.data
+    if not data then return end
+    return {
+      flavor = "ElvUI",
+      current = function() return data:GetCurrentProfile() end,
+      exists = function(n) return data.sv and data.sv.profiles and data.sv.profiles[n] end,
+      apply = function(n)
+        data:SetProfile(n)
+        -- Profils par spé d'ElvUI (LibDualSpec) actifs : on y range aussi le choix, sinon ElvUI
+        -- remettrait l'ancien profil au prochain changement de spé.
+        if data.IsDualSpecEnabled and data:IsDualSpecEnabled() and data.SetDualSpecProfile then
+          data:SetDualSpecProfile(n)
+        end
+      end,
+    }
+  end
+  if C_AddOns.IsAddOnLoaded("EllesmereUI") and EllesmereUI and EllesmereUI.SwitchProfile then
+    local EUI = EllesmereUI
+    local function exists(n) return EllesmereUIDB and EllesmereUIDB.profiles and EllesmereUIDB.profiles[n] end
+    return {
+      flavor = "Ellesmere",
+      current = function() return EUI.GetActiveProfileName and EUI.GetActiveProfileName() end,
+      exists = exists,
+      -- Même enchaînement que les raccourcis de profil d'EllesmereUI (EnsureProfileBindBtn)
+      apply = function(n)
+        local prof = exists(n)
+        local reload = (EUI.ProfileChangesFont and EUI.ProfileChangesFont(prof))
+          or (EUI.ProfileChangesWindowSkins and EUI.ProfileChangesWindowSkins(prof))
+          or (EUI.ProfileChangesStyle and EUI.ProfileChangesStyle(prof))
+        EUI.SwitchProfile(n)
+        if EUI.RefreshAllAddons then EUI.RefreshAllAddons(true) end
+        if reload then
+          ShowSetupPopup("AishCoreBarsReload", L["BARS_TITLE"], L["BARS_RELOAD"], {
+            { L["ELLESMERE_SETUP_RELOAD"], true, ReloadUI },
+            { L["CDM_RELOAD_LATER"], false, function() end },
+          })
+        elseif EUI.RefreshPage then
+          EUI:RefreshPage()
+        end
+      end,
+    }
+  end
+end
+
+-- Spé courante : id, nom, rôle Blizzard (TANK / HEALER / DAMAGER)
+local function CurrentSpec()
+  local idx = ns.GetSpecialization and ns.GetSpecialization()
+  if not idx or idx == 0 then return end
+  local id, name, _, _, role = ns.GetSpecializationInfo(idx)
+  if not id then return end
+  return id, name, role or (ns.GetSpecializationRole and ns.GetSpecializationRole(idx))
+end
+
+-- Choix retenus pour ce perso, par spé : AishUISetupCharDB.roleChoice[specID] = { role = "DPS", show = true }.
+-- Indépendants de l'UI : /aishuiswitch retrouve le même profil de l'autre côté.
+local function Choices()
+  AishUISetupCharDB = AishUISetupCharDB or {}
+  AishUISetupCharDB.roleChoice = AishUISetupCharDB.roleChoice or {}
+  return AishUISetupCharDB.roleChoice
+end
+
+-- Profil actif -> rôle + barres de la spé courante, seulement si un choix existe déjà (profil changé à la
+-- main ou par /aish show|hide bars). Garde le soigneur vertical quand EllesmereUI ne le distingue pas.
+local function RecordCurrent()
+  local api, specID = GetUiApi(), CurrentSpec()
+  local entry = specID and Choices()[specID]
+  if not (api and entry) then return end
+  local cur = api.current()
+  for _, show in ipairs({ true, false }) do
+    if ProfileName(api.flavor, entry.role, show) == cur then entry.show = show; return end
+  end
+  for _, role in ipairs(ROLES) do
+    for _, show in ipairs({ true, false }) do
+      if ProfileName(api.flavor, role, show) == cur then entry.role, entry.show = role, show; return end
+    end
+  end
+end
+
+-- /aish show bars | hide bars : profil actif vers sa variante opposée (remplacement du suffixe).
+local function BarsTarget(current, show)
+  if not current then return end
+  local from, to = BARS_SUFFIX[not show], BARS_SUFFIX[show]
+  if current:sub(-#to) == to then return nil, "already" end
+  if current:sub(-#from) ~= from then return nil, "nomatch" end
+  return current:sub(1, -#from - 1) .. to
+end
+
+function ns.SwitchBarsProfile(show)
+  local P = "|cff00ccff[AishCore]|r "
+  if InCombatLockdown() then print(P .. L["UISWITCH_COMBAT"]); return end
+  local api = GetUiApi()
+  if not api then print(P .. L["BARS_NO_UI"]); return end
+  local current = api.current()
+  local target, why = BarsTarget(current, show)
+  if why == "already" then print(P .. string.format(L["BARS_ALREADY"], current)); return end
+  if not target then print(P .. string.format(L["BARS_NOMATCH"], tostring(current))); return end
+  if not api.exists(target) then print(P .. string.format(L["BARS_MISSING"], target)); return end
+  api.apply(target)
+  RecordCurrent()
+  print(P .. string.format(L["BARS_DONE"], target))
+end
+
+-- Alias /aishui show bars | hide bars (même chose que /aish show bars | hide bars)
+SLASH_AISHUIBARS1 = "/aishui"
+SlashCmdList["AISHUIBARS"] = function(msg)
+  msg = strtrim((msg or ""):lower())
+  if msg == "show bars" or msg == "hide bars" then
+    ns.SwitchBarsProfile(msg == "show bars")
+  else
+    print("|cff00ccff[AishCore]|r /aishui show bars | hide bars")
+  end
+end
+
+-- ── Profil suggéré à la 1re activation de chaque spé (version AishUI) ───────────────────────────────
+-- Rôle de la spé -> profil proposé ; puis barres montrées / cachées. Le choix est ensuite réappliqué
+-- à chaque passage sur cette spé (EllesmereUI n'a pas de profil par spé et par perso) et après
+-- /aishuiswitch. Jamais dans la session du setup initial : la proposition attend son rechargement.
+local SUGGESTED = { TANK = "TANK", HEALER = "HEALER", DAMAGER = "DPS" }
+local SPEC_SUGGEST = { [1473] = "HEALER" } -- Évocateur Augmentation : joué avec le profil soigneur
+local ROLE_LABEL = { DPS = "ROLE_DPS", HEALER = "ROLE_HEALER", TANK = "ROLE_TANK" }
+local askedThisSession = {}
+local pendingRoleCheck
+
+local function PickLabel(flavor, role)
+  if role == "HEALER" and flavor == "ElvUI" then return L["ROLE_HEALER_H"] end
+  if role == "HEALER_V" then return L["ROLE_HEALER_V"] end
+  return L[ROLE_LABEL[role]]
+end
+
+local function ApplyChoice(api, entry)
+  local name = ProfileName(api.flavor, entry.role, entry.show)
+  if not api.exists(name) then
+    print("|cff00ccff[AishCore]|r " .. string.format(L["BARS_MISSING"], name))
+    return
+  end
+  if api.current() ~= name then api.apply(name) end
+end
+
+local CheckRole, AskRole
+
+local function AskBars(specID, role)
+  local api = GetUiApi()
+  if not api then return end
+  local function Choose(show)
+    local entry = { role = role, show = show }
+    Choices()[specID] = entry
+    if InCombatLockdown() then pendingRoleCheck = true; return end
+    if CurrentSpec() == specID then ApplyChoice(api, entry) end
+  end
+  local buttons = {
+    { L["ROLE_BARS_HIDE"], false, function() Choose(false) end },
+    { api.flavor == "ElvUI" and L["ROLE_BARS_SHOW_ELVUI"] or L["ROLE_BARS_SHOW_EUI"], false, function() Choose(true) end },
+    width = 240, height = 44,
+  }
+  ShowSetupPopup("AishCoreRoleBars", L["ROLE_TITLE"], L["ROLE_BARS_PROMPT"], buttons)
+end
+
+local function AskOther(specID, suggested)
+  local api = GetUiApi()
+  if not api then return end
+  -- Autres profils existants, sans doublon (EllesmereUI : soigneur vertical = soigneur)
+  local seen, buttons = { [ProfileName(api.flavor, suggested, true)] = true }, {}
+  for _, role in ipairs(ROLES) do
+    local name = ProfileName(api.flavor, role, true)
+    if not seen[name] and (api.exists(name) or api.exists(ProfileName(api.flavor, role, false))) then
+      seen[name] = true
+      buttons[#buttons + 1] = { PickLabel(api.flavor, role), false, function() AskBars(specID, role) end }
+    end
+  end
+  if #buttons == 0 then return end
+  buttons.bottom = 60
+  buttons.back = function() AskRole(false) end
+  -- Nom par nombre de boutons : leur placement est figé à la construction de la popup
+  ShowSetupPopup("AishCoreRolePick" .. #buttons, L["ROLE_TITLE"], L["ROLE_PICK_PROMPT"], buttons)
+end
+
+AskRole = function(force)
+  local api = GetUiApi()
+  local specID, specName, blizzRole = CurrentSpec()
+  if not (api and specID) then
+    if force then print("|cff00ccff[AishCore]|r " .. L["BARS_NO_UI"]) end
+    return
+  end
+  local suggested = SPEC_SUGGEST[specID] or SUGGESTED[blizzRole] or "DPS"
+  askedThisSession[specID] = true
+  -- Couleurs Thématiques de la spé : nom en « Cercle de Puissance », rôle en « Décorations A »
+  local Colors = ns.Modules.Colors
+  local _, classFile = UnitClass("player")
+  local function Tint(text, element)
+    local c = Colors and Colors.GetForSpec and classFile and Colors.GetForSpec(classFile:lower(), specID, element)
+    if not c then return text end
+    return string.format("|cff%02x%02x%02x%s|r", c[1] * 255, c[2] * 255, c[3] * 255, text)
+  end
+  ShowSetupPopup("AishCoreRolePrompt", L["ROLE_TITLE"],
+    string.format(L["ROLE_PROMPT"], Tint(specName or "?", "powercircle"),
+      Tint(L[ROLE_LABEL[suggested]], "powerdotsa")), {
+    { L["ROLE_YES"], true, function() AskBars(specID, suggested) end },
+    { L["ROLE_OTHER"], false, function() AskOther(specID, suggested) end },
+    { L["ROLE_NEVER"], false, function()
+        AishUISetupCharDB = AishUISetupCharDB or {}
+        AishUISetupCharDB.roleNever = true
+      end },
+  })
+end
+
+CheckRole = function()
+  if not (AishaddonDB and ns.HasHeroicFeatures and ns.HasHeroicFeatures()) then return end
+  if setupPending then return end
+  local api = GetUiApi()
+  local specID = CurrentSpec()
+  if not (api and specID) then return end
+  if InCombatLockdown() then pendingRoleCheck = true; return end
+  local entry = Choices()[specID]
+  if entry then ApplyChoice(api, entry); return end
+  if AishUISetupCharDB.roleNever or askedThisSession[specID] then return end
+  AskRole(false)
+end
+
+-- /aish role | /aishrole : proposition à la demande (même si déjà choisi ou « Ne plus demander »)
+function ns.AskRoleProfile()
+  if not (AishaddonDB and ns.HasHeroicFeatures and ns.HasHeroicFeatures()) then return end
+  if InCombatLockdown() then print("|cff00ccff[AishCore]|r " .. L["UISWITCH_COMBAT"]); return end
+  AskRole(true)
+end
+
+SLASH_AISHROLE1 = "/aishrole"
+SlashCmdList["AISHROLE"] = function() ns.AskRoleProfile() end
+
+local roleEv = CreateFrame("Frame")
+roleEv:RegisterEvent("PLAYER_ENTERING_WORLD")
+ns.TrackSpecFrame(roleEv)
+roleEv:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+roleEv:RegisterEvent("PLAYER_REGEN_ENABLED")
+roleEv:RegisterEvent("PLAYER_LOGOUT")
+roleEv:SetScript("OnEvent", function(_, event, arg1, arg2)
+  if event == "PLAYER_REGEN_ENABLED" then
+    if pendingRoleCheck then pendingRoleCheck = nil; C_Timer.After(1, CheckRole) end
+  elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
+    -- Forever : rejoué par ns.FireSpecChanged, sans unité
+    if arg1 == nil or arg1 == "player" then C_Timer.After(3, CheckRole) end
+  elseif event == "PLAYER_LOGOUT" then
+    -- Profil changé à la main dans ElvUI / EllesmereUI : retenu pour cette spé (et pour /aishuiswitch)
+    pcall(RecordCurrent)
+  elseif arg1 or arg2 then
+    -- Login / reload seulement : laisse passer le setup et les popups d'EllesmereUI (+2 s)
+    C_Timer.After(4, function() SafeRun(CheckRole) end)
+  end
+end)
 
 -- Commande slash dédiée : AishCore.lua charge APRÈS ce fichier (section "# Init" en fin de .toc)
 -- et écrase SlashCmdList["AISHCORE"] sans jamais chaîner vers un handler précédent -- un sous-

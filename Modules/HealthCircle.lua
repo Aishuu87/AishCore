@@ -16,7 +16,8 @@ local hcAnimDirty = false
 
 -- Variable pour savoir si le bar etait montre en preview (pour annuler l'anim)
 local healthMoveTicker = nil
-local _hcAnimElems = {}   -- pré-alloué une fois dans Create(), réutilisé à chaque animation
+local _hcAnimElems = {}
+local ghostBuild = false   -- construction / rendu de la copie d'apercu du GUI (cf. CreateGhost)   -- pré-alloué une fois dans Create(), réutilisé à chaque animation
 
 -- Diametre de repli du cache sombre sous le texte (px), si la config n'en donne pas.
 -- Reglable via healthCircle.textBackdropSize, comme sur le cercle central.
@@ -544,27 +545,8 @@ function HealthCircle.ShouldShow()
   return HealthCircle.IsPlayerInjured()
 end
 
--- Applique les settings en live (taille, police, etc.)
-function HealthCircle.ApplySettings()
-  HealthCircle.EnsureArcSettings()
-  if not bar then return end
-  local cfg = ns.GetCfg("healthCircle")
-
-  -- Gerer l'activation/desactivation en live
-  if cfg.enabled == false then
-    if healthAnimTicker then healthAnimTicker:Cancel(); healthAnimTicker = nil end
-    -- Desactivation live du module : interruption immediate voulue (comme
-    -- SetPreview) -- on remet aussi le verrou de file d'attente a plat.
-    hcAnimBusy = false
-    hcAnimDirty = false
-    bar:Hide()
-    bar._healthShown = false
-    lastHealthVisState = nil
-    return
-  end
-  -- Forcer un re-check de visibilite (le module vient peut-etre d'etre reactive)
-  lastHealthVisState = nil
-
+-- Rendu (taille, arcs, couleurs, police, coeur) du cercle `bar` : vrai cercle ou copie d'apercu du GUI
+local function RenderVisual(cfg)
   local size   = cfg.size
   local bgSize = size * 1.1
   bar:SetSize(size, size)
@@ -618,6 +600,30 @@ function HealthCircle.ApplySettings()
     bar.dot3:SetPoint("BOTTOM", bar, "BOTTOM", cfg.dotPositions[3][1] * scale, cfg.dotPositions[3][2] * scale)
     bar.dot3:SetVertexColor(dotC[1], dotC[2], dotC[3], 1)
   end
+end
+
+-- Applique les settings en live (taille, police, etc.)
+function HealthCircle.ApplySettings()
+  HealthCircle.EnsureArcSettings()
+  if not bar then return end
+  local cfg = ns.GetCfg("healthCircle")
+
+  -- Gerer l'activation/desactivation en live
+  if cfg.enabled == false then
+    if healthAnimTicker then healthAnimTicker:Cancel(); healthAnimTicker = nil end
+    -- Desactivation live du module : interruption immediate voulue (comme
+    -- SetPreview) -- on remet aussi le verrou de file d'attente a plat.
+    hcAnimBusy = false
+    hcAnimDirty = false
+    bar:Hide()
+    bar._healthShown = false
+    lastHealthVisState = nil
+    return
+  end
+  -- Forcer un re-check de visibilite (le module vient peut-etre d'etre reactive)
+  lastHealthVisState = nil
+
+  RenderVisual(cfg)
   local sw = UIParent:GetWidth()
   local sh = UIParent:GetHeight()
   bar:ClearAllPoints()
@@ -648,7 +654,7 @@ function HealthCircle.Create(parent)
   if bar then return bar end
   local cfg = ns.GetCfg("healthCircle")
 
-  bar = CreateFrame("Frame", "AishCoreHealthRing", parent)
+  bar = CreateFrame("Frame", not ghostBuild and "AishCoreHealthRing" or nil, parent)
   bar:SetSize(cfg.size, cfg.size)
   bar:SetFrameStrata("LOW")
 
@@ -699,7 +705,7 @@ function HealthCircle.Create(parent)
   -- Soins entrants (prevision pendant un cast) : arcs qui DEMARRENT au bout de l'arc de vie (cf. UpdateHealPrediction)
   bar.iarc  = NewRadial(nil, 0)
   bar.iarc2 = NewRadial(nil, 0)
-  local arc = NewRadial("AishCoreHealthRingArc", 1)
+  local arc = NewRadial(not ghostBuild and "AishCoreHealthRingArc" or nil, 1)
   arc:SetStatusBarColor(unpack(cfg.barColor))
   bar.arc = arc
   bar.arc2 = NewRadial(nil, 1)   -- 2e moitie des remplissages miroir
@@ -828,9 +834,10 @@ function HealthCircle.Create(parent)
   text:SetTextColor(tc0[1], tc0[2], tc0[3], tc0[4] or 1)
   bar.text = text
   bar.textFrame = textFrame
-  ns.healthRingTextFrame = textFrame
-
   bar:Hide()
+  -- Copie d'apercu : ni zone de clic, ni animations, ni reference pour les animations 3D
+  if ghostBuild then ApplyArcAngles(); return bar end
+  ns.healthRingTextFrame = textFrame
 
   -- Zone de clic : bouton securise pose sur le cercle, jamais le cercle lui-meme. Seul un
   -- SecureUnitButton peut cibler et ouvrir le menu d'unite.
@@ -868,6 +875,51 @@ function HealthCircle.Create(parent)
 
   ApplyArcAngles()
   return bar
+end
+
+-- Copie d'apercu pour le GUI (page Cercles Hors Combat) : meme construction et meme rendu que le vrai cercle, sans nom
+-- global ni logique de jeu ; le vrai cercle reste a sa place. Le module travaille sur `bar` : il est permute le temps de
+-- construire / peindre la copie.
+function HealthCircle.CreateGhost(parent)
+  local real = bar
+  bar, ghostBuild = nil, true
+  local ok, g = pcall(HealthCircle.Create, parent)
+  bar, ghostBuild = real, false
+  if not ok then geterrorhandler()(g); return nil end
+  g:ClearAllPoints()
+  -- Strate du GUI (le cercle se pose la sienne a la construction, sous la fenetre)
+  local strata = parent:GetFrameStrata()
+  local function Deep(f)
+    f:SetFrameStrata(strata)
+    for _, c in ipairs({ f:GetChildren() }) do Deep(c) end
+  end
+  Deep(g)
+  g:Show()
+  return g
+end
+
+-- Reglages courants (taille, angles, couleurs, police...) et remplissage pct (0-100)
+function HealthCircle.RenderGhost(g, pct)
+  if not g then return end
+  local real = bar
+  bar, ghostBuild = g, true
+  local ok, err = pcall(function()
+    RenderVisual(ns.GetCfg("healthCircle"))
+    ApplyArcValue(pct)
+    g.text:SetText(tostring(pct))
+  end)
+  bar, ghostBuild = real, false
+  if not ok then geterrorhandler()(err) end
+end
+
+-- Remplissage seul (animation de l'apercu)
+function HealthCircle.SetGhostValue(g, pct)
+  if not g then return end
+  local real = bar
+  bar = g
+  pcall(ApplyArcValue, pct)
+  bar = real
+  g.text:SetText(tostring(pct))
 end
 
 -- Animation stagger

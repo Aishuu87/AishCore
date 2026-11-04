@@ -58,6 +58,9 @@ LUT.DEFAULTS = {
   toastEnabled = true, toastWaitCombat = true, toastDuration = 6, toastScale = 1, toastTitleScale = 1,
   toastFontScale = 1, toastBgScale = 1, toastBgAlpha = 0.85, toastTitleColor = { 1, 0.82, 0.10, 1 },
   toastX = 0, toastY = 220,
+  -- Polices du niveau, des stats et des competences (2002 : embarquee dans le client)
+  toastTitleFont = "Fonts\\2002.TTF", toastStatsFont = "Fonts\\2002.TTF", toastSpellFont = "Fonts\\2002.TTF",
+  toastSpellScale = 1,   -- GUI seulement : le module lit le reglage brut (absent = taille des stats)
 }
 local function V(k)
   local c = ns.GetCfg and ns.GetCfg("xpBar")
@@ -70,12 +73,12 @@ local function EaseOut(v) return 1 - (1 - v) * (1 - v) * (1 - v) end
 local function EaseInOut(v) return v < 0.5 and 4 * v * v * v or 1 - ((-2 * v + 2) ^ 3) / 2 end
 
 -- ═══ Construction ════════════════════════════════════════════════════════════════════════════════
--- group : "title" (taille du niveau) ou "body" (stats et competences), chacun avec son reglage de taille
+-- group : "title" (niveau), "stats" ou "spell" (competences), chacun avec ses reglages de police et de taille
 local fontSeq = 0
 local function Text(o, parent, font, size, color, justify, group)
   local fs = parent:CreateFontString(nil, "OVERLAY")
   fontSeq = fontSeq + 1
-  fs._font, fs._size, fs._key, fs._group = font, size, "LevelToast" .. fontSeq, group or "body"
+  fs._font, fs._size, fs._key, fs._group = font, size, "LevelToast" .. fontSeq, group or "spell"
   fs:SetFont(FALLBACK, size, "")
   fs:SetTextColor(color[1], color[2], color[3], 1)
   fs:SetJustifyH(justify or "CENTER")
@@ -163,7 +166,7 @@ function LUT.Build(parent, isPreview)
     c.icon:SetSize(STAT_ICON, STAT_ICON)
     c.icon:SetVertexColor(OCRE[1], OCRE[2], OCRE[3], 1)
     c.icon:SetPoint("RIGHT", c, "RIGHT", 0, 0)
-    c.value = Text(o, c, FONT_BOLD, 22, TEAL, "RIGHT")
+    c.value = Text(o, c, FONT_BOLD, 22, TEAL, "RIGHT", "stats")
     c.value:SetPoint("RIGHT", c.icon, "LEFT", 2, 0)
     o.stats[i] = c
   end
@@ -210,16 +213,20 @@ function LUT.Build(parent, isPreview)
   return o
 end
 
--- Polices a la taille reglee (Montserrat via ns.ApplyFontReliable : repli 2002 si absente)
+-- Polices et tailles reglees par groupe (ns.ApplyFontReliable : repli 2002 si la police est absente). Taille des
+-- competences : sans reglage propre, celle des stats (ancien reglage commun)
 function LUT.ApplyFonts(o)
-  local kTitle, kBody = V("toastTitleScale") or 1, V("toastFontScale") or 1
+  local c = ns.GetCfg and ns.GetCfg("xpBar")
+  local K = { title = V("toastTitleScale") or 1, stats = V("toastFontScale") or 1 }
+  K.spell = (c and c.toastSpellScale) or K.stats
+  local F = { title = V("toastTitleFont"), stats = V("toastStatsFont"), spell = V("toastSpellFont") }
   for _, fs in ipairs(o.texts) do
-    local k = (fs._group == "title") and kTitle or kBody
-    local size = math.max(6, math.floor(fs._size * k + 0.5))
-    if fs._font == FALLBACK or not ns.ApplyFontReliable then
-      pcall(fs.SetFont, fs, fs._font, size, "")
+    local size = math.max(6, math.floor(fs._size * (K[fs._group] or 1) + 0.5))
+    local font = F[fs._group] or fs._font
+    if font == FALLBACK or not ns.ApplyFontReliable then
+      pcall(fs.SetFont, fs, font, size, "")
     else
-      ns.ApplyFontReliable(fs, fs._key, fs._font, size, "")
+      ns.ApplyFontReliable(fs, fs._key, font, size, "")
     end
   end
 end

@@ -349,7 +349,7 @@ local function CreateTargetBar()
     nameFrame:Hide()
 
     local nameTxt = nameFrame:CreateFontString(nil, "OVERLAY")
-    nameTxt:SetFont(DEFAULT_FONT, 15, "")
+    nameTxt:SetFont((db2 and db2.nameFont) or DEFAULT_FONT, 15, "")
     nameTxt:SetJustifyH("CENTER")
     nameTxt:SetAlpha(1)
     nameTxt:SetShadowColor(0, 0, 0, 1)
@@ -372,7 +372,7 @@ local function CreateTargetBar()
     hpFrame:SetPoint(hanchor, bgFull, hanchor, hox, hoy)
 
     local hpTxt = hpFrame:CreateFontString(nil, "OVERLAY")
-    if not hpTxt:SetFont(DEFAULT_HP_FONT, hpts, "") then
+    if not hpTxt:SetFont((db2 and db2.hpFont) or DEFAULT_HP_FONT, hpts, "") then
         hpTxt:SetFont("Fonts\\FRIZQT__.TTF", hpts, "")
     end
     hpTxt:SetJustifyH(hanchor)
@@ -472,7 +472,7 @@ local function CreateTargetTargetBar()
     local tnoy  = (db2 and db2.ttNameOY) or 0.860
 
     local nameTxt = f:CreateFontString(nil, "OVERLAY")
-    nameTxt:SetFont(DEFAULT_FONT, 12, "")
+    nameTxt:SetFont((db2 and db2.nameFont) or DEFAULT_FONT, 12, "")
     nameTxt:SetJustifyH("CENTER")
     nameTxt:SetAlpha(1)
     nameTxt:SetShadowColor(0, 0, 0, 1)
@@ -719,6 +719,25 @@ function TopTargetBar.GetTargetFrame()
     return f_target
 end
 
+-- Polices des textes (nom, vie, nom TT) : reappliquees apres le premier chargement, ou un fichier de police pas
+-- encore charge par le client laisse le FontString sur la police de repli.
+local function ApplyFonts()
+    local db = ns.GetCfg("topTargetBar")
+    if f_target then
+        f_target.nameTxt:SetFont((db and db.nameFont) or DEFAULT_FONT, 15, "")
+        if f_target.hpTxt then
+            local hpts = (db and db.hpFontSize) or 10
+            if not f_target.hpTxt:SetFont((db and db.hpFont) or DEFAULT_HP_FONT, hpts, "") then
+                f_target.hpTxt:SetFont("Fonts\\FRIZQT__.TTF", hpts, "")
+            end
+            -- Texte deja affiche : le re-ecrire pour qu'il soit redessine avec la nouvelle police
+            local t = f_target.hpTxt:GetText()
+            if t then f_target.hpTxt:SetText(""); f_target.hpTxt:SetText(t) end
+        end
+    end
+    if f_tt then f_tt.nameTxt:SetFont((db and db.nameFont) or DEFAULT_FONT, 12, "") end
+end
+
 function TopTargetBar.Create()
     if f_target then
         -- Déjà créé (PLAYER_ENTERING_WORLD multiple) : juste réappliquer les settings
@@ -730,6 +749,9 @@ function TopTargetBar.Create()
     SetTTBVisibilityDrivers()
     UpdateTarget()
     UpdateTargetTarget()
+    -- Premier login : le fichier de police peut arriver apres la creation (OK apres /reload, deja en cache)
+    C_Timer.After(1, ApplyFonts)
+    C_Timer.After(5, ApplyFonts)
 
     -- Visibilité quand le panel de config s'ouvre
     C_Timer.After(0, function()

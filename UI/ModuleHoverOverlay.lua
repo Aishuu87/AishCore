@@ -15,11 +15,19 @@ local function G(name) return _G[name] end
 -- name    : cle de locale du nom affiche au survol (sinon le nom de la page).
 local STATIC_ENTRIES = {
   { category = "resourceCircle", getFrame = function() return G("AishCoreRingBar") end },
-  { category = "outOfCombat",    section = "SETTINGS_SEC_HEALTH_CIRCLE", mod = "healthCircle", getFrame = function() return G("AishCoreHealthRing") end },
-  { category = "outOfCombat",    section = "SETTINGS_SEC_OCRC",          mod = "outOfCombatResourceCircle", getFrame = function() return G("AishCoreOCResourceRing") end },
-  { category = "outOfCombat",    section = "SETTINGS_SEC_WELLFED",       mod = "wellFedCircle", getFrame = function() return G("AishCoreWellFedRing") end },
-  { category = "castBar",        getFrame = function() return G("AishCoreCastBar") end },
-  { category = "targetCastBar",  getFrame = function() return G("AishCoreTargetCastBar") end },
+  -- Cercles hors combat : une page pour les deux, onGo y selectionne le cercle survole
+  { category = "outOfCombat", mod = "healthCircle", name = "SETTINGS_SEC_HEALTH_CIRCLE",
+    onGo = function() ns._oocSelected = "health" end, getFrame = function() return G("AishCoreHealthRing") end },
+  { category = "outOfCombat", mod = "outOfCombatResourceCircle", name = "SETTINGS_SEC_OCRC",
+    onGo = function() ns._oocSelected = "resource" end, getFrame = function() return G("AishCoreOCResourceRing") end },
+  { category = "wellFed",        mod = "wellFedCircle", getFrame = function() return G("AishCoreWellFedRing") end },
+  -- Barres de cast : une page pour les trois, onGo y selectionne la barre survolee
+  { category = "castBars", mod = "castBar",       name = "SETTINGS_SEC_CAST_BAR",
+    onGo = function() ns._castBarsSelected = "player" end, getFrame = function() return G("AishCoreCastBar") end },
+  { category = "castBars", mod = "targetCastBar", name = "SETTINGS_CAT_TARGET_CAST",
+    onGo = function() ns._castBarsSelected = "target" end, getFrame = function() return G("AishCoreTargetCastBar") end },
+  { category = "castBars", mod = "focusCastBar",  name = "SETTINGS_CAT_FOCUS_CAST",
+    onGo = function() ns._castBarsSelected = "focus" end, getFrame = function() return G("AishCoreFocusCastBar") end },
   { category = "rotationHelper", getFrame = function() return G("AishCoreRotationHelperBar") end },
   -- TopTargetBar : roue en bas-droite (le haut-droit tombe hors d'atteinte pres du haut d'ecran).
   -- 2 entrees (barre cible + barre "cible de la cible", frame separee) sous la meme categorie.
@@ -99,12 +107,30 @@ STATIC_ENTRIES[#STATIC_ENTRIES + 1] = {
   end,
 }
 
+-- Camping HUD (Forever) : place meme masque (loin d'un feu), cadre visible sur la page Modules
+STATIC_ENTRIES[#STATIC_ENTRIES + 1] = {
+  category = "campfire",
+  getFrame = function()
+    if not (ns.IsModuleAvailable and ns.IsModuleAvailable("campfire")) then return nil end
+    return G("AishCoreCampfire")
+  end,
+}
+
 -- Barre de menu
 STATIC_ENTRIES[#STATIC_ENTRIES + 1] = {
   category = "menuBar",
   getFrame = function()
     local MB = ns.Modules and ns.Modules.MenuBar
     return MB and MB.GetHoverFrame and MB.GetHoverFrame()
+  end,
+}
+
+-- Compartiment d'addons : bouton pose sur la minimap
+STATIC_ENTRIES[#STATIC_ENTRIES + 1] = {
+  category = "addonCompartment",
+  getFrame = function()
+    local AC = ns.Modules and ns.Modules.AddonCompartment
+    return AC and AC.GetHoverFrame and AC.GetHoverFrame()
   end,
 }
 
@@ -160,20 +186,11 @@ local function BuildEntries()
     for key, frame in pairs(bars) do
       local f, bk = frame, key
       list[#list + 1] = {
-        category = "unitBars", name = UNIT_BAR_NAMES[bk], section = "SETTINGS_SEC_UB_BAR_DETAILS",
+        category = "unitBars", name = UNIT_BAR_NAMES[bk],
         mod = "unitBars_" .. (bk == "targettarget" and "tot" or bk),
         getFrame = function() return f end,
-        -- Deplie la sous-section de CETTE barre (les autres repliees), page reconstruite pour en tenir compte
-        onGo = function()
-          local db = ns.DB and ns.DB.unitBars
-          if db and db.bars then
-            for k, b in pairs(db.bars) do
-              if type(b) == "table" then b.collapsed = (k ~= bk) end
-            end
-          end
-          if ns.InvalidateSettingsPage then ns.InvalidateSettingsPage("unitBars") end
-        end,
-        scrollTo = function() return ns.GetUnitBarSettingsHeader and ns.GetUnitBarSettingsHeader(bk) end,
+        -- Selectionne CETTE barre dans la page avant d'y sauter
+        onGo = function() ns._unitBarsSelected = bk end,
       }
     end
   end
@@ -216,6 +233,9 @@ local function GoToSettings()
   end
   -- Page deja affichee : elle ne repasse pas par OnShow, rafraichissement explicite
   if hoveredCategory == "extraBars" and ns.ExtraBarsPageRefresh then ns.ExtraBarsPageRefresh() end
+  if hoveredCategory == "unitBars" and ns.UnitBarsPageRefresh then ns.UnitBarsPageRefresh() end
+  if hoveredCategory == "castBars" and ns.CastBarsPageRefresh then ns.CastBarsPageRefresh() end
+  if hoveredCategory == "outOfCombat" and ns.OOCPageRefresh then ns.OOCPageRefresh() end
 end
 
 local function EnsureWidgets()
@@ -419,13 +439,21 @@ local function HideBoxes()
   for _, b in ipairs(boxes) do b:Hide(); b._target = nil end
 end
 
--- Renvoie l'entree survolee (cadre le plus petit) parmi tous les elements, visibles ou non.
+-- Module de l'entree active (cf. ns.ModuleEntryEnabled, page Modules) ; inconnu : considere actif
+local function ModuleOn(e)
+  local f = ns.ModuleEntryEnabled
+  if not f then return true end
+  local ok, v = pcall(f, e.mod or e.category)
+  return not ok or v ~= false
+end
+
+-- Renvoie l'entree survolee (cadre le plus petit) parmi tous les elements, visibles ou non (modules coupes exclus).
 local function UpdateBoxes()
   local best, bestArea, bestE
   local n = 0
   for _, e in ipairs(BuildEntries()) do
     local ok, frame = pcall(e.getFrame)
-    if ok and frame then
+    if ok and frame and ModuleOn(e) then
       n = n + 1
       local b = BoxFor(n)
       if b._target ~= frame then
@@ -452,7 +480,8 @@ local ticker
 
 local function Tick()
   local panel = ns.SettingsPanel
-  if not panel or not panel:IsShown() then
+  -- GUI minimise : plus de hitbox, les elements retrouvent leur survol normal (ex. tooltip de la barre d'XP)
+  if not panel or not panel:IsShown() or panel._minimized then
     HideHighlight()
     HideBoxes()
     return

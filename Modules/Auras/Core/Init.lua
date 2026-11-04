@@ -57,29 +57,38 @@ end
 -- le profil, partagé entre personnages, donc une liste "Auras à tracker" configurée sur un personnage
 -- doit être retrouvée par tout autre personnage de la même classe/spé utilisant ce profil. Ancien format (nom-realm
 -- inclus) migré une fois vers ce format par MigrateSpecKeys (cf. ns.InitDB).
+-- Chemin chaud (scans, tickers) : ni closure ni concatenation par appel. Cle memorisee par specID / classe.
+local _specKeyCache = {}
+
+local function ResolveSpecID()
+    -- Globals d'abord : ils portent la spe deduite des branches de talents sur un client sans
+    -- vraies specialisations (cf. Core.lua). Dans l'autre ordre, la cle de spe restait nulle
+    -- et les listes d'auras par spec ne se chargeaient jamais.
+    local gS = _addon.GetSpecialization or (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization)
+    local gI = _addon.GetSpecializationInfo or (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo)
+    if not gS or not gI then return nil end
+    return gI(gS())
+end
+
 function ns.GetSpecKey()
-    local key
     -- Forever : pas de vraies specialisations, la liste "Auras a tracker" est par CLASSE (cle "CLASSE_ALL"),
     -- disponible des le niveau 1 -- sans attendre qu'une branche de talents soit choisie.
     if _addon.IsForever then
         local _, classFile = UnitClass("player")
-        return classFile and (classFile .. "_ALL") or nil
+        if not classFile then return nil end
+        local key = _specKeyCache[classFile]
+        if not key then key = classFile .. "_ALL"; _specKeyCache[classFile] = key end
+        return key
     end
-    pcall(function()
-        -- Globals d'abord : ils portent la spe deduite des branches de talents sur un client sans
-        -- vraies specialisations (cf. Core.lua). Dans l'autre ordre, la cle de spe restait nulle
-        -- et les listes d'auras par spec ne se chargeaient jamais.
-        local gS = _addon.GetSpecialization or (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization)
-        local gI = _addon.GetSpecializationInfo or (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo)
-        if not gS or not gI then return end
-        local specID = gI(gS())
-        if not specID then return end
-        local m = ns.SPEC_MAP[specID]
-        if m then
-            key = m.class .. "_" .. m.spec
-        end
-    end)
-    return key
+    local ok, specID = pcall(ResolveSpecID)
+    if not ok or not specID then return nil end
+    local key = _specKeyCache[specID]
+    if key == nil then
+        local m = ns.SPEC_MAP and ns.SPEC_MAP[specID]
+        key = m and (m.class .. "_" .. m.spec) or false
+        _specKeyCache[specID] = key
+    end
+    return key or nil
 end
 
 -- Mode admin ("Auras à tracker") : adminOverrides[spellID] = { source="debuff"|"buff"|"totem"
@@ -99,13 +108,17 @@ function ns.ApplyAdminOverrides(spells)
     -- Baseline codée en dur (SpellClassificationOverrides.lua) pour tous, puis override
     -- personnel du joueur (ns.GetAdminOverrides, /aishadmin) par-dessus qui garde le dernier mot.
     -- Table propre a Forever appliquee apres la commune (cf. SpellClassificationOverrides.lua).
-    for _, hardcoded in ipairs({ ns.SpellClassificationOverrides,
-                                 _addon.IsForever and ns.SpellClassificationOverridesForever or nil }) do
-        for spellID, o in pairs(hardcoded) do
-            local info = spells[spellID]
-            if info then
-                if o.source then info.source = o.source end
-                if o.deleted then info._adminDeleted = true end
+    -- Sans table construite a chaque appel (chemin chaud, cf. GetSpecSpells)
+    for pass = 1, 2 do
+        local hardcoded = (pass == 1) and ns.SpellClassificationOverrides
+                          or (_addon.IsForever and ns.SpellClassificationOverridesForever)
+        if hardcoded then
+            for spellID, o in pairs(hardcoded) do
+                local info = spells[spellID]
+                if info then
+                    if o.source then info.source = o.source end
+                    if o.deleted then info._adminDeleted = true end
+                end
             end
         end
     end

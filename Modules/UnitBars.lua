@@ -1,37 +1,65 @@
 -- Modules/UnitBars.lua : Barres de vie Player, Target, Focus, Pet, TargetTarget
+-- Reglages communs (couleurs, bouclier, soins previsionnels, hauteur tank, visibilite) a la racine de ns.DB.unitBars ;
+-- tout le reste est propre a chaque barre (ns.DB.unitBars.bars.<cle>, lu par BV). Le rendu d'une barre (LayoutBar)
+-- sert aussi a l'apercu du GUI (UnitBars.CreatePreview / StylePreview, UI/UnitBarsPage.lua).
 local addonName, ns = ...
 local L = ns.L
 
 local UnitBars = {}
 ns.Modules.UnitBars = UnitBars
 
--- Constantes visuelles
--- Texture de la barre : cle de config resolue a chaque appel (ns.BAR_TEXTURES),
--- pour que le choix du dropdown s'applique sans /reload.
-local function BarTex()
-    return ns.ResolveBarTexFromKey((ns.GetCfg("unitBars") or {}).barTexture)
-end
-
--- Texture du FOND de la barre (bgTex). Par defaut la meme que le remplissage : en mode par defaut (couleurs inversees) la
--- partie coloree EST le fond, la texture choisie doit donc la recouvrir et pas seulement le remplissage sombre.
-local function BgTexPath()
-    local db = ns.GetCfg("unitBars") or {}
-    return ns.ResolveBarTexFromKey(db.bgTexture or db.barTexture)
-end
-
--- Peint le fond : texture + teinte (a la place d'un aplat SetColorTexture, qui ignorerait toute texture)
-local function PaintBg(tex, c)
-    tex:SetTexture(BgTexPath())
-    tex:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
-end
 local DEFAULT_FONT   = ns.FONT_FALLBACK  -- police du jeu (2002), aucune media pack requise
 -- Couleur "noire" commune (#0e0e0e)
 local DARK         = 14/255
 -- Couleur de fond commune (presque noir)
 local DEFAULT_BG   = { DARK, DARK, DARK, 1 }
--- Ratios de base des 3 dots (le 3e est la référence)
-local DOT_BASE    = { 3, 5, 9 }
-local DOT_SPACING = 3   -- gap interne (fixe) entre chaque dot
+
+-- Points decoratifs : proportions des formes selon leur nombre, de la plus eloignee de la barre a la plus proche (= 1).
+-- Pour 3 points : 3 / 5 / 9, le rendu historique.
+local DOT_MAX   = 5
+local DOT_BASES = {
+    { 1 },
+    { 5/9, 1 },
+    { 3/9, 5/9, 1 },
+    { 2/9, 3/9, 5/9, 1 },
+    { 2/9, 3/9, 4/9, 6/9, 1 },
+}
+-- Formes : texture, rotation (rad) et echelle d'affichage (le losange est un carre tourne, ramene a la meme
+-- diagonale). Le chevron (pointe en haut dans le fichier) est tourne vers l'exterieur de la barre (cf. LayoutDots).
+local DOT_SHAPES = {
+    circle  = { tex = "Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2.tga" },
+    square  = { tex = "Interface\\Buttons\\WHITE8x8" },
+    diamond = { tex = "Interface\\Buttons\\WHITE8x8", rot = math.pi / 4, scale = 0.7071 },
+    chevron = { tex = "Interface\\AddOns\\AishCore\\Media\\UI\\chevron.png", outward = true },
+}
+UnitBars.DOT_MAX    = DOT_MAX
+-- Formes combinees : { forme la plus proche de la barre, forme des suivantes }
+local DOT_COMBOS = {
+    circle_chevron  = { "circle", "chevron" },
+    diamond_chevron = { "diamond", "chevron" },
+    square_circle   = { "square", "circle" },
+}
+UnitBars.DOT_SHAPES = { "circle", "chevron", "diamond", "square", "circle_chevron", "diamond_chevron", "square_circle" }
+
+-- Ombre derriere la barre (client sans cet atlas : aplat noir, opacite du reglage)
+local NAME_SHADOW_ATLAS = "Banner-FiligreeShadow"
+
+-- Formes du cadre du texte de vie (etirees a sa taille)
+local HP_BOX_TEX = {
+    rect    = "Interface\\Buttons\\WHITE8x8",
+    diamond = "Interface\\AddOns\\AishCore\\Media\\UI\\Diamond.tga",
+    circle  = "Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2.tga",
+}
+
+-- Sens de remplissage : orientation de la StatusBar, bords de depart et d'arrivee du remplissage (les soins
+-- previsionnels et l'absorb s'accrochent au bord d'arrivee)
+local FILL_DIRS = {
+    LTR = { orient = "HORIZONTAL", rev = false, from = "LEFT",   to = "RIGHT"  },
+    RTL = { orient = "HORIZONTAL", rev = true,  from = "RIGHT",  to = "LEFT"   },
+    BTT = { orient = "VERTICAL",   rev = false, from = "BOTTOM", to = "TOP"    },
+    TTB = { orient = "VERTICAL",   rev = true,  from = "TOP",    to = "BOTTOM" },
+}
+UnitBars.FILL_DIRS = { "LTR", "RTL", "BTT", "TTB" }
 
 -- Spécialisations tank : reçoivent une HAUTEUR de barre spécifique si l'option est
 -- activée (cfg.useTankHeight / cfg.tankHeight, cf. GetEffectiveHeight). La largeur,
@@ -64,26 +92,6 @@ local function UpdateTankSpec()
     return true
 end
 
--- Retourne les 3 tailles de dots depuis la config globale
--- dotRatio (0=proportionnel, 100=identiques) contrôle la convergence des petits dots
-local function GetDotSizes()
-    local db    = ns.GetCfg("unitBars")
-    local big   = (db and db.dotSize)  or DOT_BASE[3]
-    local ratio = ((db and db.dotRatio ~= nil) and db.dotRatio or 0) / 100
-    local sizes = {}
-    for i = 1, 3 do
-        local natural = big * DOT_BASE[i] / DOT_BASE[3]
-        sizes[i] = math.max(1, math.floor(natural + (big - natural) * ratio + 0.5))
-    end
-    return sizes
-end
-
--- Retourne l'espace entre barre et groupe de dots
-local function GetDotGap()
-    local db = ns.GetCfg("unitBars")
-    return (db and db.dotGap) or DOT_SPACING
-end
-
 -- Vrais si les couleurs sont en mode classique (fill=couleur, bg=noir)
 local function IsReversed()
     local db = ns.GetCfg("unitBars")
@@ -114,81 +122,18 @@ local REACTION_COLORS = {
     hostile  = { 0.780, 0.251, 0.251, 1 },
 }
 
--- Descripteurs de chaque barre
+-- Descripteurs de chaque barre (ordre de creation : le pet s'ancre sur le joueur). Les reglages par defaut d'une barre
+-- sont dans Config/Defaults.lua (unitBars.bars) ; `defaults` ne sert que de repli de position / couleur.
 local BAR_DEFS = {
-    {
-        key       = "player",
-        unit      = "player",
-        dotsLeft  = true,   -- dots à gauche de la barre
-        showText  = true,   -- affiche le % PV
-        nameJustify = "RIGHT",   -- nom au survol (option showPlayerNameHover) : aligne a droite, en miroir de la barre de cible
-        defaults  = {
-            enabled   = true,
-            width     = 200,
-            height    = 4,
-            x         = -260, y = -120,
-            fillColor = { 0.78, 0.61, 0.44, 1 },
-        },
-    },
-    {
-        key         = "target",
-        unit        = "target",
-        dotsLeft    = false,  -- dots à droite de la barre
-        showText    = true,   -- affiche le % PV
-        showName    = true,
-        nameJustify = "LEFT",
-        defaults  = {
-            enabled   = true,
-            width     = 200,
-            height    = 4,
-            x         = 260, y = -120,
-            fillColor = { 0.72, 0.59, 0.39, 1 },
-        },
-    },
-    {
-        key         = "focus",
-        unit        = "focus",
-        dotsLeft    = true,
-        showName    = true,
-        nameJustify = "LEFT",
-        defaults  = {
-            enabled   = true,
-            width     = 200,
-            height    = 4,
-            x         = -260, y = -145,
-            fillColor = { 0.71, 0.60, 0.49, 1 },
-        },
-    },
-    {
-        key         = "pet",
-        unit        = "pet",
-        dotsLeft    = true,
-        showName    = true,
-        nameJustify = "RIGHT",
-        defaults  = {
-            enabled   = true,
-            width     = 143,
-            height    = 4,
-            x         = -260, y = -100,
-            fillColor = { 0.71, 0.60, 0.49, 1 },
-        },
-    },
-    {
-        key         = "targettarget",
-        unit        = "targettarget",
-        dotsLeft    = false,
-        noDots      = true,
-        showName    = true,
-        nameJustify = "LEFT",
-        defaults  = {
-            enabled   = true,
-            width     = 80,
-            height    = 4,
-            x         = 260, y = -145,
-            fillColor = { 0.41, 0.41, 0.41, 1 },
-        },
-    },
+    { key = "player",       unit = "player",       defaults = { x = -260, y = -120, fillColor = { 0.78, 0.61, 0.44, 1 } } },
+    { key = "target",       unit = "target",       defaults = { x =  260, y = -120, fillColor = { 0.72, 0.59, 0.39, 1 } } },
+    { key = "focus",        unit = "focus",        defaults = { x = -260, y = -145, fillColor = { 0.71, 0.60, 0.49, 1 } } },
+    { key = "pet",          unit = "pet",          defaults = { x = -260, y = -100, fillColor = { 0.71, 0.60, 0.49, 1 } } },
+    { key = "targettarget", unit = "targettarget", defaults = { x =  260, y = -145, fillColor = { 0.41, 0.41, 0.41, 1 } } },
 }
+local DEF_BY_KEY = {}
+for _, d in ipairs(BAR_DEFS) do DEF_BY_KEY[d.key] = d end
+UnitBars.BAR_KEYS = { "player", "target", "focus", "pet", "targettarget" }
 
 -- Tables des frames créés
 local bars = {}   -- bars[key] = frame
@@ -197,7 +142,7 @@ local ubFadeTickers         = {}     -- key → ticker de fade par barre
 local ubPosPending          = {}     -- key → frame dont le snap de position finale a ete saute (combat lockdown)
 local ubLastVisState        = {}     -- key → dernier état de visibilité (true/false)
 local ubHovered             = {}     -- key → true si le curseur est dans la zone tolérante
-local playerNameShown        = false  -- nom du personnage affiche au survol de sa barre (option showPlayerNameHover, hors combat)
+local playerNameShown        = false  -- nom du personnage affiche au survol de sa barre (option showName du joueur, hors combat)
 local ubHiddenForSkyriding  = false  -- masquées pour le skyriding
 local ubHiddenForGui        = false  -- onglet Animations 3D : tout masqué
 local ubPreviewMode         = false  -- panneau settings ouvert → forcer affichage
@@ -208,6 +153,44 @@ local inPetBattle           = false
 local function Cfg(key)
     local db = ns.GetCfg("unitBars")
     return db and db.bars and db.bars[key] or {}
+end
+
+-- Reglage d'une barre : sa valeur, sinon le defaut de cette barre (Config/Defaults.lua)
+local function BV(key, prop)
+    local v = Cfg(key)[prop]
+    if v ~= nil then return v end
+    local d = ns.Defaults and ns.Defaults.unitBars and ns.Defaults.unitBars.bars
+    d = d and d[key]
+    return d and d[prop]
+end
+UnitBars.BV = BV
+
+-- Anciens reglages communs a toutes les barres, devenus propres a chacune : repris une fois par barre (drapeau
+-- perBarSettings), pour garder le rendu du profil. A rappeler a chaque changement de profil (cf. ApplySettings).
+local LEGACY_PER_BAR = {
+    nameFont = "nameFont", nameOutline = "nameOutlineStyle", nameSize = "nameSize",
+    hpFont = "font", hpOutline = "hpOutlineStyle", hpSize = "textSize",
+    hpMode = "hpDisplayMode", hpHoverValue = "hpHoverValue",
+    barTexture = "barTexture", showDots = "showDots",
+    dotSize = "dotSize", dotRatio = "dotRatio", dotGap = "dotGap",
+}
+local function EnsurePerBar()
+    local db = ns.DB and ns.DB.unitBars
+    if not db or db.perBarSettings then return end
+    db.perBarSettings = true
+    db.bars = db.bars or {}
+    for _, d in ipairs(BAR_DEFS) do
+        local b = db.bars[d.key] or {}
+        db.bars[d.key] = b
+        for p, g in pairs(LEGACY_PER_BAR) do
+            if db[g] ~= nil then b[p] = db[g] end
+        end
+        if db.bgTexture or db.barTexture then b.bgTexture = db.bgTexture or db.barTexture end
+    end
+    local bb = db.bars
+    bb.player.showName = db.showPlayerNameHover == true
+    bb.target.showLevel = db.showTargetLevel == true
+    bb.targettarget.showDots = false   -- n'en a jamais eu
 end
 
 -- Nom du joueur (au survol de sa barre) : une seule fois, meme decalage que le nom de la barre de cible, en miroir
@@ -359,8 +342,13 @@ end
 local function ApplyHitPad(frame, tol)
     local pad = frame._hitPad
     if not pad or InCombatLockdown() then return end
+    -- Barre desactivee (module ou barre) : elle reste a alpha 0 mais captait encore les clics
+    local db = ns.GetCfg("unitBars")
+    local def = frame._def   -- nil a la creation : ApplyBarSettings repasse juste apres
+    local off = (db and db.enabled == false) or (def and Cfg(def.key).enabled == false)
+    frame:EnableMouse(not off)
     pad:ClearAllPoints()
-    if tol <= 0 then
+    if off or tol <= 0 then
         UnregisterStateDriver(pad, "visibility")
         pad:Hide()
         return
@@ -407,6 +395,8 @@ end
 function UnitBars.FlashHitbox()
     local tol = EffectiveHoverTol()
     local shown = {}
+    local dbAll = ns.GetCfg("unitBars")
+    if dbAll and dbAll.enabled == false then UnitBars.HideHitbox(); return end   -- module coupe : aucun apercu
     for key, f in pairs(bars) do
         -- Repartir propre : une barre decochee entre deux passages garderait son cadre
         -- allume, le ticker precedent ayant ete annule avant de pouvoir le masquer.
@@ -473,9 +463,15 @@ local function ShouldShowBar(frame)
     -- Survol : prime sur les "Cacher" (monture, repos), mais reste apres les masquages durs (skyriding, vehicule,
     -- pet battle), qui ne se rouvrent pas a la souris
     if r.hover and ubHovered[frame._def.key] then return true end
+    -- Furtivite : la visibilite du Mode furtif remplace les regles ci-dessous (joueur et cible)
+    local key = frame._def.key
+    if (key == "player" or key == "target") and ns.StealthVisOverride then
+        local ov = ns.StealthVisOverride(key)
+        if ov ~= nil then return ov end
+    end
     -- Les "Cacher" passent avant "Toujours" et les autres conditions
     if r.hideMount and IsMounted() then return false end
-    if r.hideRest and IsResting() then return false end
+    if r.hideRest and ns.IsRestArea() then return false end
     if r.always then return true end
     local hasTarget = UnitExists("target") and not UnitIsDeadOrGhost("target")
     if r.attackable and hasTarget and UnitCanAttack("player", "target") then return true end
@@ -497,20 +493,37 @@ local function IsThemedColors()
     return not db or db.themedColors ~= false
 end
 
--- Le "noir" des barres (remplissage en mode inverse, filet, 3e dot) : suit la couleur de l'arriere plan hors couleurs thematiques
+-- Le "noir" des barres (remplissage en mode inverse, filet, point le plus proche) : couleur de fond, reglable
+-- independamment des couleurs thematiques
 local function GetDarkColor()
-    if IsThemedColors() then return DEFAULT_BG end
     return GetBgColor()
 end
 
+-- Textures : cles de ns.BAR_TEXTURES resolues a chaque appel, pour que le choix du dropdown s'applique sans /reload.
+local function BarTex(key)
+    return ns.ResolveBarTexFromKey(BV(key, "barTexture"))
+end
+
+-- Texture du FOND de la barre. Par defaut la meme que le remplissage : en mode par defaut (couleurs inversees) la
+-- partie coloree EST le fond, la texture choisie doit donc la recouvrir et pas seulement le remplissage sombre.
+local function BgTexPath(key)
+    return ns.ResolveBarTexFromKey(BV(key, "bgTexture") or BV(key, "barTexture"))
+end
+
+-- Peint le fond : texture + teinte (a la place d'un aplat SetColorTexture, qui ignorerait toute texture)
+local function PaintBg(tex, c, key)
+    tex:SetTexture(BgTexPath(key))
+    tex:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
+end
+
 -- Hauteur effective d'une barre : tankHeight si spé tank + option activée
-local function GetEffectiveHeight(def, cfg)
+local function GetEffectiveHeight(key)
     local db = ns.GetCfg("unitBars")
     if db and db.useTankHeight and inTankSpec
-       and (def.key == "player" or def.key == "target" or def.key == "focus") then
+       and (key == "player" or key == "target" or key == "focus") then
         return db.tankHeight or 8
     end
-    return cfg.height or def.defaults.height
+    return BV(key, "height")
 end
 
 -- Couleur d'une unité : classe pour les joueurs, réaction pour les PNJ (cf. TopTargetBar.GetUnitColor)
@@ -539,28 +552,520 @@ local function GetClassFillColor(unit, fallback)
     return fallback
 end
 
--- Création d'une barre (appelée une seule fois par key)
+-- Geometrie d'une barre, calculee depuis la config (jamais lue sur la frame, pour ignorer les animations) :
+--   w, h            taille de la barre
+--   n, sizes        nombre de points decoratifs et leurs tailles (avant echelle de la forme), du plus eloigne au plus proche
+--   dotsW           largeur du groupe de points (le decalage dotGap ne change pas le cadre)
+--   totalW, frameH  taille du cadre ; barOffX / barOffY : coin bas gauche de la barre dans le cadre
+-- forceDots : points comptes meme desactives (apercu du GUI, ou ils restent visibles estompes).
+local function Geometry(key, forceDots)
+    local g = { w = BV(key, "width"), h = GetEffectiveHeight(key), sizes = {}, dotsW = 0, n = 0 }
+    if forceDots or BV(key, "showDots") then
+        g.n = math.max(1, math.min(DOT_MAX, math.floor(BV(key, "dotCount") or 3)))
+        local big, ratio, sp = BV(key, "dotSize"), (BV(key, "dotRatio") or 0) / 100, BV(key, "dotSpacing")
+        for i = 1, g.n do
+            local natural = big * DOT_BASES[g.n][i]
+            g.sizes[i] = math.max(1, math.floor(natural + (big - natural) * ratio + 0.5))
+            g.dotsW = g.dotsW + g.sizes[i] + (i > 1 and sp or 0)
+        end
+    end
+    local side = BV(key, "dotSide")
+    g.totalW  = g.w + g.dotsW * (side == "BOTH" and 2 or 1)
+    g.frameH  = math.max(g.n > 0 and g.sizes[g.n] or 0, g.h) + 4
+    g.barOffX = (g.n > 0 and side ~= "RIGHT") and g.dotsW or 0
+    g.barOffY = math.floor((g.frameH - g.h) / 2)   -- entier : la barre tombe sur la grille de pixels
+    return g
+end
+
+-- Barre liee a une autre (disposition "mirror" = symetrie, "parent" = parentee ; jamais a elle-meme) : renvoie la barre
+-- de reference (champ mirrorOf, commun aux deux modes) et le mode, sinon nil.
+local function LinkSource(key)
+    local cfg = Cfg(key)
+    if (cfg.layout == "mirror" or cfg.layout == "parent") and cfg.mirrorOf ~= key and DEF_BY_KEY[cfg.mirrorOf] then
+        return cfg.mirrorOf, cfg.layout
+    end
+end
+local function IsLinked(key) return LinkSource(key) ~= nil end
+
+-- Decalage de la barre dans son cadre : centre horizontal de la barre et bord bas de la barre, par rapport au point
+-- d'ancrage du cadre (centre de son bord bas). Le cadre englobe aussi les points decoratifs : sa taille change avec eux.
+local function BarOffset(g)
+    return -g.totalW / 2 + g.barOffX + g.w / 2, g.barOffY
+end
+
+-- Position (x, y) d'une barre : centre horizontal et bord bas de la BARRE (pas de son cadre : les points decoratifs ne
+-- la deplacent jamais), relatifs au centre de UIParent. La sienne ; en symetrie de sa barre de reference (axe vertical
+-- au centre de l'ecran, bords bas alignes) ; ou parentee (position de la reference + relX / relY). Une chaine de liens
+-- est suivie sur 5 niveaux au plus (boucle A <-> B sans fin sinon).
+local function BarPos(key, depth)
+    depth = depth or 0
+    local src, mode = LinkSource(key)
+    if src and depth < 5 then
+        local sx, sy = BarPos(src, depth + 1)
+        if mode == "parent" then
+            local cfg = Cfg(key)
+            return sx + (cfg.relX or 0), sy + (cfg.relY or 0)
+        end
+        return -sx, sy
+    end
+    local cfg, def = Cfg(key), DEF_BY_KEY[key]
+    return cfg.x or def.defaults.x, cfg.y or def.defaults.y
+end
+UnitBars.BarPos = BarPos
+
+-- Inverse de BarPos en symetrie : position a donner a la barre de reference pour que `key` soit en (x, y)
+local function MirrorSourcePos(key, x, y)
+    return -x, y
+end
+
+-- Positions enregistrees autrefois pour le CADRE (bas, centre) : converties une fois en positions de la barre
+-- (drapeau barAnchorPos), sans deplacer quoi que ce soit a l'ecran.
+local function EnsureBarAnchor()
+    local db = ns.DB and ns.DB.unitBars
+    if not db or db.barAnchorPos or not db.bars then return end
+    db.barAnchorPos = true
+    local off = {}
+    for _, d in ipairs(BAR_DEFS) do off[d.key] = { BarOffset(Geometry(d.key)) } end
+    for _, d in ipairs(BAR_DEFS) do
+        local b, o = db.bars[d.key], off[d.key]
+        if b then
+            b.x = math.floor((b.x or d.defaults.x) + o[1] + 0.5)
+            b.y = math.floor((b.y or d.defaults.y) + o[2] + 0.5)
+            local so = off[b.mirrorOf]
+            if so and (b.relX or b.relY) then
+                b.relX = math.floor((b.relX or 0) + o[1] - so[1] + 0.5)
+                b.relY = math.floor((b.relY or 0) + o[2] - so[2] + 0.5)
+            end
+        end
+    end
+end
+
+-- Place la barre `key` en (x, y) en respectant sa disposition : libre = x / y ; parentee = decalage par rapport a sa
+-- reference ; en symetrie = c'est la reference qui bouge (en miroir), recursivement.
+local function SetBarPos(key, x, y, depth)
+    depth = depth or 0
+    local db = ns.DB and ns.DB.unitBars
+    local bc = db and db.bars and db.bars[key]
+    if not bc then return end
+    local src, mode = LinkSource(key)
+    if src and depth < 5 then
+        if mode == "mirror" then
+            local sx, sy = MirrorSourcePos(key, x, y)
+            return SetBarPos(src, sx, sy, depth + 1)
+        end
+        local sx, sy = BarPos(src)
+        bc.relX, bc.relY = math.floor(x - sx + 0.5), math.floor(y - sy + 0.5)
+        return
+    end
+    bc.x, bc.y = math.floor(x + 0.5), math.floor(y + 0.5)
+end
+
+-- Ancrage des textes : l'element accroche au point `anchor` de la barre se place a l'exterieur (au-dessus pour la
+-- rangee du haut, en dessous pour celle du bas, a cote pour celle du milieu). `h` force son bord horizontal
+-- (justification du nom : "LEFT", "" = centre, "RIGHT") : TOP + LEFT = le nom part du milieu de la barre vers la droite.
+local FLIP = { TOP = "BOTTOM", BOTTOM = "TOP", LEFT = "RIGHT", RIGHT = "LEFT", [""] = "" }
+local function OuterPoint(anchor, h)
+    anchor = anchor or "CENTER"
+    local v  = anchor:match("^TOP") or anchor:match("^BOTTOM") or ""
+    local ah = anchor:match("LEFT$") or anchor:match("RIGHT$") or ""
+    local p
+    if v ~= "" then p = FLIP[v] .. (h or ah) else p = h or FLIP[ah] end
+    return p ~= "" and p or "CENTER"
+end
+
+-- Creation d'une barre (appelée une seule fois par key)
 -- Forward : PositionBarFrame est defini plus bas (avec les fonctions de refresh), mais OnDragStop
 -- doit pouvoir le rappeler pour re-ancrer immediatement dans la convention canonique.
 local PositionBarFrame
 
+-- Elements visuels d'une barre : cadre securise en jeu, simple cadre pour l'apercu du GUI. Tailles, positions et
+-- couleurs sont posees ensuite par LayoutBar.
+local function NewVisual(frame)
+    local lvl = frame:GetFrameLevel()
+
+    -- Fond de la barre (sublevel 1 pour être au-dessus du border)
+    frame.bgTex = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
+
+    -- StatusBar de remplissage HP (doit exister avant absorbTex qui s'ancre sur son fill)
+    local sb = CreateFrame("StatusBar", nil, frame)
+    sb:SetFrameLevel(lvl + 1)
+    sb:SetMinMaxValues(0, 1)
+    sb:SetValue(0)
+    frame.bar = sb
+
+    -- Cadre de rognage : tout ce qui s'ajoute apres le fill HP (soins previsionnels, absorb) y est enferme, donc
+    -- rien ne peut deborder de la barre de vie. Impossible de calculer la place restante en Lua : la vie courante
+    -- est un secret number en combat, on ne peut ni la lire ni la soustraire -- le rognage est la seule voie fiable.
+    local clip = CreateFrame("Frame", nil, frame)
+    clip:SetFrameLevel(lvl + 2)
+    clip:SetPoint("TOPLEFT",     frame.bgTex, "TOPLEFT",     0, 0)
+    clip:SetPoint("BOTTOMRIGHT", frame.bgTex, "BOTTOMRIGHT", 0, 0)
+    if clip.SetClipsChildren then clip:SetClipsChildren(true) end
+    frame.clipFrame = clip
+
+    -- Soins previsionnels : segment ajoute au bord d'arrivee du fill HP, AVANT l'absorb. Meme principe que la barre
+    -- d'absorb : la valeur vient du calculateur et peut etre un secret number, donc elle est passee telle quelle a
+    -- SetValue, jamais lue cote Lua.
+    pcall(function()
+        local healBar = CreateFrame("StatusBar", nil, clip)
+        healBar:SetFrameLevel(clip:GetFrameLevel() + 1)
+        healBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        healBar:EnableMouse(false)  -- ne pas intercepter les clics (SecureUnitButtonTemplate parent)
+        healBar:SetMinMaxValues(0, 1)
+        healBar:SetValue(0)
+        frame.healPredBar = healBar
+    end)
+
+    -- Barre d'absorb : StatusBar ancrée au bord d'arrivee du segment de soins (C-side, secret numbers OK)
+    pcall(function()
+        local absorbBar = CreateFrame("StatusBar", nil, clip)
+        absorbBar:SetFrameLevel(clip:GetFrameLevel() + 2)
+        absorbBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        absorbBar:EnableMouse(false)
+        absorbBar:SetMinMaxValues(0, 1)
+        absorbBar:SetValue(0)
+        frame.absorbBar = absorbBar
+    end)
+
+    -- Filet de bordure (1px noir autour de la barre, sublevel 0 = derrière bgTex)
+    local border = frame:CreateTexture(nil, "BACKGROUND", nil, 0)
+    border:SetPoint("TOPLEFT",     frame.bgTex, "TOPLEFT",     -1,  1)
+    border:SetPoint("BOTTOMRIGHT", frame.bgTex, "BOTTOMRIGHT",  1, -1)
+    frame.border = border
+
+    -- Points decoratifs : crees a la demande (LayoutDots), sur un calque au-dessus de la barre et de ses segments
+    -- (soins, absorb) : la forme la plus proche peut recouvrir le bout de la barre, voulu pour le rendu
+    frame.dots = {}
+    local dotLayer = CreateFrame("Frame", nil, frame)
+    dotLayer:SetAllPoints(frame)
+    dotLayer:SetFrameLevel(lvl + 6)
+    dotLayer:EnableMouse(false)
+    frame.dotLayer = dotLayer
+
+    -- Texte de vie, dans son cadre (fond sombre optionnel)
+    local tbFrame = CreateFrame("Frame", nil, frame)
+    tbFrame:SetFrameLevel(lvl + 2)
+    local tbTex = tbFrame:CreateTexture(nil, "BACKGROUND")
+    tbTex:SetAllPoints(tbFrame)
+    frame.textBG    = tbFrame
+    frame.textBGTex = tbTex
+    local txt = tbFrame:CreateFontString(nil, "OVERLAY")
+    frame.hpTextSlug = ns.CreateSlugRing(tbFrame, txt)
+    -- Police posee sur le texte ET son anneau SLUG avant tout SetText (sinon "Font not set")
+    ns.ApplyTextOutlineStyle(txt, frame.hpTextSlug, DEFAULT_FONT, 8, "OUTLINE")
+    txt:SetAlpha(0.66)
+    txt:SetJustifyH("CENTER")
+    txt:SetTextColor(1, 1, 1, 1)
+    txt:SetPoint("CENTER", tbFrame, "CENTER", 0, 1)
+    txt:SetText("--")
+    frame.hpText = txt
+
+    -- Nom de l'unité, et son ombre (derriere lui, a sa taille)
+    -- Ombre derriere la barre (sous le fond et le filet)
+    frame.nameShadow = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+    frame.nameShadow:Hide()
+    local nameTxt = frame:CreateFontString(nil, "OVERLAY")
+    frame.nameTxtSlug = ns.CreateSlugRing(frame, nameTxt)
+    ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, DEFAULT_FONT, 14, "OUTLINE")
+    nameTxt:SetShadowColor(0, 0, 0, 0.7)
+    nameTxt:SetTextColor(1, 1, 1, 1)
+    nameTxt:SetText("")
+    frame.nameTxt = nameTxt
+    frame._nameEmpty = true
+end
+
+-- Opacite du nom (animations) ; en jeu, l'ombre de la barre la suit (cf. LayoutBar)
+local function SetNameAlpha(frame, a)
+    frame.nameTxt:SetAlpha(a)
+    if frame._shadowBase then frame.nameShadow:SetAlpha(frame._shadowBase * a) end
+end
+
+-- Ombre de la barre, en jeu : seulement quand le nom s'affiche (au survol pour le joueur)
+local function RefreshShadowVis(frame)
+    if frame._shadowBase then frame.nameShadow:SetShown(not frame._nameEmpty) end
+end
+
+-- Soins previsionnels au bord d'arrivee du fill HP ; absorb a leur suite, ou au depart de la barre en miroir
+-- (absorbReversed). Rappele a chaque passage d'UpdateAbsorb : l'option peut changer en direct.
+local function AnchorAbsorb(frame)
+    local fd, abs = frame._fill or FILL_DIRS.LTR, frame.absorbBar
+    if not abs then return end
+    abs:ClearAllPoints()
+    if (ns.GetCfg("unitBars") or {}).absorbReversed then
+        abs:SetPoint(fd.from, frame.bgTex, fd.from, 0, 0)
+    else
+        -- Derriere le segment de soins : sa texture est large de 0 quand aucun soin n'est en vol, donc l'absorb
+        -- reste colle au fill HP dans ce cas.
+        abs:SetPoint(fd.from, (frame.healPredBar or frame.bar):GetStatusBarTexture(), fd.to, 0, 0)
+    end
+end
+
+local function AnchorPrediction(frame)
+    local fd = frame._fill or FILL_DIRS.LTR
+    if frame.healPredBar then
+        frame.healPredBar:ClearAllPoints()
+        frame.healPredBar:SetPoint(fd.from, frame.bar:GetStatusBarTexture(), fd.to, 0, 0)
+    end
+    AnchorAbsorb(frame)
+end
+
+-- Points decoratifs : un groupe par cote choisi (LEFT, RIGHT ou BOTH), du plus eloigne de la barre (rang 1) au plus
+-- proche (rang n). dotGap positif les eloigne de la barre. Forme combinee : la plus proche differe des suivantes.
+-- frame.dots[i] : textures dans l'ordre (groupe de gauche puis de droite) ; frame._dotRank[i] : rang dans son groupe.
+local function LayoutDots(frame, key, g)
+    local name  = BV(key, "dotShape")
+    local combo = DOT_COMBOS[name]
+    local near  = DOT_SHAPES[combo and combo[1] or name] or DOT_SHAPES.circle
+    local far   = DOT_SHAPES[combo and combo[2] or name] or near
+    local side  = BV(key, "dotSide")
+    local gap, sp = BV(key, "dotGap"), BV(key, "dotSpacing")
+    local yc = g.barOffY + g.h / 2   -- centre vertical de la barre
+    local groups = {}
+    if g.n > 0 and side ~= "RIGHT" then groups[#groups + 1] = true end
+    if g.n > 0 and side ~= "LEFT" then groups[#groups + 1] = false end
+    frame._dotN, frame._dotYCenter, frame._dotSizes, frame._dotRank = g.n, yc, {}, {}
+    local idx = 0
+    for _, left in ipairs(groups) do
+        local x = 0
+        for i = 1, g.n do
+            idx = idx + 1
+            local d = frame.dots[idx]
+            if not d then
+                d = (frame.dotLayer or frame):CreateTexture(nil, "OVERLAY")
+                -- Pas de calage sur la grille de pixels : centre exact sur celui de la barre (sinon decale d'1 px)
+                if d.SetSnapToPixelGrid then d:SetSnapToPixelGrid(false); d:SetTexelSnappingBias(0) end
+                frame.dots[idx] = d
+            end
+            local shape = (i == g.n) and near or far
+            local rot = shape.rot or 0
+            if shape.outward then rot = left and math.pi / 2 or -math.pi / 2 end
+            local sz = g.sizes[i]
+            local dx
+            if left then
+                dx = x + sz / 2 - gap
+                x = x + sz + sp
+            else
+                local off = 0
+                for j = i + 1, g.n do off = off + g.sizes[j] + sp end
+                dx = g.barOffX + g.w + gap + off + sz / 2
+            end
+            local shown = sz * (shape.scale or 1)
+            d:SetTexture(shape.tex)
+            d:SetRotation(rot)
+            d:SetSize(shown, shown)
+            d:ClearAllPoints()
+            d:SetPoint("CENTER", frame, "BOTTOMLEFT", dx, yc)
+            d:Show()
+            frame._dotSizes[idx], frame._dotRank[idx] = shown, i
+            frame["dot" .. idx .. "_dx"] = dx
+        end
+    end
+    frame._dotCount = idx
+    for j = idx + 1, #frame.dots do frame.dots[j]:Hide() end
+end
+
+-- Met à jour la couleur de la barre (target = classe, autres = config/Colors)
+local function UpdateBarColor(frame)
+    local def = frame._def
+    local key = def.key
+    local fc  = Cfg(key).fillColor or def.defaults.fillColor
+    local bg  = GetBgColor()
+    local CLR = ns.Modules.Colors
+
+    -- Pour target/targettarget : couleur de classe ; player/pet : Colors si dispo
+    if key == "target" or key == "targettarget" then
+        fc = GetClassFillColor(def.unit, fc)
+    elseif key == "player" and CLR then
+        fc = CLR.Get("playerhealthbar")
+    elseif key == "pet" and CLR then
+        fc = CLR.Get("pethealthbar")
+    end
+
+    -- Couleur des points : peut différer du fill pour player/pet
+    local dc = fc
+    if key == "player" and CLR then
+        dc = CLR.Get("playerdots")
+    elseif key == "pet" and CLR then
+        dc = CLR.Get("petdots")
+    end
+
+    -- Hors couleurs thematiques : couleur des barres unique (remplissage, points, textes) ; le "noir" suit l'arriere plan
+    if not IsThemedColors() then
+        local ubdb = ns.GetCfg("unitBars")
+        local bc = ubdb and ubdb.barColor or fc
+        fc, dc = bc, bc
+    end
+    local dark = GetDarkColor()
+
+    if IsReversed() then
+        -- Mode classique : fond sombre, fill coloré
+        PaintBg(frame.bgTex, bg, key)
+        frame.bar:SetStatusBarColor(fc[1], fc[2], fc[3], fc[4] or 1)
+    else
+        -- Mode inversé (défaut) : fond coloré, fill noir
+        PaintBg(frame.bgTex, fc, key)
+        frame.bar:SetStatusBarColor(dark[1], dark[2], dark[3], dark[4] or 1)
+    end
+
+    -- Points : couleur de la barre, le plus proche d'elle en noir (sauf point unique)
+    local n = frame._dotN or 0
+    for i, d in ipairs(frame.dots) do
+        local c = (n > 1 and frame._dotRank and frame._dotRank[i] == n) and dark or dc
+        -- Alpha de vertex = alpha de la texture : l'estompage de l'apercu (_dotDim) passe donc ici
+        d:SetVertexColor(c[1], c[2], c[3], frame._dotDim or 1)
+    end
+    if frame.border then frame.border:SetColorTexture(dark[1], dark[2], dark[3], dark[4] or 1) end
+    if frame.textBGTex then
+        local hc = BV(key, "hpBgColor") or bg
+        frame.textBGTex:SetVertexColor(hc[1], hc[2], hc[3], hc[4] or 1)
+    end
+    -- Couleur du texte = fill color
+    if frame.hpText then
+        frame.hpText:SetTextColor(fc[1], fc[2], fc[3], 1)
+    end
+    -- Couleur du nom = fill color
+    if frame.nameTxt then
+        frame.nameTxt:SetTextColor(fc[1], fc[2], fc[3], 1)
+    end
+    -- Couleur du glow
+    if frame.glowFrame then
+        frame.glowFrame:SetBackdropBorderColor(fc[1], fc[2], fc[3], 0.9)
+    end
+end
+
+-- Mise en page complete d'une barre (tailles, remplissage, points, textes, couleurs), sans toucher a sa position a
+-- l'ecran. `preview` : apercu du GUI, ou les elements desactives restent visibles, estompes, pour rester survolables.
+local PREVIEW_DIM = 0.2
+local function LayoutBar(frame, preview)
+    local key = frame._def.key
+    local g = Geometry(key, preview)
+    frame:SetSize(g.totalW, g.frameH)
+    frame.bgTex:SetSize(g.w, g.h)
+    frame.bgTex:ClearAllPoints()
+    frame.bgTex:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", g.barOffX, g.barOffY)
+    frame._barOffX, frame._barOffY, frame._barW = g.barOffX, g.barOffY, g.w
+    frame._posDX, frame._posDY = BarOffset(g)
+
+    -- Remplissage : textures et sens
+    local fd = FILL_DIRS[BV(key, "fillDir")] or FILL_DIRS.LTR
+    frame._fill = fd
+    for _, sb in ipairs({ frame.bar, frame.healPredBar or false, frame.absorbBar or false }) do
+        if sb then
+            sb:SetSize(g.w, g.h)
+            sb:SetOrientation(fd.orient)
+            sb:SetReverseFill(fd.rev)
+        end
+    end
+    frame.bar:SetStatusBarTexture(BarTex(key))
+    frame.bar:ClearAllPoints()
+    frame.bar:SetPoint("TOPLEFT", frame.bgTex)
+    AnchorPrediction(frame)
+
+    -- Points decoratifs
+    LayoutDots(frame, key, g)
+    frame._dotDim = preview and not BV(key, "showDots") and PREVIEW_DIM or nil   -- applique par UpdateBarColor
+
+    -- Texte de vie : cadre ancre a la barre, texte centre dedans
+    local hpOn, hpAnchor = BV(key, "hpShow") and true or false, BV(key, "hpAnchor")
+    local tb = frame.textBG
+    tb:SetSize(BV(key, "hpBoxW"), BV(key, "hpBoxH"))
+    tb:ClearAllPoints()
+    tb:SetPoint(OuterPoint(hpAnchor), frame.bgTex, hpAnchor, BV(key, "hpOffX"), BV(key, "hpOffY"))
+    frame.textBGTex:SetTexture(HP_BOX_TEX[BV(key, "hpBgShape")] or HP_BOX_TEX.rect)
+    frame.textBGTex:SetShown(BV(key, "hpBg") and true or false)
+    ns.ApplyTextOutlineStyle(frame.hpText, frame.hpTextSlug, BV(key, "hpFont") or ns.Media.font, BV(key, "hpSize"), BV(key, "hpOutline"))
+    tb:SetShown(hpOn or preview)
+    tb:SetAlpha((hpOn or not preview) and 1 or PREVIEW_DIM)
+
+    -- Nom : point d'ancrage sur la barre + justification (cf. OuterPoint)
+    local nAnchor, just = BV(key, "nameAnchor"), BV(key, "nameJustify") or "LEFT"
+    local nSize = BV(key, "nameSize")
+    ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, BV(key, "nameFont") or DEFAULT_FONT, nSize, BV(key, "nameOutline"))
+    frame.nameTxt:SetJustifyH(just)
+    -- Largeur de boite du nom : au-dela, le nom est coupe ("..."). 0 = libre
+    local boxW = BV(key, "nameBoxW") or 0
+    frame.nameTxt:SetWordWrap(false)
+    frame.nameTxt:SetWidth(boxW > 0 and boxW or 0)
+    for _, fs in ipairs(frame.nameTxtSlug or {}) do fs:SetWordWrap(false) end
+    frame._nameAnchorS = OuterPoint(nAnchor, just == "CENTER" and "" or just)
+    frame._nameAnchorA = nAnchor
+    frame._nameOffX, frame._nameOffY = BV(key, "nameOffX"), BV(key, "nameOffY")
+    frame.nameTxt:ClearAllPoints()
+    frame.nameTxt:SetPoint(frame._nameAnchorS, frame.bgTex, frame._nameAnchorA, frame._nameOffX, frame._nameOffY)
+
+    -- Ombre : derriere la barre, a sa largeur ; hauteur dans les proportions de l'atlas, donc elle deborde de la barre :
+    -- vers le haut, ou vers le bas (tournee de 180 degres) si "Inversee". Ne se montre qu'avec le nom.
+    local sh = frame.nameShadow
+    local shadowOn = BV(key, "nameShadow") and true or false
+    if shadowOn or preview then
+        local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(NAME_SHADOW_ATLAS)
+        local ratio = 0.25
+        if info then
+            sh:SetAtlas(NAME_SHADOW_ATLAS)
+            sh:SetVertexColor(1, 1, 1, 1)
+            if info.width and info.width > 0 then ratio = info.height / info.width end
+        else
+            sh:SetColorTexture(0, 0, 0, 1)
+        end
+        -- Le bord dense de l'atlas (bas de la texture non tournee) est le depart de l'ombre : pose sur le bord de la
+        -- barre (haut par defaut, bas si "Inversee"), l'ombre deborde vers l'exterieur
+        local down = BV(key, "nameShadowFlip") and true or false
+        sh:SetRotation(down and math.pi or 0)
+        sh:ClearAllPoints()
+        local from, to = "BOTTOM", "TOP"
+        if down then from, to = "TOP", "BOTTOM" end
+        -- Centree ; largeur en % de la barre, hauteur en % de la hauteur proportionnelle (atlas non deforme a 100 / 100)
+        local sw = g.w * (BV(key, "nameShadowW") or 100) / 100
+        sh:SetPoint(from, frame.bgTex, to)
+        sh:SetSize(math.max(1, sw), math.max(1, sw * ratio * (BV(key, "nameShadowH") or 100) / 100))
+        local base = BV(key, "nameShadowAlpha") or 0.8
+        if preview then
+            -- Apercu : estompee si elle, ou le nom qui la porte, est desactive
+            local nameOn = BV(key, "showName") or (key == "player" and BV(key, "nameAlways"))
+            frame._shadowBase = nil
+            sh:SetAlpha(base * ((shadowOn and nameOn) and 1 or PREVIEW_DIM))
+            sh:Show()
+        else
+            frame._shadowBase = base
+            sh:SetAlpha(base * frame.nameTxt:GetAlpha())
+            RefreshShadowVis(frame)
+        end
+    else
+        frame._shadowBase = nil
+        sh:Hide()
+    end
+
+    UpdateBarColor(frame)
+end
+
+-- Glisser-deposer : la position est enregistree a chaque image (StoreDragPos), et les autres barres sont replacees en
+-- direct -- celles en symetrie ou parentees suivent la barre tenue, comme si on les deplacait ensemble.
+-- Sauvegarde dans le repere exact de PositionBarFrame (centre horizontal, bord bas, relatifs au centre de UIParent),
+-- sans lire frame:GetPoint(1) : StartMoving re-ancre la frame dans la convention que WoW juge bonne (souvent un coin),
+-- et des offsets lus dans ce repere teleportaient la barre au refresh suivant.
+local dragFrame
+local function StoreDragPos(frame)
+    local cx, bottom = frame:GetCenter(), frame:GetBottom()
+    local ucx, ucy   = UIParent:GetCenter()
+    if cx and bottom and ucx and ucy then
+        SetBarPos(frame._def.key, cx - ucx + (frame._posDX or 0), bottom - ucy + (frame._posDY or 0))
+    end
+end
+local dragDriver = CreateFrame("Frame")
+dragDriver:Hide()
+dragDriver:SetScript("OnUpdate", function()
+    if not dragFrame or InCombatLockdown() then return end
+    StoreDragPos(dragFrame)
+    for _, f in pairs(bars) do
+        if f ~= dragFrame then PositionBarFrame(f) end
+    end
+end)
+
 local function CreateUnitBar(def)
-    local cfg      = Cfg(def.key)
-    local w        = cfg.width or def.defaults.width
-    local h        = GetEffectiveHeight(def, cfg)
-    local bg       = GetBgColor()
-    local dotSizes = GetDotSizes()
-    local dotGap   = GetDotGap()
-
-    -- Largeur du groupe de dots (0 si pas de dots)
-    local dotsW  = (not def.noDots) and
-                   (dotSizes[1] + DOT_SPACING + dotSizes[2] + DOT_SPACING + dotSizes[3]) or 0
-    local totalW = w + dotsW   -- dotGap ne modifie pas la barre, seulement les dots
-
-    -- Frame racine (draggable, taille totale incluant les dots)
-    local frameH = math.max(dotsW > 0 and dotSizes[3] or 0, h) + 4
+    -- Frame racine (draggable, taille totale incluant les points)
     local frame = CreateFrame("Button", "AishCoreUnitBar_" .. def.key, UIParent, "SecureUnitButtonTemplate")
-    frame:SetSize(totalW, frameH)
+    frame._def = def
+    frame.unit = def.unit
     frame:SetFrameStrata("MEDIUM")
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -602,134 +1107,25 @@ local function CreateUnitBar(def)
         if ns.GetCfg("unitBars") and ns.GetCfg("unitBars").locked then return end
         self._dragging = true
         self:StartMoving()
+        dragFrame = self
+        dragDriver:Show()
     end)
     frame:SetScript("OnDragStop", function(self)
         if not self._dragging then return end
         self._dragging = false
         self:StopMovingOrSizing()
-        -- Sauvegarde de la position.
-        -- On NE LIT PLUS frame:GetPoint(1) : StartMoving/StopMovingOrSizing re-ancre la frame dans la
-        -- convention que WoW juge bonne (souvent un coin, relatif a un bord d'ecran), et l'ancien code
-        -- jetait les 3 premiers retours -- donc le point ET le point relatif. Les offsets etaient donc
-        -- enregistres dans un repere inconnu, alors que PositionBarFrame les reapplique toujours en
-        -- BOTTOM de la frame vers CENTER de UIParent. Tant que rien ne repositionnait, l'ancre de WoW
-        -- tenait et tout semblait correct ; au premier ApplyBarSettings (changer la police du nom, par
-        -- exemple) la barre se teleportait. Le verrou n'y changeait rien : il bloque le drag, pas la
-        -- relecture d'une valeur deja corrompue.
-        -- On recalcule donc dans le repere exact de PositionBarFrame, comme le fait deja
-        -- ResourceCircle.SetDraggable : centre horizontal, bord bas, relatifs au centre de UIParent.
-        local db = ns.DB and ns.DB.unitBars
-        if db and db.bars and db.bars[def.key] then
-            local cx        = frame:GetCenter()
-            local bottom    = frame:GetBottom()
-            local ucx, ucy  = UIParent:GetCenter()
-            if cx and bottom and ucx and ucy then
-                -- Valeurs absolues (repere UIParent CENTER) : c'est deja la convention de stockage,
-                -- y compris pour le pet, dont PositionBarFrame soustrait lui-meme la position du joueur.
-                db.bars[def.key].x = math.floor(cx - ucx + 0.5)
-                db.bars[def.key].y = math.floor(bottom - ucy + 0.5)
-            end
-        end
-        -- Re-ancrage immediat dans la convention canonique : sans ca la frame resterait sur l'ancre
-        -- posee par WoW jusqu'au prochain refresh, et on ne verrait le desaccord que plus tard.
-        if PositionBarFrame then PositionBarFrame(frame) end
-        if def.key == "player" then UnitBars.NotifyPlayerBarMoved() end
-
-        -- Report dans les champs X/Y du panneau (registre rempli par UI/SettingsPanel.lua). Sans ca
-        -- les sliders gardaient l'ancienne valeur apres un deplacement a la souris : impossible
-        -- d'affiner au clavier ensuite, le premier ajustement renvoyait la barre a son ancien point.
-        -- pcall : les widgets sont detruits/recrees a chaque reconstruction de la page.
-        local sl = ns._ubPosSliders and ns._ubPosSliders[def.key]
-        local saved = db and db.bars and db.bars[def.key]
-        if sl and saved then
-            if sl.x and saved.x then pcall(sl.x.SetValue, sl.x, saved.x) end
-            if sl.y and saved.y then pcall(sl.y.SetValue, sl.y, saved.y) end
-        end
+        StoreDragPos(self)
+        dragFrame = nil
+        dragDriver:Hide()
+        -- Re-ancrage immediat de toutes les barres (celle-ci comprise) dans la convention canonique
+        for _, f in pairs(bars) do PositionBarFrame(f) end
+        UnitBars.NotifyPlayerBarMoved()
+        -- Report dans les champs X/Y du panneau (UI/UnitBarsPage.lua)
+        if ns.UnitBarsPagePosChanged then pcall(ns.UnitBarsPagePosChanged) end
     end)
 
-    -- Position initiale (ancre bas : grandit vers le haut si hauteur augmente)
-    local x = cfg.x or def.defaults.x
-    local y = cfg.y or def.defaults.y
-    -- Le pet est ancré sur la barre du joueur (pas UIParent) pour rester correct sur tout ratio d'écran
-    if def.key == "pet" and bars.player then
-        local pDef = BAR_DEFS[1].defaults
-        local pCfg = Cfg("player")
-        local px   = pCfg.x or pDef.x
-        local py   = pCfg.y or pDef.y
-        frame:SetPoint("BOTTOM", bars.player, "BOTTOM", x - px, y - py)
-    else
-        frame:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
-    end
+    NewVisual(frame)
 
-    -- Zone de la barre (à droite ou à gauche selon dotsRight)
-    local barOffX = (not def.noDots and def.dotsLeft) and dotsW or 0  -- pas de dotGap ici
-    local barH    = h
-
-    -- Fond de la barre (sublevel 1 pour être au-dessus du border)
-    local bgTex = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
-    bgTex:SetSize(w, barH)
-    bgTex:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", barOffX, (frameH - barH) / 2)
-    frame._barOffX = barOffX
-    frame._barOffY = (frameH - barH) / 2
-    frame.bgTex = bgTex
-
-    -- StatusBar de remplissage HP (doit exister avant absorbTex qui s'ancre sur son fill)
-    local parentLevel = frame:GetFrameLevel()
-    local sb = CreateFrame("StatusBar", nil, frame)
-    sb:SetFrameLevel(parentLevel + 1)
-    sb:SetSize(w, barH)
-    sb:SetPoint("TOPLEFT", bgTex)
-    sb:SetStatusBarTexture(BarTex())
-    sb:SetMinMaxValues(0, 1)
-    sb:SetValue(0)
-    frame.bar = sb
-
-    frame._barW = w
-
-    -- Cadre de rognage : tout ce qui s'ajoute a droite du fill HP (soins previsionnels,
-    -- absorb) y est enferme, donc rien ne peut deborder de la barre de vie. Impossible de
-    -- calculer la place restante en Lua : la vie courante est un secret number en combat,
-    -- on ne peut ni la lire ni la soustraire -- le rognage est la seule voie fiable.
-    local clip = CreateFrame("Frame", nil, frame)
-    clip:SetFrameLevel(parentLevel + 2)
-    clip:SetPoint("TOPLEFT",     bgTex, "TOPLEFT",     0, 0)
-    clip:SetPoint("BOTTOMRIGHT", bgTex, "BOTTOMRIGHT", 0, 0)
-    if clip.SetClipsChildren then clip:SetClipsChildren(true) end
-    frame.clipFrame = clip
-
-    -- Soins previsionnels : segment ajoute au bord droit du fill HP, AVANT l'absorb.
-    -- Meme principe que la barre d'absorb : la valeur vient du calculateur et peut etre un
-    -- secret number, donc elle est passee telle quelle a SetValue, jamais lue cote Lua.
-    pcall(function()
-        local healBar = CreateFrame("StatusBar", nil, clip)
-        healBar:SetFrameLevel(clip:GetFrameLevel() + 1)
-        healBar:SetSize(w, barH)
-        healBar:SetPoint("LEFT", sb:GetStatusBarTexture(), "RIGHT", 0, 0)
-        healBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
-        local _hc = (ns.GetCfg("unitBars") or {}).healPredColor or { 0.15, 0.85, 0.35, 1 }
-        healBar:SetStatusBarColor(_hc[1], _hc[2], _hc[3], _hc[4] or 1)
-        healBar:EnableMouse(false)  -- ne pas intercepter les clics (SecureUnitButtonTemplate parent)
-        healBar:SetMinMaxValues(0, 1)
-        healBar:SetValue(0)
-        frame.healPredBar = healBar
-    end)
-
-    -- Barre d'absorb : StatusBar sans REVERSE_FILL, ancrée au bord droit du fill HP (C-side, secret numbers OK)
-    pcall(function()
-        local absorbBar = CreateFrame("StatusBar", nil, clip)
-        absorbBar:SetFrameLevel(clip:GetFrameLevel() + 2)
-        absorbBar:SetSize(w, barH)
-        -- Derriere le segment de soins : sa texture est large de 0 quand il n'y a aucun
-        -- soin en vol, donc l'absorb reste colle au fill HP dans ce cas.
-        absorbBar:SetPoint("LEFT", (frame.healPredBar or sb):GetStatusBarTexture(), "RIGHT", 0, 0)
-        absorbBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
-        local _ac = (ns.GetCfg("unitBars") or {}).absorbColor or { 0, 1, 0.918, 1 }
-        absorbBar:SetStatusBarColor(_ac[1], _ac[2], _ac[3], _ac[4] or 1)
-        absorbBar:EnableMouse(false)  -- ne pas intercepter les clics (SecureUnitButtonTemplate parent)
-        absorbBar:SetMinMaxValues(0, 1)
-        absorbBar:SetValue(0)
-        frame.absorbBar = absorbBar
-    end)
     -- Calculateur Retail : CreateUnitHealPredictionCalculator retourne hp/absorb/maxHP réguliers
     if CreateUnitHealPredictionCalculator then
         pcall(function()
@@ -749,98 +1145,17 @@ local function CreateUnitBar(def)
         end)
     end
 
-    -- Couleurs initiales (UpdateBarColor appliquera le bon mode)
-    PaintBg(bgTex, bg)
-    do local dk = GetDarkColor(); sb:SetStatusBarColor(dk[1], dk[2], dk[3], dk[4] or 1) end
-
-    -- Filet de bordure (1px noir autour de la barre, sublevel 0 = derrière bgTex)
-    local border = frame:CreateTexture(nil, "BACKGROUND", nil, 0)
-    border:SetPoint("TOPLEFT",     bgTex, "TOPLEFT",     -1,  1)
-    border:SetPoint("BOTTOMRIGHT", bgTex, "BOTTOMRIGHT",  1, -1)
-    do local dk = GetDarkColor(); border:SetColorTexture(dk[1], dk[2], dk[3], dk[4] or 1) end
-    frame.border = border
-
     -- Glow au survol : BackdropTemplate + GlowTex.tga (même technique qu'ElvUI)
     local GLOW_TEX  = "Interface\\AddOns\\AishCore\\Media\\UI\\GlowTex.tga"
     local GLOW_SIZE = 5
-    local fc0 = cfg.fillColor or def.defaults.fillColor
     local glowFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     glowFrame:SetFrameLevel(frame:GetFrameLevel() + 10)
-    glowFrame:SetPoint("TOPLEFT",     bgTex, "TOPLEFT",     -GLOW_SIZE,  GLOW_SIZE)
-    glowFrame:SetPoint("BOTTOMRIGHT", bgTex, "BOTTOMRIGHT",  GLOW_SIZE, -GLOW_SIZE)
+    glowFrame:SetPoint("TOPLEFT",     frame.bgTex, "TOPLEFT",     -GLOW_SIZE,  GLOW_SIZE)
+    glowFrame:SetPoint("BOTTOMRIGHT", frame.bgTex, "BOTTOMRIGHT",  GLOW_SIZE, -GLOW_SIZE)
     glowFrame:SetBackdrop({ edgeFile = GLOW_TEX, edgeSize = GLOW_SIZE })
     glowFrame:SetBackdropColor(0, 0, 0, 0)
-    glowFrame:SetBackdropBorderColor(fc0[1], fc0[2], fc0[3], 0.9)
     glowFrame:SetAlpha(0)
     frame.glowFrame = glowFrame
-
-    -- Trois dots décoratifs (absents pour targettarget)
-    if not def.noDots then
-        local fc_dot     = cfg.fillColor or def.defaults.fillColor
-        local dotColors  = { fc_dot, fc_dot, GetDarkColor() }
-        local dotYCenter = frameH / 2
-
-        for i = 1, 3 do
-            local d  = frame:CreateTexture(nil, "OVERLAY")
-            local sz = dotSizes[i]
-            d:SetSize(sz, sz)
-            local dx
-            if def.dotsLeft then
-                -- dots à gauche : dotGap positif = dots s'éloignent de la barre (vont à gauche)
-                local offset = 0
-                for j = 1, i - 1 do offset = offset + dotSizes[j] + DOT_SPACING end
-                dx = offset + sz / 2 - dotGap
-            else
-                -- dots à droite : dotGap positif = dots s'éloignent de la barre (vont à droite)
-                local totalOff = 0
-                for j = 3, i + 1, -1 do totalOff = totalOff + dotSizes[j] + DOT_SPACING end
-                dx = w + dotGap + totalOff + sz / 2
-            end
-            d:SetPoint("CENTER", frame, "BOTTOMLEFT", dx, dotYCenter)
-            d:SetTexture("Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2.tga")
-            d:SetVertexColor(dotColors[i][1], dotColors[i][2], dotColors[i][3], 1)
-            frame["dot" .. i] = d
-            frame["dot" .. i .. "_dx"] = dx
-        end
-        frame._dotYCenter = dotYCenter
-    end
-
-    -- Texte HP% (player et target uniquement)
-    if def.showText then
-        -- Fond du texte (rectangle sombre 32x17)
-        local tbFrame = CreateFrame("Frame", nil, frame)
-        tbFrame:SetSize(32, 17)
-        tbFrame:SetFrameLevel(frame:GetFrameLevel() + 2)
-        if def.dotsLeft then
-            -- player : côté droit (vers le centre écran) + 1px inward
-            tbFrame:SetPoint("BOTTOMRIGHT", bgTex, "TOPRIGHT", 1, 0)
-        else
-            -- target : côté gauche (vers le centre écran) + 1px inward
-            tbFrame:SetPoint("BOTTOMLEFT", bgTex, "TOPLEFT", -1, 0)
-        end
-        local tbTex = tbFrame:CreateTexture(nil, "BACKGROUND")
-        tbTex:SetAllPoints(tbFrame)
-        tbTex:SetColorTexture(bg[1], bg[2], bg[3], bg[4] or 1)
-        frame.textBG    = tbFrame
-        frame.textBGTex = tbTex
-
-        -- Texte HP%
-        local txt = tbFrame:CreateFontString(nil, "OVERLAY")
-        local ubCfg   = ns.GetCfg("unitBars")
-        local txtSize = (ubCfg and ubCfg.textSize) or 8
-        frame.hpTextSlug = ns.CreateSlugRing(tbFrame, txt)
-        ns.ApplyTextOutlineStyle(txt, frame.hpTextSlug, ns.Media.font, txtSize, ubCfg and ubCfg.hpOutlineStyle)
-        txt:SetAlpha(0.66)
-        txt:SetJustifyH("CENTER")
-        txt:SetTextColor(1, 1, 1, 1)
-        txt:SetPoint("CENTER", tbFrame, "CENTER", 0, 1)
-        txt:SetText("--")
-        frame.hpText = txt
-    end
-
-    frame._def    = def
-    frame._dotsW  = dotsW
-    frame.unit    = def.unit
 
     -- Survol : fade in/out de la lueur (HookScript pour ne pas écraser le template)
     frame:HookScript("OnEnter", function(self)
@@ -850,47 +1165,25 @@ local function CreateUnitBar(def)
         UIFrameFadeOut(self.glowFrame, 0.2, self.glowFrame:GetAlpha(), 0)
     end)
 
-    -- Texte de nom d'unité (target, focus, pet, targettarget)
-    if def.showName or def.key == "player" then
-        if def.key == "player" then EnsurePlayerNameOffset() end
-        local db      = ns.GetCfg("unitBars")
-        local cfg2    = Cfg(def.key)
-        local nSize   = (db and db.nameSize)     or 14
-        local nOffX   = (cfg2 and cfg2.nameOffX) or 0
-        local nOffY   = (cfg2 and cfg2.nameOffY) or 2
-        local justify = def.nameJustify or "LEFT"
-        local anchorS = (justify == "LEFT") and "BOTTOMLEFT"  or "BOTTOMRIGHT" -- bas du texte
-        local anchorA = (justify == "LEFT") and "TOPLEFT"     or "TOPRIGHT"    -- haut de bgTex
-
-        local nameTxt = frame:CreateFontString(nil, "OVERLAY")
-        frame.nameTxtSlug = ns.CreateSlugRing(frame, nameTxt)
-        ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, DEFAULT_FONT, nSize, db and db.nameOutlineStyle)
-        nameTxt:SetJustifyH(justify)
-        nameTxt:SetShadowColor(0, 0, 0, 0.7)
-        nameTxt:SetTextColor(1, 1, 1, 1)
-        nameTxt:SetPoint(anchorS, bgTex, anchorA, nOffX, nOffY)
-        nameTxt:SetText("")
-        frame.nameTxt = nameTxt
-        -- Forever : icone de satisfaction du familier (chasseur), a gauche du nom (cf. UpdatePetHappiness)
-        if ns.IsForever and def.key == "pet" then
-            local ic = frame:CreateTexture(nil, "OVERLAY")
-            ic:SetPoint("RIGHT", nameTxt, "LEFT", -3, 2)
-            ic:Hide()
-            frame.happyIcon = ic
-        end
-        frame._nameAnchorS, frame._nameAnchorA = anchorS, anchorA
-        frame._nameOffX, frame._nameOffY = nOffX, nOffY
+    if def.key == "player" then EnsurePlayerNameOffset() end
+    -- Forever : icone de satisfaction du familier (chasseur), a gauche du nom (cf. UpdatePetHappiness)
+    if ns.IsForever and def.key == "pet" then
+        local ic = frame:CreateTexture(nil, "OVERLAY")
+        ic:SetPoint("RIGHT", frame.nameTxt, "LEFT", -3, 2)
+        ic:Hide()
+        frame.happyIcon = ic
     end
 
+    LayoutBar(frame)
+    PositionBarFrame(frame, 0)
     return frame
 end
 
--- Helper : mise à jour du texte HP selon le mode (pct ou value)
+-- Helper : mise à jour du texte HP selon le mode de la barre (pct ou value)
 local function SetHPText(hpTextWidget, unit, barKey)
-    local db   = ns.GetCfg("unitBars")
-    local mode = (db and db.hpDisplayMode) or "pct"
+    local mode = BV(barKey, "hpMode") or "pct"
     -- "Valeur au survol" : la barre sous le curseur passe en valeur brute, quel que soit le mode.
-    if barKey and db and db.hpHoverValue and ubHovered[barKey] then mode = "value" end
+    if BV(barKey, "hpHoverValue") and ubHovered[barKey] then mode = "value" end
     if mode == "value" then
         -- AbbreviateNumbers est C-side, accepte les secret numbers
         local ok, txt = pcall(function()
@@ -918,8 +1211,7 @@ local function UpdateBarHealth(frame)
         frame.bar:SetMinMaxValues(0, 100)
         ns.SmoothBarValue(frame.bar, 75)
         if frame.hpText then
-            local _mode = (ns.GetCfg("unitBars") or {}).hpDisplayMode or "pct"
-            frame.hpText:SetText(_mode == "value" and "75K" or "75")
+            frame.hpText:SetText(BV("player", "hpMode") == "value" and "75K" or "75")
         end
         return
     end
@@ -949,17 +1241,14 @@ local function UpdateBarHealth(frame)
 end
 
 -- Mise à jour absorb (commune à toutes les barres, y compris target).
--- Volontairement SANS ns.SmoothSetValue : l'absorb est ancre au bord droit du fill HP et
+-- Volontairement SANS ns.SmoothSetValue : l'absorb est ancre au bord du fill HP et
 -- se repositionne a chaque passage -- une valeur interpolee le ferait flotter a cote.
 local function UpdateAbsorb(frame)
     if not frame.hpCalc or not frame.absorbBar then return end
-    local db2  = ns.GetCfg("unitBars")
-    local show = db2 == nil or db2.showAbsorb ~= false
-    if not show then frame.absorbBar:SetValue(0); return end
+    local cfg2 = ns.GetCfg("unitBars") or {}
+    if cfg2.showAbsorb == false then frame.absorbBar:SetValue(0); return end
     -- UnitGetTotalAbsorbs retourne un secret number, passé directement à SetValue (C-side)
-    local cfg2     = ns.GetCfg("unitBars") or {}
-    local reversed = cfg2.absorbReversed or false
-    local ac       = cfg2.absorbColor or { 0, 1, 0.918, 1 }
+    local ac = cfg2.absorbColor or { 0, 1, 0.918, 1 }
     pcall(function()
         local fn = UnitAbsorb or UnitGetTotalAbsorbs
         local absorb = 0
@@ -967,17 +1256,11 @@ local function UpdateAbsorb(frame)
             local ok, v = pcall(fn, frame._def.unit)
             if ok then absorb = v end
         end
-        -- Repositionnement selon sens choisi (ClearAllPoints car peut changer en live)
-        frame.absorbBar:ClearAllPoints()
-        if reversed then
-            -- Miroir : ancré à GAUCHE de bgTex, se superpose au fill HP depuis la gauche
-            frame.absorbBar:SetPoint("LEFT", frame.bgTex, "LEFT", 0, 0)
-            local maxHP = UnitHealthMax(frame._def.unit) or 1  -- valeur régulière
-            frame.absorbBar:SetMinMaxValues(0, maxHP)
+        AnchorAbsorb(frame)
+        if cfg2.absorbReversed then
+            -- Miroir : se superpose au fill HP depuis le depart de la barre
+            frame.absorbBar:SetMinMaxValues(0, UnitHealthMax(frame._def.unit) or 1)  -- valeur régulière
         else
-            -- Défaut : ancré au bord droit du segment de soins (donc du fill HP quand
-            -- aucun soin n'est en vol -- la texture fait alors 0 de large)
-            frame.absorbBar:SetPoint("LEFT", (frame.healPredBar or frame.bar):GetStatusBarTexture(), "RIGHT", 0, 0)
             frame.absorbBar:SetMinMaxValues(0, frame.hpCalc:GetMaximumHealth())
         end
         frame.absorbBar:SetValue(absorb)
@@ -986,7 +1269,7 @@ local function UpdateAbsorb(frame)
 end
 
 -- Soins previsionnels. Comme UpdateAbsorb : pas de lissage (le segment est ancre au bord
--- droit du fill HP et se repositionne a chaque passage), et aucune valeur n'est lue cote
+-- du fill HP et se repositionne a chaque passage), et aucune valeur n'est lue cote
 -- Lua -- GetIncomingHeals peut renvoyer un secret number en combat.
 local function UpdateHealPrediction(frame)
     if not frame.hpCalc or not frame.healPredBar then return end
@@ -1002,73 +1285,6 @@ local function UpdateHealPrediction(frame)
         frame.healPredBar:SetValue(allHeal)
         frame.healPredBar:SetStatusBarColor(hc[1], hc[2], hc[3], hc[4] or 1)
     end)
-end
-
--- Met à jour la couleur de la barre (target = classe, autres = config/Colors)
-local function UpdateBarColor(frame)
-    local def = frame._def
-    local cfg = Cfg(def.key)
-    local fc  = cfg.fillColor or def.defaults.fillColor
-    local bg  = GetBgColor()
-    local CLR = ns.Modules.Colors
-
-    -- Pour target/targettarget : couleur de classe ; player/pet : Colors si dispo
-    if def.key == "target" or def.key == "targettarget" then
-        fc = GetClassFillColor(def.unit, fc)
-    elseif def.key == "player" and CLR then
-        fc = CLR.Get("playerhealthbar")
-    elseif def.key == "pet" and CLR then
-        fc = CLR.Get("pethealthbar")
-    end
-
-    -- Couleur des dots : peut différer du fill pour player/pet
-    local dc = fc
-    if def.key == "player" and CLR then
-        dc = CLR.Get("playerdots")
-    elseif def.key == "pet" and CLR then
-        dc = CLR.Get("petdots")
-    end
-
-    -- Hors couleurs thematiques : couleur des barres unique (remplissage, dots, textes) ; le "noir" suit l'arriere plan
-    if not IsThemedColors() then
-        local ubdb = ns.GetCfg("unitBars")
-        local bc = ubdb and ubdb.barColor or fc
-        fc, dc = bc, bc
-    end
-    local dark = GetDarkColor()
-
-    if IsReversed() then
-        -- Mode classique : fond sombre, fill coloré
-        PaintBg(frame.bgTex, bg)
-        frame.bar:SetStatusBarColor(fc[1], fc[2], fc[3], fc[4] or 1)
-    else
-        -- Mode inversé (défaut) : fond coloré, fill noir
-        PaintBg(frame.bgTex, fc)
-        frame.bar:SetStatusBarColor(dark[1], dark[2], dark[3], dark[4] or 1)
-    end
-
-    -- Couleur des petits dots (1 et 2) = dc, dot 3 reste noir
-    if not def.noDots then
-        for i = 1, 2 do
-            if frame["dot" .. i] then
-                frame["dot" .. i]:SetVertexColor(dc[1], dc[2], dc[3], 1)
-            end
-        end
-        if frame.dot3 then frame.dot3:SetVertexColor(dark[1], dark[2], dark[3], 1) end
-    end
-    if frame.border then frame.border:SetColorTexture(dark[1], dark[2], dark[3], dark[4] or 1) end
-    -- Couleur du texte = fill color
-    if frame.hpText then
-        frame.hpText:SetTextColor(fc[1], fc[2], fc[3], 1)
-    end
-    -- Couleur du nom = fill color
-    if frame.nameTxt then
-        frame.nameTxt:SetTextColor(fc[1], fc[2], fc[3], 1)
-    end
-    -- Couleur du glow
-    if frame.glowFrame then
-        frame.glowFrame:SetBackdropBorderColor(fc[1], fc[2], fc[3], 0.9)
-    end
 end
 
 -- Forever : satisfaction du familier du chasseur (C_PetInfo.GetPetHappiness : 1 = mecontent, 2 = content, 3 = heureux).
@@ -1091,7 +1307,7 @@ local function UpdatePetHappiness(frame)
     end
     local color = level and HAPPINESS_COLOR[level]
     if not color then ic:Hide(); return end
-    local size = ((ns.GetCfg("unitBars") or {}).nameSize or 14) + 4
+    local size = (BV("pet", "nameSize") or 14) + 4
     ic:SetSize(size, size)
     if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(HAPPINESS_ICON) then
         ic:SetAtlas(HAPPINESS_ICON)
@@ -1103,8 +1319,8 @@ local function UpdatePetHappiness(frame)
     ic:Show()
 end
 
--- Niveau devant le nom de la barre de cible, comme la Top Target Bar ("7 • Nom", niveau colore selon la difficulte du mob)
-local function SetTargetNameWithLevel(frame, rawName, preview)
+-- Niveau devant le nom, comme la Top Target Bar ("7 • Nom", niveau colore selon la difficulte du mob)
+local function SetNameWithLevel(frame, unit, rawName, preview)
     local TTB = ns.Modules and ns.Modules.TopTargetBar
     if not (TTB and TTB.GetLevelColor and TTB.GetLevelPrefix) then return false end
     local ok = pcall(function()
@@ -1112,7 +1328,7 @@ local function SetTargetNameWithLevel(frame, rawName, preview)
         if preview then
             lc, pfx = { 1.000, 0.000, 0.133 }, "90 \226\128\162 "
         else
-            lc, pfx = TTB.GetLevelColor("target"), TTB.GetLevelPrefix("target")
+            lc, pfx = TTB.GetLevelColor(unit), TTB.GetLevelPrefix(unit)
         end
         -- string.format %s : seul moyen de composer avec une chaine secrete (concatener echoue)
         frame.nameTxt:SetText(string.format("|cff%02x%02x%02x%s|r%s",
@@ -1123,61 +1339,68 @@ local function SetTargetNameWithLevel(frame, rawName, preview)
     return ok
 end
 
+-- Nom affiche quand l'unite n'existe pas (apercu)
+local PREVIEW_NAMES = {
+    target       = "UNITBARS_PREVIEW_TARGET",
+    targettarget = "UNITBARS_PREVIEW_TARGETTARGET",
+    focus        = "UNITBARS_PREVIEW_FOCUS",
+    pet          = "UNITBARS_PREVIEW_PET",
+}
+
 -- Mise à jour du nom d'unité
 local function UpdateBarName(frame)
     if not frame.nameTxt then return end
     UpdatePetHappiness(frame)
-    local unit = frame.unit
-    -- Barre du joueur : le nom n'apparait qu'au survol, hors combat (ticker plus bas)
-    if frame._def.key == "player" then
-        local shown = playerNameShown and UnitExists(unit)
+    local unit, key = frame.unit, frame._def.key
+    local empty = true
+    if key == "player" then
+        -- Barre du joueur : nom au survol, hors combat (ticker plus bas), ou en permanence (nameAlways)
         local rawName
-        if shown then
+        if (playerNameShown or BV("player", "nameAlways")) and UnitExists(unit) then
             -- Forever : le nom de famille est porte par la partie "royaume" du nom complet (Prenom-Famille)
             local nm, fam = UnitFullName(unit)
             rawName = nm or UnitName(unit)
             if ns.IsForever and rawName and fam and fam ~= "" then rawName = rawName .. " " .. fam end
         end
         frame.nameTxt:SetText(rawName or "")
-        return
-    end
-    local withLevel = frame._def.key == "target" and (ns.GetCfg("unitBars") or {}).showTargetLevel == true
-    if UnitExists(unit) then
-        if withLevel and SetTargetNameWithLevel(frame, (UnitName(unit))) then return end   -- parentheses : UnitName renvoie aussi le "royaume" (nom de famille sur Forever), qui serait pris pour l'argument `preview`
-        -- Détainter UnitName (secret string en instance/raid) via concaténation avant SetText
-        local rawName = UnitName(unit)
-        frame.nameTxt:SetText((rawName and ("" .. rawName)) or "")
-    elseif ubPreviewMode and (unit == "target" or unit == "targettarget" or unit == "focus" or unit == "pet") then
-        -- Preview : nom spécifique au module quand l'unité n'existe pas
-        local PREVIEW_NAMES = {
-            target       = L["UNITBARS_PREVIEW_TARGET"],
-            targettarget = L["UNITBARS_PREVIEW_TARGETTARGET"],
-            focus        = L["UNITBARS_PREVIEW_FOCUS"],
-            pet          = L["UNITBARS_PREVIEW_PET"],
-        }
-        if withLevel and SetTargetNameWithLevel(frame, PREVIEW_NAMES[unit] or (unit .. " Name"), true) then return end
-        frame.nameTxt:SetText(PREVIEW_NAMES[unit] or (unit .. " Name"))
-    else
+        empty = not rawName
+    elseif not BV(key, "showName") then
         frame.nameTxt:SetText("")
+    else
+        local withLevel = BV(key, "showLevel")
+        if UnitExists(unit) then
+            empty = false
+            -- parentheses : UnitName renvoie aussi le "royaume" (nom de famille sur Forever), qui serait pris pour
+            -- l'argument `preview`
+            if not (withLevel and SetNameWithLevel(frame, unit, (UnitName(unit)))) then
+                -- Détainter UnitName (secret string en instance/raid) via concaténation avant SetText
+                local rawName = UnitName(unit)
+                frame.nameTxt:SetText((rawName and ("" .. rawName)) or "")
+            end
+        elseif ubPreviewMode and PREVIEW_NAMES[key] then
+            -- Preview : nom spécifique au module quand l'unité n'existe pas
+            empty = false
+            local nm = L[PREVIEW_NAMES[key]]
+            if not (withLevel and SetNameWithLevel(frame, unit, nm, true)) then frame.nameTxt:SetText(nm) end
+        else
+            frame.nameTxt:SetText("")
+        end
     end
+    frame._nameEmpty = empty
+    RefreshShadowVis(frame)
 end
 
--- Repositionne frame selon cfg.x/y, avec decalage horizontal optionnel (extraX, pour l'anim slide-in/out)
+-- Repositionne frame selon sa position (BarPos), avec decalage horizontal optionnel (extraX, pour l'anim slide-in/out)
 function PositionBarFrame(frame, extraX)
-    local def = frame._def
-    local cfg = Cfg(def.key)
-    local x   = (cfg.x or def.defaults.x) + (extraX or 0)
-    local y   = cfg.y or def.defaults.y
+    local key = frame._def.key
+    local x, y = BarPos(key)
+    -- Position de la barre -> point d'ancrage du cadre (decalage pose par LayoutBar)
+    x = x + (extraX or 0) - (frame._posDX or 0)
+    y = y - (frame._posDY or 0)
     frame:ClearAllPoints()
-    if def.key == "pet" and bars.player then
-        local pDef = BAR_DEFS[1].defaults
-        local pCfg = Cfg("player")
-        local px   = pCfg.x or pDef.x
-        local py   = pCfg.y or pDef.y
-        frame:SetPoint("BOTTOM", bars.player, "BOTTOM", x - px, y - py)
-    else
-        frame:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
-    end
+    -- Toutes les barres sur UIParent : le familier, autrefois ancre sur la barre du joueur, en suivait le glissement
+    -- d'apparition et sautait avec elle. Une barre parentee a une autre suit sa position, pas ses animations.
+    frame:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
 end
 
 -- Application des settings sur un bar déjà créé (ApplySettings)
@@ -1189,149 +1412,22 @@ local function ApplyBarSettings(frame)
     end
 
     local def = frame._def
-    local cfg = Cfg(def.key)
     local db2 = ns.GetCfg("unitBars")
 
     -- Activation / desactivation (global OU par barre)
-    if (db2 and db2.enabled == false) or cfg.enabled == false then
+    if (db2 and db2.enabled == false) or Cfg(def.key).enabled == false then
         ubLastVisState[def.key] = nil
+        ApplyHitPad(frame, 0)   -- coupe aussi la souris
         UnitBars.UpdateAllVisibility()
         return
     end
 
-    local w  = cfg.width or def.defaults.width
-    local h  = GetEffectiveHeight(def, cfg)
-
-    local dotSizes = GetDotSizes()
-    local dotGap   = GetDotGap()
-    local showDots = db2 == nil or db2.showDots ~= false
-    local dotsW    = (not def.noDots) and showDots and
-                     (dotSizes[1] + DOT_SPACING + dotSizes[2] + DOT_SPACING + dotSizes[3]) or 0
-    local totalW   = w + dotsW   -- dotGap ne modifie pas la barre
-    local frameH   = math.max(dotsW > 0 and dotSizes[3] or 0, h) + 4
-    frame:SetSize(totalW, frameH)
+    LayoutBar(frame)
 
     -- Tolerance de survol : le pad de clic deborde la barre de `tol` px sur les quatre cotes,
     -- sans toucher a sa geometrie visible. Nos barres font quelques pixels de haut : sans ca
     -- elles sont penibles a viser.
     ApplyHitPad(frame, ConfiguredHoverTol())
-
-    -- Repositionner la barre dans le frame
-    local barOffX = (not def.noDots and def.dotsLeft) and dotsW or 0  -- pas de dotGap ici
-    frame.bgTex:SetSize(w, h)
-    frame.bgTex:ClearAllPoints()
-    frame.bgTex:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", barOffX, (frameH - h) / 2)
-    frame._barOffX = barOffX
-    frame._barOffY = (frameH - h) / 2
-    frame.bar:SetSize(w, h)
-    frame.bar:SetStatusBarTexture(BarTex())
-    frame.bar:ClearAllPoints()
-    frame.bar:SetPoint("TOPLEFT", frame.bgTex)
-    frame._barW = w
-    if frame.healPredBar then
-        pcall(function()
-            frame.healPredBar:SetSize(w, h)
-            frame.healPredBar:ClearAllPoints()
-            frame.healPredBar:SetPoint("LEFT", frame.bar:GetStatusBarTexture(), "RIGHT", 0, 0)
-        end)
-    end
-    if frame.absorbBar then
-        pcall(function()
-            frame.absorbBar:SetSize(w, h)
-            frame.absorbBar:ClearAllPoints()
-            frame.absorbBar:SetPoint("LEFT", (frame.healPredBar or frame.bar):GetStatusBarTexture(), "RIGHT", 0, 0)
-        end)
-    end
-
-    -- Couleurs via UpdateBarColor (gère reversed)
-    UpdateBarColor(frame)
-
-    -- Repositionner les dots (si présents)
-    if not def.noDots then
-        -- Masquer ou afficher les dots selon la préférence
-        for i = 1, 3 do
-            local d = frame["dot" .. i]
-            if d then d:SetShown(showDots) end
-        end
-        if showDots then
-            local CLR2    = ns.Modules.Colors
-            local fc_dot  = cfg.fillColor or def.defaults.fillColor
-            if def.key == "target" or def.key == "targettarget" then
-                fc_dot = GetClassFillColor(def.unit, fc_dot)
-            elseif def.key == "player" and CLR2 then
-                fc_dot = CLR2.Get("playerdots")
-            elseif def.key == "pet" and CLR2 then
-                fc_dot = CLR2.Get("petdots")
-            end
-            local dotColors  = { fc_dot, fc_dot, GetDarkColor() }
-            local dotYCenter = frameH / 2
-            for i = 1, 3 do
-                local d  = frame["dot" .. i]
-                if d then
-                    local sz = dotSizes[i]
-                    d:SetSize(sz, sz)
-                    local dx
-                    if def.dotsLeft then
-                        -- dots à gauche : dotGap positif = s'éloignent de la barre (vers la gauche)
-                        local offset = 0
-                        for j = 1, i - 1 do offset = offset + dotSizes[j] + DOT_SPACING end
-                        dx = offset + sz / 2 - dotGap
-                    else
-                        -- dots à droite : dotGap positif = s'éloignent de la barre (vers la droite)
-                        local totalOff = 0
-                        for j = 3, i + 1, -1 do totalOff = totalOff + dotSizes[j] + DOT_SPACING end
-                        dx = w + dotGap + totalOff + sz / 2
-                    end
-                    d:SetPoint("CENTER", frame, "BOTTOMLEFT", dx, dotYCenter)
-                    d:SetVertexColor(dotColors[i][1], dotColors[i][2], dotColors[i][3], 1)
-                    frame["dot" .. i .. "_dx"] = dx
-                end
-            end
-            frame._dotYCenter = dotYCenter
-        end
-    end
-
-    -- Repositionner le fond de texte si présent + mise à jour taille police
-    if frame.textBG then
-        local bgc = GetBgColor()
-        frame.textBG:ClearAllPoints()
-        if def.dotsLeft then
-            frame.textBG:SetPoint("BOTTOMRIGHT", frame.bgTex, "TOPRIGHT", 1, 0)
-        else
-            frame.textBG:SetPoint("BOTTOMLEFT", frame.bgTex, "TOPLEFT", -1, 0)
-        end
-        frame.textBGTex:SetColorTexture(bgc[1], bgc[2], bgc[3], bgc[4] or 1)
-        if frame.hpText then
-            local ubCfg   = ns.GetCfg("unitBars")
-            local txtSize = (ubCfg and ubCfg.textSize) or 8
-            ns.ApplyTextOutlineStyle(frame.hpText, frame.hpTextSlug, (ubCfg and ubCfg.font) or ns.Media.font, txtSize, ubCfg and ubCfg.hpOutlineStyle)
-        end
-    end
-
-    -- Repositionner le texte de nom si présent
-    if frame.nameTxt then
-        local ubCfg  = ns.GetCfg("unitBars")
-        local cfg2   = Cfg(def.key)
-        local nSize  = (ubCfg and ubCfg.nameSize)   or 14
-        local nOffX  = (cfg2  and cfg2.nameOffX)    or 0
-        local nOffY  = (cfg2  and cfg2.nameOffY)    or 2
-        local justify_n = def.nameJustify or "LEFT"
-        local anchorS = (justify_n == "LEFT") and "BOTTOMLEFT"  or "BOTTOMRIGHT"
-        local anchorA = (justify_n == "LEFT") and "TOPLEFT"     or "TOPRIGHT"
-        ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, (ubCfg and ubCfg.nameFont) or DEFAULT_FONT, nSize, ubCfg and ubCfg.nameOutlineStyle)
-        frame.nameTxt:SetJustifyH(justify_n)
-        frame.nameTxt:ClearAllPoints()
-        frame.nameTxt:SetPoint(anchorS, frame.bgTex, anchorA, nOffX, nOffY)
-        frame._nameAnchorS, frame._nameAnchorA = anchorS, anchorA
-        frame._nameOffX, frame._nameOffY = nOffX, nOffY
-    end
-
-    -- Repositionner la lueur
-    if frame.glowFrame then
-        frame.glowFrame:ClearAllPoints()
-        frame.glowFrame:SetPoint("TOPLEFT",     frame.bgTex, "TOPLEFT",     -5,  5)
-        frame.glowFrame:SetPoint("BOTTOMRIGHT", frame.bgTex, "BOTTOMRIGHT",  5, -5)
-    end
 
     -- Position frame (ancre bas)
     PositionBarFrame(frame, 0)
@@ -1342,6 +1438,48 @@ local function ApplyBarSettings(frame)
     UpdateBarHealth(frame)
     UpdateBarName(frame)
 end
+
+--- Apercu du GUI : simple cadre portant les memes elements qu'une barre en jeu (cf. UnitBars.StylePreview).
+function UnitBars.CreatePreview(parent)
+    local f = CreateFrame("Frame", nil, parent)
+    NewVisual(f)
+    return f
+end
+
+--- Rendu de la barre `key` dans un apercu, avec des valeurs fictives (vie a 70 %, soins et bouclier s'ils sont
+--- actives). Les elements desactives restent visibles, estompes (PREVIEW_DIM).
+function UnitBars.StylePreview(f, key)
+    local def = DEF_BY_KEY[key]
+    if not def then return end
+    f._def, f.unit = def, def.unit
+    LayoutBar(f, true)
+    local db = ns.GetCfg("unitBars") or {}
+    f.bar:SetMinMaxValues(0, 100)
+    f.bar:SetValue(70)
+    if f.healPredBar then
+        local c = db.healPredColor or { 0.15, 0.85, 0.35, 1 }
+        f.healPredBar:SetMinMaxValues(0, 100)
+        f.healPredBar:SetValue(db.showHealPrediction ~= false and 12 or 0)
+        f.healPredBar:SetStatusBarColor(c[1], c[2], c[3], c[4] or 1)
+    end
+    if f.absorbBar then
+        local c = db.absorbColor or { 0, 1, 0.918, 1 }
+        f.absorbBar:SetMinMaxValues(0, 100)
+        f.absorbBar:SetValue(db.showAbsorb ~= false and 10 or 0)
+        f.absorbBar:SetStatusBarColor(c[1], c[2], c[3], c[4] or 1)
+    end
+    f.hpText:SetText(BV(key, "hpMode") == "value" and "70K" or "70")
+    local name = (key == "player") and UnitName("player") or L[PREVIEW_NAMES[key]]
+    if not (key ~= "player" and BV(key, "showLevel") and SetNameWithLevel(f, def.unit, name, true)) then
+        f.nameTxt:SetText(name or "")
+    end
+    f._nameEmpty = false
+    local nameOn = BV(key, "showName") or (key == "player" and BV(key, "nameAlways"))
+    SetNameAlpha(f, nameOn and 1 or PREVIEW_DIM)
+end
+
+UnitBars.IsLinked = IsLinked
+
 
 -- Animation de visibilité (fade + slide in/out) — remplace les StateDrivers
 -- Sens du glissement par barre : +1 = arrive en venant de la droite, -1 = de la gauche (croisement voulu avec joueur/pet)
@@ -1369,13 +1507,14 @@ local function EaseOut(p)
     return 1 - (1 - p)^5
 end
 
--- Delais d'entree (cascade bar+dot3 -> dot2 -> dot1 -> nom), en multiples de DOT_STAGGER
-local ENTER_DELAY_DOT = { [3] = 0, [2] = 1, [1] = 2 }
+-- Delais d'entree (cascade barre + point le plus proche -> ... -> point le plus eloigne -> nom), en multiples de
+-- DOT_STAGGER ; sortie : LIFO exact (nom en premier, barre + point le plus proche en dernier). Les points s'etalent sur
+-- 2 pas quel que soit leur nombre (pour 3 : entree 2 / 1 / 0, sortie 1 / 2 / 3).
 local ENTER_DELAY_NAME = 3
--- Delais de sortie : LIFO exact de la cascade d'entree (nom part en premier, bar+dot3 en dernier)
-local LEAVE_DELAY_DOT = { [1] = 1, [2] = 2, [3] = 3 }
 local LEAVE_DELAY_NAME = 0
 local LEAVE_DELAY_BAR = 3
+local function DotEnterSteps(i, n) return n > 1 and (n - i) * 2 / (n - 1) or 0 end
+local function DotLeaveSteps(i, n) return n > 1 and 1 + (i - 1) * 2 / (n - 1) or LEAVE_DELAY_BAR end
 -- Duree totale d'un cycle (dernier element demarre a 3*stagger + sa propre fade_duration)
 local TOTAL_STAGGER_STEPS = 3
 local TOTAL_DURATION     = FADE_DURATION + TOTAL_STAGGER_STEPS * DOT_STAGGER
@@ -1400,7 +1539,7 @@ end
 
 -- Remet un dot a son etat de repos (taille finale, decalage nul), utilise en fin/debut de cycle d'anim
 local function ResetDotToRest(frame, i, dotSizes)
-    local d = frame["dot" .. i]
+    local d = frame.dots[i]
     if not d then return end
     local dx = frame["dot" .. i .. "_dx"]
     if dx and frame._dotYCenter then
@@ -1417,7 +1556,7 @@ local function ResetNameToRest(frame)
     if not n or not frame._nameAnchorS then return end
     n:ClearAllPoints()
     n:SetPoint(frame._nameAnchorS, frame.bgTex, frame._nameAnchorA, frame._nameOffX, frame._nameOffY)
-    n:SetAlpha(1)
+    SetNameAlpha(frame, 1)
 end
 
 -- Anim mise en file (jamais interrompue) : la derniere direction demandee rejoue en fin de cycle
@@ -1436,7 +1575,10 @@ local function AnimateBar(frame, shouldShow)
 
     if ubFadeTickers[key] then ubFadeTickers[key]:Cancel(); ubFadeTickers[key] = nil end
     local dir = SLIDE_DIR[key] or 0
-    local dotSizes = not def.noDots and GetDotSizes() or nil
+    local dotN     = frame._dotN or 0          -- points par groupe
+    local dotCount = frame._dotCount or 0      -- tous groupes
+    local dotRank  = frame._dotRank or {}
+    local dotSizes = dotCount > 0 and frame._dotSizes or nil
     local hasName  = frame.nameTxt ~= nil and frame._nameAnchorS ~= nil
 
     -- Appelee en fin de cycle (show ou hide) : libere le verrou et rejoue la derniere direction en file
@@ -1467,11 +1609,11 @@ local function AnimateBar(frame, shouldShow)
             ApplyBarWidthScale(frame, BAR_SCALE_START + (1 - BAR_SCALE_START) * eased, dir)
 
             if dotSizes then
-                for i = 1, 3 do
-                    local d = frame["dot" .. i]
+                for i = 1, dotCount do
+                    local d = frame.dots[i]
                     local dx = frame["dot" .. i .. "_dx"]
                     if d and dx then
-                        local delay = (ENTER_DELAY_DOT[i] or 0) * DOT_STAGGER
+                        local delay = DotEnterSteps(dotRank[i] or 1, dotN) * DOT_STAGGER
                         local dp = math.min(math.max(elapsed - delay, 0) / FADE_DURATION, 1)
                         local dEased = EaseOut(dp)
                         d:SetAlpha(dEased)
@@ -1487,7 +1629,7 @@ local function AnimateBar(frame, shouldShow)
                 local delay = ENTER_DELAY_NAME * DOT_STAGGER
                 local np = math.min(math.max(elapsed - delay, 0) / FADE_DURATION, 1)
                 local nEased = EaseOut(np)
-                frame.nameTxt:SetAlpha(nEased)
+                SetNameAlpha(frame, nEased)
                 frame.nameTxt:ClearAllPoints()
                 frame.nameTxt:SetPoint(frame._nameAnchorS, frame.bgTex, frame._nameAnchorA,
                     frame._nameOffX + dir * NAME_SLIDE_EXTRA * (1 - nEased), frame._nameOffY)
@@ -1500,7 +1642,7 @@ local function AnimateBar(frame, shouldShow)
                 if InCombatLockdown() then ubPosPending[key] = frame else PositionBarFrame(frame, 0) end
                 ApplyBarWidthScale(frame, 1, dir)
                 if dotSizes then
-                    for i = 1, 3 do ResetDotToRest(frame, i, dotSizes) end
+                    for i = 1, dotCount do ResetDotToRest(frame, i, dotSizes) end
                 end
                 if hasName then ResetNameToRest(frame) end
                 FinishAndMaybeReplay()
@@ -1525,11 +1667,11 @@ local function AnimateBar(frame, shouldShow)
             ApplyBarWidthScale(frame, 1 - (1 - BAR_SCALE_START) * bEased, dir)
 
             if dotSizes then
-                for i = 1, 3 do
-                    local d = frame["dot" .. i]
+                for i = 1, dotCount do
+                    local d = frame.dots[i]
                     local dx = frame["dot" .. i .. "_dx"]
                     if d and dx then
-                        local delay = (LEAVE_DELAY_DOT[i] or 0) * DOT_STAGGER_OUT
+                        local delay = DotLeaveSteps(dotRank[i] or 1, dotN) * DOT_STAGGER_OUT
                         local dp = math.min(math.max(elapsed - delay, 0) / FADE_DURATION_OUT, 1)
                         local dEased = EaseOut(dp)
                         d:SetAlpha(1 - dEased)
@@ -1545,7 +1687,7 @@ local function AnimateBar(frame, shouldShow)
                 local delay = LEAVE_DELAY_NAME * DOT_STAGGER_OUT
                 local np = math.min(math.max(elapsed - delay, 0) / FADE_DURATION_OUT, 1)
                 local nEased = EaseOut(np)
-                frame.nameTxt:SetAlpha(1 - nEased)
+                SetNameAlpha(frame, 1 - nEased)
                 frame.nameTxt:ClearAllPoints()
                 frame.nameTxt:SetPoint(frame._nameAnchorS, frame.bgTex, frame._nameAnchorA,
                     frame._nameOffX + dir * NAME_SLIDE_EXTRA * nEased, frame._nameOffY)
@@ -1558,7 +1700,7 @@ local function AnimateBar(frame, shouldShow)
                 if InCombatLockdown() then ubPosPending[key] = frame else PositionBarFrame(frame, 0) end
                 ApplyBarWidthScale(frame, 1, dir)
                 if dotSizes then
-                    for i = 1, 3 do ResetDotToRest(frame, i, dotSizes) end
+                    for i = 1, dotCount do ResetDotToRest(frame, i, dotSizes) end
                 end
                 if hasName then ResetNameToRest(frame) end
                 FinishAndMaybeReplay()
@@ -1580,6 +1722,8 @@ end
 
 -- Interface publique
 function UnitBars.ApplySettings()
+    EnsurePerBar()   -- profil tout juste charge (changement de profil) : anciens reglages communs repris par barre
+    EnsureBarAnchor()
     for _, frame in pairs(bars) do
         ApplyBarSettings(frame)   -- en combat : differe (tailles / positions), voir pendingSettingsApply
         -- Les couleurs, elles, n'ont rien de protege : on les applique tout de suite, sinon un changement de couleur en
@@ -1595,13 +1739,9 @@ end
 function UnitBars.GetPlayerBarRect()
     local f = bars.player
     if not (f and f.bgTex) then return nil end
-    local def = f._def
-    local cfg = Cfg("player")
-    local x = cfg.x or def.defaults.x
-    local y = cfg.y or def.defaults.y
-    local w = f._barW or cfg.width or def.defaults.width
-    local left   = x - f:GetWidth() / 2 + (f._barOffX or 0)
-    local bottom = y + (f._barOffY or 0)
+    local x, bottom = BarPos("player")
+    local w = f._barW or BV("player", "width")
+    local left = x - w / 2
     return left, left + w, bottom, bottom + f.bgTex:GetHeight()
 end
 
@@ -1622,6 +1762,22 @@ end
 function UnitBars.SetGuiHidden(on)
     ubHiddenForGui = (on == true)
     UnitBars.UpdateAllVisibility()
+end
+
+-- /aishub : etat de la barre du joueur (animation, largeurs, ancres), a lancer quand elle reste trop courte
+SLASH_AISHUB1 = "/aishub"
+SlashCmdList["AISHUB"] = function()
+    local P = "|cff33aaff[UB]|r "
+    local f = bars.player
+    if not f then print(P .. "pas de barre joueur"); return end
+    local function S(fn, ...) local ok, a, b, c, d, e = pcall(fn, ...); return ok and table.concat({ tostring(a), tostring(b), tostring(c), tostring(d), tostring(e) }, " ") or "err" end
+    print(P .. string.format("alpha=%s anim=%s file=%s ticker=%s vis=%s combat=%s",
+        S(f.GetAlpha, f), tostring(f._aishAnimBusyDir), tostring(f._aishAnimQueuedDir), tostring(ubFadeTickers.player ~= nil),
+        tostring(ubLastVisState.player), tostring(InCombatLockdown())))
+    print(P .. "config largeur=" .. tostring(Cfg("player").width) .. " _barW=" .. tostring(f._barW)
+        .. " | fond=" .. S(f.bgTex.GetWidth, f.bgTex) .. " | barre=" .. S(f.bar.GetWidth, f.bar) .. " | cadre=" .. S(f.GetSize, f))
+    print(P .. "ancre cadre=" .. S(f.GetPoint, f, 1))
+    print(P .. "ancre fond=" .. S(f.bgTex.GetPoint, f.bgTex, 1) .. " | _barOffX=" .. tostring(f._barOffX))
 end
 
 -- bars est locale a ce fichier (pas de nom global par barre) : accesseur pour le survol GUI (ModuleHoverOverlay.lua)
@@ -1677,6 +1833,8 @@ end
 
 function UnitBars.Create(parent)
     MigrateHealPredOpaque()
+    EnsurePerBar()
+    EnsureBarAnchor()
     -- Avant la boucle : CreateUnitBar lit deja GetEffectiveHeight, autant partir avec la
     -- bonne valeur quand la spe est lisible des maintenant.
     UpdateTankSpec()
@@ -1708,9 +1866,7 @@ function UnitBars.Create(parent)
                             f.bar:SetValue(75)
                         end
                         if f.hpText then
-                            local _ubdb = ns.GetCfg("unitBars")
-                            local _mode = (_ubdb and _ubdb.hpDisplayMode) or "pct"
-                            f.hpText:SetText(_mode == "value" and "75K" or "75")
+                            f.hpText:SetText(BV(f._def.key, "hpMode") == "value" and "75K" or "75")
                         end
                     end
                 end
@@ -1762,6 +1918,8 @@ eventFrame:RegisterEvent("PET_BATTLE_OPENING_START")
 eventFrame:RegisterEvent("PET_BATTLE_CLOSE")
 -- Regles de visibilite (zone de repos, groupe, monture)
 eventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
+-- Village sur (zone de repos etendue, cf. ns.IsRestArea) : pas d'evenement de repos, on suit la bascule
+ns.OnRestAreaChanged(function() UnitBars.UpdateAllVisibility() end)
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 
@@ -1785,7 +1943,7 @@ SlashCmdList["UBTANK"] = function()
     if f then
         local cfg = Cfg("player")
         p(string.format("player: hauteur attendue=%s  bgTex=%.1f  bar=%.1f  cfg.height=%s",
-            tostring(GetEffectiveHeight(f._def, cfg)),
+            tostring(GetEffectiveHeight("player")),
             f.bgTex and f.bgTex:GetHeight() or -1,
             f.bar and f.bar:GetHeight() or -1,
             tostring(cfg.height)))
@@ -1808,6 +1966,15 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
     if event == "PLAYER_REGEN_DISABLED" then
         inCombat = true
+        -- Dernier instant avant le verrouillage : une barre en plein glissement (apparue en sortie de furtivite,
+        -- juste avant l'attaque) restait figee a son decalage tout le combat, le cadre ne pouvant plus bouger.
+        -- On la pose a sa place ; l'animation continue en fondu et en largeur.
+        for k, f in pairs(bars) do
+            if ubFadeTickers[k] or ubPosPending[k] then
+                PositionBarFrame(f, 0)
+                ubPosPending[k] = nil
+            end
+        end
         UnitBars.UpdateAllVisibility()   -- le debounce détecte le changement d'état
         return
     end
@@ -2051,7 +2218,8 @@ ns.NewTicker(0.05, function()
     local db = ns.GetCfg("unitBars")
     if not db then return end
     local reveal   = HoverRevealActive()
-    local hoverVal = db.hpHoverValue == true
+    local hoverVal = false   -- "Valeur au survol" sur au moins une barre
+    for k in pairs(bars) do if BV(k, "hpHoverValue") then hoverVal = true end end
 
     if not (reveal or hoverVal) then
         -- Option coupee alors qu'une barre etait survolee : effacer l'etat et rendre la main
@@ -2084,14 +2252,14 @@ ns.NewTicker(0.05, function()
 end)
 
 
--- Nom du personnage au survol de sa barre de vie (option showPlayerNameHover), jamais en combat. Meme zone de survol que
+-- Nom du personnage au survol de sa barre de vie (option showName de la barre du joueur), jamais en combat. Meme zone de survol que
 -- la reveal "Au survol" (tolerance comprise).
 ns.NewTicker(0.1, function()
     local f = bars.player
     if not f then return end
     local db = ns.GetCfg("unitBars")
     local want = false
-    if db and db.showPlayerNameHover == true and not InCombatLockdown() and f:GetAlpha() > 0.05 then
+    if db and BV("player", "showName") and not InCombatLockdown() and f:GetAlpha() > 0.05 then
         want = IsBarHovered(f, EffectiveHoverTol())
     end
     if want ~= playerNameShown then

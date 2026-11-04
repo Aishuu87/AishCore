@@ -21,6 +21,7 @@ local previewTicker = nil
 local hiddenForGui = false
 local introT = nil           -- animation d'arrivee (slide depuis le bas + fondu), secondes ecoulees
 local INTRO, INTRO_RISE = 0.85, 22
+local host = nil             -- apercu epingle du GUI qui accueille le cercle (cf. SetHostPreview), sinon nil
 local fadeT = nil            -- fondu de sortie en cours (secondes ecoulees)
 local FADE = 0.35
 local VERTICAL_CROP_H = 0.88
@@ -39,7 +40,8 @@ local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_Food_15"
 -- Repli : un buff apparu pendant le repas, vers la fin du delai, est pris pour "Bien nourri".
 local EAT_IDS = { [433] = true, [434] = true, [435] = true, [1131] = true, [192002] = true, [396920] = true }
 local FED_IDS = { [19705] = true, [19706] = true, [19708] = true, [19709] = true, [19710] = true, [19711] = true,
-                  [24869] = true, [104280] = true, [462179] = true }
+                  [24869] = true, [104280] = true, [462179] = true,
+                  [1232585] = true }   -- "Repas nourrissant" (festins) : nom sans "bien nourri"
 -- Boissons ("Boisson" 430, "Rafraichissement" 167152 : nourriture / eau invoquees du mage) : suivies seulement avec
 -- l'option "showWithoutBuff", comme une nourriture sans buff (jamais de passage au vert, sauf si l'infobulle de l'objet
 -- annonce "Bien nourri"). Reconnues surtout par leur nom localise, qui couvre tous les rangs.
@@ -237,6 +239,7 @@ local function PlayPlus(pin)
   local cfg = Cfg()
   if not (bar and cfg.showPlus ~= false) then return end
   local p = EnsurePlus()
+  p:SetFrameStrata(host and "FULLSCREEN_DIALOG" or "HIGH")
   plusPinned = pin and true or false
   local size = cfg.plusIconSize or cfg.plusSize or 22   -- taille de l'icone (le "+" suit plusSize)
   ApplyFontOnce(p.text, "WellFedPlus", cfg.plusFont, cfg.plusSize, cfg.plusOutline, p.textRing)
@@ -314,14 +317,24 @@ local function ApplyFoodIcon()
   end
 end
 
+-- Position du cercle (dy : decalage vertical de l'animation d'arrivee) : centre de l'apercu du GUI qui l'accueille, sinon
+-- sa position a l'ecran
+local function Place(dy)
+  bar:ClearAllPoints()
+  if host then
+    bar:SetPoint("CENTER", host, "CENTER", 0, dy or 0)
+  else
+    bar:SetPoint("CENTER", UIParent, "BOTTOMLEFT", bar._bx, bar._by + (dy or 0))
+  end
+end
+
 local function ShowBar()
   local fresh = (not bar:IsShown()) or fadeT ~= nil
   fadeT = nil
   if fresh and bar._bx then
     introT = 0
     bar:SetAlpha(0)
-    bar:ClearAllPoints()
-    bar:SetPoint("CENTER", UIParent, "BOTTOMLEFT", bar._bx, bar._by - INTRO_RISE)
+    Place(-INTRO_RISE)
   elseif not introT then
     bar:SetAlpha(1)
   end
@@ -360,8 +373,7 @@ local function OnBarUpdate(self, dt)
     local u = math.min(1, introT / INTRO)
     local e = 1 - (1 - u) ^ 4   -- ease-out quartique : depart vif, arrivee tres douce
     self:SetAlpha(e)
-    self:ClearAllPoints()
-    self:SetPoint("CENTER", UIParent, "BOTTOMLEFT", self._bx, self._by - INTRO_RISE * (1 - e))
+    Place(-INTRO_RISE * (1 - e))
     if u >= 1 then introT = nil end
     return
   end
@@ -864,10 +876,7 @@ function WellFedCircle.ApplySettings()
   end
   local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
   bar._bx, bar._by = sw * cfg.anchorPctX + cfg.x, sh * cfg.anchorPctY + cfg.y
-  if not introT then
-    bar:ClearAllPoints()
-    bar:SetPoint("CENTER", UIParent, "BOTTOMLEFT", bar._bx, bar._by)
-  end
+  if not introT then Place(0) end
   if state == "eating" then ApplyColor(cfg.eatingColor) elseif state == "fed" or previewState == "fed" then ApplyColor(cfg.fedColor) end
   if cfg.enabled == false then
     if state then SetState(nil) end
@@ -1008,6 +1017,7 @@ end
 
 function WellFedCircle.SetDraggable(on)
   if not bar then return end
+  if host then on = false end   -- dans l'apercu du GUI : pas de glisser-deposer (la position enregistree serait faussee)
   if on then
     bar:SetMovable(true); bar:EnableMouse(true); bar:RegisterForDrag("LeftButton")
     bar:SetScript("OnDragStart", function(self)
@@ -1044,6 +1054,27 @@ function WellFedCircle.SetDraggable(on)
     bar:SetScript("OnDragStart", nil); bar:SetScript("OnDragStop", nil)
     bar:SetScript("OnEnter", nil); bar:SetScript("OnLeave", nil)
     if bar._dragBorder then bar._dragBorder:Hide() end
+  end
+end
+
+-- Apercu epingle du GUI (page du cercle) : le vrai cercle y est centre, au-dessus de la fenetre, a l'echelle du jeu
+-- (il reste enfant d'UIParent, seule son ancre change), avec le cycle repas -> buff. nil : retour a l'ecran.
+local function SetStrataDeep(f, s)
+  f:SetFrameStrata(s)
+  for _, c in ipairs({ f:GetChildren() }) do SetStrataDeep(c, s) end
+end
+function WellFedCircle.SetHostPreview(frame)
+  if not bar then return end
+  if frame then
+    host = frame
+    WellFedCircle.SetDraggable(false)
+    SetStrataDeep(bar, "FULLSCREEN")
+    Place(0)
+    WellFedCircle.SetPreview(true)
+  elseif host then
+    host = nil
+    SetStrataDeep(bar, "MEDIUM")
+    WellFedCircle.ApplySettings()
   end
 end
 

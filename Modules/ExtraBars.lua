@@ -41,9 +41,11 @@ for _, id in ipairs({
 -- Classes d'objets jamais classees en Gadgets (cf. ItemTags)
 local GADGET_EXCLUDED_CLASS = {}
 -- (Tradegoods / Reagent : composants d'artisanat, ex. "Utiliser : combine 10 particules...")
-for _, k in ipairs({ "Weapon", "Armor", "Recipe", "Tradegoods", "Reagent" }) do
-  local v = Enum.ItemClass and Enum.ItemClass[k]
-  if v then GADGET_EXCLUDED_CLASS[v] = true end
+-- Valeurs de repli si Enum.ItemClass manque (Forever)
+local ITEM_CLASS_FALLBACK = { Weapon = 2, Armor = 4, Recipe = 9, Tradegoods = 7, Reagent = 5 }
+for k, def in pairs(ITEM_CLASS_FALLBACK) do
+  local v = Enum.ItemClass and Enum.ItemClass[k] or def
+  GADGET_EXCLUDED_CLASS[v] = true
 end
 
 -- Composant d'artisanat d'une autre classe (marque "Composant d'artisanat" : 17e retour de GetItemInfo)

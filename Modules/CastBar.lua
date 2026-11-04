@@ -34,6 +34,12 @@ local DEFAULTS = {
     timerOffY     = 2,
     timerJustify  = "RIGHT",
     colorBySchool = false,
+    showIcon      = false,
+    iconWidth     = 15,
+    iconHeight    = 15,
+    iconAnchor    = "LEFT",   -- "LEFT" | "CENTER" | "RIGHT" : cote de la barre
+    iconOffX      = 0,
+    iconOffY      = 0,
     font      = nil,   -- nil = utilise DEFAULT_FONT (police du jeu)
     timerFont = nil,   -- nil = utilise ns.Media.font (Montserrat)
     timerOutlineStyle = "OUTLINE",
@@ -120,7 +126,52 @@ local function ApplyTextColor(spellId)
     if not frame then return end
     local c = ResolveTextColor(spellId)
     frame.nameTxt:SetTextColor(c[1], c[2], c[3], c[4] or 1)
-    if frame.timerTxt then frame.timerTxt:SetTextColor(c[1], c[2], c[3], c[4] or 1) end
+    -- Temps : ecole du sort (reglage reserve), couleurs thematiques, couleur choisie, sinon celle du nom
+    local cfg = Cfg()
+    local tc
+    if cfg.timerUseSchoolColor and spellId and SCHOOL_TEXT and ns.HasHeroicFeatures and ns.HasHeroicFeatures() then
+        tc = SCHOOL_TEXT(spellId)
+    end
+    if not tc and cfg.timerUseSpecColor then
+        local CLR = ns.Modules and ns.Modules.Colors
+        tc = CLR and CLR.Get and CLR.Get("powerdotsa")
+    end
+    tc = tc or cfg.timerColor or c
+    if frame.timerTxt then frame.timerTxt:SetTextColor(tc[1], tc[2], tc[3], tc[4] or 1) end
+end
+
+-- Icone du sort : a gauche, au milieu ou a droite de la barre (ecart de 4 px hors de la barre), + decalage
+local function LayoutIcon()
+    if not frame or not frame.icon then return end
+    local cfg = Cfg()
+    local anchor = cfg.iconAnchor or DEFAULTS.iconAnchor
+    local ox, oy = cfg.iconOffX or 0, cfg.iconOffY or 0
+    ns.StyleCastIcon(frame.icon, frame.iconBorder, cfg)
+    frame.icon:ClearAllPoints()
+    if anchor == "RIGHT" then
+        frame.icon:SetPoint("LEFT", frame.bgTex, "RIGHT", 4 + ox, oy)
+    elseif anchor == "CENTER" then
+        frame.icon:SetPoint("CENTER", frame.bgTex, "CENTER", ox, oy)
+    else
+        frame.icon:SetPoint("RIGHT", frame.bgTex, "LEFT", -4 + ox, oy)
+    end
+end
+
+local function UpdateIcon()
+    if not frame or not frame.icon then return end
+    local cfg = Cfg()
+    local tex = cfg.showIcon and state.spellIcon
+    -- Icone absente (ou 0 en preview) : repli sur la texture du sort
+    if cfg.showIcon and (tex == nil or (not (issecretvalue and issecretvalue(tex)) and tex == 0)) then
+        tex = state.spellId and C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(state.spellId)
+    end
+    if tex then
+        frame.icon:SetTexture(tex)
+        frame.icon:Show()
+    else
+        frame.icon:Hide()
+    end
+    ns.SyncCastIconBorder(frame.icon, frame.iconBorder, cfg)
 end
 
 local function FormatTime(t)
@@ -192,6 +243,23 @@ SCHOOL_TEXT = function(spellId)
     return { (tonumber(rhex:sub(1, 2), 16) or 255) / 255, (tonumber(rhex:sub(3, 4), 16) or 255) / 255,
              (tonumber(rhex:sub(5, 6), 16) or 255) / 255, 1 }
 end
+
+-- Degrade d'ecole d'un sort ("gauche:droite" en hex) : couleur propre au sort, sinon son ecole de magie (fallbackSchool :
+-- masque d'ecole si le sort est inconnu des tables). Expose pour l'apercu du GUI, avec ParseGradient / SchoolText.
+function CastBar.SchoolGradient(spellId, fallbackSchool)
+    local gradient = spellId and ns.SpellGradients and ns.SpellGradients[spellId]
+    if gradient then return gradient end
+    local school = (spellId and ns.SpellSchools and ns.SpellSchools[spellId]) or fallbackSchool
+    if not school then return nil end
+    gradient = SCHOOL_GRADIENTS[school]
+    if not gradient then
+        for _, mask in ipairs({64, 32, 16, 8, 4, 2}) do
+            if bit.band(school, mask) ~= 0 then return SCHOOL_GRADIENTS[mask] end
+        end
+    end
+    return gradient
+end
+CastBar.ParseGradient = ParseGradient
 
 local function ApplyBarColor(spellId, spellName, spellIcon)
     if not frame then return end
@@ -360,7 +428,7 @@ end
 -- Opacite par groupe : barre (fond, filet, barre, etincelle, ticks) / textes (nom, temps, et leur anneau SLUG)
 local function SetGroupAlpha(eBar, eTxt)
     frame:SetAlpha(1)
-    for _, r in ipairs({ frame.bgTex, frame.border, frame.bar, frame.spark }) do r:SetAlpha(eBar) end
+    for _, r in ipairs({ frame.bgTex, frame.border, frame.bar, frame.spark, frame.icon, frame.iconBorder }) do r:SetAlpha(eBar) end
     for _, r in ipairs({ frame.nameTxt, frame.timerTxt }) do r:SetAlpha(eTxt) end
     for _, ring in ipairs({ frame.nameTxtSlug or {}, frame.timerTxtSlug or {} }) do
         for _, fs in ipairs(ring) do fs:SetAlpha(eTxt) end
@@ -470,10 +538,10 @@ local function UpdateProgress()
         -- Spark
         local cfg = Cfg()
         local w   = cfg.width or DEFAULTS.width
-        local sparkX = progress * w
+        local sparkX = (cfg.fillDir == "RTL") and (1 - progress) * w or progress * w
         frame.spark:ClearAllPoints()
         frame.spark:SetPoint("CENTER", frame.bgTex, "LEFT", sparkX, 0)
-        frame.spark:Show()
+        frame.spark:SetShown(not frame._noSpark)
 
         -- Timer
         local remaining = state.endTime - now
@@ -518,6 +586,7 @@ local function StartCast(name, startTimeMS, endTimeMS, spellId, spellIcon, castG
     ApplyBarColor(spellId, name, spellIcon)
     -- Ticks : aucun sur un cast normal (l'empower a son propre handler)
     HideTicks()
+    UpdateIcon()
 
     frame.nameTxt:SetText(state.name)
     ShowAnimated()
@@ -545,6 +614,7 @@ local function StartChannel(name, startTimeMS, endTimeMS, spellId, spellIcon, ca
     ApplyBarColor(spellId, name, spellIcon)
     -- Ticks pour sorts canalisés (Pénance, Mind Flay, etc.)
     ShowTicks(CHANNEL_TICKS[spellId])
+    UpdateIcon()
 
     frame.nameTxt:SetText(state.name)
     ShowAnimated()
@@ -594,6 +664,7 @@ local FillToFull   -- definie plus bas (partagee avec FinishCast)
 local function InterruptCast()
     if not frame then return end
     if state.preview then return end  -- ne pas afficher en preview
+    if Cfg().enabled == false then return end  -- module desactive : pas d'"Interrompu" non plus
     state.active = false
     frame.spark:Hide()
     frame.timerTxt:SetText("")
@@ -669,11 +740,14 @@ local SPARK_TEXTURES = {
     burst   = { path = "Interface\\Cooldown\\starburst",             w = 24, h = 24 },
     dot     = { path = nil,                                          w = 8,  h = 8  },   -- nil : disque de l'addon (ns.Media.circle)
 }
-CastBar.SPARK_KEYS = { "default", "line", "star", "burst", "dot" }
+CastBar.SPARK_KEYS = { "none", "default", "line", "star", "burst", "dot" }
+CastBar.SPARK_TEXTURES = SPARK_TEXTURES
 
 local function ApplySpark()
     if not frame or not frame.spark then return end
     local cfg = Cfg()
+    frame._noSpark = (cfg.sparkTexture == "none")
+    if frame._noSpark then frame.spark:Hide() end
     local t = SPARK_TEXTURES[cfg.sparkTexture or "default"] or SPARK_TEXTURES.default
     local k = (tonumber(cfg.sparkSize) or 100) / 100
     frame.spark:SetTexture(t.path or ns.Media.circle)
@@ -683,11 +757,24 @@ local function ApplySpark()
 end
 
 -- Création de la barre
--- Ancres self/relative selon le justify, pour un alignement visuel cohérent sur la barre
-local function TextAnchor(justify)
-    if justify == "LEFT"  then return "BOTTOMLEFT",  "TOPLEFT"  end
-    if justify == "RIGHT" then return "BOTTOMRIGHT", "TOPRIGHT" end
-    return "BOTTOM", "TOP"   -- CENTER (défaut)
+local TP_FLIP = { TOP = "BOTTOM", BOTTOM = "TOP", LEFT = "RIGHT", RIGHT = "LEFT" }
+-- Texte : ancrage 9 points sur la barre + alignement (bord du texte pose sur l'ancre ; haut / bas : le texte est a
+-- l'exterieur de la barre). Sans ancre enregistree, deduite de l'ancien alignement seul (au-dessus de la barre, a gauche
+-- / au centre / a droite). Renvoie le point du texte et celui de la barre.
+local function TextPoints(anchor, justify)
+    justify = justify or "CENTER"
+    if not anchor then
+        anchor = (justify == "LEFT" and "TOPLEFT") or (justify == "RIGHT" and "TOPRIGHT") or "TOP"
+    end
+    local v = anchor:match("^TOP") or anchor:match("^BOTTOM") or ""
+    local h = (justify == "CENTER") and "" or justify
+    local p
+    if v ~= "" then
+        p = TP_FLIP[v] .. h
+    else
+        p = (h ~= "" and h) or (TP_FLIP[anchor:match("LEFT$") or anchor:match("RIGHT$") or ""] or "")
+    end
+    return (p ~= "" and p or "CENTER"), anchor
 end
 
 function CastBar.Create(parent)
@@ -751,6 +838,7 @@ function CastBar.Create(parent)
     sb:SetMinMaxValues(0, 1)
     sb:SetValue(0)
     sb:SetStatusBarColor(bc[1], bc[2], bc[3], bc[4] or 1)
+    sb:SetReverseFill(cfg.fillDir == "RTL")
     frame.bar = sb
 
     -- Spark
@@ -770,6 +858,17 @@ function CastBar.Create(parent)
     frame.spark = spark
     ApplySpark()
 
+    -- Icone du sort (dans le cadre de l'etincelle, au-dessus du remplissage quand elle est au milieu)
+    local icon = sparkFrame:CreateTexture(nil, "ARTWORK")
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    icon:Hide()
+    frame.icon = icon
+    local iconBorder = CreateFrame("Frame", nil, sparkFrame, "BackdropTemplate")
+    iconBorder:SetFrameLevel(sparkFrame:GetFrameLevel() + 1)
+    iconBorder:Hide()
+    frame.iconBorder = iconBorder
+    LayoutIcon()
+
     -- Pool de ticks (sorts canalisés / étapes empower)
     frame.tickLines = {}
 
@@ -778,13 +877,13 @@ function CastBar.Create(parent)
     local nOffX    = cfg.nameOffX    or DEFAULTS.nameOffX
     local nOffY    = cfg.nameOffY    or DEFAULTS.nameOffY
     local nJustify = cfg.nameJustify or DEFAULTS.nameJustify
-    local nSelf, nRel = TextAnchor(nJustify)
+    local nSelf, nRel = TextPoints(cfg.nameAnchor, nJustify)
     local nameTxt = frame:CreateFontString(nil, "OVERLAY")
     frame.nameTxtSlug = ns.CreateSlugRing(frame, nameTxt)
     ns.ApplyTextOutlineStyle(nameTxt, frame.nameTxtSlug, DEFAULT_FONT, nSize, cfg.nameOutlineStyle, true)
     nameTxt:SetJustifyH(nJustify)
     nameTxt:SetTextColor(0.792, 0.639, 0.392, 1)
-    nameTxt:SetWidth(w)
+    nameTxt:SetWidth(0)
     nameTxt:SetPoint(nSelf, bgTex, nRel, nOffX, nOffY)
     nameTxt:SetText("")
     frame.nameTxt = nameTxt
@@ -794,13 +893,13 @@ function CastBar.Create(parent)
     local tOffX    = cfg.timerOffX    or DEFAULTS.timerOffX
     local tOffY    = cfg.timerOffY    or DEFAULTS.timerOffY
     local tJustify = cfg.timerJustify or DEFAULTS.timerJustify
-    local tSelf, tRel = TextAnchor(tJustify)
+    local tSelf, tRel = TextPoints(cfg.timerAnchor, tJustify)
     local timerTxt = frame:CreateFontString(nil, "OVERLAY")
     frame.timerTxtSlug = ns.CreateSlugRing(frame, timerTxt)
     ns.ApplyTextOutlineStyle(timerTxt, frame.timerTxtSlug, ns.Media.font, tSize, cfg.timerOutlineStyle, true)
     timerTxt:SetJustifyH(tJustify)
     timerTxt:SetTextColor(0.847, 0.627, 0.380, 1)
-    timerTxt:SetWidth(w)
+    timerTxt:SetWidth(0)
     timerTxt:SetPoint(tSelf, bgTex, tRel, tOffX, tOffY)
     timerTxt:SetText("")
     frame.timerTxt = timerTxt
@@ -819,6 +918,9 @@ function CastBar.Create(parent)
     ev:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
     ev:RegisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
     ev:RegisterEvent("UNIT_SPELLCAST_EMPOWER_STOP")
+    -- Recul : cast retarde par les coups recus (DELAYED), canal raccourci (CHANNEL_UPDATE)
+    ev:RegisterEvent("UNIT_SPELLCAST_DELAYED")
+    ev:RegisterEvent("UNIT_SPELLCAST_CHANNEL_UPDATE")
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
     ev:SetScript("OnEvent", function(self, event, unit, castGUID, spellID)
         if unit and unit ~= "player" then return end
@@ -908,6 +1010,23 @@ function CastBar.Create(parent)
                 C_Timer.After(0, function() PollStart(g, si) end)
             end
 
+        elseif event == "UNIT_SPELLCAST_DELAYED" or event == "UNIT_SPELLCAST_CHANNEL_UPDATE" then
+            -- Recul : nouveaux debut / fin du sort en cours, relus aupres du jeu (la barre ne les lisait qu'au depart)
+            if state.active then
+                local _, _, _, startMS, endMS
+                if state.channeling then
+                    _, _, _, startMS, endMS = UnitChannelInfo("player")
+                else
+                    _, _, _, startMS, endMS = UnitCastingInfo("player")
+                end
+                if type(startMS) == "number" and type(endMS) == "number"
+                   and not (issecretvalue and (issecretvalue(startMS) or issecretvalue(endMS))) then
+                    state.startTime = startMS / 1000
+                    state.endTime   = endMS / 1000
+                    UpdateProgress()
+                end
+            end
+
         elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
             FinishCast(castGUID)
 
@@ -956,7 +1075,11 @@ function CastBar.ApplySettings()
     frame.bar:ClearAllPoints()
     frame.bar:SetPoint("TOPLEFT", frame.bgTex)
     frame.bar:SetStatusBarTexture(BarTex())
+    frame.bar:SetReverseFill(cfg.fillDir == "RTL")
     ApplyBarColor(state.spellId, state.name, state.spellIcon)
+
+    LayoutIcon()
+    UpdateIcon()
 
     -- Textes : l'ancre de la boîte de texte suit le justify pour que
     -- LEFT/CENTER/RIGHT soit visuellement cohérent par rapport à la barre.
@@ -964,10 +1087,10 @@ function CastBar.ApplySettings()
     local nOffX    = cfg.nameOffX    or DEFAULTS.nameOffX
     local nOffY    = cfg.nameOffY    or DEFAULTS.nameOffY
     local nJustify = cfg.nameJustify or DEFAULTS.nameJustify
-    local nSelf, nRel = TextAnchor(nJustify)
+    local nSelf, nRel = TextPoints(cfg.nameAnchor, nJustify)
     ns.ApplyTextOutlineStyle(frame.nameTxt, frame.nameTxtSlug, cfg.font or DEFAULT_FONT, nSize, cfg.nameOutlineStyle, true)
     frame.nameTxt:SetJustifyH(nJustify)
-    frame.nameTxt:SetWidth(w)
+    frame.nameTxt:SetWidth(0)
     frame.nameTxt:ClearAllPoints()
     frame.nameTxt:SetPoint(nSelf, frame.bgTex, nRel, nOffX, nOffY)
 
@@ -975,10 +1098,10 @@ function CastBar.ApplySettings()
     local tOffX    = cfg.timerOffX    or DEFAULTS.timerOffX
     local tOffY    = cfg.timerOffY    or DEFAULTS.timerOffY
     local tJustify = cfg.timerJustify or DEFAULTS.timerJustify
-    local tSelf, tRel = TextAnchor(tJustify)
+    local tSelf, tRel = TextPoints(cfg.timerAnchor, tJustify)
     ns.ApplyTextOutlineStyle(frame.timerTxt, frame.timerTxtSlug, cfg.timerFont or ns.Media.font, tSize, cfg.timerOutlineStyle, true)
     frame.timerTxt:SetJustifyH(tJustify)
-    frame.timerTxt:SetWidth(w)
+    frame.timerTxt:SetWidth(0)
     frame.timerTxt:ClearAllPoints()
     frame.timerTxt:SetPoint(tSelf, frame.bgTex, tRel, tOffX, tOffY)
 
@@ -1017,6 +1140,7 @@ function CastBar.SetPreview(on)
         state.spellIcon  = 0
         ApplyTextColor(133)
         ApplyBarColor(133, L["CASTBAR_PREVIEW_SPELL_NAME"], 0)
+        UpdateIcon()
         frame.nameTxt:SetText(L["CASTBAR_PREVIEW_SPELL_NAME"])
         frame.timerTxt:SetText("2.1")
         frame.bar:SetValue(0.3)

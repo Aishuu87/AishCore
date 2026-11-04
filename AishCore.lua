@@ -70,6 +70,10 @@ SLASH_AISHCORE2 = "/aishcore"
 SlashCmdList["AISHCORE"] = function(msg)
   msg = strtrim((msg or ""):lower())
   if msg == "mem" then ns.PrintMemoryReport(); return end
+  if msg == "rest" then ns.RestAreaDebug(); return end
+  if msg == "show bars" or msg == "hide bars" then ns.SwitchBarsProfile(msg == "show bars"); return end
+  if msg == "role" then ns.AskRoleProfile(); return end
+  if msg == "setup" then SlashCmdList["AISHSETUP"](); return end
   -- /aish diag — dump l'état d'init
   if msg == "diag" or msg == "diag on" or msg == "diag off" then
     if msg == "diag on"  then ns._diag = true ; print("|cff00ccff[AishCore]|r diag |cff00ff00ON|r  — /reload pour rejouer l'init avec logs") ; return end
@@ -85,7 +89,7 @@ SlashCmdList["AISHCORE"] = function(msg)
       .. "  | Profils    : " .. tostring(ns.Profiles ~= nil))
     local names = { "ResourceCircle","HealthCircle","OutOfCombatResourceCircle",
       "SpellEffects","RotationHelper","PriorityBar","XPBar","UnitBars",
-      "CastBar","TargetCastBar","TopTargetBar","TargetAuras","Colors","Skyriding",
+      "CastBar","TargetCastBar","FocusCastBar","TopTargetBar","TargetAuras","Colors","Skyriding",
       "AFKMode", "Location" }
     print("  Modules enregistrés :")
     for _, n in ipairs(names) do
@@ -331,7 +335,7 @@ SlashCmdList["AISHCORE"] = function(msg)
     print("  restIndicator=" .. tostring(cfg.restIndicator))
     print("  restPreview=true (forcé)")
     print("  restX=" .. tostring(cfg.restX) .. " restY=" .. tostring(cfg.restY) .. " restScale=" .. tostring(cfg.restScale))
-    print("  IsResting=" .. tostring(IsResting()))
+    print("  IsResting=" .. tostring(IsResting()) .. " IsRestArea=" .. tostring(ns.IsRestArea()))
     -- Forcer position au centre pour confirmer le rendu
     xb.ForceRestCenter()
   elseif msg == "testbar" then
@@ -518,7 +522,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
       local present, missing = {}, {}
       for _, name in ipairs({ "ResourceCircle","HealthCircle","OutOfCombatResourceCircle",
         "SpellEffects","RotationHelper","PriorityBar","XPBar","UnitBars",
-        "CastBar","TargetCastBar","TopTargetBar","TargetAuras","Colors","Skyriding",
+        "CastBar","TargetCastBar","FocusCastBar","TopTargetBar","TargetAuras","Colors","Skyriding",
         "AFKMode", "Location" }) do
         if ns.Modules[name] then table.insert(present, name)
         else table.insert(missing, name) end
@@ -543,6 +547,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     SafeCall("UnitBars",                  "Create", UIParent)
     SafeCall("CastBar",                   "Create", UIParent)
     SafeCall("TargetCastBar",             "Create", UIParent)
+    SafeCall("FocusCastBar",              "Create", UIParent)
     SafeCall("TopTargetBar",              "Create")
     SafeCall("TargetAuras",               "Init")
     SafeCall("Skyriding",                 "Create")
@@ -561,6 +566,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     SafeCall("UnitBars",                  "ApplySettings")
     SafeCall("CastBar",                   "ApplySettings")
     SafeCall("TargetCastBar",             "ApplySettings")
+    SafeCall("FocusCastBar",              "ApplySettings")
     SafeCall("TopTargetBar",              "ApplySettings")
     SafeCall("TargetAuras",               "ApplySettings")
     SafeCall("Skyriding",                 "ApplySettings")

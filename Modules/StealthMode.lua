@@ -142,9 +142,82 @@ function StealthMode.Update()
   if p ~= target then driver:SetScript("OnUpdate", Step) else ApplyAlpha() end
 end
 
+-- ═══ Visibilite en furtivite ═══════════════════════════════════════════════════════════════════
+-- Une colonne par element (stealthMode.vis[elem]), cases cumulables : l'une suffit a montrer l'element. Tant que le
+-- joueur est furtif (hors combat), une colonne avec au moins une case cochee remplace les regles de visibilite de
+-- l'element ; sans case cochee, rien ne change. "Toujours" prime sur les autres.
+StealthMode.VIS_ELEMS = { "player", "target", "circle", "priority" }
+StealthMode.VIS_KEYS  = { "always", "contested", "friendly", "attackable", "pvp", "instance", "group" }
+
+local stealthed = false   -- furtivite confirmee (la detection "faible" attend 0,4 s, cf. Update)
+
+--- Joueur furtif (etat confirme, independant du vignettage)
+function StealthMode.IsStealthed() return stealthed end
+
+-- Zone contestee : tout sauf une zone sure (zone de repos etendue, sanctuaire)
+local function InContestedZone()
+  if ns.IsRestArea and ns.IsRestArea() then return false end
+  local pvp = GetZonePVPInfo and GetZonePVPInfo()
+  return pvp ~= "sanctuary"
+end
+
+--- nil : pas de regle de furtivite (regles habituelles de l'element) ; sinon true / false.
+function ns.StealthVisOverride(elem)
+  if not stealthed then return nil end
+  local cfg = Cfg()
+  if cfg.enabled ~= true then return nil end
+  local r = cfg.vis and cfg.vis[elem]
+  if not r then return nil end
+  local any = false
+  for _, k in ipairs(StealthMode.VIS_KEYS) do if r[k] then any = true; break end end
+  if not any then return nil end
+  if UnitAffectingCombat("player") then return nil end
+  if r.always then return true end
+  if r.contested and InContestedZone() then return true end
+  local hasTarget = UnitExists("target") and not UnitIsDeadOrGhost("target")
+  if r.attackable and hasTarget and UnitCanAttack("player", "target") then return true end
+  if r.friendly and hasTarget and not UnitCanAttack("player", "target") and UnitIsFriend("player", "target") then return true end
+  local inInst, instType = IsInInstance()
+  if r.pvp and inInst and (instType == "pvp" or instType == "arena") then return true end
+  if r.instance and inInst and (instType == "party" or instType == "raid" or instType == "scenario") then return true end
+  if r.group and IsInGroup() then return true end
+  return false
+end
+
+-- Reevalue la visibilite des 4 elements
+function StealthMode.RefreshVisibility()
+  local M = ns.Modules
+  if M.UnitBars and M.UnitBars.UpdateAllVisibility then M.UnitBars.UpdateAllVisibility() end
+  if M.ResourceCircle and M.ResourceCircle.UpdateVisibility then M.ResourceCircle.UpdateVisibility() end
+  if M.PriorityBar and M.PriorityBar.UpdateVisibility then M.PriorityBar.UpdateVisibility() end
+end
+
+local function SetStealthed(v)
+  if v == stealthed then return end
+  stealthed = v
+  if ns.CallbackRegistry then ns.CallbackRegistry:Trigger("StealthMode.Changed", v) end
+  StealthMode.RefreshVisibility()
+end
+
+local stPending = false
+local function TrackStealth()
+  local st, weak = false, false
+  if ns.IsPlayerStealthed then st, weak = ns.IsPlayerStealthed() end
+  if not st then SetStealthed(false); return end
+  if not weak then SetStealthed(true); return end
+  -- Detection faible (barre "bonus" du Voleur) : confirmee apres un court delai, comme le vignettage
+  if stealthed or stPending then return end
+  stPending = true
+  C_Timer.After(0.4, function()
+    stPending = false
+    if ns.IsPlayerStealthed and ns.IsPlayerStealthed() then SetStealthed(true) end
+  end)
+end
+
 function StealthMode.ApplySettings()
   if frame then Layout() end
   StealthMode.Update()
+  StealthMode.RefreshVisibility()
 end
 
 -- Apercu pendant l'ouverture de la page de reglages
@@ -153,22 +226,36 @@ function StealthMode.SetPreview(on)
   StealthMode.Update()
 end
 
+-- Seuls le Voleur et le Druide ont une furtivite de classe : ailleurs le module reste en sommeil (aucun evenement,
+-- donc aucun appel a chaque UNIT_AURA). L'apercu de la page de reglages fonctionne toujours (SetPreview).
+local _, PLAYER_CLASS = UnitClass("player")
+if PLAYER_CLASS ~= "ROGUE" and PLAYER_CLASS ~= "DRUID" then return end
+
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("UPDATE_STEALTH")
 ev:RegisterEvent("UPDATE_BONUS_ACTIONBAR")   -- Voleur : la barre "bonus" suit la furtivite (Danse de l'ombre, Subterfuge)
 ev:RegisterEvent("PLAYER_REGEN_DISABLED")    -- option "Desactive en combat"
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
-if select(2, UnitClass("player")) == "ROGUE" then
+if PLAYER_CLASS == "ROGUE" then
   ev:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")   -- rattrapage, comme les animations d'orbes
 end
 ev:RegisterEvent("DISPLAY_SIZE_CHANGED")
 ev:RegisterEvent("UI_SCALE_CHANGED")
 ev:RegisterUnitEvent("UNIT_AURA", "player")
+-- Conditions de la visibilite en furtivite
+local VIS_EVENTS = { PLAYER_TARGET_CHANGED = true, GROUP_ROSTER_UPDATE = true, ZONE_CHANGED = true,
+  ZONE_CHANGED_INDOORS = true, ZONE_CHANGED_NEW_AREA = true, PLAYER_UPDATE_RESTING = true }
+for e in pairs(VIS_EVENTS) do ev:RegisterEvent(e) end
 ev:SetScript("OnEvent", function(_, event)
   if event == "DISPLAY_SIZE_CHANGED" or event == "UI_SCALE_CHANGED" then
     if frame then Layout() end
     return
   end
+  if VIS_EVENTS[event] or event == "PLAYER_REGEN_ENABLED" then
+    if stealthed then C_Timer.After(0, StealthMode.RefreshVisibility) end
+    if VIS_EVENTS[event] then return end
+  end
+  TrackStealth()
   StealthMode.Update()
 end)

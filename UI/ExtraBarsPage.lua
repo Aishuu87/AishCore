@@ -92,16 +92,27 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
     return w
   end
 
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_EXTRA_BARS"], W))
-
-  -- Bloc épinglé en haut de la page (reste visible quand on défile) : sélecteur de barre + aperçu
+  -- Bloc épinglé en haut de la page (reste visible quand on défile) : titre, sélecteur de barre + aperçu
   local pin = CreateFrame("Frame", nil, container)
-  local PIN_TOP_H = 26
+  local TITLE_H, PIN_TOP_H = 30, 26
+
+  -- Titre de la page + interrupteur du module (extraBars.enabled, hors des réglages par barre)
+  local title = SW.CreateSectionHeader(pin, L["SETTINGS_CAT_EXTRA_BARS"], W)
+  title:SetPoint("TOPLEFT", pin, "TOPLEFT", 0, 0)
+  ctx:PinnedTitle(title, pin)
+  local cbModule = SW.CreateCheckbox(container, L["EXTRABARS_ENABLE"], L["SETTINGS_CAT_EXTRA_BARS_TT"], W)
+  cbModule:SetChecked(not (ns.DB.extraBars and ns.DB.extraBars.enabled == false))
+  cbModule.onChanged = function(v)
+    ns.DB.extraBars = ns.DB.extraBars or {}
+    ns.DB.extraBars.enabled = v and true or false
+    Changed(true)
+  end
+  ctx:TitleToggle(cbModule)
 
   -- Sélecteur de barre (centré) + interrupteur de la barre ------------------------------------------
   local top = CreateFrame("Frame", nil, pin)
-  top:SetPoint("TOPLEFT", pin, "TOPLEFT", 0, 0)
-  top:SetPoint("TOPRIGHT", pin, "TOPRIGHT", 0, 0)
+  top:SetPoint("TOPLEFT", pin, "TOPLEFT", 0, -TITLE_H)
+  top:SetPoint("TOPRIGHT", pin, "TOPRIGHT", 0, -TITLE_H)
   top:SetHeight(PIN_TOP_H)
   local barDD = SW.CreateDropdown(top, "", {}, 420)
   barDD:SetPoint("CENTER", top, "CENTER", -32, 0)
@@ -112,8 +123,8 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
 
   -- Aperçu ---------------------------------------------------------------------------------------
   local preview = CreateFrame("Frame", nil, pin, "BackdropTemplate")
-  preview:SetPoint("TOPLEFT", pin, "TOPLEFT", 0, -(PIN_TOP_H + 6))
-  preview:SetPoint("TOPRIGHT", pin, "TOPRIGHT", 0, -(PIN_TOP_H + 6))
+  preview:SetPoint("TOPLEFT", pin, "TOPLEFT", 0, -(TITLE_H + PIN_TOP_H + 6))
+  preview:SetPoint("TOPRIGHT", pin, "TOPRIGHT", 0, -(TITLE_H + PIN_TOP_H + 6))
   preview:SetHeight(PREVIEW_H)
   preview:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
   preview:SetBackdropBorderColor(unpack(Theme.border))
@@ -132,7 +143,7 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
   tagsText:SetWordWrap(false)
   local previewButtons = {}
   local function PinUp()
-    if ns.SettingsPin then ns.SettingsPin(pin, PIN_TOP_H + 6 + PREVIEW_H) end
+    if ns.SettingsPin then ns.SettingsPin(pin, TITLE_H + PIN_TOP_H + 6 + PREVIEW_H) end
   end
   container:HookScript("OnShow", PinUp)
   container:HookScript("OnHide", function() if ns.SettingsUnpin then ns.SettingsUnpin(pin) end end)
@@ -538,6 +549,7 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
     end
     barDD:SetOptions(opts)
     barDD:SetValue(ns._extraBarsSelected)
+    cbModule:SetChecked(not (ns.DB.extraBars and ns.DB.extraBars.enabled == false))   -- a pu changer depuis la page Modules
     if not bc then return end
     for _, e in ipairs(bound) do
       local v = bc[e.key]

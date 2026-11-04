@@ -46,6 +46,7 @@ local DEF_TF = { x = -34, y = 85,   w = 145, h = 48,
 -- Etat prive
 local container
 local bgTex
+local restedTex       -- segment XP reposee, cf. UpdateRestedBar
 local xpBar
 local overlayTex
 local sparkTex
@@ -66,8 +67,12 @@ local fxModel
 local restModel       -- animation 3D indicateur de zone de repos
 
 --- Applique le style de contour a levelText (factorise les ~9 sites qui refont SetFont).
+--- size = taille de base (19 niveau, 13 abreviation), multipliee par le reglage "Taille du texte de niveau".
 local function SetLevelTextFont(size)
-  ns.ApplyTextOutlineStyle(levelText, levelText.slugRing, xpFontLevel, size,
+  levelText.baseSize = size
+  local cfg = ns.GetCfg("xpBar")
+  local s = ((cfg and tonumber(cfg.levelTextSize)) or 19) / 19
+  ns.ApplyTextOutlineStyle(levelText, levelText.slugRing, xpFontLevel, math.max(6, math.floor(size * s + 0.5)),
     ns.DB.xpBar and ns.DB.xpBar.levelOutlineStyle, true)
 end
 
@@ -169,6 +174,107 @@ local REST_H        = 66.667037963867
 local REST_SCALE    = 40               
 local REST_TX       = 40               
 
+-- ═══ Orientation (cfg.barPosition / cfg.fillReverse) ═══════════════════════════════════════════════
+-- Tout est pense dans le repere "barre en bas, remplie vers la droite" : u = le long de la barre depuis son debut,
+-- v = vers l'interieur de l'ecran. O convertit ce repere vers l'ecran. O.corner = coin de depart (badge de niveau),
+-- sx / sy = signes des decalages ecran depuis ce coin. lvlS / infoS : echelles des textes (niveau, infos).
+local O = { vertical = false, reverse = false, sx = 1, sy = 1, corner = "BOTTOMLEFT", hside = "LEFT",
+            slideSign = 1, lvlS = 1, infoS = 1 }
+
+function O.Read()
+  local cfg = ns.GetCfg("xpBar") or {}
+  local pos = cfg.barPosition or "bottom"
+  O.pos = pos
+  O.vertical = (pos == "left" or pos == "right")
+  O.reverse = cfg.fillReverse == true
+  if O.vertical then
+    O.sx = (pos == "right") and -1 or 1
+    O.sy = O.reverse and -1 or 1      -- normal : de bas en haut
+  else
+    O.sx = O.reverse and -1 or 1      -- normal : de gauche a droite
+    O.sy = (pos == "top") and -1 or 1
+  end
+  O.corner = (O.sy > 0 and "BOTTOM" or "TOP") .. (O.sx > 0 and "LEFT" or "RIGHT")
+  O.hside = O.sx > 0 and "LEFT" or "RIGHT"
+  -- milieu du bord de l'ecran qui porte la barre (texte d'xp central, panneau des quetes)
+  O.mid = O.vertical and O.hside or (O.sy > 0 and "BOTTOM" or "TOP")
+  O.slideSign = (O.vertical or O.sy > 0) and 1 or -1
+  O.lvlS = (tonumber(cfg.levelTextSize) or 19) / 19
+  O.infoS = (tonumber(cfg.infoTextSize) or 12) / 12
+  return pos .. (O.reverse and "R" or "N")
+end
+
+-- Decalage ecran du point (u, v), depuis O.corner
+function O.ToScreen(u, v)
+  if O.vertical then return O.sx * v, O.sy * u end
+  return O.sx * u, O.sy * v
+end
+
+-- Pose le coin O.corner du cadre en (u, v) : l'element s'etend toujours vers l'interieur de l'ecran
+function O.PlaceAt(frame, u, v)
+  local dx, dy = O.ToScreen(u, v)
+  frame:ClearAllPoints()
+  frame:SetPoint(O.corner, UIParent, O.corner, dx, dy)
+end
+
+-- Etendues (le long, en travers) d'un cadre w x h
+function O.Extents(w, h)
+  if O.vertical then return h, w end
+  return w, h
+end
+
+-- Coin proche d'un cadre ramene dans le repere (u, v) (sauvegarde du mode edition)
+function O.FromFrame(frame)
+  local ul, ub = UIParent:GetLeft() or 0, UIParent:GetBottom() or 0
+  local l, b = frame:GetLeft() - ul, frame:GetBottom() - ub
+  local r, t = frame:GetRight() - ul, frame:GetTop() - ub
+  local ax = (O.sx > 0) and l or (UIParent:GetWidth() - r)
+  local ay = (O.sy > 0) and b or (UIParent:GetHeight() - t)
+  if O.vertical then return ay, ax end
+  return ax, ay
+end
+
+-- Badge agrandi (taille du texte de niveau) autour de son centre : coin proche (u, v) et croissance gu le long
+function O.BadgeGeom(lb)
+  local s = O.lvlS
+  local eu, ev = O.Extents(lb.w, lb.h)
+  local gu, gv = eu * (s - 1) / 2, ev * (s - 1) / 2
+  return lb.x - gu, lb.y - gv, gu
+end
+
+-- Rotation d'un fond grunge vu dans le miroir du coin de depart
+function O.Rot(deg)
+  local mx, my = O.sx < 0, O.sy < 0
+  if mx and my then return deg + 180 end
+  if mx then return -deg end
+  if my then return 180 - deg end
+  return deg
+end
+
+-- Bord de depart de la barre, et decalage d'une position p (px) le long de la barre
+function O.AlongStart()
+  if O.vertical then return O.sy > 0 and "BOTTOM" or "TOP" end
+  return O.sx > 0 and "LEFT" or "RIGHT"
+end
+function O.AlongOffset(p)
+  if O.vertical then return 0, O.sy * p end
+  return O.sx * p, 0
+end
+function O.SetLength(tex, len)
+  if O.vertical then tex:SetHeight(len) else tex:SetWidth(len) end
+end
+-- Texture couvrant [p, p + len] le long de la barre, sur toute son epaisseur
+function O.SetSpan(tex, rel, p, len)
+  local s = O.AlongStart()
+  local a, b
+  if O.vertical then a, b = s .. "LEFT", s .. "RIGHT" else a, b = "TOP" .. s, "BOTTOM" .. s end
+  local dx, dy = O.AlongOffset(p)
+  tex:ClearAllPoints()
+  tex:SetPoint(a, rel, a, dx, dy)
+  tex:SetPoint(b, rel, b, dx, dy)
+  O.SetLength(tex, len)
+end
+
 -- Helpers DB
 local function GetCfgLB()
   local db = ns.DB and ns.DB.xpBar and ns.DB.xpBar.levelBg
@@ -204,12 +310,14 @@ local function SaveLB()
   if not levelBg then return end
   if not ns.DB    then ns.DB    = {} end
   if not ns.DB.xpBar then ns.DB.xpBar = {} end
-  local x, y = levelBg:GetLeft(), levelBg:GetBottom()
-  local ux, uy = UIParent:GetLeft() or 0, UIParent:GetBottom() or 0
+  local u, v = O.FromFrame(levelBg)
+  local s = O.lvlS
   local w, h = levelBg:GetSize()
+  w, h = w / s, h / s
+  local eu, ev = O.Extents(w, h)
   ns.DB.xpBar.levelBg = ns.DB.xpBar.levelBg or {}
-  ns.DB.xpBar.levelBg.x = x - ux
-  ns.DB.xpBar.levelBg.y = y - uy
+  ns.DB.xpBar.levelBg.x = u + eu * (s - 1) / 2
+  ns.DB.xpBar.levelBg.y = v + ev * (s - 1) / 2
   ns.DB.xpBar.levelBg.w = w
   ns.DB.xpBar.levelBg.h = h
 end
@@ -218,14 +326,14 @@ local function SaveTF()
   if not tooltipFrame then return end
   if not ns.DB         then ns.DB = {} end
   if not ns.DB.xpBar   then ns.DB.xpBar = {} end
-  local x, y = tooltipFrame:GetLeft(), tooltipFrame:GetBottom()
-  local ux, uy = UIParent:GetLeft() or 0, UIParent:GetBottom() or 0
+  local u, v = O.FromFrame(tooltipFrame)
+  local _, _, gu = O.BadgeGeom(GetCfgLB())
   local w, h = tooltipFrame:GetSize()
   ns.DB.xpBar.tooltipFrame = ns.DB.xpBar.tooltipFrame or {}
-  ns.DB.xpBar.tooltipFrame.x = x - ux
-  ns.DB.xpBar.tooltipFrame.y = y - uy
-  ns.DB.xpBar.tooltipFrame.w = w
-  ns.DB.xpBar.tooltipFrame.h = h
+  ns.DB.xpBar.tooltipFrame.x = u - gu
+  ns.DB.xpBar.tooltipFrame.y = v
+  ns.DB.xpBar.tooltipFrame.w = w / O.infoS
+  ns.DB.xpBar.tooltipFrame.h = h / O.infoS
 end
 
 -- Helpers display
@@ -236,8 +344,9 @@ local function GetClassColor()
   return 1, 1, 1
 end
 
+-- Longueur de la barre (largeur ou hauteur de l'ecran)
 local function GetBarWidth()
-  return UIParent:GetWidth()
+  return O.vertical and UIParent:GetHeight() or UIParent:GetWidth()
 end
 
 local function UpdateBarColor()
@@ -252,9 +361,11 @@ local function UpdateBarColor()
   end
   local barTex = xpBar:GetStatusBarTexture()
   if barTex and barTex.SetGradient then
-    barTex:SetGradient("VERTICAL",
-      CreateColor(r * 0.45, g * 0.45, b * 0.45, 1),
-      CreateColor(r,        g,        b,        1))
+    -- sombre cote bord de l'ecran, clair cote interieur
+    local dark, bright = CreateColor(r * 0.45, g * 0.45, b * 0.45, 1), CreateColor(r, g, b, 1)
+    local inward = O.vertical and O.sx or O.sy
+    if inward < 0 then dark, bright = bright, dark end
+    barTex:SetGradient(O.vertical and "HORIZONTAL" or "VERTICAL", dark, bright)
   else
     xpBar:SetStatusBarColor(r, g, b, 1)
   end
@@ -285,14 +396,12 @@ local function AnimateXPGain(oldPct, deltaPct)
   gainTargetW = math.max(2, deltaPct * totalW)
   gainElapsed = 0
   gainPhase   = "grow"
-  gainBar:ClearAllPoints()
-  gainBar:SetPoint("LEFT", container, "LEFT", gainStartX, 0)
-  gainBar:SetSize(1, BAR_H)
+  O.SetSpan(gainBar, container, gainStartX, 1)
   gainBar:SetAlpha(1)
   gainBar:Show()
   if sparkTex then
     sparkTex:ClearAllPoints()
-    sparkTex:SetPoint("CENTER", container, "LEFT", gainStartX, 0)
+    sparkTex:SetPoint("CENTER", container, O.AlongStart(), O.AlongOffset(gainStartX))
     sparkTex:SetAlpha(1)
     sparkTex:Show()
   end
@@ -301,6 +410,32 @@ end
 
 local function IsMaxLevel()
   return UnitLevel("player") >= GetMaxPlayerLevel()
+end
+
+-- XP reposee : segment apres le remplissage (sous la barre), couleur choisie ou "Texte de Puissance" de la spe
+local RESTED_DEF_CLR = { 0.40, 0.80, 1.00, 0.55 }
+local function UpdateRestedBar()
+  if not restedTex then return end
+  if petMode or IsMaxLevel() then restedTex:Hide(); return end
+  local maxXP = UnitXPMax("player") or 0
+  local rested = GetXPExhaustion() or 0
+  if maxXP <= 0 or rested <= 0 then restedTex:Hide(); return end
+  local pct = math.min(1, (UnitXP("player") or 0) / maxXP)
+  local endPct = math.min(1, pct + rested / maxXP)
+  local totalW = GetBarWidth()
+  local w = (endPct - pct) * totalW
+  if w < 1 then restedTex:Hide(); return end
+  local cfg = ns.GetCfg("xpBar") or {}
+  local c = cfg.restedColor or RESTED_DEF_CLR
+  local r, g, b, a = c[1], c[2], c[3], cfg.restedAlpha or RESTED_DEF_CLR[4]
+  if cfg.restedUseThemeColors then
+    local CLR = ns.Modules.Colors
+    local tc = CLR and CLR.Get and CLR.Get("powertext")
+    if tc then r, g, b = tc[1], tc[2], tc[3] end
+  end
+  restedTex:SetColorTexture(r, g, b, a)
+  O.SetSpan(restedTex, container, pct * totalW, w)
+  restedTex:Show()
 end
 
 -- Réputation trackée (mode niveau max)
@@ -793,6 +928,7 @@ end
 
 local function UpdateBarFill()
   if not xpBar then return end
+  if restedTex and (petMode or IsMaxLevel()) then restedTex:Hide() end
   if petMode then
     local pd = GetPetXPData()
     if pd then
@@ -828,6 +964,7 @@ local function UpdateBarFill()
   local pct   = (maxXP > 0) and (xp / maxXP) or 0
   xpBar:SetValue(pct)
   UpdateBarColor()
+  UpdateRestedBar()
   if sparkTex and gainPhase == "idle" then
     sparkTex:Hide()
   end
@@ -846,23 +983,36 @@ local function Eased(p, delay)
   return 1 - (1 - v) * (1 - v)
 end
 
+-- Lignes de l'infobulle (total, xp reposee) : justifiees du cote du coin de depart, decalees de d (glissement)
+function O.TooltipText(dXP, dRest)
+  local s, k = O.infoS, O.sx
+  local pt = (k > 0) and "TOPLEFT" or "TOPRIGHT"
+  tooltipXP:ClearAllPoints()
+  tooltipXP:SetPoint(pt, tooltipFrame, pt, k * 32 * s, -12 * s - (dXP or 0))
+  tooltipRested:ClearAllPoints()
+  tooltipRested:SetPoint(pt, tooltipFrame, pt, k * 10 * s, -26 * s - (dRest or 0))
+end
+
 local function ApplyFade(obj, p)
   if obj == centerXPText then
     local e = Eased(p, 0.1)
+    local d = SLIDE * (1 - e)
+    local cp = O.vertical and O.hside or "CENTER"
     obj:SetAlpha(e)
     obj:ClearAllPoints()
-    obj:SetPoint("CENTER", obj:GetParent(), "CENTER", 0, -SLIDE * (1 - e))
+    if O.vertical then
+      obj:SetPoint(cp, obj:GetParent(), cp, -O.sx * d, 0)
+    else
+      obj:SetPoint(cp, obj:GetParent(), cp, 0, -O.sy * d)
+    end
   elseif obj == nlPanel or obj == qPanel then
     obj:SetAlpha(Eased(p, 0))
   elseif obj == tooltipFrame then
     local eBg, eTxt, eRest = Eased(p, 0), Eased(p, 0.2), Eased(p, 0.4)
     ttTex:SetAlpha(eBg)
     tooltipXP:SetAlpha(eTxt)
-    tooltipXP:ClearAllPoints()
-    tooltipXP:SetPoint("TOPLEFT", tooltipFrame, "TOPLEFT", 32, -12 - SLIDE * (1 - eTxt))
     tooltipRested:SetAlpha(eRest)
-    tooltipRested:ClearAllPoints()
-    tooltipRested:SetPoint("TOPLEFT", tooltipFrame, "TOPLEFT", 10, -26 - SLIDE * (1 - eRest))
+    O.TooltipText(O.slideSign * SLIDE * (1 - eTxt), O.slideSign * SLIDE * (1 - eRest))
   end
 end
 
@@ -911,10 +1061,10 @@ local function UpdateTooltip()
         tooltipRested:SetText(pd.loyalty)
         tooltipRested:SetTextColor(0.40, 0.80, 1.00, 1)
         tooltipRested:Show()
-        tooltipFrame:SetHeight(48)
+        tooltipFrame:SetHeight(48 * O.infoS)
       else
         tooltipRested:Hide()
-        tooltipFrame:SetHeight(28)
+        tooltipFrame:SetHeight(28 * O.infoS)
       end
       FadeTo(tooltipFrame, true)
       if centerXPText then
@@ -930,7 +1080,7 @@ local function UpdateTooltip()
     if comp then
       tooltipXP:SetText(string.format(L["XP_TOOLTIP_COMPANION_LEVEL"], comp.level, comp.maxLevel or 60, comp.pct * 100))
       tooltipRested:Hide()
-      tooltipFrame:SetHeight(28)
+      tooltipFrame:SetHeight(28 * O.infoS)
       FadeTo(tooltipFrame, true)
       if centerXPText then
         centerXPText:SetText(string.format("[ %s  /  %s ]", ShortNum(comp.xp), ShortNum(comp.maxXP)))
@@ -956,7 +1106,7 @@ local function UpdateTooltip()
       tooltipRested:SetTextColor(0.50, 0.50, 0.50, 1)
     end
     tooltipRested:Show()
-    tooltipFrame:SetHeight(48)
+    tooltipFrame:SetHeight(48 * O.infoS)
     FadeTo(tooltipFrame, true)
     if centerXPText then
       centerXPText:SetText(string.format("[ %s / %s ]  %s  —  %.1f%%",
@@ -976,10 +1126,10 @@ local function UpdateTooltip()
     tooltipRested:SetText(string.format(L["XP_TOOLTIP_RESTED"], string.format("%.2f%%", restedPct)))
     tooltipRested:SetTextColor(0.40, 0.80, 1.00, 1)
     tooltipRested:Show()
-    tooltipFrame:SetHeight(48)
+    tooltipFrame:SetHeight(48 * O.infoS)
   else
     tooltipRested:Hide()
-    tooltipFrame:SetHeight(28)
+    tooltipFrame:SetHeight(28 * O.infoS)
   end
   FadeTo(tooltipFrame, true)
 
@@ -995,7 +1145,8 @@ local function BuildAnimations()
   showAnim:SetToFinalAlpha(true)
 
   local t = showAnim:CreateAnimation("Translation")
-  t:SetOffset(0, 20)
+  O.showTrans = t   -- decalage pose par O.Apply (vers l'interieur de l'ecran)
+  t:SetOffset(O.ToScreen(0, 20))
   t:SetDuration(ANIM_IN_DUR)
   t:SetSmoothing("IN")
   t:SetOrder(1)
@@ -1008,8 +1159,7 @@ local function BuildAnimations()
   a:SetOrder(1)
 
   showAnim:SetScript("OnFinished", function()
-    container:ClearAllPoints()
-    container:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, 0)
+    O.PlaceAt(container, 0, 0)
     container:SetAlpha(1)
   end)
 
@@ -1055,8 +1205,7 @@ local function ShowXPBar()
   end
   UpdateBarFill()
   container:SetAlpha(0)
-  container:ClearAllPoints()
-  container:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, -20)
+  O.PlaceAt(container, 0, -20)
   container:Show()
   if showAnim then
     showAnim:Stop()
@@ -1072,8 +1221,7 @@ local function ShowXPBar()
   C_Timer.After(ANIM_IN_DUR + 0.05, function()
     if container and container:IsVisible()
        and not (hideAnim and hideAnim:IsPlaying()) then
-      container:ClearAllPoints()
-      container:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, 0)
+      O.PlaceAt(container, 0, 0)
       container:SetAlpha(1)
     end
   end)
@@ -1196,10 +1344,10 @@ local function OnGainUpdate(self, dt)
     local p     = math.min(gainElapsed / GAIN_ANIM_GROW_DUR, 1)
     local eased = 1 - (1 - p) ^ 3
     local w = math.max(1, gainTargetW * eased)
-    gainBar:SetWidth(w)
+    O.SetLength(gainBar, w)
     if sparkTex then
       sparkTex:ClearAllPoints()
-      sparkTex:SetPoint("CENTER", container, "LEFT", gainStartX + w, 0)
+      sparkTex:SetPoint("CENTER", container, O.AlongStart(), O.AlongOffset(gainStartX + w))
       sparkTex:SetAlpha(pulse)
     end
     if p >= 1 then
@@ -1209,7 +1357,7 @@ local function OnGainUpdate(self, dt)
   elseif gainPhase == "hold" then
     if sparkTex then
       sparkTex:ClearAllPoints()
-      sparkTex:SetPoint("CENTER", container, "LEFT", gainStartX + gainTargetW, 0)
+      sparkTex:SetPoint("CENTER", container, O.AlongStart(), O.AlongOffset(gainStartX + gainTargetW))
       sparkTex:SetAlpha(pulse)
     end
     if gainElapsed >= GAIN_ANIM_HOLD_DUR then
@@ -1361,6 +1509,21 @@ end
 -- Forever expose ces API (moteur moderne) mais son livre de sorts ne liste aucun sort futur : on force les entraineurs.
 local HAS_CLASS_TRAINERS = ns.IsForever or not (C_SpellBook and C_SpellBook.GetSpellBookItemLevelLearned
                                 and Enum and Enum.SpellBookItemType and Enum.SpellBookItemType.FutureSpell)
+
+-- Tables livrees (Data/ClassSpellLevels.lua, Data/LevelGains.lua) : toutes les classes sont chargees, seule celle du
+-- perso sert. Au login on ne garde qu'elle, et rien du tout quand la table n'a plus d'usage : sorts d'entraineur sans
+-- entraineur (Retail), gains du prochain niveau au niveau max. ~700 Ko liberes. Fonction de table (pas de local :
+-- fichier a la limite des 200).
+function XPBar.PruneShippedData()
+  local cf = select(2, UnitClass("player"))
+  local maxed = UnitLevel("player") >= GetMaxPlayerLevel()
+  if ns.ClassSpellLevels then
+    ns.ClassSpellLevels = HAS_CLASS_TRAINERS and cf and { [cf] = ns.ClassSpellLevels[cf] } or nil
+  end
+  if ns.LevelGains then
+    ns.LevelGains = (not maxed) and cf and { [cf] = ns.LevelGains[cf] } or nil
+  end
+end
 
 -- Competences d'armes (Forever), apprises chez un maitre d'armes : niveau 1 et 10 pa, sauf les armes d'hast (niveau 20,
 -- 1 po). Classes autorisees par arme. Donnees reprises de l'addon WhatsTraining (Classes/WeaponSkills.lua, regles "era").
@@ -1720,6 +1883,30 @@ NL.SHADOW_DUR = 1.6   -- l'ombre arrive plus doucement que le texte : fondu + le
 NL.ANIM_DUR, NL.ANIM_SLIDE, NL.ANIM_STAGGER = 0.65, 22, 1.9   -- duree d'un element, glissement, etirement des decalages
 NL.OCRE = { 1, 189 / 255, 116 / 255 }   -- ocre des tooltips XP (#FFBD74) : icones de stats, quetes de difficulte "normale"
 NL.GREY = { 72 / 255, 72 / 255, 72 / 255 }       -- "5525xp to" (#484848)
+-- Le panneau se cale au bout de la barre oppose au badge de niveau. NL.M : miroir gauche <-> droite (coin gauche) ;
+-- NL.V : coin haut (barre en haut, ou barre verticale qui part du bas). En haut, seuls le coin et l'ombre s'inversent :
+-- les blocs gardent leur ordre, l'empilement est reporte contre le bord haut (NL.CY). NL.M / NL.V sont figes a la
+-- construction du panneau ; un changement d'orientation le fait reconstruire (cf. XPBar.ApplySettings).
+NL.SWAP = { LEFT = "RIGHT", RIGHT = "LEFT", TOPLEFT = "TOPRIGHT", TOPRIGHT = "TOPLEFT",
+            BOTTOMLEFT = "BOTTOMRIGHT", BOTTOMRIGHT = "BOTTOMLEFT" }
+NL.VSWAP = { BOTTOMLEFT = "TOPLEFT", BOTTOMRIGHT = "TOPRIGHT", TOPLEFT = "BOTTOMLEFT", TOPRIGHT = "BOTTOMRIGHT" }
+function NL.P(pt) return NL.M and NL.SWAP[pt] or pt end
+function NL.X(x) return NL.M and -x or x end
+-- coin de l'ecran / du panneau (miroir vertical en plus)
+function NL.PV(pt) return NL.P(NL.V and NL.VSWAP[pt] or pt) end
+function NL.Y(y) return NL.V and -y or y end
+-- dy d'une cellule (bas de la cellule depuis le bord bas) -> decalage depuis le coin NL.PV du panneau
+function NL.CY(f, dy) return NL.V and (dy - (f.vShift or 0)) or dy end
+-- En haut : l'empilement est translate pour que l'ecart au bord haut soit celui du bas en mode normal
+function NL.Shift(f)
+  local top, low = 0, math.huge
+  for _, it in ipairs(f.items) do
+    local c = it.cell
+    top = math.max(top, (c.dy or 0) + c:GetHeight())
+    low = math.min(low, c.dy or 0)
+  end
+  f.vShift = (low == math.huge) and 0 or (top + low)
+end
 
 -- Montserrat vient de SharedMedia_MyMedia, que le client n'accepte pas toujours des le premier SetFont (cf.
 -- ns.ApplyFontReliable) : la police est reposee apres 2 s et 6 s, et le texte reste en 2002 tant qu'elle manque.
@@ -1740,7 +1927,7 @@ function NL.Text(parent, font, size, color, justify)
     if not ok or res == false then fs:SetFont(ns.FONT_FALLBACK, size, "") end
   end
   fs:SetTextColor(color[1], color[2], color[3], 1)
-  fs:SetJustifyH(justify or "RIGHT")
+  fs:SetJustifyH(NL.P(justify or "RIGHT"))
   fs:SetShadowColor(0, 0, 0, 0.7)
   fs:SetShadowOffset(1, -1)
   return fs
@@ -1780,16 +1967,23 @@ NL.TRAIN_LAYOUT = {
 NL.GREY_RANK = { 0.60, 0.60, 0.60 }
 
 local function BuildNextLevelPanel()
+  -- barre horizontale : coin oppose au badge, cote de la barre ; verticale : cote de la barre, bout oppose au badge
+  if O.vertical then
+    NL.M, NL.V = O.sx > 0, O.sy > 0
+  else
+    NL.M, NL.V = O.sx < 0, O.sy < 0
+  end
   local f = CreateFrame("Frame", nil, UIParent)
   f:SetSize(656, 400)
-  f:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", 0, 0)
+  f:SetPoint(NL.PV("BOTTOMRIGHT"), UIParent, NL.PV("BOTTOMRIGHT"), 0, 0)
   f:SetFrameStrata("FULLSCREEN")   -- devant les barres dynamiques, cadres de dialogue...
   f:Hide()
   f:SetScript("OnHide", function() NL.hiding = false; NL.RestoreXPBar("level") end)
   f.shadow = f:CreateTexture(nil, "BACKGROUND")
   f.shadow:SetTexture(NL.TEX_SHADOW)
   f.shadow:SetSize(656, 400)
-  f.shadow:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+  f.shadow:SetPoint(NL.PV("BOTTOMRIGHT"), f, NL.PV("BOTTOMRIGHT"), 0, 0)
+  f.shadow:SetTexCoord(NL.M and 1 or 0, NL.M and 0 or 1, NL.V and 1 or 0, NL.V and 0 or 1)
   f.shadowX, f.shadowY, f.curX, f.curY, f.shadowT = 0, 0, 0, 0, 0
 
   -- chaque element vit dans sa cellule : c'est elle qui glisse / se fond a l'apparition
@@ -1804,20 +1998,25 @@ local function BuildNextLevelPanel()
   f.title = Cell()
   f.titleLight = NL.Text(f.title, NL.FONT_LIGHT, 21, NL.GREY, "RIGHT")        -- "5525 xp to" : plus petit
   f.titleBold = NL.Text(f.title, NL.FONT_BOLD_ITALIC, 28, NL.CREAM, "RIGHT")   -- "level 10"
-  f.titleBold:SetPoint("BOTTOMRIGHT", f.title, "BOTTOMRIGHT", 0, 0)
-  f.titleLight:SetPoint("BOTTOMRIGHT", f.titleBold, "BOTTOMLEFT", 0, 1)       -- meme ligne de base
+  if NL.M then   -- ordre de lecture conserve : "5525 xp to" puis "level 10", cale a gauche
+    f.titleLight:SetPoint("BOTTOMLEFT", f.title, "BOTTOMLEFT", 0, 1)
+    f.titleBold:SetPoint("BOTTOMLEFT", f.titleLight, "BOTTOMRIGHT", 0, -1)
+  else
+    f.titleBold:SetPoint("BOTTOMRIGHT", f.title, "BOTTOMRIGHT", 0, 0)
+    f.titleLight:SetPoint("BOTTOMRIGHT", f.titleBold, "BOTTOMLEFT", 0, 1)       -- meme ligne de base
+  end
 
   -- en-tetes (police du jeu) avec leur filet a gauche
   local function Header(r0, r1)
     local c = Cell()
     c.text = NL.Text(c, ns.FONT_FALLBACK, 15, NL.BROWN, "RIGHT")
-    c.text:SetPoint("RIGHT", c, "RIGHT", 0, 0)
+    c.text:SetPoint(NL.P("RIGHT"), c, NL.P("RIGHT"), 0, 0)
     c.line = c:CreateTexture(nil, "ARTWORK")
     c.line:SetTexture(NL.TEX_DIVIDER)
     c.line:SetSize(314, r1 - r0)
     -- rognage d'un des deux filets (rangees r0..r1-1 des 129 de la texture) ; le filet finit au bord droit
-    c.line:SetTexCoord(0, 1, r0 / 129, r1 / 129)
-    c.line:SetPoint("RIGHT", c.text, "LEFT", -8, 0)
+    if NL.M then c.line:SetTexCoord(1, 0, r0 / 129, r1 / 129) else c.line:SetTexCoord(0, 1, r0 / 129, r1 / 129) end
+    c.line:SetPoint(NL.P("RIGHT"), c.text, NL.P("LEFT"), NL.X(-8), 0)
     return c
   end
   f.hdrGain = Header(0, 4)
@@ -1831,14 +2030,14 @@ local function BuildNextLevelPanel()
     c.icon = c:CreateTexture(nil, "ARTWORK")
     c.icon:SetSize(NL.STAT_ICON, NL.STAT_ICON)
     c.icon:SetVertexColor(NL.OCRE[1], NL.OCRE[2], NL.OCRE[3], 1)
-    c.icon:SetPoint("RIGHT", c, "RIGHT", 0, 0)
+    c.icon:SetPoint(NL.P("RIGHT"), c, NL.P("RIGHT"), 0, 0)
     c.value = NL.Text(c, NL.FONT_BOLD, 23, NL.TEAL, "RIGHT")
     -- ancre a la cellule (pas a l'icone) : l'icone glisse avec Alt, le "+N" reste en place
-    c.value:SetPoint("RIGHT", c, "RIGHT", -(NL.STAT_ICON - 4), 0)
+    c.value:SetPoint(NL.P("RIGHT"), c, NL.P("RIGHT"), NL.X(-(NL.STAT_ICON - 4)), 0)
     -- Alt maintenu : l'icone monte et s'efface, ce texte (PV, FOR, ESP...) arrive par le bas a sa place
     -- Montserrat Bold comme le "+N" s'il est installe, sinon la 2002 (repli fait par NL.Text / ApplyFontReliable)
     c.label = NL.Text(c, NL.FONT_BOLD, 17, NL.OCRE, "LEFT")
-    c.label:SetPoint("LEFT", c, "RIGHT", -NL.STAT_ICON + NL.LABEL_DX, 0)   -- justifie a gauche, depuis le bord gauche de l'icone
+    c.label:SetPoint(NL.P("LEFT"), c, NL.P("RIGHT"), NL.X(-NL.STAT_ICON + NL.LABEL_DX), 0)   -- justifie a gauche, depuis le bord gauche de l'icone
     c.label:SetAlpha(0)
     f.stats[i] = c
   end
@@ -1850,12 +2049,12 @@ local function BuildNextLevelPanel()
     c:SetHeight(NL.SPELL_ICON)
     c.icon = c:CreateTexture(nil, "ARTWORK")
     c.icon:SetSize(NL.SPELL_ICON, NL.SPELL_ICON)
-    c.icon:SetPoint("LEFT", c, "LEFT", 0, 0)
+    c.icon:SetPoint(NL.P("LEFT"), c, NL.P("LEFT"), 0, 0)
     c.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     -- badge "+" (sort nouveau) ou chevron (nouveau rang), pose par LayoutLevel (XPBar.SpellBadge)
     c.plus = c:CreateTexture(nil, "OVERLAY")
     c.plus:SetSize(20, 20)
-    c.plus:SetPoint("CENTER", c.icon, "TOPRIGHT", -4, -1)
+    c.plus:SetPoint("CENTER", c.icon, NL.P("TOPRIGHT"), NL.X(-4), -1)
     c.name = NL.Text(c, ns.FONT_FALLBACK, 12, NL.TEAL, "LEFT")
     c.name:SetWordWrap(true)
     c.name:SetMaxLines(2)
@@ -1869,11 +2068,11 @@ local function BuildNextLevelPanel()
     local c = Cell()
     c:SetSize(190, 36)
     c.price = NL.Text(c, ns.FONT_FALLBACK, 11, { 1, 1, 1 }, "RIGHT")
-    c.price:SetPoint("LEFT", c, "LEFT", 0, 0)
+    c.price:SetPoint(NL.P("LEFT"), c, NL.P("LEFT"), 0, 0)
     c.price:SetWidth(56)
     c.icon = c:CreateTexture(nil, "ARTWORK")
     c.icon:SetSize(36, 36)
-    c.icon:SetPoint("LEFT", c, "LEFT", 60, 0)
+    c.icon:SetPoint(NL.P("LEFT"), c, NL.P("LEFT"), NL.X(60), 0)
     c.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     c.name = NL.Text(c, ns.FONT_FALLBACK, 12, NL.TEAL, "LEFT")
     c.name:SetWordWrap(true)
@@ -1884,20 +2083,25 @@ local function BuildNextLevelPanel()
   f.total = Cell()
   f.total:SetSize(300, 24)
   f.totalValue = NL.Text(f.total, ns.FONT_FALLBACK, 16, NL.CREAM, "RIGHT")
-  f.totalValue:SetPoint("RIGHT", f.total, "RIGHT", 0, 0)
   f.totalLabel = NL.Text(f.total, ns.FONT_FALLBACK, 16, NL.CREAM, "RIGHT")
-  f.totalLabel:SetPoint("RIGHT", f.totalValue, "LEFT", -12, 0)
+  if NL.M then   -- "Total" puis le montant, cale a gauche
+    f.totalLabel:SetPoint("LEFT", f.total, "LEFT", 0, 0)
+    f.totalValue:SetPoint("LEFT", f.totalLabel, "RIGHT", 12, 0)
+  else
+    f.totalValue:SetPoint("RIGHT", f.total, "RIGHT", 0, 0)
+    f.totalLabel:SetPoint("RIGHT", f.totalValue, "LEFT", -12, 0)
+  end
 
   -- "..." : des competences ne tiennent pas dans l'affichage (le total, lui, les compte toutes)
   f.more = Cell()
   f.more:SetSize(30, 14)
   f.moreText = NL.Text(f.more, ns.FONT_FALLBACK, 16, NL.CREAM, "RIGHT")
-  f.moreText:SetPoint("RIGHT", f.more, "RIGHT", 0, 0)
+  f.moreText:SetPoint(NL.P("RIGHT"), f.more, NL.P("RIGHT"), 0, 0)
   f.moreText:SetText("...")
 
   f.hint = Cell()
   f.hintText = NL.Text(f.hint, ns.FONT_FALLBACK, 13, NL.DIM, "RIGHT")
-  f.hintText:SetPoint("RIGHT", f.hint, "RIGHT", 0, 0)
+  f.hintText:SetPoint(NL.P("RIGHT"), f.hint, NL.P("RIGHT"), 0, 0)
   f.hintText:SetWidth(300)
   f.hintText:SetWordWrap(true)
 
@@ -1922,7 +2126,7 @@ function NL.CityScroll(clip, el)
   elseif t < 2 * pause + run then x = over
   else x = over - (t - 2 * pause - run) * sp end
   fs:ClearAllPoints()
-  fs:SetPoint("LEFT", clip, "LEFT", -x, 0)
+  fs:SetPoint(NL.P("LEFT"), clip, NL.P("LEFT"), NL.X(-x), 0)
 end
 
 -- Ligne des villes (sous le nom, a la place du rang) ; renvoie sa hauteur, 0 si rien a afficher
@@ -1938,7 +2142,7 @@ function NL.CityLine(c, cities, tw)
     cb:SetClipsChildren(true)
     cb.text = cb:CreateFontString(nil, "OVERLAY")
     cb.text:SetWordWrap(false)
-    cb.text:SetJustifyH("LEFT")
+    cb.text:SetJustifyH(NL.P("LEFT"))
     c.city = cb
   end
   local font, size, flags = c.rank:GetFont()
@@ -1949,11 +2153,11 @@ function NL.CityLine(c, cities, tw)
   cb.text:SetText(txt)
   cb:SetSize(tw, cb.text:GetStringHeight() + 2)
   cb.text:ClearAllPoints()
-  cb.text:SetPoint("LEFT", cb, "LEFT", 0, 0)
+  cb.text:SetPoint(NL.P("LEFT"), cb, NL.P("LEFT"), 0, 0)
   cb.t = 0
   cb:SetScript("OnUpdate", (cb.text:GetStringWidth() > tw) and NL.CityScroll or nil)
   cb:ClearAllPoints()
-  cb:SetPoint("TOPLEFT", c.name, "BOTTOMLEFT", 0, 0)
+  cb:SetPoint(NL.P("TOPLEFT"), c.name, NL.P("BOTTOMLEFT"), 0, 0)
   cb:Show()
   return cb:GetHeight()
 end
@@ -1975,9 +2179,9 @@ function NL.NameBlock(c, name, rank, tw, iconSize, cities)
   local cityH = NL.CityLine(c, (not r) and cities or nil, tw)
   local block = c.name:GetStringHeight() + (r and (c.rank:GetStringHeight() + 1) or (cityH > 0 and cityH + 1) or 0)
   c.name:ClearAllPoints()
-  c.name:SetPoint("TOPLEFT", c.icon, "TOPRIGHT", 6, -math.max(0, (iconSize - block) / 2))
+  c.name:SetPoint(NL.P("TOPLEFT"), c.icon, NL.P("TOPRIGHT"), NL.X(6), -math.max(0, (iconSize - block) / 2))
   c.rank:ClearAllPoints()
-  c.rank:SetPoint("TOPLEFT", c.name, "BOTTOMLEFT", 0, -1)
+  c.rank:SetPoint(NL.P("TOPLEFT"), c.name, NL.P("BOTTOMLEFT"), 0, -1)
 end
 
 -- Prix avec les icones de pieces (or / argent / cuivre) a la suite de chaque montant ; size = hauteur de l'icone
@@ -1999,7 +2203,7 @@ function NL.Place(f, cell, dx, dy, w, h)
   if w then cell:SetWidth(w) end
   if h then cell:SetHeight(h) end
   cell:ClearAllPoints()
-  cell:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -dx, dy)
+  cell:SetPoint(NL.P("BOTTOMRIGHT"), f, NL.PV("BOTTOMRIGHT"), NL.X(-dx), NL.CY(f, dy))
 end
 
 function NL.Add(f, cell, delay)
@@ -2017,7 +2221,7 @@ function NL.ShadowStep(f)
   f.shadow:SetAlpha(e)
   f.shadow:SetSize(656 * sc, 400 * sc)
   f.shadow:ClearAllPoints()
-  f.shadow:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", f.curX + (1 - e) * 14, f.curY - (1 - e) * 9)
+  f.shadow:SetPoint(NL.PV("BOTTOMRIGHT"), f, NL.PV("BOTTOMRIGHT"), NL.X(f.curX + (1 - e) * 14), NL.Y(f.curY - (1 - e) * 9))
 end
 
 -- Apparition des elements : fondu + glissement depuis la droite, decales d'un element a l'autre.
@@ -2032,7 +2236,7 @@ function NL.Animate(f, keepShadow)
   for _, it in ipairs(f.items) do
     it.cell:SetAlpha(0)
     it.cell:ClearAllPoints()
-    it.cell:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -it.cell.dx + NL.ANIM_SLIDE, it.cell.dy)
+    it.cell:SetPoint(NL.P("BOTTOMRIGHT"), f, NL.PV("BOTTOMRIGHT"), NL.X(-it.cell.dx + NL.ANIM_SLIDE), NL.CY(f, it.cell.dy))
   end
   f:SetScript("OnUpdate", function(self, el)
     self.t = self.t + el
@@ -2049,7 +2253,7 @@ function NL.Animate(f, keepShadow)
       local e = 1 - (1 - v) * (1 - v) * (1 - v)
       it.cell:SetAlpha(e)
       it.cell:ClearAllPoints()
-      it.cell:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -it.cell.dx + (1 - e) * NL.ANIM_SLIDE, it.cell.dy)
+      it.cell:SetPoint(NL.P("BOTTOMRIGHT"), self, NL.PV("BOTTOMRIGHT"), NL.X(-it.cell.dx + (1 - e) * NL.ANIM_SLIDE), NL.CY(self, it.cell.dy))
     end
     if not pending then self:SetScript("OnUpdate", nil) end
   end)
@@ -2156,10 +2360,10 @@ function NL.ApplyStatAlt(f, p)
   for _, c in ipairs(f.stats) do
     c.icon:SetAlpha(1 - e)
     c.icon:ClearAllPoints()
-    c.icon:SetPoint("RIGHT", c, "RIGHT", 0, ALT_SLIDE * e)
+    c.icon:SetPoint(NL.P("RIGHT"), c, NL.P("RIGHT"), 0, ALT_SLIDE * e)
     c.label:SetAlpha(e)
     c.label:ClearAllPoints()
-    c.label:SetPoint("LEFT", c, "RIGHT", -NL.STAT_ICON + NL.LABEL_DX - (c.labelDX or 0), -ALT_SLIDE * (1 - e))
+    c.label:SetPoint(NL.P("LEFT"), c, NL.P("RIGHT"), NL.X(-NL.STAT_ICON + NL.LABEL_DX - (c.labelDX or 0)), -ALT_SLIDE * (1 - e))
   end
 end
 local altDriver = CreateFrame("Frame")
@@ -2197,12 +2401,14 @@ end
 -- avec une petite marge a gauche (15) et au-dessus (30). Le bord gauche est en pente : descendre l'ombre ou la pousser vers la droite
 -- la retrecit ; chaque element impose sa propre limite (un titre etroit en haut n'a pas besoin de la largeur des sorts).
 function NL.FitShadow(f)
+  NL.Shift(f)
   local boxes, top = {}, 0
   for _, it in ipairs(f.items) do
     local c = it.cell
     local ext = (c.dx or 0) + c:GetWidth()
     if c.line then ext = ext + 8 + 120 end        -- le filet d'un en-tete s'efface vite : on n'en compte qu'une partie
-    local t = (c.dy or 0) + c:GetHeight()
+    -- t = cote de la cellule le plus loin du bord de l'ecran (en haut : son bas, l'empilement etant translate)
+    local t = NL.V and (f.vShift - (c.dy or 0)) or ((c.dy or 0) + c:GetHeight())
     boxes[#boxes + 1] = { left = ext, top = t }
     top = math.max(top, t)
   end
@@ -2256,7 +2462,7 @@ function NL.LayoutTrain(f, lvlX, lvlY)
 
   if n == 0 then
     local cf = select(2, UnitClass("player"))
-    local hasData = (ns.ClassSpellLevels and ns.ClassSpellLevels[cf])
+    local hasData = (not HAS_CLASS_TRAINERS) or (ns.ClassSpellLevels and ns.ClassSpellLevels[cf])
                     or (AishaddonDB and AishaddonDB.futureSpells and AishaddonDB.futureSpells[cf]
                         and next(AishaddonDB.futureSpells[cf]) ~= nil)
     f.hintText:SetText(hasData and L["XP_NL_TRAIN_NONE"] or L["XP_NEXTLEVEL_NO_DATA"])
@@ -2459,7 +2665,6 @@ function NL.ShowHint()
     h:SetFrameStrata("TOOLTIP")   -- au-dessus de l'infobulle total / xp reposee, qui est remontee pendant le survol
     h:Hide()
     h.text = NL.Text(h, ns.FONT_FALLBACK, 9, { 0.55, 0.55, 0.55 }, "RIGHT")
-    h.text:SetPoint("RIGHT", h, "RIGHT", 0, 0)
     h.target = 0
     h:SetScript("OnUpdate", function(self, el)
       local a = self:GetAlpha()
@@ -2477,9 +2682,14 @@ function NL.ShowHint()
   local r, g, b = 0.55, 0.55, 0.55
   if tooltipXP and tooltipXP.GetTextColor then r, g, b = tooltipXP:GetTextColor() end
   h.text:SetTextColor(r, g, b, 1)
+  h.text:ClearAllPoints()
+  h.text:SetPoint(NL.P("RIGHT"), h, NL.P("RIGHT"), 0, 0)
+  h.text:SetJustifyH(NL.P("RIGHT"))
   h:SetWidth(h.text:GetStringWidth() + 4)
   h:ClearAllPoints()
-  h:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -10, BAR_H)   -- coin bas droit, juste au-dessus de la barre d'xp
+  -- coin du panneau, colle au bord de l'ecran, juste a cote de la barre d'xp quand elle longe ce bord
+  local edge = O.vertical and 4 or BAR_H
+  h:SetPoint(NL.PV("BOTTOMRIGHT"), UIParent, NL.PV("BOTTOMRIGHT"), NL.X(-(10 + (O.vertical and BAR_H or 0))), NL.Y(edge))
   if not h:IsShown() then h:SetAlpha(0); h:Show() end
   h.target = 1
 end
@@ -2498,6 +2708,7 @@ ShowNextLevelPanel = function(refresh)
   NL.hiding = false
   if not nlPanel then nlPanel = BuildNextLevelPanel() end
   local f = nlPanel
+  f:SetScale(math.max(0.5, (cfg and tonumber(cfg.nlScale)) or 1))
   f:SetScript("OnUpdate", nil)
   NL.HideAll(f)
   if nlMode == "train" then
@@ -2509,6 +2720,7 @@ ShowNextLevelPanel = function(refresh)
   else
     NL.LayoutLevel(f)
   end
+  NL.Shift(f)
   NL.RaiseXPBar("level")
   if not refresh then NL.ShowHint() end
   if refresh and f:IsShown() then
@@ -2594,7 +2806,7 @@ local function PotStep(self, el)
   if self.mode == "in" then
     local v = math.min(1, self.t / 0.55)
     local e = 1 - (1 - v) * (1 - v) * (1 - v)
-    potTex:SetWidth(math.max(1, self.w * e))
+    O.SetLength(potTex, math.max(1, self.w * e))
     potTex:SetAlpha(0.95 * math.min(1, self.t / 0.25))
     if v >= 1 then self:SetScript("OnUpdate", nil) end
   else
@@ -2616,10 +2828,7 @@ function NL.ShowPot(totalXP, xpMax)
   local W = GetBarWidth()
   local frac0 = math.min(1, cur / xpMax)
   local frac1 = math.min(1, (cur + totalXP) / xpMax)
-  potTex:ClearAllPoints()
-  potTex:SetPoint("TOPLEFT", xpBar, "TOPLEFT", frac0 * W, 0)
-  potTex:SetPoint("BOTTOMLEFT", xpBar, "BOTTOMLEFT", frac0 * W, 0)
-  potTex:SetWidth(1)
+  O.SetSpan(potTex, xpBar, frac0 * W, 1)
   potTex:SetAlpha(0)
   potTex:Show()
   potDrv.t, potDrv.mode, potDrv.w = 0, "in", math.max(2, (frac1 - frac0) * W)
@@ -2674,14 +2883,19 @@ local function BuildQuestPanel()
 end
 
 HideQuestPanel = function()
-  if qPanel then FadeTo(qPanel, false) end
+  if qPanel then qPanel.kind = nil; FadeTo(qPanel, false) end
   NL.HidePot()
 end
 
 -- ALT : quetes pretes a rendre. Maj (Retail, sans entraineur de classe) : quetes en cours, meme presentation.
 ShowQuestPanel = function()
-  local kind = (IsAltKeyDown() and "ready") or ((not HAS_CLASS_TRAINERS and IsShiftKeyDown()) and "progress") or nil
+  -- "Toujours montrer les quetes a rendre" : affichees des le survol, sans Alt
+  local qcfg = ns.GetCfg("xpBar")
+  local kind = (IsAltKeyDown() and "ready") or ((not HAS_CLASS_TRAINERS and IsShiftKeyDown()) and "progress")
+               or ((qcfg and qcfg.questsAlwaysShown) and "ready") or nil
   if not kind or IsMaxLevel() then HideQuestPanel(); return end
+  -- deja affiche avec le meme contenu (Alt enfonce alors que les quetes sont deja la) : pas de nouvelle animation
+  if qPanel and qPanel:IsShown() and qPanel.kind == kind and fades[qPanel] ~= 0 then return end
   local ready, readyXP, prog, progXP = GetTurnInQuests()
   local list, totalXP = ready, readyXP
   if kind == "progress" then
@@ -2693,6 +2907,7 @@ ShowQuestPanel = function()
   if #list == 0 or xpMax <= 0 then HideQuestPanel(); return end
   if not qPanel then qPanel = BuildQuestPanel() end
   local q = qPanel
+  q.kind = kind
   local function Pct(xp)
     local p = xp / xpMax * 100
     if p < 1 then return string.format("+%.1f%%", p) end
@@ -2738,7 +2953,11 @@ ShowQuestPanel = function()
   Item(q.tot, W, 22, y, 0.2 + n * 0.08 + 0.06)
   q:SetSize(W, -y + 22)
   q:ClearAllPoints()
-  q:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, BAR_H + 20 + 10)
+  if O.vertical then
+    q:SetPoint("BOTTOM" .. O.hside, UIParent, O.hside, O.sx * (BAR_H + 20), 20)
+  else
+    q:SetPoint(O.mid, UIParent, O.mid, 0, O.sy * (BAR_H + 20 + 10))
+  end
 
   -- animation : lignes en glissement leger depuis la gauche (decalees), ombre en glissement leger depuis le bas
   q.t = 0
@@ -2948,8 +3167,12 @@ local function OnCompanionUpdate()
 end
 
 local function OnXPBarEvent(_, event, arg1, ...)
-  if event == "PLAYER_XP_UPDATE" then
+  if event == "PLAYER_LOGIN" then
+    pcall(XPBar.PruneShippedData)
+  elseif event == "PLAYER_XP_UPDATE" then
     OnXPGained()
+  elseif event == "UPDATE_EXHAUSTION" then
+    UpdateRestedBar()
   elseif event == "PLAYER_LEVEL_UP" then
     -- gains de ce niveau (PV, ressource, stats, talents) : servent d'estimation pour le suivant
     pcall(RecordLevelGains, arg1, ...)
@@ -3046,7 +3269,9 @@ end
 -- Enregistrement des events au niveau module (independant de Create)
 do
   local evtFrame = CreateFrame("Frame")
+  evtFrame:RegisterEvent("PLAYER_LOGIN")
   evtFrame:RegisterEvent("PLAYER_XP_UPDATE")
+  evtFrame:RegisterEvent("UPDATE_EXHAUSTION")
   evtFrame:RegisterEvent("PLAYER_LEVEL_UP")
   evtFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
   evtFrame:RegisterEvent("UPDATE_FACTION")
@@ -3056,34 +3281,94 @@ do
   evtFrame:SetScript("OnEvent", OnXPBarEvent)
 end
 
--- Apply layout visuals (positions/sizes/rotations depuis DB)
+-- Apply layout visuals (positions/sizes/rotations depuis DB), dans le repere du coin de depart
 local function ApplyLayoutCfg()
   local lb = GetCfgLB()
   local tf = GetCfgTF()
+  local sL, sI = O.lvlS, O.infoS
+  local bu, bv, gu = O.BadgeGeom(lb)
 
   if levelBg then
-    levelBg:ClearAllPoints()
-    levelBg:SetSize(lb.w, lb.h)
-    levelBg:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", lb.x, lb.y)
+    levelBg:SetSize(lb.w * sL, lb.h * sL)
+    O.PlaceAt(levelBg, bu, bv)
   end
   if lbTex then
-    lbTex:SetRotation(math.rad(lb.rot))
+    lbTex:SetRotation(math.rad(O.Rot(lb.rot)))
   end
   -- Sync hoverFrame sur levelBg pour qu'il suive les déplacements en layout mode
   if hoverFrame then
-    hoverFrame:ClearAllPoints()
-    hoverFrame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", lb.x, math.max(0, lb.y))
+    hoverFrame:SetSize(HOVER_W * sL, HOVER_H * sL)
+    O.PlaceAt(hoverFrame, bu, math.max(0, bv))
+  end
+  -- Nom complet (reputation / compagnon) au survol : depuis le bord de l'ecran, a hauteur du badge
+  if repNameLabel then
+    local _, dy = O.ToScreen(bu, bv)
+    repNameLabel:ClearAllPoints()
+    repNameLabel:SetPoint(O.hside, UIParent, O.corner, O.sx * 4, dy + O.sy * (lb.h * sL * 0.45 + 2))
+    repNameLabel:SetJustifyH(O.hside)
   end
 
   if tooltipFrame then
-    tooltipFrame:ClearAllPoints()
-    tooltipFrame:SetSize(tf.w, tf.h)
-    tooltipFrame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", tf.x, tf.y)
+    tooltipFrame:SetSize(tf.w * sI, tf.h * sI)
+    O.PlaceAt(tooltipFrame, tf.x + gu, tf.y)   -- suit le bord du badge agrandi
+    tooltipXP:SetJustifyH(O.hside)
+    tooltipRested:SetJustifyH(O.hside)
+    O.TooltipText(0, 0)
   end
   if ttTex then
-    ttTex:SetSize(tf.bgW, tf.bgH)
-    ttTex:SetPoint("TOPLEFT", tooltipXP, "TOPLEFT", tf.bgOffX, tf.bgOffY)
-    ttTex:SetRotation(math.rad(tf.bgRot))
+    ttTex:SetSize(tf.bgW * sI, tf.bgH * sI)
+    ttTex:ClearAllPoints()
+    if O.sx > 0 then
+      ttTex:SetPoint("TOPLEFT", tooltipXP, "TOPLEFT", tf.bgOffX * sI, tf.bgOffY * sI)
+    else
+      ttTex:SetPoint("TOPRIGHT", tooltipXP, "TOPRIGHT", -tf.bgOffX * sI, tf.bgOffY * sI)
+    end
+    ttTex:SetRotation(math.rad(O.Rot(tf.bgRot)))
+  end
+end
+
+-- Orientation de la barre (bord de l'ecran, sens de remplissage) et des elements poses dessus
+local function ApplyOrientation()
+  if not container then return end
+  if O.vertical then
+    container:SetSize(BAR_H, UIParent:GetHeight())
+  else
+    container:SetSize(UIParent:GetWidth(), BAR_H)
+  end
+  if not (showAnim and showAnim:IsPlaying()) then O.PlaceAt(container, 0, 0) end
+  if O.showTrans then O.showTrans:SetOffset(O.ToScreen(0, 20)) end
+  xpBar:SetOrientation(O.vertical and "VERTICAL" or "HORIZONTAL")
+  xpBar:SetReverseFill(O.reverse)
+  -- cadre decoratif : 4 px de plus a chaque bout, tourne pour garder son haut vers l'interieur de l'ecran
+  local oh = O.overlayHolder
+  overlayTex:ClearAllPoints()
+  if O.vertical then
+    overlayTex:SetPoint("TOPLEFT", oh, "TOPLEFT", 0, 4)
+    overlayTex:SetPoint("BOTTOMRIGHT", oh, "BOTTOMRIGHT", 0, -4)
+    if O.sx > 0 then overlayTex:SetTexCoord(0, 1, 1, 1, 0, 0, 1, 0) else overlayTex:SetTexCoord(1, 0, 0, 0, 1, 1, 0, 1) end
+    sparkTex:SetSize(SPARK_H, SPARK_W)
+    sparkTex:SetTexCoord(0, 1, 1, 1, 0, 0, 1, 0)
+  else
+    overlayTex:SetPoint("TOPLEFT", oh, "TOPLEFT", -4, 0)
+    overlayTex:SetPoint("BOTTOMRIGHT", oh, "BOTTOMRIGHT", 4, 0)
+    if O.sy > 0 then overlayTex:SetTexCoord(0, 1, 0, 1) else overlayTex:SetTexCoord(0, 1, 1, 0) end
+    sparkTex:SetSize(SPARK_W, SPARK_H)
+    sparkTex:SetTexCoord(0, 1, 0, 1)
+  end
+  if gainPhase == "idle" then gainBar:Hide(); sparkTex:Hide() end
+  -- total d'xp : au milieu de la barre, juste a cote
+  local holder = O.centerHolder
+  if holder then
+    holder:ClearAllPoints()
+    holder:SetPoint(O.mid, UIParent, O.mid, O.ToScreen(0, BAR_H))
+    local cp = O.vertical and O.hside or "CENTER"
+    centerXPText:ClearAllPoints()
+    centerXPText:SetPoint(cp, holder, cp, 0, 0)
+    centerXPText:SetJustifyH(cp)
+  end
+  if fxModel then
+    fxModel:ClearAllPoints()
+    fxModel:SetPoint((O.sy > 0 and "BOTTOM" or "TOP") .. O.hside, UIParent, O.hside, O.sx * -127.8, O.sy * -170.3)
   end
 end
 
@@ -3102,6 +3387,10 @@ local function CreateXPBar_Container()
   bgTex:SetAllPoints(container)
   bgTex:SetColorTexture(0, 0, 0, 1)
 
+  -- Sous le StatusBar (cadre enfant) : visible seulement apres le remplissage
+  restedTex = container:CreateTexture(nil, "BORDER")
+  restedTex:Hide()
+
   xpBar = CreateFrame("StatusBar", nil, container)
   xpBar:SetAllPoints(container)
   xpBar:SetStatusBarTexture(TEX_SOLID)
@@ -3117,6 +3406,7 @@ local function CreateXPBar_Container()
   local overlayHolder = CreateFrame("Frame", nil, container)
   overlayHolder:SetAllPoints(container)
   overlayHolder:SetFrameLevel(xpBar:GetFrameLevel() + 1)
+  O.overlayHolder = overlayHolder
 
   overlayTex = overlayHolder:CreateTexture(nil, "ARTWORK")
   -- Cadre decoratif 4 px plus large de chaque cote que la barre
@@ -3209,6 +3499,7 @@ local function CreateXPBar_Tooltip(tf)
   centerXPHolder:SetSize(300, 20)
   centerXPHolder:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, BAR_H)
   centerXPHolder:SetFrameStrata("DIALOG")
+  O.centerHolder = centerXPHolder
 
   centerXPText = centerXPHolder:CreateFontString(nil, "OVERLAY")
   centerXPText:SetFont(xpFontInfo, 13, "OUTLINE")
@@ -3300,6 +3591,7 @@ function XPBar.Create()
   local cfg = ns.GetCfg("xpBar")
   if not cfg then return end
 
+  O.key = O.Read()
   local lb = GetCfgLB()
   local tf = GetCfgTF()
 
@@ -3308,6 +3600,8 @@ function XPBar.Create()
   CreateXPBar_Tooltip(tf)
   CreateXPBar_HoverAndModel(lb)
   CreateXPBar_LayoutTools()
+  ApplyOrientation()
+  ApplyLayoutCfg()
   CreateXPBar_Finalize()
 end
 
@@ -3321,7 +3615,7 @@ ApplyRestModelCfg = function()
   local y     = cfg.restY     or 0
   local scale = cfg.restScale or 1.0
   restModel:ClearAllPoints()
-  restModel:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", x, y)
+  restModel:SetPoint(O.corner, UIParent, O.corner, O.sx * x, O.sy * y)   -- X / Y depuis le coin de depart de la barre
   restModel:SetSize(REST_W * scale, REST_H * scale)
 end
 XPBar.ApplyRestModelCfg = ApplyRestModelCfg
@@ -3329,6 +3623,16 @@ XPBar.ApplyRestModelCfg = ApplyRestModelCfg
 function XPBar.SetRestPreview(enabled)
   restPreview = enabled and true or false
   UpdateRestingIndicator()
+end
+
+-- Bouton de test des reglages : l'indicateur s'affiche quelques secondes, meme hors zone de repos
+function XPBar.TestRestIndicator(seconds)
+  if XPBar._restTest then XPBar._restTest:Cancel() end
+  XPBar.SetRestPreview(true)
+  XPBar._restTest = C_Timer.NewTimer(seconds or 8, function()
+    XPBar._restTest = nil
+    XPBar.SetRestPreview(false)
+  end)
 end
 
 -- Force le restModel au centre de l'écran, bypass total de toute la logique
@@ -3350,7 +3654,7 @@ end
 UpdateRestingIndicator = function()
   if not restModel then return end
   local cfg = ns.GetCfg("xpBar")
-  if not cfg or cfg.enabled == false or cfg.restIndicator == false then
+  if not cfg or cfg.enabled == false or (cfg.restIndicator == false and not restPreview) then
     restModel:Hide()
     return
   end
@@ -3637,13 +3941,19 @@ function XPBar.ApplySettings()
     return
   end
 
+  -- Orientation / tailles : un changement de coin de depart reconstruit le panneau du prochain niveau (miroir fige)
+  local key = O.Read()
+  if key ~= O.key then
+    O.key = key
+    if nlPanel then nlPanel:Hide(); nlPanel = nil end
+  end
+  ApplyOrientation()
+
   -- Police du badge de niveau (mis a jour avant les fonctions dynamiques)
   xpFontLevel = cfg.fontLevel or FONT_LEVEL
   xpFontInfo  = cfg.fontInfo  or FONT_INFO
   if levelText then
-    local _, sz = levelText:GetFont()
-    -- GetFont peut rendre une hauteur <= 0 (police pas encore chargee) : SetFont plante alors
-    SetLevelTextFont((sz and sz > 0) and sz or 19)
+    SetLevelTextFont(levelText.baseSize or 19)
     -- Un SetFont ne rafraichit pas toujours le rendu du texte deja pose : on le re-pose
     local t = levelText:GetText()
     if t then levelText:SetText(t) end
@@ -3658,8 +3968,7 @@ function XPBar.ApplySettings()
     local flags = (style == "THICKOUTLINE") and "THICKOUTLINE" or ((style == "SLUG" or style == "") and "" or "OUTLINE")
     local function RestyleInfo(fs, key, defSize)
       if not fs then return end
-      local _, sz = fs:GetFont()
-      sz = (sz and sz > 0) and sz or defSize
+      local sz = math.max(6, math.floor(defSize * O.infoS + 0.5))   -- reglage "Taille des infos"
       local fo = fontObjs[key]
       if not fo then
         fo = CreateFont("AishCoreXPInfoFont_" .. key)
@@ -3674,6 +3983,9 @@ function XPBar.ApplySettings()
         fo:SetShadowOffset(1, -1)
       end
       fs:SetFontObject(fo)
+      -- un texte deja style par SetFont garde sa taille malgre l'objet Font : on la repose aussi en direct
+      local foFile, foSize, foFlags = fo:GetFont()
+      if foFile then pcall(fs.SetFont, fs, foFile, foSize or sz, foFlags or flags) end
       local t = fs:GetText()
       if t then fs:SetText("") ; fs:SetText(t) end
     end
@@ -3682,14 +3994,15 @@ function XPBar.ApplySettings()
     RestyleInfo(centerXPText, "centerXP", 13)
   end
   if repNameLabel then
-    local _, sz = repNameLabel:GetFont()
-    ns.ApplyTextOutlineStyle(repNameLabel, repNameLabel.slugRing, xpFontLevel, (sz and sz > 0) and sz or 13, cfg.levelOutlineStyle, true)
+    ns.ApplyTextOutlineStyle(repNameLabel, repNameLabel.slugRing, xpFontLevel, math.max(6, math.floor(13 * O.lvlS + 0.5)),
+      cfg.levelOutlineStyle, true)
   end
   -- Re-applique positions/tailles/rotations depuis DB
   ApplyLayoutCfg()
   ApplyRestModelCfg()
   UpdateBarColor()
   UpdateXPColors()
+  UpdateRestedBar()
   XPBar.UpdateVisibility()
   SetBlizzXPBarHidden(true)   -- cacher la barre Blizzard
 end

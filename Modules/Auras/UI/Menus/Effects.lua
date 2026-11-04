@@ -729,7 +729,7 @@ function ns.SettingsPanel.BuildEffectsMenu(p, cw)
                 local wTx=wBadge:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(wTx,FONT,8,"OUTLINE"); wTx:SetAllPoints(); wTx:SetJustifyH("CENTER")
                 wTx:SetText("E"); wTx:SetTextColor(0.80,0.55,0.20); bx=bx+16
             end
-            sr:SetScript("OnEnter",function() sBg:SetColorTexture(1,1,1,0.03); sN:SetTextColor(1,1,1) end)
+            sr:SetScript("OnEnter",function() sBg:SetColorTexture(1,1,1,0.03); local M=_addon.SharedWidgets; local c=M and M.GlowColor and M.GlowColor() or {1,1,1}; sN:SetTextColor(c[1],c[2],c[3]) end)
             sr:SetScript("OnLeave",function() if selectedSpellID==entry.id then sBg:SetColorTexture(unpack(ROW_SELECTED_BG)) else sBg:SetColorTexture(0,0,0,0) end; sN:SetTextColor(unpack(Theme.textNormal)) end)
             sr:SetScript("OnClick",function()
                 for _,r in ipairs(spellRowBgs) do r.bg:SetColorTexture(0,0,0,0) end

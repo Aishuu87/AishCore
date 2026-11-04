@@ -87,21 +87,27 @@ de les modifier.
 | Fichier | Script | Quand le relancer |
 | --- | --- | --- |
 | `Data/SearchIndex.lua` | `python generate_search_index.py` | **Après toute modif qui ajoute, retire ou renomme un texte d'option** dans `UI/SettingsPanel.lua` ou `Modules/Auras/UI/Menus/*.lua` (nouveau `L["..."]` dans une page, nouvelle page dans `CATEGORIES`). Sinon la recherche du GUI ne trouve pas la nouvelle option. Une nouvelle page dont le texte vient d'une table hors de sa fonction `Build.*` : l'ajouter à `EXTRA_BLOCKS` dans le script ; une page construite dans un fichier à part (ex. `UI/CDMLayoutPage.lua`) : l'ajouter à `EXTERNAL_PAGES`. |
-| `Config/ProfileTemplate.lua` + `Modules/Auras/Core/ProfileTemplate.lua` | `python generate_profile_template.py` | **Apres chaque mise a jour du profil de reference "Empty Template" en jeu** (faire un `/reload` avant, pour que le profil soit ecrit dans les SavedVariables). Ces deux fichiers servent de configuration de depart a tout nouveau profil et au tout premier lancement. Ne jamais les editer a la main. |
+| `Config/ProfileTemplate.lua` + `Modules/Auras/Core/ProfileTemplate.lua` | `python generate_profile_template.py` | **Apres chaque mise a jour du profil de reference "Template" en jeu** (faire un `/reload` avant, pour que le profil soit ecrit dans les SavedVariables). Ces deux fichiers servent de configuration de depart a tout nouveau profil et au tout premier lancement. Ne jamais les editer a la main. |
 | `Data/MapOverlays.lua` | `python generate_map_overlays.py` | Calques de la carte du monde pour « Révéler la carte » (tables WorldMapOverlay / WorldMapOverlayTile des dernières builds Retail et Forever, via wago.tools). À relancer quand un patch ajoute ou modifie des zones. |
+| `Data/TownAreas.lua` | `python generate_town_areas.py` | Villages (flag town d'AreaTable, via wago.tools) et leurs bâtiments (WMOAreaTable, par nom localisé) pour la zone de repos étendue `ns.IsRestArea()` (`Core.lua`). Forever n'a pas le flag : villages Retail repris par nom interne. À relancer quand un patch ajoute des villages. |
 | `Data/ModelPaths.lua` | `python generate_model_paths.py` | Seulement pour **mettre à jour la liste des modèles 3D** (nouveau patch WoW avec de nouveaux modèles). Télécharge la listfile communautaire. Inutile après une modif de code. |
 
-Les deux scripts sont dans `.gitignore` : ils restent en local, seuls les `.lua` générés sont versionnés.
+### Traductions bénévoles — `locale_sheet.py` (dépendance : `pip install openpyxl`)
+
+- `python locale_sheet.py export deDE [--missing]` → `docs/translations/AishCore_Translation_deDE.xlsx` (s'ouvre dans Google Sheets), à envoyer au traducteur. Lignes rangées par page du GUI (lit `Data/SearchIndex.lua` : le régénérer avant), notes auto, français en référence. `--missing` : seulement les clés à traduire ou dont l'anglais a changé.
+- `python locale_sheet.py import <fichier.xlsx>` → fusionne dans `Locales/deDE.lua` (généré, avec empreinte `-- @xxxxxx` de l'anglais) et ajoute la ligne au `.toc`. Une ligne dont les `%s` / codes couleur diffèrent de l'anglais est ignorée. Ne pas importer en `frFR` : il reste maintenu à la main.
+
+Les scripts sont dans `.gitignore` : ils restent en local, seuls les `.lua` générés sont versionnés.
 Compiler le fichier généré après coup (cf. section Lua).
 
-## Version Forever (`_classic_beta_`) — un seul code, en miroir
+## Version Forever (`_forever_`) — un seul code, en miroir
 
-Le dossier Retail est la **seule source**. La copie `_classic_beta_\Interface\AddOns\AishCore`
+Le dossier Retail est la **seule source**. La copie `_forever_\Interface\AddOns\AishCore`
 n'est jamais éditée à la main : après **toute modification** d'AishCore, la resynchroniser,
 sans rien demander :
 
 ```
-robocopy "H:\JEUX\World of Warcraft\_retail_\Interface\AddOns\AishCore" "H:\JEUX\World of Warcraft\_classic_beta_\Interface\AddOns\AishCore" /MIR /XD .git .github docs __pycache__ /XF *.py CLAUDE.md AishCore.toc.bak .gitignore .aishdev
+robocopy "H:\JEUX\World of Warcraft\_retail_\Interface\AddOns\AishCore" "H:\JEUX\World of Warcraft\_forever_\Interface\AddOns\AishCore" /MIR /XD .git .github docs __pycache__ /XF *.py CLAUDE.md AishCore.toc.bak .gitignore .aishdev
 ```
 
 Différences de client dans le code, jamais par fichiers séparés (cf. `docs/PLAN_MULTI_CLIENT.md`) :

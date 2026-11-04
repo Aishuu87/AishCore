@@ -116,7 +116,11 @@ local function CreateBuffRow(parent, entry, y, W)
         end
         Refresh()
     end)
-    row:SetScript("OnEnter", function() label:SetTextColor(1, 1, 1) end)
+    row:SetScript("OnEnter", function()
+        local M = _addon.SharedWidgets
+        local c = M and M.GlowColor and M.GlowColor() or { 1, 1, 1 }
+        label:SetTextColor(c[1], c[2], c[3])
+    end)
     row:SetScript("OnLeave", function() label:SetTextColor(unpack(Theme.textNormal)) end)
     return row
 end
@@ -137,6 +141,7 @@ local function GeneralRows()
         { dbKey = "ignoreBagsFull",       displayName = L["MISSINGBUFFS_BAGS_FULL"],      icon = I .. "INV_Misc_Bag_08" },
         { dbKey = "ignoreWellFedFood",    displayName = L["MISSINGBUFFS_WELLFED_FOOD"],   icon = I .. "INV_Misc_Food_15" },
         { dbKey = "ignoreFlasks",         displayName = L["MISSINGBUFFS_FLASKS"],         icon = I .. "INV_Potion_62" },
+        { dbKey = "ignoreElixirs",        displayName = L["MISSINGBUFFS_ELIXIRS"],        icon = I .. "INV_Potion_32" },
         { dbKey = "ignoreWeaponStones",   displayName = L["MISSINGBUFFS_WEAPON_STONES"],  icon = I .. "INV_Stone_SharpeningStone_05" },
         { dbKey = "ignoreGatherTracking", displayName = L["MISSINGBUFFS_GATHER_TRACKING"], icon = I .. "INV_Misc_Flower_02" },
         { dbKey = "ignoreTalentPoints",   displayName = L["MISSINGBUFFS_TALENT_POINTS"],  icon = I .. "Ability_Marksmanship" },
@@ -176,18 +181,22 @@ local CLASS_COLUMNS = {
     end },
     { class = "MAGE", rows = function() return Append({}, ns.MISSING_CLASS_BUFFS.MAGE) end },
     { class = "PALADIN", rows = function()
-        local r = Append({ { dbKey = "ignorePaladinAuras", displayName = L["MISSINGBUFFS_ROW_AURA"], icon = I .. "Spell_Holy_DevotionAura" } },
-            ns.MISSING_CLASS_BUFFS.PALADIN)
-        -- Forever : une ligne par aura proposable (decochee = jamais proposee, mais compte comme active)
-        if _addon.IsForever then
-            for _, e in ipairs(Existing(ns.MISSING_PALADIN_AURAS)) do
-                if e.settingsId then r[#r + 1] = e end
-            end
+        local r = {}
+        -- une ligne par aura proposable (decochee = jamais proposee, mais compte comme active ; tout decocher coupe l'alerte)
+        for _, e in ipairs(Existing(ns.MISSING_PALADIN_AURAS)) do
+            if e.settingsId then r[#r + 1] = e end
         end
-        return r
+        return Append(r, ns.MISSING_CLASS_BUFFS.PALADIN)
     end },
     { class = "PRIEST", rows = function() return Append({}, ns.MISSING_CLASS_BUFFS.PRIEST) end },
     { class = "ROGUE", rows = function()
+        -- Forever : poisons fabriques (metier) puis appliques depuis les sacs, sans letal / non letal
+        if _addon.IsForever then
+            return {
+                { dbKey = "ignoreLethalPoisons", displayName = L["MISSINGBUFFS_ROW_POISONS"],      icon = I .. "Ability_Poisons" },
+                { dbKey = "ignorePoisonStock",   displayName = L["MISSINGBUFFS_ROW_POISON_STOCK"], icon = I .. "Trade_BrewPoison" },
+            }
+        end
         return {
             { dbKey = "ignoreLethalPoisons",    displayName = L["MISSINGBUFFS_ROW_LETHAL"],    iconSpell = 2823 },
             { dbKey = "ignoreNonlethalPoisons", displayName = L["MISSINGBUFFS_ROW_NONLETHAL"], iconSpell = 3408 },
@@ -223,6 +232,10 @@ local function ThresholdOf(entry)
     if entry.dbKey == "ignoreBagsFull" then return { "bagsFreeThreshold", 0, 30, 1, 2 } end
     if entry.kind == "ammo" then return { "ammoThreshold", 20, 1000, 20, 200 } end
     if entry.kind == "item" then return { "shardsThreshold", 1, 20, 1, 3 } end
+    if _addon.IsForever and entry.dbKey == "ignoreLethalPoisons" then
+        return { "poisonDurationThreshold", 1, 30, 1, 5, fmt = "MISSINGBUFFS_THRESHOLD_MIN", labelW = 72 }
+    end
+    if entry.dbKey == "ignorePoisonStock" then return { "poisonStockThreshold", 1, 40, 1, 5 } end
 end
 
 -- "Seuil : 2 |----|" : libelle en petit et curseur etroit, decales sous l'icone de la ligne d'alerte
@@ -231,11 +244,11 @@ local function CreateMiniThreshold(parent, y, W, t)
     local key, minV, maxV, step, default = t[1], t[2], t[3], t[4], t[5]
     local f = CreateFrame("Frame", nil, parent)
     f:SetSize(W, MINI_H)
-    f:SetPoint("TOPLEFT", 0, -y)
+    f:SetPoint("TOPLEFT", t.x or 0, -y)
     local lbl = f:CreateFontString(nil, "OVERLAY")
     ns.ApplyFont(lbl, ns.Media.font, 9)
     lbl:SetPoint("LEFT", 22, 0)
-    lbl:SetWidth(54)
+    lbl:SetWidth(t.labelW or 54)
     lbl:SetJustifyH("LEFT")
     lbl:SetTextColor(unpack(Theme.textDim or Theme.textNormal))
     local sl = CreateFrame("Slider", nil, f)
@@ -247,15 +260,18 @@ local function CreateMiniThreshold(parent, y, W, t)
     track:SetHeight(2)
     track:SetPoint("LEFT"); track:SetPoint("RIGHT")
     track:SetColorTexture(1, 1, 1, 0.22)
-    sl:SetThumbTexture("Interface\\Buttons\\WHITE8x8")
+    -- Curseur rond "Decorations B", comme les sliders du GUI
+    sl:SetThumbTexture("Interface\\AddOns\\AishCore\\Media\\UI\\SliderThumb.tga")
     local thumb = sl:GetThumbTexture()
-    thumb:SetSize(5, 10)
-    local g = Theme.gold or GENERAL_COLOR
+    thumb:SetSize(10, 10)
+    if thumb.SetSnapToPixelGrid then thumb:SetSnapToPixelGrid(false); thumb:SetTexelSnappingBias(0) end
+    local CLR = _addon.Modules and _addon.Modules.Colors
+    local g = (CLR and CLR.Get and CLR.Get("powerdotsb")) or Theme.gold or GENERAL_COLOR
     thumb:SetVertexColor(g[1], g[2], g[3], 1)
     sl:SetMinMaxValues(minV, maxV)
     sl:SetValueStep(step)
     sl:SetObeyStepOnDrag(true)
-    local function Txt(v) lbl:SetText(string.format(L["MISSINGBUFFS_THRESHOLD_SHORT"] or "Seuil : %d", v)) end
+    local function Txt(v) lbl:SetText(string.format(L[t.fmt or "MISSINGBUFFS_THRESHOLD_SHORT"] or "Seuil : %d", v)) end
     local v0 = Cfg()[key] or default
     sl:SetValue(v0); Txt(v0)
     sl:SetScript("OnValueChanged", function(_, v)
@@ -338,8 +354,8 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     local y = -34
     local cfg = Cfg()
 
+    -- Interrupteur du module dans le titre (cf. AttachTitleToggle du GUI principal) : coupe, page grisee et repliee
     local cbEnable = SW.CreateCheckbox(p, L["MISSINGBUFFS_ENABLE"] or "Activer", cw - 30)
-    cbEnable:SetPoint("TOPLEFT", 15, y)
     cbEnable:SetChecked(cfg.enabled and true or false)
     cbEnable.onChanged = function(v)
         Cfg().enabled = v
@@ -349,15 +365,25 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
             ns.SettingsPanel.InvalidateCategory("modulesOverview")
         end
     end
-    y = y - 26
+    local applyOff = _addon.SharedWidgets.AttachTitleToggle(hdr, p, cbEnable, function(off)
+        if off and p._stackSetAll then p._stackSetAll(true) end
+    end)
 
-    local cbClick = SW.CreateCheckbox(p, L["MISSINGBUFFS_CLICKABLE"] or "Icone cliquable (lance le sort manquant)", cw - 30)
+    -- Grille a 4 colonnes (comme le GUI principal) : reglages generaux a gauche, verrou seul en 4e colonne
+    local GAP = 12
+    local col = math.floor((cw - 30 - 3 * GAP) / 4)
+    local cbLock = SW.CreateCheckbox(p, L["MISSINGBUFFS_LOCK"] or "Verrouiller la position", col)
+    cbLock:SetPoint("TOPLEFT", 15 + 3 * (col + GAP), y)
+    cbLock:SetChecked(cfg.locked and true or false)
+    cbLock.onChanged = function(v) Cfg().locked = v end
+
+    local cbClick = SW.CreateCheckbox(p, L["MISSINGBUFFS_CLICKABLE"] or "Icone cliquable (lance le sort manquant)", 3 * col + 2 * GAP)
     cbClick:SetPoint("TOPLEFT", 15, y)
     cbClick:SetChecked(cfg.makeIconClickable and true or false)
     cbClick.onChanged = function(v) Cfg().makeIconClickable = v end
     y = y - 26
 
-    local cbMount = SW.CreateCheckbox(p, L["MISSINGBUFFS_IGNORE_MOUNTED"] or "Ignorer si monte", cw - 30)
+    local cbMount = SW.CreateCheckbox(p, L["MISSINGBUFFS_IGNORE_MOUNTED"] or "Ignorer si monte", 3 * col + 2 * GAP)
     cbMount:SetPoint("TOPLEFT", 15, y)
     cbMount:SetChecked(cfg.ignoreBuffsWhileMounted and true or false)
     cbMount.onChanged = function(v)
@@ -366,7 +392,7 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     end
     y = y - 26
 
-    local cbResting = SW.CreateCheckbox(p, L["MISSINGBUFFS_IGNORE_RESTING"] or "Ignorer en zone de repos", cw - 30)
+    local cbResting = SW.CreateCheckbox(p, L["MISSINGBUFFS_IGNORE_RESTING"] or "Ignorer en zone de repos", 3 * col + 2 * GAP)
     cbResting:SetPoint("TOPLEFT", 15, y)
     cbResting:SetChecked(cfg.ignoreWhileResting and true or false)
     cbResting.onChanged = function(v)
@@ -375,42 +401,36 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     end
     y = y - 26
 
-    local cbHideText = SW.CreateCheckbox(p, L["MISSINGBUFFS_HIDE_TEXT"] or "Cacher le texte sous l'icone", cw - 30)
+    local cbHideText = SW.CreateCheckbox(p, L["MISSINGBUFFS_HIDE_TEXT"] or "Cacher le texte sous l'icone", 3 * col + 2 * GAP)
     cbHideText:SetPoint("TOPLEFT", 15, y)
     cbHideText:SetChecked(cfg.hideText and true or false)
     cbHideText.onChanged = function(v) Cfg().hideText = v end
-    y = y - 26
-
-    local cbLock = SW.CreateCheckbox(p, L["MISSINGBUFFS_LOCK"] or "Verrouiller la position (empeche le glisser-deposer)", cw - 30)
-    cbLock:SetPoint("TOPLEFT", 15, y)
-    cbLock:SetChecked(cfg.locked and true or false)
-    cbLock.onChanged = function(v) Cfg().locked = v end
     y = y - 34
 
-    local slider = SW.CreateSlider(p, L["MISSINGBUFFS_THROTTLE"] or "Delai entre 2 verifications (s)", 0.1, 2.0, 0.05, cw - 30)
+    local slider = SW.CreateSlider(p, L["MISSINGBUFFS_THROTTLE"] or "Delai entre 2 verifications (s)", 0.1, 2.0, 0.05, col, true)
     slider:SetPoint("TOPLEFT", 15, y)
     slider:SetValue(cfg.debounceThrottle or 0.25)
     slider.onChanged = function(v) Cfg().debounceThrottle = v end
-    y = y - 62
+    y = y - 56
 
-    -- Rappel "bientot expire" : desactive par defaut, seuil en minutes (converti en secondes a l'usage)
-    local cbExpiring = SW.CreateCheckbox(p, L["MISSINGBUFFS_EXPIRING_ENABLE"] or "Rappel avant expiration", cw - 30)
+    -- Rappel "bientot expire" : desactive par defaut ; seuil en minutes (converti en secondes a l'usage), en petit juste
+    -- dessous comme les seuils des alertes (Sacs pleins...), grise tant que le rappel est coupe
+    local cbExpiring = SW.CreateCheckbox(p, L["MISSINGBUFFS_EXPIRING_ENABLE"] or "Rappel avant expiration", col * 2)
     cbExpiring:SetPoint("TOPLEFT", 15, y)
     cbExpiring:SetChecked(cfg.expiringSoonEnabled and true or false)
+    y = y - 22
+    local miniExp = CreateMiniThreshold(p, -y, col * 2, { "expiringSoonThreshold", 1, 30, 1, 5,
+        fmt = "MISSINGBUFFS_EXPIRING_SHORT", labelW = 96, x = 15 })
+    local function GrayExpiring()
+        _addon.SharedWidgets.SetGrayReason(miniExp, "expiring", not cbExpiring:GetChecked())
+    end
     cbExpiring.onChanged = function(v)
         Cfg().expiringSoonEnabled = v
         if ns.MissingBuffs then ns.MissingBuffs.RequestCheck() end
+        GrayExpiring()
     end
-    y = y - 26
-
-    local slExpiring = SW.CreateSlider(p, L["MISSINGBUFFS_EXPIRING_THRESHOLD"] or "Afficher le rappel quand il reste moins de (minutes)", 1, 30, 1, cw - 30)
-    slExpiring:SetPoint("TOPLEFT", 15, y)
-    slExpiring:SetValue(cfg.expiringSoonThreshold or 5)
-    slExpiring.onChanged = function(v)
-        Cfg().expiringSoonThreshold = v
-        if ns.MissingBuffs then ns.MissingBuffs.RequestCheck() end
-    end
-    y = y - 62
+    GrayExpiring()
+    y = y - MINI_H - 16
 
     -- Apparence icone / texte : deux sections repliables en tete de l'accordeon, devant
     -- les sections de classe. Chaque onChanged rafraichit l'icone en direct.
@@ -418,23 +438,38 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
         if ns.MissingBuffs then ns.MissingBuffs.RefreshAppearance() end
     end
 
-    local function BuildIconSection(c, w)
-        local cy, x, fw = 0, 5, w - 10
+    -- Grille a 4 colonnes des sections : une rangee de menus / curseurs fait 48 px ; case et couleur s'alignent sur la
+    -- ligne de controle (sous le libelle de 18 px)
+    local LBL = 18
+    local function Grid(w)
+        local fw = w - 10
+        local cl = math.floor((fw - 3 * GAP) / 4)
+        return cl, function(i) return 5 + (i - 1) * (cl + GAP) end
+    end
+    local function Gray(widgets, reason, on)
+        for _, wd in ipairs(widgets) do _addon.SharedWidgets.SetGrayReason(wd, reason, on) end
+    end
 
-        local slIconSize = SW.CreateSlider(c, L["MISSINGBUFFS_ICON_SIZE"] or "Taille de l'icone", 32, 128, 1, fw)
-        slIconSize:SetPoint("TOPLEFT", x, -cy)
+    -- Icone : taille / forme, puis bordure / couleur / epaisseur (grisees sans bordure)
+    local function BuildIconSection(c, w)
+        local cl, X = Grid(w)
+        local cy = 0
+
+        local slIconSize = SW.CreateSlider(c, L["MISSINGBUFFS_ICON_SIZE"] or "Taille de l'icone", 32, 128, 1, cl, true)
+        slIconSize:SetPoint("TOPLEFT", X(1), -cy)
         slIconSize:SetValue(cfg.iconSize or 64)
         slIconSize.onChanged = function(v) Cfg().iconSize = v; Refresh() end
-        cy = cy + 62
+        local ddMask = SW.CreateDropdown(c, L["MISSINGBUFFS_ICON_SHAPE"] or "Forme", ns.MISSING_BUFF_ICON_MASKS, cl)
+        ddMask:SetPoint("TOPLEFT", X(2), -cy)
+        ddMask:SetValue(cfg.iconMaskIndex or 1)
+        ddMask.onChanged = function(v) Cfg().iconMaskIndex = v; Refresh() end
+        cy = cy + 48
 
-        local cbBorder = SW.CreateCheckbox(c, L["MISSINGBUFFS_BORDER_ENABLE"] or "Bordure", fw)
-        cbBorder:SetPoint("TOPLEFT", x, -cy)
+        local cbBorder = SW.CreateCheckbox(c, L["MISSINGBUFFS_BORDER_ENABLE"] or "Bordure", cl)
+        cbBorder:SetPoint("TOPLEFT", X(1), -(cy + LBL))
         cbBorder:SetChecked(cfg.borderEnabled ~= false)
-        cbBorder.onChanged = function(v) Cfg().borderEnabled = v; Refresh() end
-        cy = cy + 26
-
-        local colBorder = SW.CreateColorButton(c, L["MISSINGBUFFS_BORDER_COLOR"] or "Couleur de bordure", fw)
-        colBorder:SetPoint("TOPLEFT", x, -cy)
+        local colBorder = SW.CreateColorButton(c, L["MISSINGBUFFS_BORDER_COLOR"] or "Couleur de bordure", cl)
+        colBorder:SetPoint("TOPLEFT", X(2), -(cy + LBL))
         colBorder:SetColor(unpack(cfg.borderColor or { 1, 0.15, 0.15, 0.9 }))
         colBorder.onChanged = function(rgb)
             local c2 = Cfg()
@@ -442,80 +477,67 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
             c2.borderColor = { rgb[1], rgb[2], rgb[3], a }
             Refresh()
         end
-        cy = cy + 30
-
-        local slBorderThick = SW.CreateSlider(c, L["MISSINGBUFFS_BORDER_THICKNESS"] or "Epaisseur de bordure", 1, 6, 1, fw)
-        slBorderThick:SetPoint("TOPLEFT", x, -cy)
+        local slBorderThick = SW.CreateSlider(c, L["MISSINGBUFFS_BORDER_THICKNESS"] or "Epaisseur de bordure", 1, 6, 1, cl, true)
+        slBorderThick:SetPoint("TOPLEFT", X(3), -cy)
         slBorderThick:SetValue(cfg.borderThickness or 2)
         slBorderThick.onChanged = function(v) Cfg().borderThickness = v; Refresh() end
-        cy = cy + 62
-
-        local ddMask = SW.CreateDropdown(c, L["MISSINGBUFFS_ICON_SHAPE"] or "Forme", ns.MISSING_BUFF_ICON_MASKS, fw)
-        ddMask:SetPoint("TOPLEFT", x, -cy)
-        ddMask:SetValue(cfg.iconMaskIndex or 1)
-        ddMask.onChanged = function(v) Cfg().iconMaskIndex = v; Refresh() end
+        cbBorder.onChanged = function(v)
+            Cfg().borderEnabled = v
+            Refresh()
+            Gray({ colBorder, slBorderThick }, "border", not v)
+        end
+        Gray({ colBorder, slBorderThick }, "border", cfg.borderEnabled == false)
         cy = cy + 48
 
         c:SetHeight(cy)
     end
 
+    -- Texte : police / taille / couleur / contour, decalages X / Y, puis les animations (combinables)
     local function BuildTextSection(c, w)
-        local cy, x, fw = 0, 5, w - 10
+        local cl, X = Grid(w)
+        local cy = 0
 
-        local ddFont = SW.CreateDropdown(c, L["MISSINGBUFFS_TEXT_FONT"] or "Police", _addon.GetFontList(), fw)
-        ddFont:SetPoint("TOPLEFT", x, -cy)
+        local ddFont = SW.CreateDropdown(c, L["MISSINGBUFFS_TEXT_FONT"] or "Police", _addon.GetFontList(), cl)
+        ddFont:SetPoint("TOPLEFT", X(1), -cy)
         ddFont:SetValue(cfg.textFont or ns.Media.font)
         ddFont.onChanged = function(v) Cfg().textFont = v; Refresh() end
-        cy = cy + 48
-
-        local slTextSize = SW.CreateSlider(c, L["MISSINGBUFFS_TEXT_SIZE"] or "Taille du texte", 8, 24, 1, fw)
-        slTextSize:SetPoint("TOPLEFT", x, -cy)
+        local slTextSize = SW.CreateSlider(c, L["MISSINGBUFFS_TEXT_SIZE"] or "Taille du texte", 8, 24, 1, cl, true)
+        slTextSize:SetPoint("TOPLEFT", X(2), -cy)
         slTextSize:SetValue(cfg.textSize or 12)
         slTextSize.onChanged = function(v) Cfg().textSize = v; Refresh() end
-        cy = cy + 62
-
-        local colText = SW.CreateColorButton(c, L["MISSINGBUFFS_TEXT_COLOR"] or "Couleur du texte", fw)
-        colText:SetPoint("TOPLEFT", x, -cy)
+        local colText = SW.CreateColorButton(c, L["MISSINGBUFFS_TEXT_COLOR"] or "Couleur du texte", cl)
+        colText:SetPoint("TOPLEFT", X(3), -(cy + LBL))
         colText:SetColor(unpack(cfg.textColor or { 1, 0.9, 0.3 }))
         colText.onChanged = function(rgb) Cfg().textColor = { rgb[1], rgb[2], rgb[3] }; Refresh() end
-        cy = cy + 30
-
-        local halfW = math.floor((fw - 8) / 2)
-        local slOffX = SW.CreateSlider(c, L["SETTINGS_OFFSET_X"] or "Decalage X", -50, 50, 1, halfW)
-        slOffX:SetPoint("TOPLEFT", x, -cy)
-        slOffX:SetValue(cfg.textOffsetX or 0)
-        slOffX.onChanged = function(v) Cfg().textOffsetX = v; Refresh() end
-        local slOffY = SW.CreateSlider(c, L["SETTINGS_OFFSET_Y"] or "Decalage Y", -50, 50, 1, halfW)
-        slOffY:SetPoint("TOPLEFT", x + halfW + 8, -cy)
-        slOffY:SetValue(cfg.textOffsetY or -2)
-        slOffY.onChanged = function(v) Cfg().textOffsetY = v; Refresh() end
-        cy = cy + 62
-
-        -- Toggles combinables (pas un dropdown exclusif), sur 3 colonnes
-        local w3 = math.floor((fw - 16) / 3)
-        local cbPulse = SW.CreateCheckbox(c, L["MISSINGBUFFS_TEXT_ANIM_PULSE"] or "Pulsation", w3)
-        cbPulse:SetPoint("TOPLEFT", x, -cy)
-        cbPulse:SetChecked(cfg.textAnimPulse and true or false)
-        cbPulse.onChanged = function(v) Cfg().textAnimPulse = v; Refresh() end
-
-        local cbBounce = SW.CreateCheckbox(c, L["MISSINGBUFFS_TEXT_ANIM_BOUNCE"] or "Rebond", w3)
-        cbBounce:SetPoint("TOPLEFT", x + w3 + 8, -cy)
-        cbBounce:SetChecked(cfg.textAnimBounce and true or false)
-        cbBounce.onChanged = function(v) Cfg().textAnimBounce = v; Refresh() end
-
-        local cbBlink = SW.CreateCheckbox(c, L["MISSINGBUFFS_TEXT_ANIM_BLINK"] or "Clignotement", w3)
-        cbBlink:SetPoint("TOPLEFT", x + (w3 + 8) * 2, -cy)
-        cbBlink:SetChecked(cfg.textAnimBlink and true or false)
-        cbBlink.onChanged = function(v) Cfg().textAnimBlink = v; Refresh() end
-        cy = cy + 26
-
-        local ddOutline = SW.CreateDropdown(c, L["SETTINGS_TEXT_OUTLINE"] or "Contour", ns.GetTextOutlineStyles(), fw)
-        ddOutline:SetPoint("TOPLEFT", x, -cy)
+        local ddOutline = SW.CreateDropdown(c, L["SETTINGS_TEXT_OUTLINE"] or "Contour", ns.GetTextOutlineStyles(), cl)
+        ddOutline:SetPoint("TOPLEFT", X(4), -cy)
         ddOutline:SetValue(cfg.textOutlineStyle or "OUTLINE")
         ddOutline.onChanged = function(v) Cfg().textOutlineStyle = v; Refresh() end
         cy = cy + 48
 
-        c:SetHeight(cy)
+        local slOffX = SW.CreateSlider(c, L["SETTINGS_OFFSET_X"] or "Decalage X", -50, 50, 1, cl, true)
+        slOffX:SetPoint("TOPLEFT", X(1), -cy)
+        slOffX:SetValue(cfg.textOffsetX or 0)
+        slOffX.onChanged = function(v) Cfg().textOffsetX = v; Refresh() end
+        local slOffY = SW.CreateSlider(c, L["SETTINGS_OFFSET_Y"] or "Decalage Y", -50, 50, 1, cl, true)
+        slOffY:SetPoint("TOPLEFT", X(2), -cy)
+        slOffY:SetValue(cfg.textOffsetY or -2)
+        slOffY.onChanged = function(v) Cfg().textOffsetY = v; Refresh() end
+        cy = cy + 52
+
+        for _, a in ipairs({
+            { "textAnimPulse",  "MISSINGBUFFS_TEXT_ANIM_PULSE",  "Pulsation" },
+            { "textAnimBounce", "MISSINGBUFFS_TEXT_ANIM_BOUNCE", "Rebond" },
+            { "textAnimBlink",  "MISSINGBUFFS_TEXT_ANIM_BLINK",  "Clignotement" },
+        }) do
+            local cb = SW.CreateCheckbox(c, L[a[2]] or a[3], cl * 2)
+            cb:SetPoint("TOPLEFT", X(1), -cy)
+            cb:SetChecked(cfg[a[1]] and true or false)
+            cb.onChanged = function(v) Cfg()[a[1]] = v; Refresh() end
+            cy = cy + 26
+        end
+
+        c:SetHeight(cy + 4)
     end
 
     local sections = {
@@ -524,6 +546,7 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
         { name = L["MISSINGBUFFS_SEC_ALERTS"], build = BuildAlertsSection },
     }
     SW.CreateSectionStack(p, sections, cw, -y, "missingbuffs")
+    applyOff()
 
     return p
 end

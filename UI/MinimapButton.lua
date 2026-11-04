@@ -43,6 +43,7 @@ local isDragging = false
 btn:RegisterForDrag("LeftButton")
 
 btn:SetScript("OnDragStart", function(self)
+  if self.__aishCompartment then return end   -- range dans le Compartiment d'addons : place fixe
   isDragging = true
   self:SetScript("OnUpdate", function()
     local mx, my = Minimap:GetCenter()
@@ -76,7 +77,7 @@ btn:SetScript("OnEnter", function(self)
   GameTooltip:SetOwner(self, "ANCHOR_LEFT")
   GameTooltip:AddLine(L["MINIMAP_TOOLTIP_TITLE"], 0, 0.69, 1)
   GameTooltip:AddLine(L["MINIMAP_TOOLTIP_LEFT_CLICK"], 1, 1, 1)
-  GameTooltip:AddLine(L["MINIMAP_TOOLTIP_DRAG"], 0.8, 0.8, 0.8)
+  if not self.__aishCompartment then GameTooltip:AddLine(L["MINIMAP_TOOLTIP_DRAG"], 0.8, 0.8, 0.8) end
   GameTooltip:Show()
 end)
 

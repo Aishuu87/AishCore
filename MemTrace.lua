@@ -20,7 +20,10 @@ local wrappers = setmetatable({}, { __mode = "k" })  -- nos enveloppes
 local function Site()
   local ok, s = pcall(debugstack, 3, 8, 0)
   -- Pile secrete (appel venu d'un contexte protege) : illisible, le handler est traite comme etranger
-  if not ok or type(s) ~= "string" or (issecretvalue and issecretvalue(s)) then return nil end
+  if not ok or type(s) ~= "string" or (issecretvalue and issecretvalue(s)) then
+    T.secret = (T.secret or 0) + 1   -- handlers jamais mesures faute de pile lisible (compte affiche par Run)
+    return nil
+  end
   for line in s:gmatch("[^\n]+") do
     if not line:find("MemTrace", 1, true) then
       local file, n = line:match("AddOns[\\/]" .. addonName .. "[\\/]([^:\"]-)%.lua\"?%]?:(%d+)")
@@ -41,9 +44,11 @@ local function Wrap(key, fn)
   return w
 end
 
-local SCRIPTS = { OnUpdate = true, OnEvent = true }
+local SCRIPTS = { OnUpdate = true, OnEvent = true, OnLoop = true }
 local function OnSetScript(self, script, handler)
   if not SCRIPTS[script] or type(handler) ~= "function" or wrappers[handler] or foreign[handler] then return end
+  -- Frames securisees (boutons d'action...) : jamais retouchees (taint / blocage en combat)
+  if self.IsProtected and self:IsProtected() then return end
   local w = cache[handler]
   if not w then
     local key = Site()
@@ -69,6 +74,25 @@ for _, kind in ipairs({ "Frame", "Button", "CheckButton", "StatusBar", "Slider",
   end)
 end
 
+-- Animations (groupes et animations) : OnUpdate / OnLoop poses par AishCore
+pcall(function()
+  local ag = CreateFrame("Frame"):CreateAnimationGroup()
+  local objs = { ag }
+  for _, k in ipairs({ "Animation", "Alpha", "Translation", "Scale", "Rotation", "Path", "FlipBook",
+                       "TextureCoordTranslation", "VertexColor" }) do
+    local ok, a = pcall(ag.CreateAnimation, ag, k)
+    if ok and a then objs[#objs + 1] = a end
+  end
+  for _, o in ipairs(objs) do
+    local mt = getmetatable(o)
+    local idx = mt and mt.__index
+    if type(idx) == "table" and not T[idx] and idx.SetScript then
+      T[idx] = true
+      hooksecurefunc(idx, "SetScript", OnSetScript)
+    end
+  end
+end)
+
 local function TimerArg(fn, label)
   if type(fn) ~= "function" or wrappers[fn] then return fn end
   local key = Site()
@@ -92,7 +116,9 @@ function T.Run()
   UpdateAddOnMemoryUsage()
   local m0, t0 = GetAddOnMemoryUsage(addonName), GetTime()
   T.on = true
-  print(P .. "trace : 10 s, sans combat ni GUI ouvert de preference...")
+  -- Les C_Timer.After poses avant la trace (initialisation differee, jusqu'a ~15 s apres le chargement) ne sont pas
+  -- enveloppes : lancee trop tot, la trace les compte en "non attribue".
+  print(P .. "trace : 10 s, sans combat ni GUI ouvert, au moins 30 s apres le chargement...")
   origAfter(10, function()
     T.on = false
     C_Timer.After, C_Timer.NewTicker = origAfter, origTicker
@@ -108,6 +134,7 @@ function T.Run()
     table.sort(rows, function(a, b) return a.kb > b.kb end)
     print(P .. string.format("total AishCore : %.1f Ko/s | attribue : %.1f Ko/s | non attribue : %.1f Ko/s",
       total / dt, sum / dt, (total - sum) / dt))
+    print(P .. string.format("crochets / scripts ignores (pile secrete) depuis le chargement : %d", T.secret or 0))
     for i = 1, math.min(20, #rows) do
       local r = rows[i]
       print(P .. string.format("%-52s %7.1f Ko/s  (%d appels, %.0f o/appel)", r.key, r.kb / dt, r.n, r.kb * 1024 / r.n))

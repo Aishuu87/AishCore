@@ -12,7 +12,7 @@ ns.Modules.MapReveal = MapReveal
 local hookedPins = {}
 local cache = {}   -- artID -> liste de calques decodes
 
-local function Cfg() return ns.GetCfg("comfort") or {} end
+local function Cfg() return ns.QoLEnabled() and ns.GetCfg("comfort") or {} end
 
 -- "w,h,x,y,fid:fid;..." -> { { w, h, x, y, { fid, ... } }, ... }
 local function Overlays(artID)

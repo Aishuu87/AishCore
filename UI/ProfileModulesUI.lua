@@ -10,8 +10,8 @@ local Theme = ns.Theme
 local ROW_H, HEADER_H = 20, 22
 local INDENT, BASE_INDENT, TRUNK_X0 = 14, 14, 6
 local COL_GAP = 14
--- Colonnes de l'arbre (ids de sections), équilibrées en hauteur
-local TREE_COLUMNS = { { "unitFrames", "global" }, { "combat", "hud" }, { "aurasProcs", "animations" } }
+-- Colonnes de l'arbre (ids de sections) : mêmes colonnes que la page "Modules"
+local TREE_COLUMNS = { { "unitFrames", "extras" }, { "combat", "animations", "global" }, { "hud", "aurasProcs" } }
 
 local function Gold() return Theme.accentText or Theme.gold or Theme.accent end
 

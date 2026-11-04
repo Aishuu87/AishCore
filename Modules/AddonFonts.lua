@@ -1,5 +1,6 @@
 -- Modules/AddonFonts.lua : force une police (fichier, taille, contour) sur certains textes de
--- Platynator (timers des auras, niveau) et Baganator (textes des icônes d'objets).
+-- Platynator (timers des auras, niveau) et Baganator (textes des icônes d'objets, noms des
+-- catégories et des sections).
 -- Réglages ns.DB.addonFonts.<cible>{Enabled,Font,Size,Outline}, page "Intégrations".
 -- Chaque FontString ciblé est hooké une fois (SetFont/SetFontObject) : quand l'addon d'origine
 -- restyle le texte, on mémorise sa police puis on réapplique la nôtre. Décocher restaure la
@@ -27,7 +28,8 @@ local rings      = setmetatable({}, { __mode = "k" }) -- [fontString] = anneau S
 local slugOn     = setmetatable({}, { __mode = "k" }) -- [fontString] = true si l'anneau est actif
 local origShadow = setmetatable({}, { __mode = "k" }) -- [fontString] = { x, y, r, g, b, a } avant SLUG / ombre
 local applying = false
-local bagActive, bagHooked = false, false
+local bagHooked = false
+local bagActive = {} -- [cible Baganator] = true si active
 
 local function Get(k)
   local c = ns.DB and ns.DB.addonFonts
@@ -42,7 +44,7 @@ local function TargetOf(fs)
   if t == "platLevel" then
     local o = owners[fs]
     if not (o and o.details and o.details.kind == "level") then return nil end
-  elseif t == "bagItem" and not bagActive then
+  elseif t and t:sub(1, 3) == "bag" and not bagActive[t] then
     return nil
   end
   return t
@@ -114,7 +116,7 @@ local function ApplyUnsafe(fs)
   if target and Get(target .. "Enabled") then
     local path = ns.SafeFontPath(Get(target .. "Font") or ns.FONT_FALLBACK)
     local size, style = Get(target .. "Size") or 12, Get(target .. "Outline")
-    if target ~= "bagItem" then size = SnapSize(fs, size) end
+    if target:sub(1, 3) ~= "bag" then size = SnapSize(fs, size) end
     -- SLUG réservé à Baganator : sur les nameplates, textes et opacités sont des valeurs
     -- secrètes en combat, l'anneau ne peut pas les suivre. Repli sur le contour fin.
     local slug = style == "SLUG" and target == "bagItem"
@@ -143,7 +145,10 @@ local function ApplyUnsafe(fs)
     customized[fs] = true
   elseif customized[fs] then
     local o = origFont[fs]
-    if o and o[1] then pcall(fs.SetFont, fs, o[1], o[2], o[3]) end
+    -- Font object d'origine plutôt qu'un SetFont figé : il a pu être modifié depuis (UI qui
+    -- remplace les polices du jeu), et SetFont couperait le lien avec lui.
+    if o and o.obj then pcall(fs.SetFontObject, fs, o.obj)
+    elseif o and o[1] then pcall(fs.SetFont, fs, o[1], o[2], o[3]) end
     if origShadow[fs] then RestoreShadow(fs) end
     slugOn[fs] = nil
     customized[fs] = nil
@@ -155,10 +160,20 @@ end
 -- Nameplates amicales en instance : objets interdits aux addons. IsForbidden() ne suffit pas
 -- (un texte peut l'être via sa nameplate sans se déclarer interdit) : toute lecture est protégée,
 -- et un objet illisible est simplement ignoré.
-local function ReadFont(fs)
+-- obj : font object posé par l'addon d'origine (false = SetFont explicite, nil = inconnu : on garde
+-- celui du texte s'il donne exactement la police actuelle).
+local function ReadFont(fs, obj)
   local ok, path, size, flags = pcall(fs.GetFont, fs)
   if not ok then return nil end
-  return { path, size, flags }
+  if type(obj) == "string" then obj = _G[obj] end
+  if obj == nil then
+    local okO, o = pcall(fs.GetFontObject, fs)
+    if okO and type(o) == "table" and o.GetFont then
+      local p2, s2, f2 = o:GetFont()
+      if p2 == path and s2 == size and (f2 or "") == (flags or "") then obj = o end
+    end
+  end
+  return { path, size, flags, obj = type(obj) == "table" and obj or nil }
 end
 
 local function Apply(fs)
@@ -167,13 +182,14 @@ local function Apply(fs)
 end
 
 -- L'addon d'origine vient de (re)poser sa police : on la mémorise puis on réapplique la nôtre.
-local function OnOwnerFont(fs)
+local function OnOwnerFont(fs, obj)
   if applying then return end
-  local font = ReadFont(fs)
+  local font = ReadFont(fs, obj)
   if not font then return end
   origFont[fs] = font
   if customized[fs] or TargetOf(fs) then Apply(fs) end
 end
+local function OnOwnerSetFont(fs) OnOwnerFont(fs, false) end
 
 local function Track(fs, target, owner)
   if tracked[fs] then return end
@@ -182,7 +198,7 @@ local function Track(fs, target, owner)
   tracked[fs] = target
   owners[fs] = owner
   origFont[fs] = font
-  hooksecurefunc(fs, "SetFont", OnOwnerFont)
+  hooksecurefunc(fs, "SetFont", OnOwnerSetFont)
   hooksecurefunc(fs, "SetFontObject", OnOwnerFont)
   Apply(fs)
 end
@@ -309,29 +325,48 @@ end
 
 -- ── Baganator ───────────────────────────────────────────────────────────────
 
+-- Noms des catégories / en-têtes de sections : boutons recyclés (pool), un seul FontString chacun.
+local BAG_BUTTON_TARGETS = { CategoryLabel = "bagLabel", CategorySectionHeader = "bagSection" }
+
 local function OnBagRegion(details)
-  if not bagActive or details.regionType ~= "CornerWidget" then return end
   local r = details.region
+  if not r then return end
+  local btnTarget = BAG_BUTTON_TARGETS[details.regionType]
+  if btnTarget then
+    local fs = bagActive[btnTarget] and r.GetFontString and r:GetFontString()
+    if fs then Track(fs, btnTarget) end
+    return
+  end
+  if not bagActive.bagItem or details.regionType ~= "CornerWidget" then return end
   -- Les icônes d'amélioration de qualité sont du balisage d'atlas : on n'y touche pas.
   if details.tags and details.tags[1] == "item_quality_upgrade_icons" then return end
-  if r and r.GetObjectType and r:GetObjectType() == "FontString" then Track(r, "bagItem") end
+  if r.GetObjectType and r:GetObjectType() == "FontString" then Track(r, "bagItem") end
 end
 
 -- Skins Baganator qui posent déjà leur propre police sur ces textes (ElvUI : police des sacs
 -- d'ElvUI via FontTemplate ; GW2 UI : police imposée) : on s'efface pour ne pas se battre avec eux.
-local BAG_SKIN_CONFLICTS = { elvui = "ElvUI", gw2_ui = "GW2 UI" }
-function AddonFonts.BagSkinConflict()
+-- ElvUI ne touche qu'aux textes des icônes.
+local BAG_SKIN_CONFLICTS = {
+  bagItem    = { elvui = "ElvUI", gw2_ui = "GW2 UI" },
+  bagLabel   = { gw2_ui = "GW2 UI" },
+  bagSection = { gw2_ui = "GW2 UI" },
+}
+function AddonFonts.BagSkinConflict(target)
   local api = Baganator and Baganator.API and Baganator.API.Skins
   if not (api and api.GetCurrentSkin) then return nil end
   local ok, skin = pcall(api.GetCurrentSkin)
-  return ok and skin and BAG_SKIN_CONFLICTS[skin] or nil
+  return ok and skin and BAG_SKIN_CONFLICTS[target or "bagItem"][skin] or nil
 end
 
-local function SetBagActive(on)
+local function SetBagActive()
   local api = Baganator and Baganator.API and Baganator.API.Skins
   if not api then return end
-  bagActive = on
-  if not on then return end
+  local any = false
+  for target in pairs(BAG_SKIN_CONFLICTS) do
+    bagActive[target] = Get(target .. "Enabled") and not AddonFonts.BagSkinConflict(target) or nil
+    any = any or bagActive[target] ~= nil
+  end
+  if not any then return end
   if not bagHooked then
     bagHooked = true
     api.RegisterListener(OnBagRegion)
@@ -343,8 +378,12 @@ end
 
 function AddonFonts.ApplySettings()
   SetPlatActive(Platynator ~= nil and (Get("platAuraEnabled") or Get("platLevelEnabled")) and true or false)
-  SetBagActive(Get("bagItemEnabled") and not AddonFonts.BagSkinConflict() and true or false)
+  SetBagActive()
   for fs in pairs(tracked) do Apply(fs) end
+  -- Baganator dimensionne catégories et sections sur la largeur du texte au layout : sans
+  -- relayout, l'ancienne largeur fait passer la fin du nom à la ligne.
+  local api = Baganator and Baganator.API
+  if api and api.RequestLayoutUpdate then pcall(api.RequestLayoutUpdate) end
 end
 
 local ev = CreateFrame("Frame")

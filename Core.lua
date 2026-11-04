@@ -22,6 +22,9 @@ local MODULE_RULES = {
   cdmLayout    = function() return C_CooldownViewer ~= nil end,
   cdmEssential = function() return C_CooldownViewer ~= nil end,
   cdmUtility   = function() return C_CooldownViewer ~= nil end,
+  cdmAppearance = function() return C_CooldownViewer ~= nil end,   -- page commune Essentiels / Utilitaires
+  campfire     = function() return ns.IsForever end,   -- feux de camp : Forever seulement
+  animCampfire = function() return ns.IsForever end,   -- animations 3D du Camping HUD
 }
 local _moduleAvail = {}
 function ns.IsModuleAvailable(id)
@@ -615,6 +618,13 @@ function ns.GetCfg(key)
   return ns.Defaults[key]
 end
 
+-- Interrupteur general des outils QoL (comfort.enabled, page Modules) : coupe aussi le curseur en combat et les
+-- herbes / minerais de la minimap, reglages de la meme page.
+function ns.QoLEnabled()
+  local c = ns.GetCfg("comfort")
+  return not (c and c.enabled == false)
+end
+
 -- Couleur des cadres de hitbox (survol des modules, page Modules, zone cliquable des barres d'unite) : "cercle de
 -- puissance" des Couleurs Thematiques ; avec les couleurs de base (colors.useClassDefaults), le bleu d'origine.
 ns.HITBOX_BLUE = { 0.35, 0.75, 1 }
@@ -693,13 +703,17 @@ end
 -- Police de repli universelle : 2002.TTF est livree par le client dans TOUTES les
 -- locales, donc aucune dependance externe a installer.
 ns.FONT_FALLBACK = "Fonts\\2002.TTF"
+-- Client chinois : 2002 et Friz n'ont pas tous les glyphes du simplifie, on prend la police du client.
+local IS_ZHCN = GetLocale() == "zhCN"
+if IS_ZHCN then ns.FONT_FALLBACK = "Fonts\\ARKai_T.ttf" end
+local FONT_FALLBACK_NAME = IS_ZHCN and "ARKai (WoW)" or "2002 (WoW)"
 
 -- Chemins media (jamais de police SharedMedia en dur : la media pack peut etre absente)
 ns.Media = {
   circle      = "Interface\\AddOns\\AishCore\\Media\\Wheel\\circleflat2.tga",
   font        = ns.FONT_FALLBACK,
-  fontGui     = "Fonts\\FRIZQT__.TTF",
-  fontTitle   = "Fonts\\FRIZQT__.TTF",
+  fontGui     = IS_ZHCN and ns.FONT_FALLBACK or "Fonts\\FRIZQT__.TTF",
+  fontTitle   = IS_ZHCN and ns.FONT_FALLBACK or "Fonts\\FRIZQT__.TTF",
   -- Texture de repli des StatusBar : native au client, jamais manquante.
   fallbackBar = "Interface\\TargetingFrame\\UI-StatusBar",
 }
@@ -949,6 +963,8 @@ end
 --- contre un chemin mort reste entiere a l'application (SetFont est enveloppe dans un
 --- pcall avec repli, cf. ns.ApplyTextOutlineStyle / ns.ApplyFont).
 local BROKEN_2002 = "Fonts" .. string.char(200) .. "2.TTF"
+-- Polices par defaut des profils et templates, sans glyphes chinois (cf. FONT_FALLBACK).
+local ZHCN_REPLACED = IS_ZHCN and { ["fonts\\2002.ttf"] = true, ["fonts\\frizqt__.ttf"] = true }
 
 function ns.SanitizeFontPaths(tbl, _seen)
   if type(tbl) ~= "table" then return end
@@ -969,6 +985,8 @@ function ns.SanitizeFontPaths(tbl, _seen)
     elseif tv == "string" and v ~= ns.FONT_FALLBACK and string.lower(v) == fallbackLower then
       -- Meme police, autre casse (vieux profils ecrits avec "Fonts\\2002.ttf") : on
       -- normalise, sinon le dropdown ne retrouve pas la valeur et affiche du vide.
+      tbl[k] = ns.FONT_FALLBACK
+    elseif tv == "string" and ZHCN_REPLACED and ZHCN_REPLACED[string.lower(v)] then
       tbl[k] = ns.FONT_FALLBACK
     end
   end
@@ -1128,6 +1146,68 @@ function ns.GetBarTextureList()
     return out
 end
 
+-- Textures de contour (edgeFile de backdrop) : natives au client, + bordures LibSharedMedia (cle "lsm:<nom>")
+ns.BORDER_TEXTURES = {
+    { value = "solid",   text = "Solid",           path = "Interface\\Buttons\\WHITE8X8" },
+    { value = "tooltip", text = "Tooltip (WoW)",   path = "Interface\\Tooltips\\UI-Tooltip-Border" },
+    { value = "dialog",  text = "Dialog (WoW)",    path = "Interface\\DialogFrame\\UI-DialogBox-Border" },
+}
+
+function ns.ResolveBorderTex(key)
+    local LSM = GetLSM()
+    if type(key) == "string" and key:sub(1, #LSM_PREFIX) == LSM_PREFIX then
+        local p = LSM and LSM:Fetch("border", key:sub(#LSM_PREFIX + 1), true)
+        if p then return p end
+    end
+    for _, e in ipairs(ns.BORDER_TEXTURES) do
+        if e.value == key then return e.path end
+    end
+    return ns.BORDER_TEXTURES[1].path
+end
+
+function ns.GetBorderTextureList()
+    local LSM = GetLSM()
+    local out = {}
+    for _, e in ipairs(ns.BORDER_TEXTURES) do out[#out + 1] = { value = e.value, text = e.text } end
+    local extra = {}
+    for _, name in ipairs(LSM and LSM:List("border") or {}) do
+        if name ~= "None" then extra[#extra + 1] = { value = LSM_PREFIX .. name, text = name } end
+    end
+    table.sort(extra, function(a, b) return a.text:lower() < b.text:lower() end)
+    for _, e in ipairs(extra) do out[#out + 1] = e end
+    return out
+end
+
+-- Icone de sort des barres de cast (joueur / cible) : taille L x H (recadree sans deformation) et contour.
+-- cfg : iconWidth / iconHeight (repli iconSize), iconBorder, iconBorderTexture, iconBorderSize, iconBorderColor.
+function ns.StyleCastIcon(icon, border, cfg)
+    local w = cfg.iconWidth  or cfg.iconSize or 15
+    local h = cfg.iconHeight or cfg.iconSize or 15
+    icon:SetSize(w, h)
+    local l, r, t, b = 0.08, 0.92, 0.08, 0.92
+    if w > h then
+        local cut = (0.84 - 0.84 * h / w) / 2; t, b = t + cut, b - cut
+    elseif h > w then
+        local cut = (0.84 - 0.84 * w / h) / 2; l, r = l + cut, r - cut
+    end
+    icon:SetTexCoord(l, r, t, b)
+    if not border then return end
+    if not cfg.iconBorder then border:Hide(); return end
+    local size = cfg.iconBorderSize or 1
+    local c = cfg.iconBorderColor or { 0, 0, 0, 1 }
+    border:ClearAllPoints()
+    border:SetPoint("TOPLEFT", icon, "TOPLEFT", -size, size)
+    border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", size, -size)
+    border:SetBackdrop({ edgeFile = ns.ResolveBorderTex(cfg.iconBorderTexture), edgeSize = size })
+    border:SetBackdropBorderColor(c[1], c[2], c[3], c[4] or 1)
+    border:SetShown(icon:IsShown())
+end
+
+-- Contour visible seulement avec l'icone (a rappeler apres chaque Show / Hide de l'icone)
+function ns.SyncCastIconBorder(icon, border, cfg)
+    if border then border:SetShown(icon:IsShown() and cfg.iconBorder and true or false) end
+end
+
 -- Filtrage trilineaire (mipmaps) : réduit l'aliasing sur les cercles minifiés
 function ns.SetSmoothTexture(texture, path)
   if not texture or not texture.SetTexture then return end
@@ -1200,7 +1280,7 @@ end
 -- Triée par ordre alphabétique (text)
 local _SM = "Interface\\AddOns\\SharedMedia_MyMedia\\font\\"
 ns.FONT_LIST = {
-  { value = ns.FONT_FALLBACK,                        text = "2002 (WoW)"                    },
+  { value = ns.FONT_FALLBACK,                        text = FONT_FALLBACK_NAME              },
   { value = _SM.."AccidentalPresidency.ttf",         text = "Accidental Presidency"         },
   { value = "Fonts\\ARIALN.TTF",                     text = "Arial Narrow (WoW)"            },
   { value = _SM.."BebasNeue-Regular.ttf",            text = "Bebas Neue"                    },
@@ -1265,7 +1345,7 @@ local function WithFallbackFont(list)
     for _, entry in ipairs(list) do
         if string.lower(entry.value or "") == fallbackLower then return list end
     end
-    table.insert(list, 1, { value = ns.FONT_FALLBACK, text = "2002 (WoW)" })
+    table.insert(list, 1, { value = ns.FONT_FALLBACK, text = FONT_FALLBACK_NAME })
     return list
 end
 
@@ -1981,4 +2061,121 @@ function ns.AnimateStagger(elements, shouldShow, duration, staggerInterval, onCo
   end)
 
   return ticker
+end
+
+-- Zone de repos etendue : IsResting() (auberge, capitale) ou village sur (sous-zone de Data/TownAreas.lua).
+-- Village refuse si la zone est hostile ; en zone contestee, le maitre de vol le plus proche (<= 600 m) doit
+-- etre de notre faction ou neutre (Hammerfall en Arathi n'est pas sur pour l'Alliance). Recalcule aux
+-- changements de zone ; ns.OnRestAreaChanged(fn) previent les modules quand l'etat bascule.
+do
+  local townNames, inTown, last
+  local listeners = {}
+  local FACTION_OF_NODE = { [1] = "Horde", [2] = "Alliance" }
+
+  local function TownNames()
+    if townNames then return townNames end
+    townNames = {}
+    if not (C_Map and C_Map.GetAreaInfo) then return townNames end
+    for _, id in ipairs(ns.TownAreaIDs or {}) do
+      local ok, name = pcall(C_Map.GetAreaInfo, id)
+      if ok and type(name) == "string" and name ~= "" then townNames[name] = true end
+    end
+    for name in pairs(ns.TownWMONames or {}) do townNames[name] = true end
+    return townNames
+  end
+
+  -- Zone contestee : faction du maitre de vol le plus proche du joueur (<= 600 m), nil si aucun. Remonte
+  -- aux cartes parentes tant que la carte courante n'a pas de maitre de vol (interieur de batiment).
+  local function NearestNodeFaction()
+    if not (C_Map.GetBestMapForUnit and C_TaxiMap and C_TaxiMap.GetTaxiNodesForMap) then return nil end
+    local mapID = C_Map.GetBestMapForUnit("player")
+    for _ = 1, 4 do
+      if not mapID or mapID == 0 then return nil end
+      local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+      local w, h = C_Map.GetMapWorldSize(mapID)
+      local nodes = C_TaxiMap.GetTaxiNodesForMap(mapID)
+      if pos and w and h and w > 0 and nodes and #nodes > 0 then
+        local px, py = pos:GetXY()
+        local best, bestD = nil, 600
+        for _, n in ipairs(nodes) do
+          local np = n.position
+          if np then
+            local d = math.sqrt(((np.x - px) * w) ^ 2 + ((np.y - py) * h) ^ 2)
+            if d <= bestD then best, bestD = n.faction or 0, d end
+          end
+        end
+        return best
+      end
+      local info = C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
+      mapID = info and info.parentMapID
+    end
+    return nil
+  end
+
+  -- Verdict par village (zone contestee), garde pour la session : loin du maitre de vol, ou sur la carte
+  -- d'un batiment (sans maitre de vol), le village restait sinon "non sur" au moindre changement de sous-zone
+  local verdicts, lastZone = {}, nil
+
+  local function ComputeTown()
+    if IsInInstance() then return false end
+    local names = TownNames()
+    local sub, mini = GetSubZoneText(), GetMinimapZoneText()
+    local town = (sub and names[sub] and sub) or (mini and names[mini] and mini)
+    if not town then return false end
+    local pvp = GetZonePVPInfo and GetZonePVPInfo()
+    if pvp == "friendly" or pvp == "sanctuary" then return true end
+    if pvp == "hostile" or pvp == "arena" or pvp == "combat" then return false end
+    local zone = tostring((GetRealZoneText or GetZoneText)())
+    local key = zone .. "|" .. town
+    local ok, fac = pcall(NearestNodeFaction)
+    if not ok or fac == nil then
+      -- Sous-zone voisine du meme village (deja sur, meme zone) : herite du verdict
+      if verdicts[key] == nil and inTown and lastZone == zone then verdicts[key] = true end
+      if verdicts[key] then lastZone = zone end
+      return verdicts[key] == true
+    end
+    local owner = FACTION_OF_NODE[fac]
+    verdicts[key] = owner == nil or owner == UnitFactionGroup("player")
+    if verdicts[key] then lastZone = zone end
+    return verdicts[key]
+  end
+
+  function ns.IsRestArea()
+    if IsResting() then return true end
+    return inTown == true
+  end
+
+  function ns.OnRestAreaChanged(fn) listeners[#listeners + 1] = fn end
+
+  -- /aish rest : ce que voit ComputeTown a l'endroit du joueur
+  function ns.RestAreaDebug()
+    local names, n = TownNames(), 0
+    for _ in pairs(names) do n = n + 1 end
+    local sub, mini, zone = GetSubZoneText(), GetMinimapZoneText(), GetZoneText()
+    local ok, fac = pcall(NearestNodeFaction)
+    local ok2, v = pcall(ComputeTown)
+    print("|cff00b0ff[AishCore]|r rest : IsResting=" .. tostring(IsResting()) .. " inTown=" .. tostring(inTown)
+      .. " IsRestArea=" .. tostring(ns.IsRestArea()))
+    print("  zone=" .. tostring(zone) .. " sub=" .. tostring(sub) .. " (" .. tostring(names[sub]) .. ") mini="
+      .. tostring(mini) .. " (" .. tostring(names[mini]) .. ")")
+    print("  pvp=" .. tostring(GetZonePVPInfo and GetZonePVPInfo()) .. " node=" .. tostring(ok) .. "/" .. tostring(fac)
+      .. " ComputeTown=" .. tostring(ok2) .. "/" .. tostring(v))
+    print("  noms=" .. n .. " ids=" .. #(ns.TownAreaIDs or {}) .. " wmo=" .. tostring(ns.TownWMONames ~= nil)
+      .. " locale=" .. GetLocale() .. " forever=" .. tostring(ns.IsForever))
+  end
+
+  local f = CreateFrame("Frame")
+  for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA",
+                       "PLAYER_UPDATE_RESTING" }) do
+    f:RegisterEvent(e)
+  end
+  f:SetScript("OnEvent", function()
+    local ok, v = pcall(ComputeTown)
+    inTown = ok and v or false
+    local now = ns.IsRestArea()
+    if now ~= last then
+      last = now
+      for _, fn in ipairs(listeners) do pcall(fn, now) end
+    end
+  end)
 end

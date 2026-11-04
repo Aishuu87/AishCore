@@ -193,7 +193,7 @@ ns.Defaults = {
         ignoredSettingsIds = {}, -- [settingsId] = true
         -- Par classe
         ignoreWarriorStances = false, overrideWarriorStance = nil,
-        ignorePaladinAuras = false, overridePaladinAura = nil,
+        overridePaladinAura = nil,
         ignoreEvokerAttunements = false, overrideEvokerAttunement = nil,
         ignoreDruidForms = false,
         ignoreHunterPets = false, overrideHunterPet = nil,
@@ -207,6 +207,10 @@ ns.Defaults = {
         ignoreHealthstoneAlert = false, ignoreSoulstoneAlert = false,
         ignoreLethalPoisons = false, overrideLethalPoison = nil,
         ignoreNonlethalPoisons = false, overrideNonlethalPoison = nil,
+        -- Forever : ignoreLethalPoisons = rappel d'application (poison des sacs), seuil de duree en minutes ;
+        -- stock de poisons a fabriquer sous poisonStockThreshold
+        poisonDurationThreshold = 5,
+        ignorePoisonStock = false, poisonStockThreshold = 5,
         -- Rappel "bientot expire" (2026-08-30) : affiche l'alerte native
         -- (texte "RAFRAICHIR") quand un buff suivi sur SOI est encore actif
         -- mais expire dans moins de expiringSoonThreshold MINUTES -- cf.

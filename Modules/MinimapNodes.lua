@@ -40,6 +40,7 @@ local ORE_ITEMS = {
 local GENERIC_ITEM = { herbs = 2447, ore = 2770 }   -- icone quand le nom n'est pas reconnu
 
 local function Cfg()
+  if not ns.QoLEnabled() then return {} end
   return ns.GetCfg("minimapNodes") or {}
 end
 
@@ -107,7 +108,8 @@ local function BuildIndex()
       else
         local key = Plain(name)
         if kind == "ore" then key = OreKey(key) end
-        if #key >= 3 then list[#list + 1] = { key = key, kind = kind, id = id } end
+        -- Filon : cherche en mot entier, donc 2 lettres suffisent ("Filon d'or")
+        if #key >= (kind == "ore" and 2 or 3) then list[#list + 1] = { key = key, kind = kind, id = id } end
       end
     end
   end
@@ -125,7 +127,8 @@ local function Resolve(name, only, finderKind)
   if l:find("[%d:]") then return nil end            -- "Fleur de paix 3/8" : une quete, pas une plante
   for _, e in ipairs(index) do
     local hit
-    if e.kind == "ore" then hit = l:find("%f[%a]" .. e.key:gsub("%p", "%%%0") .. "%f[%A]") else hit = l:find(e.key, 1, true) end
+    -- Frontiere de mot qui compte les lettres accentuees (octets UTF-8) : sinon "étain" n'est jamais trouve
+    if e.kind == "ore" then hit = l:find("%f[%a\128-\255]" .. e.key:gsub("%p", "%%%0") .. "%f[^%a\128-\255]") else hit = l:find(e.key, 1, true) end
     if hit then return e.kind, ItemIcon(e.id), e.id end
   end
   if only then return only, ItemIcon(GENERIC_ITEM[only]) end

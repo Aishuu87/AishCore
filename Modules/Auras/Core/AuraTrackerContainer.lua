@@ -898,6 +898,8 @@ local function ProcGlowScanPool(pool, spellID, si)
 end
 
 local function ProcGlowTick()
+    -- Module Auras coupe (CDM natif, page Modules) : rien a suivre
+    if ns.db and ns.db.useNativeCDM == true then return end
     local spells = ns.GetSpecSpells and ns.GetSpecSpells()
     if not spells or not ns.IsCDMAuraSwipePresent then return end
     for spellID, si in pairs(spells) do

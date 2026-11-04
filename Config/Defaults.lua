@@ -35,6 +35,30 @@ local function ExtraBarDefaults(enabled, y, tags)
   }
 end
 
+-- Barres de vie (Modules/UnitBars.lua) : réglages propres à une barre ; `o` = ce qui diffère d'une barre à l'autre.
+local function UnitBarDefaults(o)
+  local t = {
+    enabled = true, width = 200, height = 4,
+    -- Disposition : "free" (x / y), "mirror" (symétrique de la barre mirrorOf, axe vertical au centre de l'écran) ou
+    -- "parent" (suit la barre mirrorOf, décalée de relX / relY)
+    layout = "free", relX = 0, relY = 0,
+    -- Nom (police 2002 : embarquée dans le client). Ancrage = point de la barre (9 points), justification LEFT / CENTER / RIGHT
+    showName = true, nameAlways = false, showLevel = false, nameFont = "Fonts\\2002.TTF", nameOutline = "OUTLINE", nameSize = 14,
+    nameAnchor = "TOPLEFT", nameJustify = "LEFT", nameOffX = 0, nameOffY = 2, nameShadow = false, nameShadowAlpha = 0.8, nameShadowFlip = false, nameBoxW = 0, nameShadowW = 100, nameShadowH = 100,
+    -- Texte de vie, dans un cadre ancré à la barre ; hpMode "pct" (0-100) ou "value" (abrégée)
+    hpShow = false, hpFont = "Fonts\\2002.TTF", hpOutline = "OUTLINE", hpSize = 8, hpMode = "pct", hpHoverValue = false,
+    hpAnchor = "TOPLEFT", hpOffX = -1, hpOffY = 0, hpBoxW = 32, hpBoxH = 17, hpBg = true,
+    hpBgColor = { 0.0549, 0.0549, 0.0549, 1 }, hpBgShape = "rect",   -- cadre du texte de vie : rect / diamond / circle
+    -- Remplissage : textures (clés de ns.BAR_TEXTURES) et sens (LTR, RTL, BTT, TTB)
+    bgTexture = "flat", barTexture = "flat", fillDir = "LTR",
+    -- Formes décoratives : circle / chevron / diamond / square ou combinées (circle_chevron...), 1 à 5 par côté,
+    -- côté LEFT / RIGHT / BOTH de la barre. nameShadow : ombre derrière la barre (section Nom)
+    showDots = true, dotShape = "circle", dotCount = 3, dotSize = 9, dotRatio = 0, dotGap = 3, dotSpacing = 3, dotSide = "LEFT",
+  }
+  for k, v in pairs(o) do t[k] = v end
+  return t
+end
+
 ns.Defaults = {
   -- Cercle de ressource (mana)
   resourceCircle = {
@@ -274,10 +298,20 @@ ns.Defaults = {
     -- reservees au survol : c'est la barre qui devient permanente, pas tout son contenu.
     alwaysVisible  = false,
     nextLevelPreview = true,   -- survol du niveau : apercu de ce que debloque le prochain niveau
+    nlScale = 1,               -- taille globale de l'apercu du prochain niveau
+    questsAlwaysShown = false, -- quetes a rendre affichees des le survol, sans Alt
+    barPosition = "bottom",    -- "bottom" | "top" | "left" | "right" (cotes : barre verticale)
+    fillReverse = false,       -- sens inverse : droite -> gauche (haut -> bas sur les cotes) ; badge dans le coin oppose
+    levelTextSize = 19,        -- taille du texte de niveau (le badge suit)
+    infoTextSize  = 12,        -- taille des infos (infobulle total / repos, total central ; leur fond suit)
+    restedColor = { 0.40, 0.80, 1.00, 1 },     -- segment XP reposee sur la barre
+    restedAlpha = 0.55,                        -- opacite du segment (independante de la couleur)
+    restedUseThemeColors = false,              -- vrai : couleur "Texte de Puissance" de la spe
     -- Toast de montee de niveau (Modules/LevelUpToast.lua)
     toastEnabled = true, toastWaitCombat = true, toastDuration = 6, toastScale = 1, toastTitleScale = 1,
     toastFontScale = 1, toastBgScale = 1, toastBgAlpha = 0.85, toastTitleColor = { 1, 0.82, 0.10, 1 },
     toastX = 0, toastY = 220,
+    toastTitleFont = "Fonts\\2002.TTF", toastStatsFont = "Fonts\\2002.TTF", toastSpellFont = "Fonts\\2002.TTF",
     repEnabled     = true,        -- affiche la réputation au niveau max
     companionXP    = true,         -- affiche l'XP du compagnon de gouffre si en gouffre
     repDisplayMode = "tracked",   -- "tracked" | "lastGained"
@@ -412,6 +446,9 @@ ns.Defaults = {
     -- Cercle Bien Nourri : wellFedCombos.eating (pendant le repas) / wellFedCombos.fed (buff obtenu)
     wellFedEnabled = true,
     wellFedCombos = {},
+    -- Camping HUD : campfireCombos.shown (HUD affiche) / .sitting (minute assise) / .buffs (resume des bonus)
+    campfireEnabled = true,
+    campfireCombos = {},
   },
 
   -- Cercle Bien Nourri (hors combat) : se vide pendant qu'on mange, change de couleur a l'obtention du buff
@@ -420,6 +457,32 @@ ns.Defaults = {
   horizonSuite = {
     enabled = false,
     offsetY = 20,                  -- px, + = vers le haut
+  },
+  -- Campement (Modules/Campfire.lua, Forever) : HUD pres d'un feu de camp, bonus du camp pendant la minute assise
+  campfire = {
+    enabled = true,
+    locked = false,
+    size = 70,
+    anchorPctX = 0.5, anchorPctY = 0.62,
+    -- Minuteur (police : Montserrat du HUD si non choisie, repli 2002) ; tailles en % de la taille calculee
+    timerSize = 100, timerColor = { 0.95, 0.89, 0.78, 1 }, timerX = 0, timerY = 0,
+    timerOutline = "OUTLINE", buffOutline = "OUTLINE", tipOutline = "NONE",   -- "NONE" | "OUTLINE" | "THICKOUTLINE" | "SLUG"
+    timerOutline = "OUTLINE", buffOutline = "OUTLINE", tipOutline = "NONE",   -- "NONE" | "OUTLINE" | "THICKOUTLINE" | "SLUG"
+    -- Bonus : orbes (taille en %) ; popup = resume des gains apres la minute (police, taille, couleur, decalage)
+    buffSize = 100, buffFont = "Fonts\\2002.TTF", buffFontSize = 17, buffColor = { 16 / 255, 217 / 255, 149 / 255, 1 },
+    sumX = 0, sumY = 0,
+    -- Infobulle d'une orbe
+    tipFont = "Fonts\\2002.TTF", tipFontSize = 13, tipNameColor = { 0.74, 0.48, 0.27, 1 },
+    tipStatColor = { 1, 0.83, 0.42, 1 }, tipOffset = 8,
+    itemSize = 100,      -- cases d'objets de camp (%)
+    itemWidth = 100, itemHeight = 100,   -- cases d'objets : largeur, hauteur (% de la taille de base)
+    itemGap = 4, itemBorder = 1, itemBorderColor = { 0, 0, 0, 0.9 },   -- ecart entre les cases, contour (px, couleur)
+    itemCountPoint = "BOTTOMRIGHT", itemCountX = -1, itemCountY = 2,   -- position du nombre d'objets dans la case
+    itemCountFont = "Fonts\\2002.TTF", itemCountSize = 10, itemCountOutline = "OUTLINE", itemCountColor = { 1, 1, 1, 1 },   -- stacks
+    -- Barre de la minute assise (contour du losange)
+    barSize = 100, barColor = { 1, 0.55, 0.15, 1 }, barSpark = "default", barTexture = "flat",
+    barSparkSize = 100, barSparkColor = { 1, 1, 1, 1 }, barSparkAnim = true,   -- etincelle : animation "braise"
+    barAnim = false,   -- barre : opacite qui ondule (75 a 100 %)
   },
   movementBuffs = {
     enabled = true,
@@ -690,6 +753,9 @@ ns.Defaults = {
     elvuiBuffsOocAlpha      = 0.2,  -- opacite hors combat
     elvuiBuffsCombatAlpha   = 1.0,  -- opacite en combat
     elvuiBuffsHoverReveal   = true, -- survol = 100% temporairement
+    -- Barres d'action 1 a 3 d'EllesmereUI attenuees hors situations utiles (cf. Modules/Visibility.lua)
+    euiBarsEnabled          = false,
+    euiBarsAlpha            = 0.2,
   },
 
   -- Polices forcees sur des textes d'addons tiers (Modules/AddonFonts.lua). Decoche = visuel d'origine.
@@ -697,6 +763,8 @@ ns.Defaults = {
     platAuraEnabled  = false, platAuraFont  = "Fonts\\2002.TTF", platAuraSize  = 11, platAuraOutline  = "OUTLINE",
     platLevelEnabled = false, platLevelFont = "Fonts\\2002.TTF", platLevelSize = 11, platLevelOutline = "OUTLINE",
     bagItemEnabled   = false, bagItemFont   = "Fonts\\2002.TTF", bagItemSize   = 13, bagItemOutline   = "OUTLINE",
+    bagLabelEnabled  = false, bagLabelFont  = "Fonts\\2002.TTF", bagLabelSize  = 12, bagLabelOutline  = "SHADOW",
+    bagSectionEnabled = false, bagSectionFont = "Fonts\\2002.TTF", bagSectionSize = 14, bagSectionOutline = "SHADOW",
   },
 
   -- Barre de cast joueur
@@ -716,12 +784,23 @@ ns.Defaults = {
     timerOffY     = 2,
     timerJustify  = "RIGHT",
     colorBySchool = false,
+    showIcon      = false,
+    iconWidth     = 15,
+    iconHeight    = 15,
+    iconBorder    = false,
+    iconBorderTexture = "solid",   -- cle de ns.BORDER_TEXTURES ou "lsm:<nom>"
+    iconBorderSize    = 1,
+    iconBorderColor   = { 0, 0, 0, 1 },
+    iconAnchor    = "LEFT",   -- "LEFT" | "CENTER" | "RIGHT"
+    iconOffX      = 0,
+    iconOffY      = 0,
     barColor      = { 0.471, 0.392, 0.271, 1 },
     -- Texture de remplissage : cle de ns.BAR_TEXTURES. Par defaut "Flat (WoW)", native au
     -- client ; les entrees LibSharedMedia s'ajoutent au dropdown quand une media pack
     -- est installee.
     barTexture    = "flat",
-    sparkTexture  = "default",                      -- etincelle : "default" | "line" | "star" | "burst" | "dot"
+    fillDir       = "LTR",                          -- sens de remplissage : "LTR" (gauche -> droite) | "RTL"
+    sparkTexture  = "default",                      -- etincelle : "none" | "default" | "line" | "star" | "burst" | "dot"
     sparkSize     = 100,                            -- taille de l'etincelle, en % de sa taille de base
     sparkColor    = { 1, 0.867, 0.710, 1 },
     font          = "Fonts\\2002.TTF",
@@ -739,6 +818,15 @@ ns.Defaults = {
     x             = 260,
     y             = -120,
     showIcon      = true,
+    iconWidth     = 15,
+    iconHeight    = 15,
+    iconBorder    = false,
+    iconBorderTexture = "solid",   -- cle de ns.BORDER_TEXTURES ou "lsm:<nom>"
+    iconBorderSize    = 1,
+    iconBorderColor   = { 0, 0, 0, 1 },
+    iconAnchor    = "LEFT",   -- "LEFT" | "CENTER" | "RIGHT"
+    iconOffX      = 0,
+    iconOffY      = 0,
     nameSize      = 12,
     nameOffX      = 0,
     nameOffY      = 9,
@@ -759,6 +847,55 @@ ns.Defaults = {
     colorImportant        = { 0.855, 0.239, 1, 1 },       -- #DA3DFF
     colorNotInterruptible = { 0.765, 0.294, 0.290, 1 },   -- #C34B4A
     colorChanneling       = { 0.506, 0.788, 0.243, 1 },   -- #81C93E
+    fillDir       = "LTR",
+    nameColor     = { 0.792, 0.639, 0.392, 1 },
+    timerColor    = { 0.847, 0.627, 0.380, 1 },
+    sparkTexture  = "none",                         -- pas d'etincelle par defaut (rendu d'origine)
+    sparkSize     = 100,
+    sparkColor    = { 1, 0.867, 0.710, 1 },
+  },
+
+  -- Barre de cast du focus : memes reglages que celle de la cible (Modules/TargetCastBar.lua, une instance par unite)
+  focusCastBar = {
+    enabled       = true,
+    locked        = false,
+    width         = 200,
+    height        = 3,
+    x             = 0,
+    y             = 120,
+    showIcon      = true,
+    iconWidth     = 15,
+    iconHeight    = 15,
+    iconBorder    = false,
+    iconBorderTexture = "solid",
+    iconBorderSize    = 1,
+    iconBorderColor   = { 0, 0, 0, 1 },
+    iconAnchor    = "LEFT",
+    iconOffX      = 0,
+    iconOffY      = 0,
+    nameSize      = 12,
+    nameOffX      = 0,
+    nameOffY      = 9,
+    nameJustify   = "CENTER",
+    timerSize     = 8,
+    timerOffX     = 1,
+    timerOffY     = 2,
+    timerJustify  = "RIGHT",
+    barTexture    = "flat",
+    font          = "Fonts\\2002.TTF",
+    nameOutlineStyle = "OUTLINE",
+    timerFont     = "Fonts\\2002.TTF",
+    timerOutlineStyle = "OUTLINE",
+    colorInterruptible    = { 0, 0.78, 0.78, 1 },
+    colorImportant        = { 0.855, 0.239, 1, 1 },
+    colorNotInterruptible = { 0.765, 0.294, 0.290, 1 },
+    colorChanneling       = { 0.506, 0.788, 0.243, 1 },
+    fillDir       = "LTR",
+    nameColor     = { 0.792, 0.639, 0.392, 1 },
+    timerColor    = { 0.847, 0.627, 0.380, 1 },
+    sparkTexture  = "none",
+    sparkSize     = 100,
+    sparkColor    = { 1, 0.867, 0.710, 1 },
   },
 
   -- Barres de vie par unité (Player, Target, Focus, Pet, TargetTarget)
@@ -784,6 +921,8 @@ ns.Defaults = {
     showAbsorb       = true,   -- afficher la barre de bouclier (absorb) en bleu sur les barres de vie
     absorbColor      = { 0, 1, 0.918, 1 },  -- couleur de la barre d'absorb (#00FFEA par défaut)
     absorbReversed   = false,               -- true = absorb à gauche (miroir), false = à droite (défaut)
+    -- Anciens réglages communs (points, textes, textures, modes du texte de vie, nom du joueur, niveau de la cible) :
+    -- devenus propres à chaque barre (bars.<clé>), repris une fois par barre à la migration (UnitBars, EnsurePerBar).
     showDots         = true,   -- afficher les 3 petits ronds sur le côté des barres
     dotSize          = 9,
     dotRatio         = 0,      -- 0=proportionnel, 100=tous identiques
@@ -810,37 +949,19 @@ ns.Defaults = {
     showPlayerNameHover = false,              -- nom du personnage au survol de sa barre de vie (hors combat)
     showTargetLevel = false,                  -- niveau devant le nom de la barre de cible ("7 \226\128\162 Nom")
     barColor = { 0.71, 0.60, 0.49, 1 },       -- couleur des barres de vie (hors couleurs thematiques)
+    -- Réglages par barre (cf. UnitBarDefaults). Nom du joueur : au survol seulement (showName), décalé
+    -- automatiquement en miroir de celui de la cible (EnsurePlayerNameOffset).
     bars = {
-      player = {
-        enabled = true, width = 200, height = 4,
-        x = -260, y = -120,
-        fillColor = { 0.78, 0.61, 0.44, 1 },
-        nameOffX = 0, nameOffY = 2,   -- nom au survol : decale automatiquement en miroir de celui de la cible (EnsurePlayerNameOffset)
-      },
-      target = {
-        enabled = true, width = 200, height = 4,
-        x = 260, y = -120,
-        fillColor = { 0.72, 0.59, 0.39, 1 },
-        nameOffX = 0, nameOffY = 2,
-      },
-      focus = {
-        enabled = true, width = 200, height = 4,
-        x = -260, y = -145,
-        fillColor = { 0.71, 0.60, 0.49, 1 },
-        nameOffX = 0, nameOffY = 2,
-      },
-      pet = {
-        enabled = true, width = 143, height = 4,
-        x = -260, y = -100,
-        fillColor = { 0.71, 0.60, 0.49, 1 },
-        nameOffX = 0, nameOffY = 2,
-      },
-      targettarget = {
-        enabled = true, width = 80,  height = 4,
-        x = 260, y = -145,
-        fillColor = { 0.41, 0.41, 0.41, 1 },
-        nameOffX = 0, nameOffY = 2,
-      },
+      player = UnitBarDefaults({ x = -260, y = -120, fillColor = { 0.78, 0.61, 0.44, 1 }, mirrorOf = "target",
+        showName = false, nameAnchor = "TOPRIGHT", nameJustify = "RIGHT", hpShow = true, hpAnchor = "TOPRIGHT", hpOffX = 1 }),
+      target = UnitBarDefaults({ x = 260, y = -120, fillColor = { 0.72, 0.59, 0.39, 1 }, mirrorOf = "player",
+        hpShow = true, dotSide = "RIGHT" }),
+      focus = UnitBarDefaults({ x = -260, y = -145, fillColor = { 0.71, 0.60, 0.49, 1 }, mirrorOf = "targettarget",
+        hpAnchor = "TOPRIGHT", hpOffX = 1 }),
+      pet = UnitBarDefaults({ width = 143, x = -260, y = -100, fillColor = { 0.71, 0.60, 0.49, 1 }, mirrorOf = "target",
+        nameAnchor = "TOPRIGHT", nameJustify = "RIGHT", hpAnchor = "TOPRIGHT", hpOffX = 1 }),
+      targettarget = UnitBarDefaults({ width = 80, x = 260, y = -145, fillColor = { 0.41, 0.41, 0.41, 1 }, mirrorOf = "focus",
+        showDots = false, dotSide = "RIGHT" }),
     },
   },
 
@@ -875,6 +996,7 @@ ns.Defaults = {
     enabled = true,
     -- Position (ancre TOP de UIParent par defaut, sous le bord haut de l'ecran)
     point = "TOP", relativePoint = "TOP", x = 0, y = -12,
+    locked = true,   -- verrou du glisser-deposer (page de reglages ouverte, cf. Build.Location)
     -- Contenu : "Zone: Sous-zone" quand les deux different, sous-zone seule si decoche
     showZone = true,
     -- Texte
@@ -943,10 +1065,35 @@ ns.Defaults = {
     fadeOut  = 0.8,    -- secondes
   },
 
+  -- Compartiment d'addons, cf. Modules/AddonCompartment.lua : boutons de minimap des addons ranges dans un seul bouton
+  addonCompartment = {
+    enabled = false,
+    point = "BOTTOMLEFT", x = 0, y = 0, size = 26,     -- bouton : centre sur ce point de la minimap
+    btnTexture = "circle", btnColor = { 0, 0, 0, 0.75 }, btnBorderSize = 0, btnBorderColor = { 0, 0, 0, 1 },
+    font = "Fonts\\2002.TTF", fontSize = 13, outline = "OUTLINE",
+    textColor = { 1, 0.82, 0.2, 1 }, textThemed = true,
+    -- liste : ouverture "click" / "hover", direction "auto" / "down" / "up" / "left" / "right", affichage "grid" / "list"
+    openMode = "click", direction = "auto", layout = "grid", gap = 4,
+    columns = 5, listColumns = 1, iconSize = 26, spacing = 4,
+    listFont = "Fonts\\2002.TTF", listFontSize = 12, listColor = { 0.95, 0.9, 0.8, 1 },
+    hoverColor = { 1, 0.82, 0.2, 1 }, hoverThemed = true, animate = true,
+    bgTexture = "grunge", bgColor = { 0, 0, 0, 0.85 }, bgPadX = 12, bgPadY = 10, bgEdge = 16,
+    bgBorderSize = 0, bgBorderColor = { 0, 0, 0, 1 },
+    -- favoris : grille sur la minimap. Listes hidden / favorites : reglages du compte, cf. Flags (AddonCompartment.lua)
+    favPoint = "TOPRIGHT", favX = 0, favY = 0, favIconSize = 22, favColumns = 1, favRows = 6, favSpacing = 4,
+    favAlpha = 0.6, favHoverAlpha = 1,
+    -- fond de la grille des favoris, puis fond de chaque icone
+    favBgTexture = "none", favBgColor = { 0, 0, 0, 0.6 }, favBgPadX = 6, favBgPadY = 6, favBgEdge = 12,
+    favBgBorderSize = 0, favBgBorderColor = { 0, 0, 0, 1 },
+    favIconBgTexture = "none", favIconBgColor = { 0, 0, 0, 0.75 }, favIconBgPad = 2,
+    favIconBgBorderSize = 0, favIconBgBorderColor = { 0, 0, 0, 1 },
+  },
+
   -- Confort de jeu, cf. Modules/Comfort.lua : CVars de rendu + raccourcis /rl /edit /cdm.
   comfort = {
     -- Rendu graphique (groundDensity/groundFade/groundDist/sharpen) : lie au PC/compte et non au profil,
     -- cf. Modules/Comfort.lua (GetDevice) -- jamais dans le profil, donc jamais partage avec lui.
+    enabled       = true,     -- interrupteur general QoL (page Modules)
     shortcuts     = false,
     horizonOffWithRXP = false, -- coupe Horizon Suite tant que RestedXP est charge
     merchantExtend = false,   -- fenetre marchand sur plusieurs pages a la fois
@@ -955,6 +1102,7 @@ ns.Defaults = {
     minimapTracking = false,  -- clic droit sur la minimap : ouvre le menu de pistage
     hideErrors     = false,   -- masque les messages d'erreur rouges au centre de l'ecran
     ctrlFocus      = false,   -- Ctrl + clic gauche sur une unite : focalisation
+    doubleClickFish = false,  -- double clic droit (Retail : Ctrl + double clic) : peche
     questTurnInBox = false,   -- case "rendu auto des quetes" pendant une discussion avec un PNJ
     autoTurnIn     = false,   -- etat de cette case
     questTurnInSize = 22,     -- taille de la case (position : questTurnInX / questTurnInY)

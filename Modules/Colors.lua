@@ -9,6 +9,8 @@ ns.Modules.Colors = Colors
 -- Furtivite (Camouflage, Disparition, Danse de l'ombre, Subterfuge, Rodeur...) : partage avec le Mode furtif.
 -- IsStealthed() couvre la plupart des cas ; les auras connues rattrapent les autres (Camouflage, Sous camouflage...).
 local STEALTH_AURAS = { 1784, 1785, 1786, 1787, 5215, 11327, 115191, 115192, 185313, 185422, 58984, 20580, 199483, 66, 32612 }
+-- Forever : aura de furtivite propre a ce client
+if ns.IsForever then STEALTH_AURAS[#STEALTH_AURAS + 1] = 6298 end
 -- Renvoie (furtif, faible) : faible = detecte uniquement par la barre d'action "bonus" du Voleur, la seule regle sujette
 -- aux faux positifs (monture...) : ceux-la sont confirmes apres un court delai par les appelants. IsStealthed() et les
 -- auras sont fiables, donc immediates.

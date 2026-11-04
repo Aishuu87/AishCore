@@ -756,20 +756,12 @@ local function ExclusiveGroupAlert(list)
     return choices
 end
 
--- Forever : poison = enchantement d'arme, un seul par arme (pas de groupe letal/non-letal).
--- Renvoie (choix, cle de texte) ou nil.
-local function CheckRoguePoisonsForever()
-    local cfg = Cfg()
-    if cfg.ignoreLethalPoisons and cfg.ignoreNonlethalPoisons then return nil end
-    local choices = GroupChoices(ns.MISSING_ROGUE_POISONS.forever)
-    if #choices == 0 then return nil end -- aucun poison connu
-    if WeaponInSlot(16) and WeaponEnchantState("main") == false then return choices, "APPLY_LETHAL" end
-    if WeaponInSlot(17) and WeaponEnchantState("off") == false then return choices, "APPLY_LETHAL" end
-    return nil
-end
+-- Forever : poisons = objets fabriques puis appliques sur l'arme. Fonctions regroupees (limite des 200 locales),
+-- definies plus bas : Poisons.Check (apres ConsumablesBlocked) renvoie (choix, cle de texte, texte deja forme) ou nil.
+local Poisons = {}
 
 local function CheckRoguePoisons()
-    if _addon.IsForever then return CheckRoguePoisonsForever() end
+    if _addon.IsForever then return Poisons.Check() end
     local cfg = Cfg()
     if not cfg.ignoreNonlethalPoisons then
         local choices = ExclusiveGroupAlert(ns.MISSING_ROGUE_POISONS.nonlethal)
@@ -826,20 +818,44 @@ local function HunterHasCallablePet()
     return found
 end
 
+-- Chasseur : familier mort, memorise par personnage. UnitExists("pet") repasse a false alors qu'il est toujours mort
+-- (corps disparu, resurrection interrompue) : sans cette memoire, l'alerte proposait de l'appeler.
+function MissingBuffs.NoteHunterPetState()
+    if not UnitExists("pet") then return end
+    MissingBuffs._petSeenAt = GetTime()
+    local dead = UnitIsDead("pet")
+    if IsSecret(dead) then return end
+    -- Joueur mort : le familier peut mourir sans etre vu, seul un familier vivant apres la resurrection leve la memoire
+    if not dead and UnitIsDeadOrGhost("player") then return end
+    AishUILearnDB = AishUILearnDB or { learnedDurations = {}, verbose = false }
+    AishUILearnDB.hunterPetDead = dead and true or nil
+end
+
+-- Sans corps visible, rien ne prouve que le familier est mort : Ressusciter + Appeler (le 1er familier), un sort par icone.
+-- Enchainer les deux sorts dans une macro ne marche pas : un appel qui echoue bloque la resurrection.
+function MissingBuffs.HunterPetChoices()
+    local revive = ns.MISSING_HUNTER_REVIVE_ENTRY or { spellId = ns.MISSING_HUNTER_PET_DEAD }
+    local out = (not revive.casts or IsEntryLearned(revive)) and ChoicesFromEntry(revive, "player") or {}
+    out[#out + 1] = GroupChoices(ns.MISSING_HUNTER_ALL_PETS)[1]
+    return out
+end
+
 -- Renvoie (choix, cle de texte) ou nil : familier a ressusciter, ou tous les familiers/demons invocables.
 local function CheckPetMissing(class)
     if class == "HUNTER" and HasHunterLoneWolfTalent() then
         return nil
     end
-    if UnitExists("pet") then
-        if class == "HUNTER" and UnitIsDead("pet") then
+    if class == "HUNTER" then
+        MissingBuffs.NoteHunterPetState()
+        if AishUILearnDB and AishUILearnDB.hunterPetDead then
             local revive = ns.MISSING_HUNTER_REVIVE_ENTRY or { spellId = ns.MISSING_HUNTER_PET_DEAD }
-            if revive.casts and not IsEntryLearned(revive) then return nil end
-            local choices = ChoicesFromEntry(revive, "player")
-            if #choices > 0 then return choices, "REVIVE_PET" end
+            if not revive.casts or IsEntryLearned(revive) then
+                local choices = UnitExists("pet") and ChoicesFromEntry(revive, "player") or MissingBuffs.HunterPetChoices()
+                if #choices > 0 then return choices, "REVIVE_PET" end
+            end
         end
-        return nil
     end
+    if UnitExists("pet") then return nil end
     if class == "WARLOCK" and HasSacrificedPetForGrimoire() then
         return nil
     end
@@ -1099,6 +1115,16 @@ local function BuildAppearAnimGroup()
     return group
 end
 
+--- Clic droit sur l'alerte : la masque tant que la meme alerte (meme signature) revient au rescan ;
+--- levee quand elle change, se resout, au prochain ecran de chargement ou changement de zone. Champ du module, pas une
+--- locale (limite des 200 locales du chunk).
+function MissingBuffs.DismissAlert(_, button, down)
+    if button ~= "RightButton" or down or not currentSig then return end
+    MissingBuffs._dismissedSig = currentSig
+    GameTooltip:Hide()
+    MissingBuffs.HideAlert()
+end
+
 --- Une icone de proposition : bouton securise (clic = son propre sort), enfant de `frame` qui reste le
 --- repere de position / glisser-deposer et le porteur des animations d'entree/sortie.
 local function EnsureSlot(i)
@@ -1132,8 +1158,54 @@ local function EnsureSlot(i)
         GameTooltip:Show()
     end)
     sl:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- Clic droit : type inconnu (aucune action securisee), l'alerte est masquee dans PostClick
+    sl:SetAttribute("type2", "aishdismiss")
+    sl:SetScript("PostClick", MissingBuffs.DismissAlert)
     slots[i] = sl
     return sl
+end
+
+-- Qualite d'artisanat d'un objet (atlas du badge des sacs), nil si sans rang. Retail uniquement :
+-- ces API n'existent pas sur Forever. Seuls les hits sont caches (donnees d'objet pas encore chargees).
+local SetQualityBadge
+do   -- bloc : le chunk est a la limite des 200 locales
+local qualityAtlasCache = {}
+local function QualityAtlas(itemID)
+    if type(itemID) ~= "number" then return nil end
+    local hit = qualityAtlasCache[itemID]
+    if hit then return hit end
+    local ts = C_TradeSkillUI
+    if not ts then return nil end
+    for _, method in ipairs({ "GetItemCraftedQualityInfo", "GetItemReagentQualityInfo" }) do
+        if ts[method] then
+            local ok, info = pcall(ts[method], itemID)
+            local atlas = ok and type(info) == "table" and info.iconInventory
+            if type(atlas) == "string" and atlas ~= "" then
+                qualityAtlasCache[itemID] = atlas
+                return atlas
+            end
+        end
+    end
+end
+
+-- Badge de qualite en haut a gauche de l'icone ; `holder` garde la texture (slot ou icone de combat).
+function SetQualityBadge(holder, parent, iconTex, itemID, iSize)
+    local atlas = QualityAtlas(itemID)
+    if not atlas then
+        if holder.quality then holder.quality:Hide() end
+        return
+    end
+    if not holder.quality then
+        holder.quality = parent:CreateTexture(nil, "OVERLAY", nil, 7)
+    end
+    local q = holder.quality
+    local s = math.max(12, math.floor(iSize * 0.42))
+    q:SetAtlas(atlas, false)
+    q:SetSize(s, s)
+    q:ClearAllPoints()
+    q:SetPoint("TOPLEFT", iconTex, "TOPLEFT", -2, 2)
+    q:Show()
+end
 end
 
 local function ApplySlotAppearance(sl, cfg)
@@ -1193,6 +1265,13 @@ function MissingBuffs.RefreshAppearance()
 
     ns.ApplyTextOutlineStyle(textFS, slugFS, cfg.textFont or ns.Media.font, cfg.textSize or 12, cfg.textOutlineStyle)
     textFS:SetTextColor(unpack(cfg.textColor or { 1, 0.9, 0.3 }))
+    -- Texte deja affiche : le client ne redessine pas les glyphes a la nouvelle police / taille tant que le texte ne
+    -- change pas (seul un /reload le montrait). Reposer le texte force ce rendu (l'anneau SLUG suit, cf. CreateSlugRing).
+    local cur = textFS:GetText()
+    if cur and cur ~= "" then
+        textFS:SetText("")
+        textFS:SetText(cur)
+    end
     -- L'offset utilisateur se pose sur le CONTENEUR, pas sur textFS lui-meme
     -- (qui reste ancre fixe en son centre) -- cf. commentaire EnsureFrame.
     textContainer:ClearAllPoints()
@@ -1228,6 +1307,7 @@ local function EnsureFrame()
         local cfg = Cfg()
         if cfg then cfg.framePoint = { point, relPoint, x, y } end
     end)
+    frame:SetScript("PostClick", MissingBuffs.DismissAlert)
 
     iconTex = frame:CreateTexture(nil, "ARTWORK")
     iconTex:SetSize(ICON_SIZE, ICON_SIZE)
@@ -1463,6 +1543,17 @@ function MissingBuffs.ShowAlertChoices(choices, text)
         return
     end
     if not choices or #choices == 0 then MissingBuffs.HideAlert(); return end
+    -- Signature de la rangee (cles + nombre d'icones) : alerte masquee au clic droit ou relance des combos
+    local n = #choices
+    local keys = {}
+    for _, c in ipairs(choices) do
+        if c.key then keys[#keys + 1] = tostring(c.key) end
+    end
+    local sig = table.concat(keys, ",") .. "#" .. n
+    if MissingBuffs._dismissedSig then
+        if MissingBuffs._dismissedSig == sig then MissingBuffs.HideAlert(); return end
+        MissingBuffs._dismissedSig = nil
+    end
     local cfg = Cfg()
     EnsureFrame()
     -- Ne joue le slide-in que pour une VRAIE reapparition (frame cache), pas a chaque simple
@@ -1485,10 +1576,8 @@ function MissingBuffs.ShowAlertChoices(choices, text)
     PositionFrameIfNeeded()
 
     -- Une icone par proposition, centrees ; texte unique dessous
-    local n = #choices
     LayoutSlots(n)
     wipe(currentAlertKeys)
-    local keys = {}
     for i, c in ipairs(choices) do
         local sl = slots[i]
         local tex = c.icon
@@ -1499,6 +1588,7 @@ function MissingBuffs.ShowAlertChoices(choices, text)
         sl.icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
         sl._spellId = c.spellId
         ApplySlotAppearance(sl, cfg)
+        SetQualityBadge(sl, sl, sl.icon, c.item, cfg.iconSize or ICON_SIZE)
         -- Attributs securises (type/spell/macrotext) : hors combat seulement, garanti plus haut.
         pcall(function()
             if cfg.makeIconClickable and c.macro and c.macro ~= "" then
@@ -1516,10 +1606,17 @@ function MissingBuffs.ShowAlertChoices(choices, text)
                 sl:SetAttribute("type", nil)
             end
         end)
-        if c.key then
-            currentAlertKeys[c.key] = sl
-            keys[#keys + 1] = tostring(c.key)
-        end
+        if c.key then currentAlertKeys[c.key] = sl end
+    end
+    -- Choix sans cle (2e+ consommable) : rattaches a la cle precedente, le meme combo se joue sur
+    -- chacune de ces icones (champ du module : limite des 200 locales du chunk atteinte).
+    local groups = MissingBuffs._alertGroups or {}
+    MissingBuffs._alertGroups = groups
+    wipe(groups)
+    local lastKey
+    for i, c in ipairs(choices) do
+        if c.key ~= nil then lastKey = c.key; groups[lastKey] = {} end
+        if lastKey ~= nil then table.insert(groups[lastKey], slots[i]) end
     end
     textFS:SetShown(not cfg.hideText)
     textFS:SetText(text or "")
@@ -1531,7 +1628,6 @@ function MissingBuffs.ShowAlertChoices(choices, text)
     currentAlertSpell = choices[1].key
     -- Les combos sont ancres sur l'icone de LEUR sort : si la rangee change (nombre ou ordre), on
     -- les relance pour qu'ils suivent leur icone.
-    local sig = table.concat(keys, ",")
     if sig ~= currentSig then
         currentSig = sig
         local SE = _addon.Modules and _addon.Modules.SpellEffects
@@ -1570,6 +1666,15 @@ function MissingBuffs.GetSlotForSpell(key)
     return currentAlertKeys[key] or frame
 end
 
+--- Toutes les icones qui jouent le combo de cette cle (plusieurs consommables proposes : le meme
+--- combo sur chacun). Repli : l'ancre unique de GetSlotForSpell.
+function MissingBuffs.GetSlotsForSpell(key)
+    local anchor = currentAlertKeys[key]
+    local g = MissingBuffs._alertGroups and MissingBuffs._alertGroups[key]
+    if g and #g > 1 and anchor == g[1] then return g end
+    return { anchor or frame }
+end
+
 -- Preview (menu de reglages) : force l'affichage d'un spell representatif de la classe, en
 -- ignorant les vraies conditions -- meme principe que CastBar.SetPreview. previewMode bloque
 -- CheckForMissings() tant qu'actif pour que les vrais events n'ecrasent pas l'apercu.
@@ -1585,6 +1690,7 @@ function MissingBuffs.SetPreview(on, spellId)
     if on and InCombatLockdown() then return end
     previewMode = on and true or false
     if on then
+        MissingBuffs._dismissedSig = nil
         local entry
         local resolvedId = spellId
         if resolvedId == ns.MISSING_PET_PASSIVE_KEY then
@@ -1596,7 +1702,10 @@ function MissingBuffs.SetPreview(on, spellId)
         local PREVIEW_PSEUDO = {
             [ns.MISSING_FOOD_KEY]         = { "Interface\\Icons\\INV_Misc_Food_15", "EAT_FOOD" },
             [ns.MISSING_FLASK_KEY]        = { "Interface\\Icons\\INV_Potion_62", "USE_FLASK" },
+            [ns.MISSING_ELIXIR_KEY]       = { "Interface\\Icons\\INV_Potion_32", "USE_ELIXIR" },
             [ns.MISSING_WEAPON_STONE_KEY] = { "Interface\\Icons\\INV_Stone_SharpeningStone_05", "APPLY_WEAPON_STONE" },
+            [ns.MISSING_POISON_APPLY_KEY] = { "Interface\\Icons\\Ability_Poisons", "APPLY_LETHAL" },
+            [ns.MISSING_POISON_STOCK_KEY] = { "Interface\\Icons\\Trade_BrewPoison", "LOW_POISONS" },
             [ns.MISSING_TALENTS_KEY]      = { "Interface\\Icons\\Ability_Marksmanship", "SPEND_TALENTS" },
             [ns.MISSING_LEGACY_KEY]       = { "Interface\\Icons\\INV_Misc_Book_11", "SPEND_LEGACY" },
             [ns.MISSING_BAGS_KEY]         = { "Interface\\Icons\\INV_Misc_Bag_08", "BAGS_FULL" },
@@ -1771,6 +1880,7 @@ local function ShowCombatPet(choices, text, sig)
         ic.tex:ClearAllPoints()
         ic.tex:SetPoint("TOP", cf, "TOP", (i - (n + 1) / 2) * (iSize + gap), 0)
         ic.tex:Show()
+        SetQualityBadge(ic, cf, ic.tex, c.item, iSize)
         ic.border:ClearAllPoints()
         ic.border:SetPoint("TOPLEFT", ic.tex, -bt, bt)
         ic.border:SetPoint("BOTTOMRIGHT", ic.tex, bt, -bt)
@@ -1784,7 +1894,11 @@ local function ShowCombatPet(choices, text, sig)
             else ic.mask:SetTexture(NO_MASK_TEXTURE) end
         end)
     end
-    for i = n + 1, #combatIcons do combatIcons[i].tex:Hide(); combatIcons[i].border:Hide() end
+    for i = n + 1, #combatIcons do
+        local ic = combatIcons[i]
+        ic.tex:Hide(); ic.border:Hide()
+        if ic.quality then ic.quality:Hide() end
+    end
     ns.ApplyFont(combatText, cfg.textFont or ns.Media.font, cfg.textSize or 12, "OUTLINE")
     combatText:SetTextColor(unpack(cfg.textColor or { 1, 0.9, 0.3 }))
     combatTextBox:ClearAllPoints()
@@ -1862,7 +1976,7 @@ function MissingBuffs.CheckPetInCombat()
     local cfg = Cfg()
     local class = _addon._playerClass or select(2, UnitClass("player"))
     local shout = class == "WARRIOR" and ShoutEntry() or nil  -- Forever : Cri de guerre en combat
-    local palAuras = (class == "PALADIN" and not _addon.IsForever and not cfg.ignorePaladinAuras)
+    local palAuras = (class == "PALADIN" and not _addon.IsForever)
         and PaladinCombatAuraChoices() or nil
     local ignored = (class == "HUNTER" and cfg.ignoreHunterPets) or (class == "WARLOCK" and cfg.ignoreWarlockPets)
         or (shout and MissingBuffs.IsIgnored(shout.settingsId))
@@ -1892,6 +2006,8 @@ function MissingBuffs.CheckPetInCombat()
     if choices then
         -- deja rempli (Cri de guerre)
     elseif ok and ch and #ch > 0 then
+        -- Boutons de combat (cf. ArmPetCombatButton) : rangee fixe, armee hors combat
+        if class == "HUNTER" and MissingBuffs._petCombatArmed then ch = MissingBuffs.HunterPetChoices() end
         choices = ch
         text = ns.MISSING_TEXT[tk]
     elseif PetIsPassive() then
@@ -1905,7 +2021,7 @@ function MissingBuffs.CheckPetInCombat()
 
     local keys = {}
     for i, c in ipairs(choices) do keys[i] = tostring(c.key) end
-    local sig = table.concat(keys, ",")
+    local sig = table.concat(keys, ",") .. "#" .. #choices
     -- Alerte reelle deja affichee pour ces memes propositions : on n'y touche pas
     if frame and not combatSig and frame:IsShown() and frame:GetAlpha() > 0.01 and currentSig == sig then
         if combatFrame and combatFrame:IsShown() then combatFrame:Hide() end
@@ -1917,6 +2033,92 @@ function MissingBuffs.CheckPetInCombat()
     end
     pcall(ShowCombatPet, choices, text, sig)
     return true
+end
+
+-- Chasseur / Demoniste : clic sur l'alerte familier en combat. La copie affichee en combat n'est pas cliquable et aucun
+-- attribut securise ne change en combat : ces boutons invisibles sont armes hors combat, puis le driver (conditions de
+-- macro, evaluees par le client, sans valeur secrete) les affiche sur les icones de la copie (cf. ShowCombatPet).
+function MissingBuffs.EnsurePetCombatButton(i)
+    local btns = MissingBuffs._petCombatBtns
+    if btns[i] then return btns[i] end
+    local btn = CreateFrame("Button", "AishCoreMissingBuffPetCombat" .. i, MissingBuffs._petCombatRow, "SecureActionButtonTemplate")
+    btn:SetFrameStrata("HIGH")
+    btn:SetFrameLevel(50)  -- au-dessus des icones de l'alerte normale, encore cliquables a alpha 0
+    btn:RegisterForClicks("LeftButtonUp", "LeftButtonDown")
+    btn:SetAttribute("type", "macro")
+    btn:SetScript("OnEnter", function(self)
+        if not self._spellId then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        pcall(GameTooltip.SetSpellByID, GameTooltip, self._spellId)
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    btn:Hide()
+    btns[i] = btn
+    return btn
+end
+
+function MissingBuffs.ArmPetCombatButton()
+    if InCombatLockdown() then return end
+    local cfg = Cfg()
+    local class = _addon._playerClass or select(2, UnitClass("player"))
+    local actions, driver = {}, nil
+    if cfg.enabled and cfg.makeIconClickable
+       and not (C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()) then
+        if class == "HUNTER" and not cfg.ignoreHunterPets and not HasHunterLoneWolfTalent() and HunterHasCallablePet() then
+            for _, c in ipairs(MissingBuffs.HunterPetChoices()) do
+                actions[#actions + 1] = { macro = "/cast " .. c.spellName, spellId = c.spellId }
+            end
+            driver = "[combat,nomounted,@pet,dead] show; [combat,nomounted,nopet] show; hide"
+        elseif class == "WARLOCK" and not cfg.ignoreWarlockPets and not HasSacrificedPetForGrimoire() then
+            -- Memes demons, dans le meme ordre, que la rangee de CheckPetMissing
+            for _, c in ipairs(GroupChoices(ns.MISSING_WARLOCK_ALL_PETS)) do
+                actions[#actions + 1] = { macro = "/cast " .. c.spellName, spellId = c.spellId }
+            end
+            driver = "[combat,nomounted,nopet] show; hide"
+        end
+    end
+    local n = #actions
+    MissingBuffs._petCombatArmed = n > 0
+    local btns = MissingBuffs._petCombatBtns
+    if btns then
+        for i = n + 1, #btns do
+            if btns[i]._driver then
+                UnregisterStateDriver(btns[i], "visibility")
+                btns[i]._driver = nil
+                btns[i]:Hide()
+            end
+        end
+    end
+    if n == 0 then return end
+    if not btns then
+        MissingBuffs._petCombatBtns = {}
+        MissingBuffs._petCombatRow = CreateFrame("Frame", nil, UIParent)
+    end
+    -- Meme rectangle et memes positions que la copie de combat (cf. ShowCombatPet)
+    local row = MissingBuffs._petCombatRow
+    local iSize = cfg.iconSize or ICON_SIZE
+    local gap = math.max(6, math.floor(iSize * 0.15))
+    local fp = cfg.framePoint
+    row:ClearAllPoints()
+    row:SetSize(n * iSize + (n - 1) * gap, iSize + 20)
+    if fp then
+        row:SetPoint(fp[1] or "CENTER", UIParent, fp[2] or fp[1] or "CENTER", fp[3] or 0, fp[4] or 250)
+    else
+        row:SetPoint("CENTER", UIParent, "CENTER", 0, 250)
+    end
+    for i, a in ipairs(actions) do
+        local btn = MissingBuffs.EnsurePetCombatButton(i)
+        btn:SetAttribute("macrotext", a.macro)
+        btn._spellId = a.spellId
+        btn:SetSize(iSize, iSize)
+        btn:ClearAllPoints()
+        btn:SetPoint("TOP", row, "TOP", (i - (n + 1) / 2) * (iSize + gap), 0)
+        if btn._driver ~= driver then
+            RegisterStateDriver(btn, "visibility", driver)
+            btn._driver = driver
+        end
+    end
 end
 
 -- Pierres du Demoniste (Retail) : pierre de soins en sac, pierre d'ame posee sur quelqu'un.
@@ -1967,7 +2169,147 @@ end
 
 -- Consommables : pierre a aiguiser / huile dans les sacs et arme sans enchantement temporaire -> une icone par objet,
 -- le clic l'applique (macro "/use objet" puis "/use 16|17" : l'objet cible l'emplacement de l'arme).
--- Pas pour le voleur ni le chaman : leurs poisons / imprégnations occupent deja cet enchantement temporaire.
+-- Pas pour le chaman (imprégnations) ni, en Retail, le voleur (poisons). Sur Forever le voleur garde l'alerte tant qu'il
+-- n'a pas acces aux poisons (metier debloque par quete au niveau 20).
+
+-- Forever : poison = amelioration d'arme dont le nom parle de poison (mot-cle par langue du client). Mis en cache.
+do
+    local POISON_WORDS = ({
+        frFR = { "poison" }, deDE = { "gift" }, esES = { "veneno" }, esMX = { "veneno" }, itIT = { "veleno" },
+        ptBR = { "veneno" }, ruRU = { "яд", "Яд" }, koKR = { "독" }, zhCN = { "毒" }, zhTW = { "毒" },
+    })[GetLocale()] or { "poison" }
+    -- Potions, elixirs (resistance au poison), flacons, nourriture : jamais un poison d'arme
+    local NOT_POISON_SUB = { [1] = true, [2] = true, [3] = true, [5] = true }
+    local poisonCache = {}
+    local function IsPoisonItem(itemID)
+        local c = poisonCache[itemID]
+        if c ~= nil then return c end
+        local name = C_Item.GetItemNameByID and C_Item.GetItemNameByID(itemID)
+        if type(name) ~= "string" or IsSecret(name) then return false end -- pas encore en cache : retente plus tard
+        local low = name:lower()
+        local named = false
+        for _, w in ipairs(POISON_WORDS) do
+            if low:find(w, 1, true) then named = true; break end
+        end
+        if not named then poisonCache[itemID] = false; return false end
+        -- Tooltip qui parle de l'arme, sinon consommable utilisable (le texte d'utilisation de certains poisons
+        -- ne contient pas le mot "arme")
+        local EB = _addon.Modules and _addon.Modules.ExtraBars
+        if EB and EB.IsWeaponEnhancementItem and EB.IsWeaponEnhancementItem(itemID) then c = true
+        else
+            local _, _, _, _, _, classID, subID = C_Item.GetItemInfoInstant(itemID)
+            local ok, spell = pcall(C_Item.GetItemSpell, itemID)
+            if classID == 0 and not NOT_POISON_SUB[subID] then
+                if not (ok and spell) then return false end -- sort pas encore en cache : retente plus tard
+                c = true
+            else
+                c = false
+            end
+        end
+        poisonCache[itemID] = c
+        return c
+    end
+
+    -- Poisons des sacs : objets distincts (tries) et quantite totale
+    Poisons.Bag = Memo(function()
+        local items, seen, total = {}, {}, 0
+        for bag = 0, (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4) do
+            for s = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+                local id = C_Container.GetContainerItemID(bag, s)
+                if id and IsPoisonItem(id) then
+                    local info = C_Container.GetContainerItemInfo and C_Container.GetContainerItemInfo(bag, s)
+                    total = total + ((info and info.stackCount) or 1)
+                    if not seen[id] then seen[id] = true; items[#items + 1] = id end
+                end
+            end
+        end
+        table.sort(items)
+        return { items = items, total = total }
+    end)
+
+    -- Acces aux poisons : metier appris, ou poisons deja dans les sacs
+    function Poisons.Access()
+        if not _addon.IsForever then return false end
+        local prof = ns.MISSING_ROGUE_POISON_PROFESSION
+        if prof and ForeverResolve(prof) then return true end
+        return #Poisons.Bag().items > 0
+    end
+end
+
+local function WeaponEnchantByClass(class)
+    if class == "ROGUE" then return not _addon.IsForever or Poisons.Access() end
+    return class == "SHAMAN"
+end
+-- Pierre a aiguiser = arme tranchante seulement, pierre a lester = arme contondante seulement, huile = toute arme.
+-- Type de la pierre lu d'abord sur son nom, sinon sur sa ligne "Utiliser :" si un seul type y figure (le texte peut
+-- citer l'autre type en negation : "ne s'applique pas aux armes contondantes"). Mis en cache ; nil = huile / inconnu.
+local STONE_NAME_WORDS = ({
+    frFR = { sharp = { "aiguiser" }, blunt = { "lester", "pierre de lest" } },
+    deDE = { sharp = { "wetzstein", "schleifstein" }, blunt = { "gewichtsstein" } },
+    esES = { sharp = { "afilar" }, blunt = { "piedra de peso" } },
+    esMX = { sharp = { "afilar" }, blunt = { "piedra de peso" } },
+    itIT = { sharp = { "affilare" }, blunt = { "contrappeso" } },
+    ptBR = { sharp = { "amolar", "afiar" }, blunt = { "pedra de peso" } },
+    ruRU = { sharp = { "точильн" }, blunt = { "грузил", "утяжел" } },
+})[GetLocale()] or { sharp = { "whetstone", "sharpening" }, blunt = { "weightstone" } }
+local function FindKind(low, words)
+    local found
+    for k, list in pairs(words) do
+        for _, w in ipairs(list) do
+            if low:find(w, 1, true) then
+                if found and found ~= k then return nil, true end
+                found = k; break
+            end
+        end
+    end
+    return found
+end
+local STONE_WORDS = ({
+    frFR = { sharp = { "tranchant" }, blunt = { "contondant" } },
+    deDE = { sharp = { "scharf", "klinge" }, blunt = { "stumpf" } },
+    esES = { sharp = { "afilad", "de filo" }, blunt = { "contundente" } },
+    esMX = { sharp = { "afilad", "de filo" }, blunt = { "contundente" } },
+    itIT = { sharp = { "affilat", "da taglio" }, blunt = { "contundent" } },
+    ptBR = { sharp = { "afiad", "cortante" }, blunt = { "contundente" } },
+    ruRU = { sharp = { "остр", "режущ" }, blunt = { "дробящ" } },
+})[GetLocale()] or { sharp = { "sharp", "edged", "bladed" }, blunt = { "blunt" } }
+local stoneKindCache = {}
+local function StoneKind(itemID)
+    local c = stoneKindCache[itemID]
+    if c ~= nil then return c or nil end
+    local ok, data = pcall(C_TooltipInfo.GetItemByID, itemID)
+    if not (ok and data and data.lines) then return nil end
+    if C_Item.IsItemDataCachedByID and not C_Item.IsItemDataCachedByID(itemID) then return nil end
+    local name = C_Item.GetItemNameByID and C_Item.GetItemNameByID(itemID)
+    local kind = type(name) == "string" and not IsSecret(name) and FindKind(name:lower(), STONE_NAME_WORDS)
+    if not kind then
+        local use = ITEM_SPELL_TRIGGER_ONUSE or "Use:"
+        for _, line in ipairs(data.lines) do
+            local text = line.leftText
+            if type(text) == "string" and not IsSecret(text) and text:sub(1, #use) == use then
+                local k, both = FindKind(text:lower(), STONE_WORDS)
+                if both then kind = false; break end
+                kind = kind or k
+            end
+        end
+    end
+    stoneKindCache[itemID] = kind or false
+    return kind or nil
+end
+
+-- Type de l'arme d'un emplacement : "sharp" (haches, epees, dagues, armes d'hast, glaives, lances), "blunt" (masses,
+-- batons), nil sinon (armes de pugilat... : toutes les pierres restent proposees)
+local SHARP_SUB = { [0] = true, [1] = true, [6] = true, [7] = true, [8] = true, [9] = true, [15] = true, [17] = true }
+local BLUNT_SUB = { [4] = true, [5] = true, [10] = true }
+local function WeaponKind(slot)
+    local id = GetInventoryItemID("player", slot)
+    if not id then return nil end
+    local _, _, _, _, _, _, subClassID = C_Item.GetItemInfoInstant(id)
+    if SHARP_SUB[subClassID] then return "sharp" end
+    if BLUNT_SUB[subClassID] then return "blunt" end
+    return nil
+end
+
 local function WeaponStoneChoices()
     local EB = _addon.Modules and _addon.Modules.ExtraBars
     if not (EB and EB.IsWeaponEnhancementItem and GetWeaponEnchantInfo) then return nil end
@@ -1982,13 +2324,18 @@ local function WeaponStoneChoices()
     if IsWeaponSlot(16) and not hasMain then slot = 16
     elseif IsWeaponSlot(17) and not hasOff then slot = 17 end
     if not slot then return nil end
+    local weapon = WeaponKind(slot)
     local items, seen = {}, {}
     for bag = 0, (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4) do
         for s = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
             local id = C_Container.GetContainerItemID(bag, s)
             if id and not seen[id] then
                 seen[id] = true
-                if EB.IsWeaponEnhancementItem(id) then items[#items + 1] = id end
+                if EB.IsWeaponEnhancementItem(id) then
+                    -- Pierre d'un autre type que l'arme (aiguiser sur une masse, lester sur une epee) : ignoree
+                    local stone = StoneKind(id)
+                    if not (stone and weapon and stone ~= weapon) then items[#items + 1] = id end
+                end
             end
         end
     end
@@ -1998,7 +2345,7 @@ local function WeaponStoneChoices()
     for i = 1, math.min(#items, 4) do
         local id = items[i]
         choices[#choices + 1] = { key = (i == 1) and ns.MISSING_WEAPON_STONE_KEY or nil, icon = C_Item.GetItemIconByID(id),
-                                  macro = "/use item:" .. id .. "\n/use " .. slot }
+                                  item = id, macro = "/use item:" .. id .. "\n/use " .. slot }
     end
     return choices
 end
@@ -2028,7 +2375,7 @@ local function WellFedFoodChoices()
     local choices = {}
     for i = 1, math.min(#items, 4) do
         local id = items[i]
-        choices[#choices + 1] = { key = (i == 1) and ns.MISSING_FOOD_KEY or nil, icon = C_Item.GetItemIconByID(id), macro = "/use item:" .. id }
+        choices[#choices + 1] = { key = (i == 1) and ns.MISSING_FOOD_KEY or nil, icon = C_Item.GetItemIconByID(id), item = id, macro = "/use item:" .. id }
     end
     return choices
 end
@@ -2046,12 +2393,51 @@ local function ConsumablesBlocked(allowSwim)
     return false
 end
 
--- Consommables : flacon / fiole. Objets "Flacons & fioles" des sacs ; l'alerte ne sort que si AUCUN buff de flacon
--- n'est actif : ni celui d'un flacon des sacs (sort d'utilisation de l'objet), ni un autre dont le nom parle de
--- flacon / fiole (flacon bu puis epuise dans les sacs). Une icone par flacon (au plus 4), le clic le boit.
-local FLASK_SUB = 3
+-- Forever : 1) arme sans poison (ou poison sous le seuil de duree) et poisons dans les sacs -> une icone par poison,
+-- le clic l'applique sur l'arme ; 2) stock de poisons sous le seuil -> clic = ouvre le metier pour en fabriquer.
+function Poisons.Check()
+    if not Poisons.Access() or ConsumablesBlocked(true) then return nil end
+    local cfg = Cfg()
+    local bp = Poisons.Bag()
+    if not cfg.ignoreLethalPoisons and #bp.items > 0 then
+        local limit = (cfg.poisonDurationThreshold or 5) * 60000
+        local slot, expiring
+        for _, s in ipairs({ 16, 17 }) do
+            if WeaponInSlot(s) then
+                local has, exp = WeaponEnchantState(s == 16 and "main" or "off")
+                if has == false then slot, expiring = s, false; break end
+                if has and exp and exp < limit and not slot then slot, expiring = s, true end
+            end
+        end
+        if slot then
+            local choices = {}
+            for i = 1, math.min(#bp.items, 4) do
+                local id = bp.items[i]
+                choices[#choices + 1] = { key = (i == 1) and ns.MISSING_POISON_APPLY_KEY or nil, icon = C_Item.GetItemIconByID(id),
+                                          item = id, macro = "/use item:" .. id .. "\n/use " .. slot }
+            end
+            return choices, expiring and "EXPIRING_SOON" or "APPLY_LETHAL"
+        end
+    end
+    if not cfg.ignorePoisonStock and bp.total < (cfg.poisonStockThreshold or 5) then
+        local prof = ns.MISSING_ROGUE_POISON_PROFESSION
+        local name = prof and ForeverResolve(prof) and prof._castName
+        local icon = (name and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(prof.spellId))
+            or (bp.items[1] and C_Item.GetItemIconByID(bp.items[1])) or "Interface\\Icons\\Trade_BrewPoison"
+        return { { key = ns.MISSING_POISON_STOCK_KEY, icon = icon, macro = name and ("/cast " .. name) or nil } },
+            "LOW_POISONS", string.format("%s (%d)", ns.MISSING_TEXT.LOW_POISONS or "", bp.total)
+    end
+    return nil
+end
+
+-- Consommables : flacon / fiole et elixir. Objets "Flacons & fioles" (sous-classe 3) / "Elixirs" (2) des sacs.
+-- Jamais de rafraichissement : l'alerte ne sort que si le buff a totalement disparu. Buff actif = sort
+-- d'utilisation d'un objet des sacs, ou nom qui parle de flacon / d'elixir (objet bu puis epuise dans les sacs).
+-- Un flacon couvre les elixirs et inversement (on boit l'un OU les autres). Une icone par objet (au plus 4).
+local FLASK_SUB, ELIXIR_SUB = 3, 2
 local FLASK_WORDS = { "flacon", "fiole", "flask", "phial", "fläschchen", "phiole", "frasco", "vial", "фляг", "флакон" }
-local function FlaskChoices()
+local ELIXIR_WORDS = { "lixir", "lixier", "elisir", "эликсир", "Эликсир" }
+local function BagConsumables(subClass)
     local items, seen, spellIDs = {}, {}, {}
     for bag = 0, (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4) do
         for s = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
@@ -2059,7 +2445,7 @@ local function FlaskChoices()
             if id and not seen[id] then
                 seen[id] = true
                 local _, _, _, _, _, classID, subID = C_Item.GetItemInfoInstant(id)
-                if classID == (Enum.ItemClass and Enum.ItemClass.Consumable or 0) and subID == FLASK_SUB then
+                if classID == (Enum.ItemClass and Enum.ItemClass.Consumable or 0) and subID == subClass then
                     local okS, _, sid = pcall(C_Item.GetItemSpell, id)
                     if okS and sid then
                         items[#items + 1] = id
@@ -2069,25 +2455,48 @@ local function FlaskChoices()
             end
         end
     end
-    if #items == 0 then return nil end
-    -- Un flacon deja actif ? (buffs du joueur en cache, cf. PlayerBuffs)
+    return items, spellIDs
+end
+
+-- Un buff du joueur (cache, cf. PlayerBuffs) vient-il d'un de ces sorts, ou porte-t-il un de ces mots ?
+local function ConsumableBuffActive(spellIDs, words)
     for i = 1, PlayerBuffs() do
         local sid, name = bSid[i], bName[i]
         if not (IsSecret(sid) or IsSecret(name)) then
-            if spellIDs[sid] then return nil end
+            if spellIDs[sid] then return true end
             local low = type(name) == "string" and name:lower() or ""
-            for _, w in ipairs(FLASK_WORDS) do
-                if low:find(w, 1, true) then return nil end
+            for _, w in ipairs(words) do
+                if low:find(w, 1, true) then return true end
             end
         end
     end
+    return false
+end
+
+local function ConsumableChoices(items, key)
     table.sort(items, function(a, b) return a > b end)
     local choices = {}
     for i = 1, math.min(#items, 4) do
         local id = items[i]
-        choices[#choices + 1] = { key = (i == 1) and ns.MISSING_FLASK_KEY or nil, icon = C_Item.GetItemIconByID(id), macro = "/use item:" .. id }
+        choices[#choices + 1] = { key = (i == 1) and key or nil, icon = C_Item.GetItemIconByID(id), item = id, macro = "/use item:" .. id }
     end
     return choices
+end
+
+local function FlaskChoices()
+    local items, spellIDs = BagConsumables(FLASK_SUB)
+    if #items == 0 or ConsumableBuffActive(spellIDs, FLASK_WORDS) then return nil end
+    local _, elixirIDs = BagConsumables(ELIXIR_SUB)
+    if ConsumableBuffActive(elixirIDs, ELIXIR_WORDS) then return nil end
+    return ConsumableChoices(items, ns.MISSING_FLASK_KEY)
+end
+
+local function ElixirChoices()
+    local items, spellIDs = BagConsumables(ELIXIR_SUB)
+    if #items == 0 or ConsumableBuffActive(spellIDs, ELIXIR_WORDS) then return nil end
+    local _, flaskIDs = BagConsumables(FLASK_SUB)
+    if ConsumableBuffActive(flaskIDs, FLASK_WORDS) then return nil end
+    return ConsumableChoices(items, ns.MISSING_ELIXIR_KEY)
 end
 
 -- Points de talents a depenser : arbre de traits (Retail et Forever), sinon API des anciens clients
@@ -2136,6 +2545,7 @@ end
 WeaponStoneChoices = Memo(WeaponStoneChoices)
 WellFedFoodChoices = Memo(WellFedFoodChoices)
 FlaskChoices = Memo(FlaskChoices)
+ElixirChoices = Memo(ElixirChoices)
 UnspentTalentPoints = Memo(UnspentTalentPoints)
 MissingBuffs.UnspentTalentPoints = UnspentTalentPoints
 
@@ -2313,6 +2723,7 @@ function MissingBuffs.CheckForMissings()
         return
     end
     MissingBuffs.HideCombatPet()
+    MissingBuffs.ArmPetCombatButton()
     if previewMode then return end
     -- Cle Mythique+ active : payloads d'aura secrets (anti-triche), meme la lecture sur soi peut
     -- rater un buff pourtant actif. Plutot que fiabiliser la lecture secrete (fragile), on coupe
@@ -2327,7 +2738,7 @@ function MissingBuffs.CheckForMissings()
     if not cfg.enabled then MissingBuffs.HideAlert(); return end
     if UnitIsDeadOrGhost("player") then MissingBuffs.HideAlert(); return end
     -- Paladin en monture : Aura du croise rappelee si absente, avant (et malgre) "Ignorer si monte"
-    if not cfg.ignorePaladinAuras and (_addon._playerClass or select(2, UnitClass("player"))) == "PALADIN" then
+    if (_addon._playerClass or select(2, UnitClass("player"))) == "PALADIN" then
         local crusader = CrusaderMountedChoices()
         if crusader then MissingBuffs.ShowAlertChoices(crusader, ns.MISSING_TEXT.USE_AURA); return end
     end
@@ -2336,7 +2747,7 @@ function MissingBuffs.CheckForMissings()
     if cfg.ignoreBuffsWhileMounted and ((IsMounted and IsMounted()) or GetSelfAura(783)) then
         MissingBuffs.HideAlert(); return
     end
-    if cfg.ignoreWhileResting and IsResting and IsResting() then
+    if cfg.ignoreWhileResting and _addon.IsRestArea() then
         -- Exception : une cible attaquable selectionnee en zone de repos reste un signal utile
         -- de "je vais bientot me battre". Verifie explicitement hors combat, pas suppose
         -- implicite par IsResting.
@@ -2369,7 +2780,7 @@ function MissingBuffs.CheckForMissings()
     if class == "WARRIOR" and not cfg.ignoreWarriorStances then
         local choices = ExclusiveGroupAlert(ns.MISSING_WARRIOR_STANCES)
         if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_STANCE); return end
-    elseif class == "PALADIN" and not cfg.ignorePaladinAuras then
+    elseif class == "PALADIN" then
         local choices = ExclusiveGroupAlert(ns.MISSING_PALADIN_AURAS)
         if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_AURA); return end
     elseif class == "EVOKER" and _addon._specID == ns.MISSING_AUGMENTATION_EVOKER_SPEC and not cfg.ignoreEvokerAttunements then
@@ -2390,8 +2801,8 @@ function MissingBuffs.CheckForMissings()
     Probe("2")
     -- 2) Poisons Voleur (soi uniquement) : tous les poisons connus en propositions
     if class == "ROGUE" then
-        local choices, textKey = CheckRoguePoisons()
-        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT[textKey]); return end
+        local choices, textKey, text = CheckRoguePoisons()
+        if choices then MissingBuffs.ShowAlertChoices(choices, text or ns.MISSING_TEXT[textKey]); return end
     end
 
     Probe("3")
@@ -2551,7 +2962,7 @@ function MissingBuffs.CheckForMissings()
 
     Probe("6")
     -- 6) Consommables : pierre a aiguiser / huile a appliquer sur l'arme
-    if not cfg.ignoreWeaponStones and class ~= "ROGUE" and class ~= "SHAMAN" and not ConsumablesBlocked(true) then
+    if not cfg.ignoreWeaponStones and not WeaponEnchantByClass(class) and not ConsumablesBlocked(true) then
         local choices = WeaponStoneChoices()
         if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.APPLY_WEAPON_STONE); return end
     end
@@ -2561,6 +2972,13 @@ function MissingBuffs.CheckForMissings()
     if not cfg.ignoreFlasks and not ConsumablesBlocked(true) then
         local choices = FlaskChoices()
         if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_FLASK); return end
+    end
+
+    Probe("7b")
+    -- 7b) Consommables : elixir (sans flacon actif)
+    if not cfg.ignoreElixirs and not ConsumablesBlocked(true) then
+        local choices = ElixirChoices()
+        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_ELIXIR); return end
     end
 
     Probe("8")
@@ -2584,6 +3002,7 @@ function MissingBuffs.CheckForMissings()
     end
 
     Probe("hide")
+    MissingBuffs._dismissedSig = nil   -- plus rien de manquant : le clic droit ne vaut plus
     MissingBuffs.HideAlert()
 end
 
@@ -2692,7 +3111,7 @@ SlashCmdList["AISHHERITAGE"] = function()
     print(P .. "enabled=" .. tostring(cfg.enabled) .. " ignoreTalentPoints=" .. tostring(cfg.ignoreTalentPoints)
         .. " ignoreLegacyPoints=" .. tostring(cfg.ignoreLegacyPoints)
         .. " preview=" .. tostring(previewMode) .. " combat=" .. tostring(InCombatLockdown()))
-    print(P .. "repos=" .. tostring(IsResting and IsResting()) .. " (ignore=" .. tostring(cfg.ignoreWhileResting) .. ")"
+    print(P .. "repos=" .. tostring(_addon.IsRestArea()) .. " (ignore=" .. tostring(cfg.ignoreWhileResting) .. ")"
         .. " monture=" .. tostring(IsMounted and IsMounted()) .. " (ignore=" .. tostring(cfg.ignoreBuffsWhileMounted) .. ")"
         .. " chute=" .. tostring(IsFalling and IsFalling()))
     print(P .. "panneaux ouverts : " .. (#open > 0 and table.concat(open, ", ") or "aucun")
@@ -2722,7 +3141,7 @@ end
 
 function MissingBuffs.RequestCheck()
     local cfg = Cfg()
-    if not cfg.enabled then MissingBuffs.HideAlert(); return end
+    if not cfg.enabled then MissingBuffs.HideAlert(); MissingBuffs.ArmPetCombatButton(); return end
     -- Meme gardefou qu'en tete de CheckForMissings, mais ici avant toute planification : coupe
     -- le flot d'evenements combat qui redeclencherait un DoCheck differe pour rien.
     if InCombatLockdown() then
@@ -2751,7 +3170,7 @@ end
 local eventFrame = CreateFrame("Frame")
 local GROUP_EVENTS = {
     "PLAYER_ENTERING_WORLD", "GROUP_ROSTER_UPDATE", "UNIT_AURA",
-    "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "PLAYER_ALIVE", "PLAYER_UNGHOST",
+    "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "PLAYER_ALIVE", "PLAYER_UNGHOST", "PLAYER_DEAD",
     "UNIT_CONNECTION", "UPDATE_SHAPESHIFT_FORM", "SPELLS_CHANGED", "TRAIT_CONFIG_UPDATED",
     "UNIT_PET", "UNIT_INVENTORY_CHANGED", "PLAYER_SPECIALIZATION_CHANGED", "PET_BAR_UPDATE",
     -- Necessaire pour l'exception "cible attaquable en zone de repos" (cf. CheckForMissings) :
@@ -2766,6 +3185,8 @@ local GROUP_EVENTS = {
     "TRAIT_TREE_CURRENCY_INFO_UPDATED", "CURRENCY_DISPLAY_UPDATE", "PLAYER_EQUIPMENT_CHANGED",
     -- Pistage des herbes / minerais active ou coupe
     "MINIMAP_UPDATE_TRACKING",
+    -- Changement de zone : leve le masquage au clic droit (cf. DismissAlert)
+    "ZONE_CHANGED_NEW_AREA",
 }
 
 eventFrame:SetScript("OnEvent", function(_, event, unit)
@@ -2779,6 +3200,17 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     end
     if event == "PLAYER_ENTERING_WORLD" then
         enterWorldGraceUntil = GetTime() + ENTER_WORLD_GRACE
+    end
+    -- Chasseur mort avec son familier sorti (vu il y a moins de 2 s : son unite a pu disparaitre en meme temps) :
+    -- suppose mort jusqu'a preuve du contraire, cf. NoteHunterPetState
+    if event == "PLAYER_DEAD" and (_addon._playerClass or select(2, UnitClass("player"))) == "HUNTER"
+       and (UnitExists("pet") or GetTime() - (MissingBuffs._petSeenAt or -10) < 2) then
+        AishUILearnDB = AishUILearnDB or { learnedDurations = {}, verbose = false }
+        AishUILearnDB.hunterPetDead = true
+    end
+    -- Alerte masquee au clic droit : reproposee au chargement et au changement de zone (pas de sous-zone)
+    if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
+        MissingBuffs._dismissedSig = nil
     end
     -- Cache des buffs du joueur (cf. PlayerBuffs) ; sortie de combat : des valeurs lues secretes en combat
     -- ne doivent pas survivre dans le cache
@@ -2814,12 +3246,15 @@ function MissingBuffs.Init()
     pcall(eventFrame.RegisterUnitEvent, eventFrame, "UNIT_SPELLCAST_SUCCEEDED", "player")
     -- Forever : changement de satisfaction du familier (alerte "familier mecontent")
     if _addon.IsForever then pcall(eventFrame.RegisterUnitEvent, eventFrame, "UNIT_HAPPINESS", "pet") end
+    -- Entree / sortie d'un village sur (zone de repos etendue, cf. ns.IsRestArea)
+    _addon.OnRestAreaChanged(function() MissingBuffs.RequestCheck() end)
     MissingBuffs.RequestCheck()
 
     -- Familier en combat : la mort / le renvoi du familier ne declenche pas toujours d'evenement exploitable
     local wasFlying = -1
     local lastShoutState
     _addon.NewTicker(1, function()
+        if (_addon._playerClass or select(2, UnitClass("player"))) == "HUNTER" then MissingBuffs.NoteHunterPetState() end
         if InCombatLockdown() and Cfg().enabled then MissingBuffs.CheckPetInCombat() end
         -- Mise en selle / descente, vol, nage, taxi (aucun evenement pour ces etats) : on relance l'evaluation
         -- (familier, consommables bloques dans ces situations)
@@ -2947,7 +3382,7 @@ function MissingBuffs.GetTriggerSpells()
     elseif class == "ROGUE" then
         for _, o in ipairs(ns.MISSING_ROGUE_POISONS.nonlethal) do addEntry(o) end
         for _, o in ipairs(ns.MISSING_ROGUE_POISONS.lethal) do addEntry(o) end
-        for _, o in ipairs(ns.MISSING_ROGUE_POISONS.forever or {}) do addEntry(o) end
+        if _addon.IsForever then add(ns.MISSING_POISON_APPLY_KEY); add(ns.MISSING_POISON_STOCK_KEY) end
     end
 
     -- Consommables et talents : toutes classes (pierres / huiles : pas le voleur ni le chaman)
@@ -2956,8 +3391,9 @@ function MissingBuffs.GetTriggerSpells()
     add(ns.MISSING_BAGS_KEY)
     add(ns.MISSING_TRACKING_HERBS_KEY)
     add(ns.MISSING_TRACKING_ORE_KEY)
-    if class ~= "ROGUE" and class ~= "SHAMAN" then add(ns.MISSING_WEAPON_STONE_KEY) end
+    if not WeaponEnchantByClass(class) then add(ns.MISSING_WEAPON_STONE_KEY) end
     add(ns.MISSING_FLASK_KEY)
+    add(ns.MISSING_ELIXIR_KEY)
     add(ns.MISSING_FOOD_KEY)
 
     return out
@@ -3079,7 +3515,12 @@ if _addon.IsForever then
             line("Call Pet", ns.MISSING_HUNTER_ALL_PETS[1]); line("Revive Pet", ns.MISSING_HUNTER_REVIVE_ENTRY)
         end
         if class == "WARLOCK" then for _, e in ipairs(ns.MISSING_WARLOCK_ALL_PETS) do line("demon", e) end end
-        if class == "ROGUE" then for _, e in ipairs(ns.MISSING_ROGUE_POISONS.forever) do line("poison", e) end end
+        if class == "ROGUE" then
+            line("metier", ns.MISSING_ROGUE_POISON_PROFESSION)
+            local bp = Poisons.Bag()
+            print(P .. "poisons sacs: " .. table.concat(bp.items, ", ") .. " | total=" .. tostring(bp.total) ..
+                  " | acces=" .. tostring(Poisons.Access()))
+        end
         if GetWeaponEnchantInfo then
             local ok, a, b, c, d, e, f, g, h = pcall(GetWeaponEnchantInfo)
             print(P .. "GetWeaponEnchantInfo: ok=" .. tostring(ok) .. " -> " .. tostring(a) .. ", " .. tostring(b) ..

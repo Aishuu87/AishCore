@@ -13,6 +13,7 @@ local animationTicker   = nil
 local _ocrcAnimElems = {}   -- slots créés lazily au premier appel, réutilisés ensuite
 local lastVisibilityState = nil
 local previewMode       = false
+local ghostBuild        = false   -- construction / rendu de la copie d'apercu du GUI (cf. CreateGhost)
 -- File d'attente de transition : ne jamais interrompre une animation show/hide en cours, relancer UpdateVisibility() apres
 local ocrcAnimBusy = false
 local ocrcAnimDirty = false
@@ -309,23 +310,10 @@ function OutOfCombatResourceCircle.ShouldShow()
   return true
 end
 
--- Applique les settings en live
-function OutOfCombatResourceCircle.ApplySettings()
-  OutOfCombatResourceCircle.EnsureArcSettings()
-  if not bar then return end
-  local cfg = ns.GetCfg("outOfCombatResourceCircle")
-
-  if cfg.enabled == false then
-    if animationTicker then animationTicker:Cancel(); animationTicker = nil end
-    -- Desactivation live du module : interruption immediate voulue, verrou de file remis a plat
-    ocrcAnimBusy = false
-    ocrcAnimDirty = false
-    bar:Hide()
-    lastVisibilityState = nil
-    return
-  end
-  lastVisibilityState = nil
-
+-- Rendu (taille, lueur, arcs, police, couleurs) du cercle `bar` : vrai cercle ou copie d'apercu du GUI ; la copie
+-- recoit aussi ses propres globes secondaires (cf. GhostDots)
+local GhostDots
+local function RenderVisual(cfg)
   local size   = cfg.size
   local bgSize = size * 1.1
 
@@ -361,12 +349,33 @@ function OutOfCombatResourceCircle.ApplySettings()
     end
   end
   ApplyArcAngles()
-  if previewMode then ApplyArcValue(previewPct) end
-  ns.ApplyFontReliable(bar.text, "OOCText",
+  if previewMode and not ghostBuild then ApplyArcValue(previewPct) end
+  ns.ApplyFontReliable(bar.text, ghostBuild and "OOCTextGhost" or "OOCText",
     function() local c = ns.GetCfg("outOfCombatResourceCircle"); return c and c.font or ns.Media.font end,
     function() local c = ns.GetCfg("outOfCombatResourceCircle"); return c and c.fontSize or cfg.fontSize end)
 
   OutOfCombatResourceCircle.UpdateResourceColors()
+  if ghostBuild then GhostDots() end
+end
+
+-- Applique les settings en live
+function OutOfCombatResourceCircle.ApplySettings()
+  OutOfCombatResourceCircle.EnsureArcSettings()
+  if not bar then return end
+  local cfg = ns.GetCfg("outOfCombatResourceCircle")
+
+  if cfg.enabled == false then
+    if animationTicker then animationTicker:Cancel(); animationTicker = nil end
+    -- Desactivation live du module : interruption immediate voulue, verrou de file remis a plat
+    ocrcAnimBusy = false
+    ocrcAnimDirty = false
+    bar:Hide()
+    lastVisibilityState = nil
+    return
+  end
+  lastVisibilityState = nil
+
+  RenderVisual(cfg)
   -- Re-detecter les secondary dots (option allSpecs, spec change)
   OutOfCombatResourceCircle.DetectSecondaryDots()
   OutOfCombatResourceCircle.LayoutSecDots()
@@ -422,7 +431,7 @@ function OutOfCombatResourceCircle.Create(parent)
   if bar then return bar end
   local cfg = ns.GetCfg("outOfCombatResourceCircle")
 
-  bar = CreateFrame("Frame", "AishCoreOCResourceRing", parent)
+  bar = CreateFrame("Frame", not ghostBuild and "AishCoreOCResourceRing" or nil, parent)
   bar:SetSize(cfg.size, cfg.size)
   bar:SetFrameStrata("MEDIUM")
 
@@ -467,7 +476,7 @@ function OutOfCombatResourceCircle.Create(parent)
     a:SetValue(0)
     return a
   end
-  local arc = NewRadial("AishCoreOCResourceRingArc")
+  local arc = NewRadial(not ghostBuild and "AishCoreOCResourceRingArc" or nil)
   bar.arc = arc
   bar.arc2 = NewRadial(nil)   -- 2e moitie des remplissages miroir
   -- Remplissage vertical (ancien rendu) : barre de bas en haut sur la texture pre-croppee
@@ -505,6 +514,12 @@ function OutOfCombatResourceCircle.Create(parent)
   bar.textFrame = textFrame
 
   bar:Hide()
+  -- Copie d'apercu : globes geres a part (cf. GhostDots), pas de detection sur le vrai cercle
+  if ghostBuild then
+    OutOfCombatResourceCircle.UpdateResourceColors()
+    ApplyArcAngles()
+    return bar
+  end
 
   OutOfCombatResourceCircle.DetectSecondaryDots()
   OutOfCombatResourceCircle.UpdateResourceColors()
@@ -678,7 +693,7 @@ function OutOfCombatResourceCircle.EnsureSecDotFrames(count)
   if not bar then return end
   for i = 1, count do
     if not secDots[i] then
-      local f = CreateFrame("Frame", "AishCoreOCSecDot" .. i, bar)
+      local f = CreateFrame("Frame", not ghostBuild and ("AishCoreOCSecDot" .. i) or nil, bar)
       -- Doit etre au-dessus de overlayFrame : meme niveau que textFrame
       if bar.textFrame then f:SetFrameLevel(bar.textFrame:GetFrameLevel()) end
       local bg = f:CreateTexture(nil, "BACKGROUND")
@@ -872,6 +887,66 @@ function OutOfCombatResourceCircle.UpdateSecDots()
       end
     end
   end
+end
+
+-- Globes secondaires de la copie d'apercu : sa propre table (bar._secDots), memes type / nombre / disposition / couleur
+-- que ceux du vrai cercle, pleins
+GhostDots = function()
+  local real = secDots
+  bar._secDots = bar._secDots or {}
+  secDots = bar._secDots
+  if secDotType and secDotCount > 0 then
+    OutOfCombatResourceCircle.EnsureSecDotFrames(secDotCount)
+    OutOfCombatResourceCircle.LayoutSecDots()
+    OutOfCombatResourceCircle.UpdateSecDotColors()
+  end
+  for i, f in ipairs(secDots) do f:SetShown(i <= secDotCount) end
+  secDots = real
+end
+
+-- Copie d'apercu pour le GUI (page Cercles Hors Combat) : meme construction et meme rendu que le vrai cercle, sans nom
+-- global ni logique de jeu ; le vrai cercle reste a sa place. Le module travaille sur `bar` : il est permute le temps de
+-- construire / peindre la copie.
+function OutOfCombatResourceCircle.CreateGhost(parent)
+  local real = bar
+  bar, ghostBuild = nil, true
+  local ok, g = pcall(OutOfCombatResourceCircle.Create, parent)
+  bar, ghostBuild = real, false
+  if not ok then geterrorhandler()(g); return nil end
+  g:ClearAllPoints()
+  -- Strate du GUI (le cercle se pose la sienne a la construction, sous la fenetre)
+  local strata = parent:GetFrameStrata()
+  local function Deep(f)
+    f:SetFrameStrata(strata)
+    for _, c in ipairs({ f:GetChildren() }) do Deep(c) end
+  end
+  Deep(g)
+  g:Show()
+  return g
+end
+
+-- Reglages courants (taille, angles, couleurs, police...) et remplissage pct (0-100)
+function OutOfCombatResourceCircle.RenderGhost(g, pct)
+  if not g then return end
+  local real = bar
+  bar, ghostBuild = g, true
+  local ok, err = pcall(function()
+    RenderVisual(ns.GetCfg("outOfCombatResourceCircle"))
+    ApplyArcValue(pct)
+    g.text:SetText(tostring(pct))
+  end)
+  bar, ghostBuild = real, false
+  if not ok then geterrorhandler()(err) end
+end
+
+-- Remplissage seul (animation de l'apercu)
+function OutOfCombatResourceCircle.SetGhostValue(g, pct)
+  if not g then return end
+  local real = bar
+  bar = g
+  pcall(ApplyArcValue, pct)
+  bar = real
+  g.text:SetText(tostring(pct))
 end
 
 -- Animation apparition / disparition
