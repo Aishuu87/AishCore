@@ -1,5 +1,20 @@
 # AishCore
 
+## [v4.6.3](https://github.com/Aishuu87/AishCore/tree/v4.6.3) (2026-11-05)
+
+### Movement Buffs
+- Added a customizable Stack text for buffs with stacks
+
+### QoL
+- Added an option to hide the Totem Bar or reveal it on hover
+
+### Fixes
+- [Forever] The Rotation Button Module is now disabled
+- [Forever] FIX: blocked action error (SpellStopCasting) when opening AishCore from the WoW options
+- [Forever] Mulgore: Bloodhoof Village was not considered a safe zone
+- [Forever] FIX: the Platynator integration no longer worked (font change)
+- [Forever] FIX: not all weapon skills were displayed
+
 ## [v4.6.2](https://github.com/Aishuu87/AishCore/tree/v4.6.2) (2026-11-05)
 
 - Rotation Button Module and Priority Bar: mouse button keybinds now use a short form (Ctrl + Mouse Button 4 shows CM4)

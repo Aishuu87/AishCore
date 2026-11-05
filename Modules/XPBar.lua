@@ -1529,10 +1529,10 @@ end
 -- 1 po). Classes autorisees par arme. Donnees reprises de l'addon WhatsTraining (Classes/WeaponSkills.lua, regles "era").
 -- Une seule table (et pas des locales) : le fichier est a la limite des 200 locales.
 XPBar.WEAPON_SKILLS = {
-  { id = 196,   classes = { WARRIOR = 1, PALADIN = 1, HUNTER = 1, SHAMAN = 1 } },                          -- haches a une main
-  { id = 197,   classes = { WARRIOR = 1, PALADIN = 1, HUNTER = 1 } },                                      -- haches a deux mains
+  { id = 196,   classes = { WARRIOR = 1, PALADIN = 1, HUNTER = 1, ROGUE = 1, SHAMAN = 1 } },               -- haches a une main (Voleur : donnees du client Forever)
+  { id = 197,   classes = { WARRIOR = 1, PALADIN = 1, HUNTER = 1, SHAMAN = 1 } },                          -- haches a deux mains (Chaman : donnees du client Forever)
   { id = 198,   classes = { WARRIOR = 1, PALADIN = 1, ROGUE = 1, PRIEST = 1, SHAMAN = 1, DRUID = 1 } },     -- masses a une main
-  { id = 199,   classes = { WARRIOR = 1, PALADIN = 1, DRUID = 1 } },                                       -- masses a deux mains
+  { id = 199,   classes = { WARRIOR = 1, PALADIN = 1, SHAMAN = 1, DRUID = 1 } },                           -- masses a deux mains (Chaman : donnees du client Forever)
   { id = 201,   classes = { WARRIOR = 1, PALADIN = 1, HUNTER = 1, ROGUE = 1, MAGE = 1, WARLOCK = 1 } },    -- epees a une main
   { id = 202,   classes = { WARRIOR = 1, PALADIN = 1, HUNTER = 1 } },                                      -- epees a deux mains
   { id = 1180,  classes = { WARRIOR = 1, HUNTER = 1, ROGUE = 1, PRIEST = 1, SHAMAN = 1, DRUID = 1, WARLOCK = 1, MAGE = 1 } }, -- dagues

@@ -1718,18 +1718,30 @@ end
 
 local sitting, sitExp = false, 0
 
+-- Pas de HUD en vol (taxi) ni en peche. Le rang de Peche change l'ID du sort, pas son nom. Delai apres la fin d'un
+-- lancer : le HUD ne reapparait pas entre deux lancers.
+local FISH_SPELL, FISH_GRACE = 7620, 3
+local fishUntil = 0
+
+local function HudSuppressed()
+  if UnitOnTaxi("player") or GetTime() < fishUntil then return true end
+  local channel = UnitChannelInfo("player")
+  return Plain(channel) and channel == SpellName(FISH_SPELL)
+end
+
 function Campfire.Refresh()
   if not hud or previewing or GetTime() < testUntil then return end
   if InCombatLockdown() and not hud:IsShown() then return end
   local c = Cfg()
   local near = c.enabled ~= false and NearCampfire()
+  local suppressed = HudSuppressed()
   -- Fin de la minute : "Feu de camp proche" peut manquer un instant quand "Feu de camp accueillant" tombe ; le HUD
   -- (et ses panneaux) reste le temps du rassemblement et du resume, puis Refresh est relance
-  if not near and c.enabled ~= false and fx.phase and hud:IsShown() and not InCombatLockdown() then
+  if not near and not suppressed and c.enabled ~= false and fx.phase and hud:IsShown() and not InCombatLockdown() then
     UpdateDeco()
     return
   end
-  if not near or InCombatLockdown() then
+  if not near or suppressed or InCombatLockdown() then
     if not near and next(seen) then wipe(seen) end
     if (hud:IsShown() and not hud._fadeOut) or sitting then
       sitting = false
@@ -1984,9 +1996,16 @@ function Campfire.ApplySettings()
   Campfire.Refresh()
 end
 
--- Distance au camp retenu : verifiee chaque seconde tant qu'il y en a un
+-- Chaque seconde : distance au camp retenu, et debut / fin d'un vol (UnitOnTaxi n'est pas encore a jour quand
+-- PLAYER_CONTROL_LOST arrive)
+local wasTaxi = false
 ns.NewTicker(1, function()
-  if campPos and hud and not InCombatLockdown() and ns.IsModuleAvailable("campfire") then Campfire.Refresh() end
+  if not hud or InCombatLockdown() or not ns.IsModuleAvailable("campfire") then return end
+  local taxi = UnitOnTaxi("player")
+  if campPos or taxi ~= wasTaxi then
+    wasTaxi = taxi
+    Campfire.Refresh()
+  end
 end)
 
 local ev = CreateFrame("Frame")
@@ -1995,8 +2014,19 @@ ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("BAG_UPDATE_DELAYED")
 ev:RegisterUnitEvent("UNIT_AURA", "player")
-ev:SetScript("OnEvent", function(_, event)
+ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
+ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
+ev:SetScript("OnEvent", function(_, event, _, _, spellID)
   if not ns.IsModuleAvailable("campfire") then return end
+  if event == "UNIT_SPELLCAST_CHANNEL_START" or event == "UNIT_SPELLCAST_CHANNEL_STOP" then
+    if InCombatLockdown() or SpellName(spellID) ~= SpellName(FISH_SPELL) then return end
+    if event == "UNIT_SPELLCAST_CHANNEL_STOP" then
+      fishUntil = GetTime() + FISH_GRACE
+      C_Timer.After(FISH_GRACE + 0.05, Campfire.Refresh)
+    end
+    Campfire.Refresh()
+    return
+  end
   if event == "PLAYER_LOGIN" then
     Campfire.ApplySettings()
     if TooltipDataProcessor and Enum.TooltipDataType and Enum.TooltipDataType.Object then

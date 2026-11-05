@@ -498,6 +498,9 @@ ns.Defaults = {
     useSpecColor = false,
     specColorKey = "powercircle",
     visibilityMode = "always",     -- "always" | "combat" | "ooc"
+    -- Texte des stacks, ancre sur la rangee (a l'exterieur des barres)
+    stackFont = "Fonts\\2002.TTF", stackSize = 12, stackOutline = "OUTLINE", stackColor = { 1, 1, 1, 1 },
+    stackAnchor = "RIGHT", stackJustify = "LEFT", stackX = 4, stackY = 0,
   },
   wellFedCircle = {
     enabled = true,
@@ -1110,6 +1113,9 @@ ns.Defaults = {
     mapRevealColored = false, -- ... teintees de mapRevealColor
     mapRevealColor = { 0.35, 0.6, 0.95, 1 },
     spellIDModifier = "NONE", -- touche requise : NONE / ALT / SHIFT / CTRL
+    hideTotemBar   = false,   -- barre de totems Blizzard masquee
+    totemBarHoverOnly = false, -- ... ou affichee seulement au survol
+    totemBarHoverAlpha = 0,   -- opacite hors survol
   },
 
   -- Barre de cible détaillée (haut d'écran) + cible de la cible

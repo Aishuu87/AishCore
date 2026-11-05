@@ -2110,8 +2110,9 @@ function ns.AnimateStagger(elements, shouldShow, duration, staggerInterval, onCo
 end
 
 -- Zone de repos etendue : IsResting() (auberge, capitale) ou village sur (sous-zone de Data/TownAreas.lua).
--- Village refuse si la zone est hostile ; en zone contestee, le maitre de vol le plus proche (<= 600 m) doit
--- etre de notre faction ou neutre (Hammerfall en Arathi n'est pas sur pour l'Alliance). Recalcule aux
+-- Village refuse si la zone est hostile ; sans verdict du jeu (zone contestee, royaume PvE), une zone de notre
+-- faction suffit (Mulgore), sinon le maitre de vol le plus proche (<= 600 m) doit etre de notre faction ou
+-- neutre (Hammerfall en Arathi n'est pas sur pour l'Alliance). Recalcule aux
 -- changements de zone ; ns.OnRestAreaChanged(fn) previent les modules quand l'etat bascule.
 do
   local townNames, inTown, last
@@ -2128,6 +2129,21 @@ do
     end
     for name in pairs(ns.TownWMONames or {}) do townNames[name] = true end
     return townNames
+  end
+
+  local zoneFactions
+  local function ZoneFaction(zone)
+    if not zoneFactions then
+      zoneFactions = {}
+      if not (C_Map and C_Map.GetAreaInfo) then return nil end
+      for fac, ids in pairs(ns.TownZoneFaction or {}) do
+        for _, id in ipairs(ids) do
+          local ok, name = pcall(C_Map.GetAreaInfo, id)
+          if ok and type(name) == "string" and name ~= "" then zoneFactions[name] = fac end
+        end
+      end
+    end
+    return zoneFactions[zone]
   end
 
   -- Zone contestee : faction du maitre de vol le plus proche du joueur (<= 600 m), nil si aucun. Remonte
@@ -2172,6 +2188,8 @@ do
     if pvp == "friendly" or pvp == "sanctuary" then return true end
     if pvp == "hostile" or pvp == "arena" or pvp == "combat" then return false end
     local zone = tostring((GetRealZoneText or GetZoneText)())
+    local zoneFaction = ZoneFaction(zone)
+    if zoneFaction and zoneFaction == UnitFactionGroup("player") then return true end
     local key = zone .. "|" .. town
     local ok, fac = pcall(NearestNodeFaction)
     if not ok or fac == nil then

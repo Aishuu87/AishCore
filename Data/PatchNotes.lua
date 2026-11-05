@@ -8,6 +8,21 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.3", date = "2026-11-05",
+    lines = {
+      { k = "h", t = "Movement Buffs", fr = "Buffs de déplacement" },
+      { k = "li", lvl = 1, link = { page = "movementBuffs" }, t = "Added a customizable Stack text for buffs with stacks", fr = "Ajout d’un texte réglable pour les buffs avec stacks" },
+      { k = "h", t = "QoL" },
+      { k = "li", lvl = 1, link = { page = "comfortQoL" }, t = "Added an option to hide the Totem Bar or reveal it on hover", fr = "Ajout d’une option pour masquer la Barre de Totems ou la révéler au survol" },
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] The Rotation Button Module is now disabled", fr = "[Forever] Le bouton de rotation est maintenant désactivé sur Forever." },
+      { k = "li", lvl = 1, link = false, t = "[Forever] FIX: blocked action error (SpellStopCasting) when opening AishCore from the WoW options", fr = "[Forever] FIX : erreur d'action bloquée (SpellStopCasting) à l'ouverture d'AishCore depuis les options de WoW" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] Mulgore: Bloodhoof Village was not considered a safe zone", fr = "[Forever] Mulgore : Sabot-de-sang n'était pas considérée comme une zone safe" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] FIX: the Platynator integration no longer worked (font change)", fr = "[Forever] FIX : l’intégration avec Platynator ne fonctionnait plus (changement de police)" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] FIX: not all weapon skills were displayed", fr = "[Forever] FIX : les compétences d’armes ne s’affichaient pas toutes" },
+    },
+  },
+  {
     version = "4.6.2", date = "2026-11-05",
     lines = {
       { k = "li", lvl = 1, link = false, t = "Rotation Button Module and Priority Bar: mouse button keybinds now use a short form (Ctrl + Mouse Button 4 shows CM4)", fr = "Bouton de rotation et Barre de rotation : les raccourcis des boutons de souris s'affichent en forme courte (Ctrl + Bouton de souris 4 affiche CM4)" },
@@ -604,10 +619,11 @@ ns.NewByVersion = {
   {
     version = "4.6",
     categories = { castBars = true, campfire = true, cdmAppearance = true, addonCompartment = true },
-    containers = { unitBars = true, xpBar = true, comfortQoL = true, visibility = true },
+    containers = { unitBars = true, xpBar = true, comfortQoL = true, visibility = true, movementBuffs = true },
     headers = {
       "SETTINGS_CAT_CAST_BARS", "SETTINGS_CAT_CAMPFIRE", "SETTINGS_CAT_CDM_APPEARANCE", "SETTINGS_CAT_ADDON_COMPARTMENT",
       "UNITBARS_SEC_FILL", "UNITBARS_SEC_DOTS", "SETTINGS_SEC_XP_RESTED", "ADDONFONTS_SEC_BAGANATOR",
+      "SETTINGS_MVB_SEC_STACKS", "SETTINGS_COMFORT_SEC_TOTEM_BAR",
     },
   },
   {

@@ -13572,6 +13572,20 @@ function Build.ComfortQoL(container)
   ctx:Add(cbFish)
   BindCheckbox(cbFish, "comfort", "doubleClickFish")
 
+  -- Barre de totems Blizzard : Forever seulement (cf. Modules/Comfort.lua)
+  if ns.IsForever then
+    ctx:Spacer(6)
+    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_TOTEM_BAR"], W))
+    local cbTotemBar = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_HIDE_TOTEM_BAR"], L["SETTINGS_COMFORT_HIDE_TOTEM_BAR_TT"], W))
+    BindCheckbox(cbTotemBar, "comfort", "hideTotemBar")
+    local cbTotemHover = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_TOTEM_BAR_HOVER"], L["SETTINGS_COMFORT_TOTEM_BAR_HOVER_TT"], W))
+    BindCheckbox(cbTotemHover, "comfort", "totemBarHoverOnly")
+    local slTotemAlpha = ctx:Add(SW.CreateSlider(container, L["SETTINGS_COMFORT_TOTEM_BAR_ALPHA"], 0, 1, 0.05, halfW))
+    BindSlider(slTotemAlpha, "comfort", "totemBarHoverAlpha")
+    ctx:Depends(cbTotemBar, { cbTotemHover, slTotemAlpha }, true)
+    ctx:Depends(cbTotemHover, { slTotemAlpha })
+  end
+
   -- Rendu automatique des quetes : case carree a l'ecran, toujours affichee, deplacable (cf. Modules/Comfort.lua)
   ctx:Spacer(6)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_AUTO_TURNIN"], W))
@@ -14037,6 +14051,46 @@ function Build.MovementBuffs(container)
   local origSpec = cbSpec.onChanged
   cbSpec.onChanged = function(v) if origSpec then origSpec(v) end; GrayColors() end
   GrayColors()
+
+  -- Texte des stacks : ancre sur la rangee (cf. StackPoint, Modules/MovementBuffs.lua)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_MVB_SEC_STACKS"], W))
+  local ddStackFont = SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), SL3)
+  BindDropdown(ddStackFont, "movementBuffs", "stackFont")
+  local slStackSize = SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 8, 40, 1, SL3)
+  BindSlider(slStackSize, "movementBuffs", "stackSize")
+  local ddStackOutline = SW.CreateDropdown(container, L["SETTINGS_TEXT_OUTLINE"], {
+    { value = "NONE",         text = L["SETTINGS_WF_OUTLINE_NONE"] },
+    { value = "OUTLINE",      text = L["TEXT_OUTLINE_THIN"] },
+    { value = "THICKOUTLINE", text = L["TEXT_OUTLINE_THICK"] },
+    { value = "SLUG",         text = L["TEXT_OUTLINE_SLUG"] },
+  }, SL3)
+  BindDropdown(ddStackOutline, "movementBuffs", "stackOutline")
+  ctx:AddRow(8, ddStackFont, slStackSize, ddStackOutline)
+  local colStack = SW.CreateColorButton(container, L["SETTINGS_TEXT_COLOR"], SL3)
+  BindColorButton(colStack, "movementBuffs", "stackColor")
+  ctx:AddRow(8, colStack)
+  local ddStackAnchor = SW.CreateDropdown(container, L["SETTINGS_POSITION"], {
+    { value = "TOPLEFT",     text = L["SETTINGS_ANCHOR_TOPLEFT"]     },
+    { value = "TOP",         text = L["SETTINGS_ANCHOR_TOP"]         },
+    { value = "TOPRIGHT",    text = L["SETTINGS_ANCHOR_TOPRIGHT"]    },
+    { value = "LEFT",        text = L["SETTINGS_ANCHOR_LEFT"]        },
+    { value = "CENTER",      text = L["SETTINGS_ANCHOR_CENTER"]      },
+    { value = "RIGHT",       text = L["SETTINGS_ANCHOR_RIGHT"]       },
+    { value = "BOTTOMLEFT",  text = L["SETTINGS_ANCHOR_BOTTOMLEFT"]  },
+    { value = "BOTTOM",      text = L["SETTINGS_ANCHOR_BOTTOM"]      },
+    { value = "BOTTOMRIGHT", text = L["SETTINGS_ANCHOR_BOTTOMRIGHT"] },
+  }, SL3)
+  BindDropdown(ddStackAnchor, "movementBuffs", "stackAnchor")
+  local slStackX = SW.CreateSlider(container, L["SETTINGS_OFFSET_X"], -100, 100, 1, SL3)
+  BindSlider(slStackX, "movementBuffs", "stackX")
+  local slStackY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -100, 100, 1, SL3)
+  BindSlider(slStackY, "movementBuffs", "stackY")
+  ctx:AddRow(8, ddStackAnchor, slStackX, slStackY)
+  local alignStack = SW.CreateAlignRow(container, L["UNITBARS_JUSTIFY"], SL3, nil, true)
+  alignStack:SetValue(DBGet("movementBuffs", "stackJustify") or "LEFT")
+  alignStack.onChanged = function(val) DBSet("movementBuffs", "stackJustify", val); LiveApply("movementBuffs") end
+  alignStack._dbKey, alignStack._subKey = "movementBuffs", "stackJustify"   -- identifiant du mode disposition
+  ctx:AddRow(8, alignStack)
 
   -- Buffs suivis : une case par buff, groupes par classe (puis raciaux, objets). Seuls les buffs connus du client.
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_MVB_SEC_SPELLS"], W))
@@ -14731,6 +14785,14 @@ local HEROIC_SEARCH_KEYS = {
   SETTINGS_SR_COLOR_MOUNT = true, SETTINGS_SR_COLOR_MOUNT_TT = true,
 }
 
+-- Options de la barre de totems (Forever seulement) : hors de la recherche sur les autres clients
+local FOREVER_SEARCH_KEYS = {
+  SETTINGS_COMFORT_SEC_TOTEM_BAR = true,
+  SETTINGS_COMFORT_HIDE_TOTEM_BAR = true, SETTINGS_COMFORT_HIDE_TOTEM_BAR_TT = true,
+  SETTINGS_COMFORT_TOTEM_BAR_HOVER = true, SETTINGS_COMFORT_TOTEM_BAR_HOVER_TT = true,
+  SETTINGS_COMFORT_TOTEM_BAR_ALPHA = true,
+}
+
 -- Texte cherchable d'une page : libellés de ses clés de locale (Data/SearchIndex.lua, généré par
 -- generate_search_index.py). Ne construit aucune page : construire les 33 pages pour lire leur
 -- texte les gardait toutes en mémoire jusqu'au /reload.
@@ -14742,7 +14804,7 @@ local function GetCategorySearchText(catId)
   if keys then
     local heroic = ns.HasHeroicFeatures and ns.HasHeroicFeatures()
     for key in keys:gmatch("%S+") do
-      local txt = (heroic or not HEROIC_SEARCH_KEYS[key]) and rawget(L, key)
+      local txt = (heroic or not HEROIC_SEARCH_KEYS[key]) and (ns.IsForever or not FOREVER_SEARCH_KEYS[key]) and rawget(L, key)
       if txt then buf[#buf + 1] = txt end
     end
   end

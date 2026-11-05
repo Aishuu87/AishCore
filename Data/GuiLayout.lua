@@ -249,6 +249,12 @@ ns.GUI_LAYOUT = {
       { [1] = "rotationHelper.iconSize", [2] = "rotationHelper.x", [3] = "rotationHelper.y" },
     } },
   },
+  movementBuffs = {
+    ["SETTINGS_MVB_SEC_STACKS"] = { cols = 5, rows = {
+      { [1] = "movementBuffs.stackFont", [2] = "movementBuffs.stackSize", [3] = "movementBuffs.stackColor", [4] = "movementBuffs.stackOutline" },
+      { [1] = "movementBuffs.stackAnchor", [2] = "movementBuffs.stackJustify", [3] = "movementBuffs.stackX", [4] = "movementBuffs.stackY" },
+    } },
+  },
   castBars = {
     ["CASTBARS_SEC_NAME"] = { cols = 4, rows = {
       { [1] = "dropdown:$SETTINGS_FONT@$CASTBARS_SEC_NAME", [2] = "slider:$SETTINGS_FONT_SIZE@$CASTBARS_SEC_NAME", [3] = "dropdown:$SETTINGS_TEXT_OUTLINE@$CASTBARS_SEC_NAME" },

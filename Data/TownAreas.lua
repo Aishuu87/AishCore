@@ -1,5 +1,5 @@
 -- Data/TownAreas.lua : genere par generate_town_areas.py, ne pas editer a la main.
--- Builds : Retail 12.1.5.70448, Forever 1.60.1.70450.
+-- Builds : Retail 12.1.5.70783, Forever 1.60.1.70532.
 -- AreaIDs des villages (AreaTable, flag town) et de leurs sous-zones, cf. ns.IsRestArea (Core.lua).
 local _, ns = ...
 
@@ -28,6 +28,10 @@ if ns.IsForever then
   }
   ns.TownWMONames = {}
   for _, n in ipairs(wmo[GetLocale()] or wmo.enUS) do ns.TownWMONames[n] = true end
+  ns.TownZoneFaction = {
+    Alliance = { 1,12,38,40,141,148,1519,1537,1657,16509,16510 },
+    Horde = { 14,17,85,130,215,1497,1637,1638 },
+  }
 else
   ns.TownAreaIDs = {
     9,24,35,42,69,75,77,87,99,108,117,120,131,137,144,146,150,152,154,159,
@@ -79,4 +83,8 @@ else
   }
   ns.TownWMONames = {}
   for _, n in ipairs(wmo[GetLocale()] or wmo.enUS) do ns.TownWMONames[n] = true end
+  ns.TownZoneFaction = {
+    Alliance = { 1,12,38,40,141,1519,1537,1657,3524,3525,3557 },
+    Horde = { 14,16,17,85,130,215,1497,1637,1638,3430,3433,3487,4737,10397,13983 },
+  }
 end

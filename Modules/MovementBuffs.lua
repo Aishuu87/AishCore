@@ -106,6 +106,38 @@ local function Colors(c)
   return c.dotColor or { 1, 1, 1, 1 }, c.barColor or { 1, 0.82, 0.2, 1 }
 end
 
+-- ── Texte des stacks ────────────────────────────────────────────────────────
+-- Point du texte : au-dessus / en dessous de la rangee selon l'ancrage, et cote d'accroche selon l'alignement
+-- (le texte n'a pas de largeur fixe : c'est ce point qui decide de quel cote il s'etend)
+local STACK_FONT = "Fonts\\2002.TTF"
+local STACK_V = { TOPLEFT = "BOTTOM", TOP = "BOTTOM", TOPRIGHT = "BOTTOM",
+                  BOTTOMLEFT = "TOP", BOTTOM = "TOP", BOTTOMRIGHT = "TOP" }
+
+local function StackPoint(anchor, justify)
+  local point = (STACK_V[anchor] or "") .. (justify == "CENTER" and "" or justify)
+  return point ~= "" and point or "CENTER"
+end
+
+-- ring : anneau SLUG. Le texte natif du combat n'en a pas (le jeu l'ecrit lui-meme, valeur secrete) : contour fin.
+local function StyleStack(fs, parent, ring)
+  local c = Cfg()
+  local col = c.stackColor or { 1, 1, 1, 1 }
+  local style = c.stackOutline or "OUTLINE"
+  if style == "SLUG" and not ring then style = "OUTLINE" end
+  ns.ApplyTextOutlineStyle(fs, ring, c.stackFont or STACK_FONT, c.stackSize or 12, style == "NONE" and "" or style)
+  fs:SetTextColor(col[1], col[2], col[3], col[4] or 1)
+  local anchor = c.stackAnchor or "RIGHT"
+  fs:ClearAllPoints()
+  fs:SetPoint(StackPoint(anchor, c.stackJustify or "LEFT"), parent, anchor, c.stackX or 4, c.stackY or 0)
+end
+
+-- Comme le texte natif du combat : rien a 1 stack, sauf pour un buff connu pour se cumuler
+local function SetStackText(r, aura, entry)
+  local n = aura.applications
+  local min = (entry and entry.stacks) and 1 or 2
+  r.stack:SetText((Plain(n) and type(n) == "number" and n >= min) and n or "")
+end
+
 -- ── Rangees ─────────────────────────────────────────────────────────────────
 
 local function MakeBar(parent)
@@ -129,6 +161,13 @@ local function NewRow()
   r.left = MakeBar(r)
   r.left:SetReverseFill(true)
   r.right = MakeBar(r)
+  -- Calque au-dessus des barres : le texte reste visible s'il est decale sur elles
+  r.over = CreateFrame("Frame", nil, r)
+  r.over:SetAllPoints()
+  r.over:SetFrameLevel(r.right:GetFrameLevel() + 2)
+  r.stack = r.over:CreateFontString(nil, "OVERLAY")
+  r.stack:SetFont(STACK_FONT, 12, "OUTLINE")
+  r.stackRing = ns.CreateSlugRing(r.over, r.stack, "ARTWORK")
   return r
 end
 
@@ -161,6 +200,7 @@ local function StyleRow(r)
     b:SetHeight(bh)
     b:SetStatusBarColor(bc[1], bc[2], bc[3], bc[4] or 1)
   end
+  StyleStack(r.stack, r, r.stackRing)
 end
 
 -- Duree : objet natif (Retail, valeurs secretes en combat) sinon expiration lisible (Forever), sinon barres pleines.
@@ -270,6 +310,7 @@ local function Sync(active, instant)
       rows[#rows + 1] = r
     end
     ArmRow(r, a.aura, a.entry)
+    SetStackText(r, a.aura, a.entry)
   end
   for _, r in ipairs(rows) do
     if r.state ~= "out" and not seen[r.spellID] then r.state = "out" end
@@ -350,6 +391,7 @@ local function StyleNativeButton(b)
     bar:SetSize(bw, bh)
     bar:SetStatusBarColor(bc[1], bc[2], bc[3], bc[4] or 1)
   end
+  if b._mvbStack then StyleStack(b._mvbStack, b) end
 end
 
 local diag = { init = 0, denied = 0 }   -- /aishmvb
@@ -369,7 +411,12 @@ local function BuildNativeButton(b)
     return bar
   end
   b._mvbL, b._mvbR = Bar(true), Bar(false)
+  -- Stacks remplis par le jeu (valeur secrete en combat). Police posee avant SetApplicationCount, sinon "Font not set".
+  local stack = b:CreateFontString(nil, "OVERLAY", nil, 7)
+  stack:SetFont(STACK_FONT, 12, "OUTLINE")
+  b._mvbStack = stack
   StyleNativeButton(b)
+  pcall(b.SetApplicationCount, b, stack, {})
   nativeButtons[#nativeButtons + 1] = b
 end
 
@@ -468,7 +515,7 @@ end
 local function PreviewCycle()
   local now = GetTime()
   local fake = {
-    { id = 2983, aura = { duration = 4, expirationTime = now + 4 } },
+    { id = 2983, aura = { duration = 4, expirationTime = now + 4, applications = 3 } },   -- 3 : apercu du texte des stacks
     { id = 1850, aura = { duration = 2.6, expirationTime = now + 2.6 } },
   }
   -- Fausses auras sans instance : ArmRow passe par l'expiration lisible (animation par OnUpdate)

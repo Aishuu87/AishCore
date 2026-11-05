@@ -231,8 +231,9 @@ local function ScanPlatDisplay(display)
         local seen = seenFrames[c] or 0
         if #frames > seen then lastDiscovery = GetTime() end
         for i = 1, #frames do
-          local tc = frames[i].TextsContainer
-          local cd = tc and tc.Countdown
+          -- Platynator récent : frame.Countdown ; anciennes versions : frame.TextsContainer.Countdown
+          local f = frames[i]
+          local cd = f.Countdown or (f.TextsContainer and f.TextsContainer.Countdown)
           if cd and not tracked[cd] then
             Track(cd, "platAura")
             lastDiscovery = GetTime()

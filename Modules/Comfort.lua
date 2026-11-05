@@ -596,6 +596,62 @@ local function ApplyHideErrors()
   if want then f:UnregisterEvent("UI_ERROR_MESSAGE") else f:RegisterEvent("UI_ERROR_MESSAGE") end
 end
 
+-- Barre de totems Blizzard (MultiCastActionBarFrame, Forever seulement) : boutons securises, donc pas de SetParent en combat (repris a la
+-- sortie). Reparentee vers un frame masque, Blizzard peut continuer a faire ses Show() sans la reafficher.
+local totemHider = CreateFrame("Frame")
+totemHider:Hide()
+local totemOrigParent, totemPending = nil, false
+local function ApplyTotemBar()
+  if not ns.IsForever then return end
+  local bar = _G.MultiCastActionBarFrame
+  if not bar then return end
+  if InCombatLockdown() then totemPending = true; return end
+  totemPending = false
+  if Cfg().hideTotemBar then
+    if bar:GetParent() ~= totemHider then
+      totemOrigParent = bar:GetParent()
+      bar:SetParent(totemHider)
+    end
+  elseif totemOrigParent then
+    bar:SetParent(totemOrigParent)
+    totemOrigParent = nil
+  end
+end
+
+-- Mode survol : SetAlpha n'est pas bloque en combat. Le menu de totems (MultiCastFlyoutFrame) garde la barre visible.
+local TOTEM_FADE_SPEED, TOTEM_TICK = 8, 0.02
+local totemAlpha       -- opacite courante, nil tant que le mode survol ne pilote pas la barre
+local totemAcc = 0
+local totemTicker = ns.IsForever and CreateFrame("Frame")
+if totemTicker then totemTicker:SetScript("OnUpdate", function(_, elapsed)
+  local bar = _G.MultiCastActionBarFrame
+  if not bar then return end
+  local cfg = Cfg()
+  if not cfg.totemBarHoverOnly or cfg.hideTotemBar then
+    if totemAlpha then
+      bar:SetAlpha(1)
+      totemAlpha = nil
+    end
+    return
+  end
+  totemAcc = totemAcc + elapsed
+  if totemAcc < TOTEM_TICK then return end
+  local dt = totemAcc
+  totemAcc = 0
+  local flyout = _G.MultiCastFlyoutFrame
+  local target = (bar:IsMouseOver() or (flyout and flyout:IsShown())) and 1 or (cfg.totemBarHoverAlpha or 0)
+  local cur = totemAlpha or 1
+  if math.abs(cur - target) > 0.002 then
+    cur = cur + (target - cur) * (1 - math.exp(-TOTEM_FADE_SPEED * dt))
+  else
+    cur = target
+  end
+  if cur ~= totemAlpha then
+    bar:SetAlpha(cur)
+    totemAlpha = cur
+  end
+end) end
+
 -- Ctrl + clic gauche sur une unite (dans le monde) : la met en focalisation. Bouton securise "/focus mouseover" lie a
 -- CTRL-BUTTON1 par une liaison prioritaire, posee hors combat seulement. Client sans focalisation (pas de FocusFrame) :
 -- rien.
@@ -805,6 +861,7 @@ function Comfort.ApplySettings()
   lastQoL = qol
   MigrateFromProfile()
   ApplyHideErrors()
+  ApplyTotemBar()
   ApplyCtrlFocus()
   ApplyDoubleClickFish()
   ApplyTurnBox()
@@ -832,6 +889,7 @@ ev:SetScript("OnEvent", function(_, event)
   elseif event == "PLAYER_REGEN_DISABLED" then FishDisarm()   -- dernier instant avant le verrouillage
   elseif event == "PLAYER_REGEN_ENABLED" then
     if focusPending then ApplyCtrlFocus() end   -- liaison differee : posee a la sortie du combat
+    if totemPending then ApplyTotemBar() end
     if Cfg().doubleClickFish and not fishBtn then ApplyDoubleClickFish() end
   else Comfort.ApplySettings() end
 end)
