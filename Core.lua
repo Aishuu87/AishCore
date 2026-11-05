@@ -17,6 +17,7 @@ ns.IsForever = ns.CLIENT == "forever"
 -- (page Modules, sidebar, recherche, arbre de profils, categories d'Auras).
 local MODULE_RULES = {
   skyriding    = function() return not ns.IsForever end,
+  rotationHelper = function() return not ns.IsForever end,   -- Bouton de rotation : inutile sur Forever
   -- Fiche personnage : desactivee le temps d'etre refaite (ne marchait pas bien). Repasser a true pour la rouvrir.
   characterArmory = function() return false end,
   cdmLayout    = function() return C_CooldownViewer ~= nil end,
@@ -783,6 +784,51 @@ function ns.GetActionButtonSpellID(button)
   return nil
 end
 
+-- Libelles des boutons de souris (minuscules) -> "M4", et des modificateurs -> "C". Remplis au
+-- premier appel : les noms KEY_BUTTONn et *_KEY_TEXT dependent de la langue du client.
+local _mouseLabels, _modLetters
+
+local function BuildMouseLabels()
+  _mouseLabels, _modLetters = {}, {
+    c = "C", ctrl = "C", a = "A", alt = "A", s = "S", shift = "S", m = "M", meta = "M",
+  }
+  for i = 1, 31 do
+    local short = "M" .. i
+    _mouseLabels["m" .. i] = short
+    _mouseLabels["button" .. i] = short
+    for _, name in ipairs({ _G["KEY_BUTTON" .. i] or false, _G["KEY_BUTTON" .. i .. "_ABBR"] or false }) do
+      if name then _mouseLabels[name:lower()] = short end
+    end
+  end
+  if CTRL_KEY_TEXT then _modLetters[CTRL_KEY_TEXT:lower()] = "C" end
+  if ALT_KEY_TEXT then _modLetters[ALT_KEY_TEXT:lower()] = "A" end
+  if SHIFT_KEY_TEXT then _modLetters[SHIFT_KEY_TEXT:lower()] = "S" end
+end
+
+-- Bouton de souris : "Ctrl-Bouton de souris 4" -> "CM4". Tout autre texte (touche clavier, texte
+-- deja compact d'ElvUI, modificateur inconnu) est rendu tel quel.
+local function ShortenMouseKeybind(txt)
+  if not _mouseLabels then BuildMouseLabels() end
+  local lower = txt:lower()
+  for label, short in pairs(_mouseLabels) do
+    if #label <= #lower and lower:sub(-#label) == label then
+      local mods = lower:sub(1, #lower - #label)
+      -- Sans separateur devant, le libelle n'est qu'une fin de mot ("Num4")
+      if mods == "" then return short end
+      if mods:find("[%-%+]$") then
+        local out = ""
+        for token in mods:gmatch("[^%-%+%s]+") do
+          local letter = _modLetters[token]
+          if not letter then return txt end
+          out = out .. letter
+        end
+        return out .. short
+      end
+    end
+  end
+  return txt
+end
+
 --- Texte du raccourci d'un bouton. Le FontString HotKey est prioritaire : deja abrege,
 --- correct en page de barre alternative, et il respecte les abreviations d'ElvUI. S'il est
 --- vide, on resout le binding -- ElvUI expose son nom exact via keyBoundTarget
@@ -792,7 +838,7 @@ function ns.GetActionButtonKeybindText(button, prefix, index)
   if button.HotKey then
     local ok, txt = pcall(button.HotKey.GetText, button.HotKey)
     if ok and txt and txt ~= "" and txt ~= RANGE_INDICATOR then
-      return txt
+      return ShortenMouseKeybind(txt)
     end
   end
   local action = button.keyBoundTarget or button.bindingAction
@@ -804,7 +850,7 @@ function ns.GetActionButtonKeybindText(button, prefix, index)
   local key = GetBindingKey(action)
   if not key or key == "" then return nil end
   local abbrev = GetBindingText(key, "KEY_", 1)
-  return (abbrev ~= "" and abbrev) or key
+  return ShortenMouseKeybind((abbrev ~= "" and abbrev) or key)
 end
 
 -- Sort de base d'un ID : l'assistant de rotation renvoie parfois un override (talent,

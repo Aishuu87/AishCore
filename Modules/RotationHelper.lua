@@ -2,6 +2,8 @@
 local addonName, ns = ...
 
 local RotationHelper = {}
+-- Forever : le module ne s'enregistre pas du tout (cf. ns.IsModuleAvailable)
+if not ns.IsModuleAvailable("rotationHelper") then return end
 ns.Modules.RotationHelper = RotationHelper
 
 -- State

@@ -1,5 +1,11 @@
 # AishCore
 
+## [v4.6.2](https://github.com/Aishuu87/AishCore/tree/v4.6.2) (2026-11-05)
+
+- Rotation Button Module and Priority Bar: mouse button keybinds now use a short form (Ctrl + Mouse Button 4 shows CM4)
+- [Forever] The Rotation Button Module is disabled
+- FIX: blocked action error (SpellStopCasting) when opening AishCore from the WoW options
+
 ## [v4.6](https://github.com/Aishuu87/AishCore/tree/v4.6) (2026-11-04)
 
 ### Settings panel

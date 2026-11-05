@@ -16412,9 +16412,10 @@ local function RegisterWoWSettings()
   openBtn:SetText(L["SETTINGS_OPEN_AISHCORE_SETTINGS"])
   openBtn:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -20)
   openBtn:SetScript("OnClick", function()
-    -- Fermer le panneau Options WoW
+    -- Fermer le panneau Options WoW. true = sans revenir au menu Echap : ToggleGameMenu appele
+    -- depuis ce clic (code d'addon) finit sur SpellStopCasting, protege (ADDON_ACTION_FORBIDDEN).
     if SettingsPanel and SettingsPanel.Close then
-      SettingsPanel:Close()
+      SettingsPanel:Close(true)
     elseif SettingsPanel and SettingsPanel.Hide then
       HideUIPanel(SettingsPanel)
     end

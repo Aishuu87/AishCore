@@ -8,6 +8,14 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.2", date = "2026-11-05",
+    lines = {
+      { k = "li", lvl = 1, link = false, t = "Rotation Button Module and Priority Bar: mouse button keybinds now use a short form (Ctrl + Mouse Button 4 shows CM4)", fr = "Bouton de rotation et Barre de rotation : les raccourcis des boutons de souris s'affichent en forme courte (Ctrl + Bouton de souris 4 affiche CM4)" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] The Rotation Button Module is disabled", fr = "[Forever] Le Bouton de rotation est désactivé" },
+      { k = "li", lvl = 1, link = false, t = "FIX: blocked action error (SpellStopCasting) when opening AishCore from the WoW options", fr = "FIX : erreur d'action bloquée (SpellStopCasting) à l'ouverture d'AishCore depuis les options de WoW" },
+    },
+  },
+  {
     version = "4.6", date = "2026-11-04",
     lines = {
       { k = "h", t = "Settings panel", fr = "Panneau de réglages" },
