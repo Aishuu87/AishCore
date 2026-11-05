@@ -184,6 +184,12 @@ function ns.GetPlayerResource()
   if playerClass == "DRUID" then
     if not druidFormResources then BuildDruidTable() end
     local formID = GetShapeshiftFormID()
+    -- Forever : les ID de forme ne correspondent pas aux constantes DRUID_*_FORM (ours/felin restaient a la mana).
+    -- En forme, on suit la ressource affichee par le client : ours = rage, felin = energie.
+    if ns.IsForever and formID and UnitPowerType then
+      local ok, pt = pcall(UnitPowerType, "player")
+      if ok and type(pt) == "number" then return pt end
+    end
     local resource = druidFormResources[formID or 0]
     if type(resource) == "table" then
       -- Table par specID (forme caster)

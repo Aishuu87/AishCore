@@ -402,6 +402,157 @@ local function CheckSpellOverlayMissing(entry)
     return overlayed == true -- true = Blizzard signale qu'il faut relancer -> "manquant" quelque part
 end
 
+-- ═══ Sort plus puissant deja actif (parchemin, bonus de camp, rang superieur d'un autre joueur) ═══
+-- Le serveur refuse alors le sort ("Un sort plus puissant est deja actif") : la cible compte comme buffee.
+--   1) appris au refus : buffs de la cible notes a l'echec, valable tant qu'ils sont tous encore la ;
+--   2) devine (entry.blockers, Forever) : aura d'un parchemin dont la valeur >= celle de notre rang.
+-- Bloc do ... end : le fichier est a la limite des 200 locales, seul Bounce.Blocked en sort.
+do
+local Bounce = { learned = {}, values = {}, descs = {}, sets = setmetatable({}, { __mode = "k" }) }
+
+function Bounce.MaxPoints(pts)
+    if type(pts) ~= "table" or IsSecret(pts) then return nil end
+    local m
+    for _, v in ipairs(pts) do
+        if type(v) == "number" and not IsSecret(v) and (not m or v > m) then m = v end
+    end
+    return m
+end
+
+-- Buffs de `unit` : fn(name, spellId, valeur) ; un true renvoye par fn arrete le parcours (et est renvoye).
+-- Memorise au passage la valeur (points) de chaque sort vu, pour connaitre celle de notre rang.
+function Bounce.ForEach(unit, fn)
+    for i = 1, 60 do
+        local name, sid, pts
+        if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+            local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HELPFUL")
+            if not ok or not a then return false end
+            name, sid, pts = a.name, a.spellId, a.points
+        elseif UnitBuff then
+            local ok, n, _, _, _, _, _, _, _, _, id = pcall(UnitBuff, unit, i)
+            if not ok or not n then return false end
+            name, sid = n, id
+        else
+            return false
+        end
+        if IsSecret(sid) then sid = nil end
+        if name and not IsSecret(name) then
+            local v = sid and Bounce.MaxPoints(pts)
+            if v then Bounce.values[sid] = v end
+            if fn(name, sid, v) then return true end
+        end
+    end
+    return false
+end
+
+function Bounce.CastName(entry)
+    if entry._castName then return entry._castName end
+    local id = entry.clickableId or entry.spellId
+    if not id then return nil end
+    if C_Spell and C_Spell.GetSpellName then
+        local ok, n = pcall(C_Spell.GetSpellName, id)
+        if ok and n then return n end
+    end
+    if GetSpellInfo then
+        local ok, n = pcall(GetSpellInfo, id)
+        if ok then return n end
+    end
+    return nil
+end
+
+-- Valeur de notre rang : vue sur une aura (points), sinon 1er nombre de la description
+function Bounce.Value(sid)
+    if Bounce.values[sid] then return Bounce.values[sid] end
+    local d = Bounce.descs[sid]
+    if d == nil then
+        local ok, r = pcall(function()
+            return (C_Spell and C_Spell.GetSpellDescription and C_Spell.GetSpellDescription(sid))
+                or (GetSpellDescription and GetSpellDescription(sid))
+        end)
+        d = (ok and type(r) == "string" and r ~= "") and r or false
+        if d then Bounce.descs[sid] = d end -- description vide : pas encore chargee, relue au prochain passage
+    end
+    return d and tonumber(d:match("%d+")) or nil
+end
+
+function Bounce.Blocked(unit, entry)
+    local guid = UnitGUID(unit)
+    if not guid or IsSecret(guid) then return false end
+    local cast = Bounce.CastName(entry)
+    local byGuid = cast and Bounce.learned[cast]
+    local rec = byGuid and byGuid[guid]
+    if rec then
+        local seen, hit = 0, {}
+        Bounce.ForEach(unit, function(name)
+            if rec.names[name] and not hit[name] then hit[name] = true; seen = seen + 1 end
+        end)
+        if seen >= rec.n then return true end
+        byGuid[guid] = nil -- un des buffs presents au refus est tombe : on repropose
+    end
+    if not (entry.blockers and entry.spellId) then return false end
+    local mine = Bounce.Value(entry.spellId)
+    if not mine then return false end
+    local list = ExpandNames(entry.blockers)
+    local set = Bounce.sets[list]
+    if not set then
+        set = {}
+        for _, n in ipairs(list) do set[n] = true end
+        Bounce.sets[list] = set
+    end
+    return Bounce.ForEach(unit, function(name, _, v) return set[name] and v ~= nil and v >= mine end)
+end
+
+-- Cible du sort refuse, a partir du nom donne par UNIT_SPELLCAST_SENT
+function Bounce.UnitByName(target)
+    if not target or target == "" or IsSecret(target) then return "player" end
+    local function same(u)
+        if not UnitExists(u) then return false end
+        local full, short = GetUnitName and GetUnitName(u, true), UnitName(u)
+        return (not IsSecret(full) and full == target) or (not IsSecret(short) and short == target)
+    end
+    if same("player") then return "player" end
+    if same("target") then return "target" end
+    local prefix = IsInRaid() and "raid" or "party"
+    for i = 1, GetNumGroupMembers() do
+        if same(prefix .. i) then return prefix .. i end
+    end
+    return nil
+end
+
+-- UNIT_SPELLCAST_SENT donne le sort et la cible, UI_ERROR_MESSAGE la raison du refus
+Bounce.frame = CreateFrame("Frame")
+pcall(Bounce.frame.RegisterUnitEvent, Bounce.frame, "UNIT_SPELLCAST_SENT", "player")
+Bounce.frame:RegisterEvent("UI_ERROR_MESSAGE")
+Bounce.frame:RegisterEvent("PLAYER_LEVEL_UP")
+Bounce.frame:SetScript("OnEvent", function(_, event, a1, a2, _, a4)
+    if event == "PLAYER_LEVEL_UP" then wipe(Bounce.learned); return end -- nouveau rang : peut-etre plus fort
+    if event == "UNIT_SPELLCAST_SENT" then
+        Bounce.sent = nil
+        if IsSecret(a4) or IsSecret(a2) or not a4 then return end
+        local name = Bounce.CastName({ spellId = a4 })
+        if name then Bounce.sent = { name = name, target = a2, t = GetTime() } end
+        return
+    end
+    -- UI_ERROR_MESSAGE (errorType, message)
+    local sent = Bounce.sent
+    if not sent or IsSecret(a2) or not SPELL_FAILED_AURA_BOUNCED or a2 ~= SPELL_FAILED_AURA_BOUNCED then return end
+    Bounce.sent = nil
+    if GetTime() - sent.t > 2 then return end
+    local unit = Bounce.UnitByName(sent.target)
+    local guid = unit and UnitGUID(unit)
+    if not guid or IsSecret(guid) then return end
+    local names, n = {}, 0
+    Bounce.ForEach(unit, function(name)
+        if not names[name] then names[name] = true; n = n + 1 end
+    end)
+    if n == 0 then return end
+    Bounce.learned[sent.name] = Bounce.learned[sent.name] or {}
+    Bounce.learned[sent.name][guid] = { names = names, n = n }
+    if MissingBuffs.RequestCheck then MissingBuffs.RequestCheck() end
+end)
+MissingBuffs.BounceBlocked = Bounce.Blocked
+end
+
 local function UnitHasBuffRaw(unit, entry)
     -- Payloads d'aura d'un ALLIE quasi-toujours secrets depuis le 12.1 : ForEachAura ne peut
     -- alors jamais lire de spellId, donc on suppose le buff present plutot que de spammer un
@@ -445,10 +596,10 @@ local function UnitHasBuffRaw(unit, entry)
 end
 
 local function UnitHasBuff(unit, entry)
-    if unit == "player" then return SelfHasBuff(entry) end
+    if unit == "player" then return SelfHasBuff(entry) or MissingBuffs.BounceBlocked("player", entry) end
     local overlayMissing = CheckSpellOverlayMissing(entry)
     if overlayMissing ~= nil then return not overlayMissing end
-    return UnitHasBuffRaw(unit, entry)
+    return UnitHasBuffRaw(unit, entry) or MissingBuffs.BounceBlocked(unit, entry)
 end
 
 -- Unites du groupe
@@ -1125,6 +1276,24 @@ function MissingBuffs.DismissAlert(_, button, down)
     MissingBuffs.HideAlert()
 end
 
+--- Rappel "Clic droit : masquer cette alerte" sous le texte, quand la meme alerte reste affichee plus de 15 s.
+--- Relance a chaque nouvelle alerte (signature differente ou reapparition), coupe des que l'alerte se masque.
+function MissingBuffs._ArmDismissHint()
+    local h = MissingBuffs._hintFS
+    if not h then return end
+    h:Hide()
+    if MissingBuffs._hintTimer then MissingBuffs._hintTimer:Cancel() end
+    MissingBuffs._hintTimer = C_Timer.NewTimer(15, function()
+        MissingBuffs._hintTimer = nil
+        if frame and frame:IsShown() and currentSig then h:Show() end
+    end)
+end
+
+function MissingBuffs._ClearDismissHint()
+    if MissingBuffs._hintTimer then MissingBuffs._hintTimer:Cancel(); MissingBuffs._hintTimer = nil end
+    if MissingBuffs._hintFS then MissingBuffs._hintFS:Hide() end
+end
+
 --- Une icone de proposition : bouton securise (clic = son propre sort), enfant de `frame` qui reste le
 --- repere de position / glisser-deposer et le porteur des animations d'entree/sortie.
 local function EnsureSlot(i)
@@ -1265,6 +1434,9 @@ function MissingBuffs.RefreshAppearance()
 
     ns.ApplyTextOutlineStyle(textFS, slugFS, cfg.textFont or ns.Media.font, cfg.textSize or 12, cfg.textOutlineStyle)
     textFS:SetTextColor(unpack(cfg.textColor or { 1, 0.9, 0.3 }))
+    if MissingBuffs._hintFS then
+        ns.ApplyFont(MissingBuffs._hintFS, "Fonts\\2002.TTF", math.max(8, math.floor((cfg.textSize or 12) * 0.75)), "OUTLINE")
+    end
     -- Texte deja affiche : le client ne redessine pas les glyphes a la nouvelle police / taille tant que le texte ne
     -- change pas (seul un /reload le montrait). Reposer le texte force ce rendu (l'anneau SLUG suit, cf. CreateSlugRing).
     local cur = textFS:GetText()
@@ -1347,6 +1519,17 @@ local function EnsureFrame()
     -- Ombre "SLUG" (helper partage, cf. Core.lua) : anneau de regions du
     -- MEME conteneur -- cascade donc avec lui a chaque animation.
     slugFS = ns.CreateSlugRing(textContainer, textFS)
+
+    local hintHolder = CreateFrame("Frame", nil, frame)
+    hintHolder:SetAllPoints(frame)
+    hintHolder:SetFrameLevel(frame:GetFrameLevel() + 10)
+    local hint = hintHolder:CreateFontString(nil, "OVERLAY")
+    ns.ApplyFont(hint, "Fonts\\2002.TTF", 9, "OUTLINE")   -- police avant SetText (taille reelle : RefreshAppearance)
+    hint:SetPoint("TOP", textFS, "BOTTOM", 0, -2)
+    hint:SetTextColor(0.8, 0.8, 0.8)
+    hint:SetText(_addon.L["MISSINGBUFFS_DISMISS_HINT"])
+    hint:Hide()
+    MissingBuffs._hintFS = hint
 
     BuildTextAnimGroups()
     vanishAnimGroup = BuildVanishAnimGroup()
@@ -1490,6 +1673,7 @@ end
 
 function MissingBuffs.HideAlert()
     if not frame then return end
+    MissingBuffs._ClearDismissHint()
     currentAlertSpell = nil
     wipe(currentAlertKeys)
     currentSig = nil
@@ -1628,6 +1812,7 @@ function MissingBuffs.ShowAlertChoices(choices, text)
     currentAlertSpell = choices[1].key
     -- Les combos sont ancres sur l'icone de LEUR sort : si la rangee change (nombre ou ordre), on
     -- les relance pour qu'ils suivent leur icone.
+    if sig ~= currentSig or wasHidden then MissingBuffs._ArmDismissHint() end
     if sig ~= currentSig then
         currentSig = sig
         local SE = _addon.Modules and _addon.Modules.SpellEffects

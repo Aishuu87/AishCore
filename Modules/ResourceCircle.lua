@@ -2382,7 +2382,7 @@ function ResourceCircle.SetPreview(on)
           bar.secResFrame:Show()
         end
         if secResDef then
-          bar.secResText:SetText("8")
+          bar.secResText:SetText(secResDef.useFormMana and "75%" or "8")
           SetSecResShown(true)
         else
           -- Valeur factice dans la bande "moderee" (30-60%), d'ou la couleur orange :
@@ -3388,6 +3388,37 @@ function ResourceCircle.RetrySpecDetectionIfNeeded()
   C_Timer.After(0.3, Retry)
 end
 
+ResourceCircle.DRUID_FORM_MANA_DEF = { useFormMana = true, color = { 0.30, 0.55, 1.00, 1 } }
+
+--- Druide dont la ressource affichee est la rage (ours) ou l'energie (felin), option non decochee
+function ResourceCircle.DruidFormManaActive()
+  if ns._playerClass ~= "DRUID" then return false end
+  local cfg = ns.GetCfg("resourceCircle")
+  if cfg and cfg.druidFormMana == false then return false end
+  local pt = ns.GetPlayerResource()
+  return pt == Enum.PowerType.Rage or pt == Enum.PowerType.Energy
+end
+
+--- Mana du joueur en pourcentage dans le texte secondaire. Retail : UnitPowerPercent (valeur
+--- eventuellement secrete, formatee sans arithmetique) ; repli : mana / mana max.
+function ResourceCircle.ApplyFormManaText(fs)
+  local MANA = Enum.PowerType.Mana
+  if UnitPowerPercent and CurveConstants and CurveConstants.ScaleTo100 then
+    local ok, v = pcall(UnitPowerPercent, "player", MANA, true, CurveConstants.ScaleTo100)
+    if ok and v ~= nil then
+      local okF, txt = pcall(string.format, "%.0f%%", v)
+      if okF and txt then return pcall(fs.SetText, fs, txt) end
+    end
+  end
+  local ok, txt = pcall(function()
+    local max = UnitPowerMax("player", MANA)
+    if not max or max <= 0 then return nil end
+    return string.format("%.0f%%", UnitPower("player", MANA) / max * 100)
+  end)
+  if ok and txt then fs:SetText(txt); return true end
+  return false
+end
+
 -- Détecte la ressource secondaire selon la spec active et démarre le ticker
 function ResourceCircle.DetectSecondaryResource()
   if not bar then return end
@@ -3414,6 +3445,9 @@ function ResourceCircle.DetectSecondaryResource()
   if not specID then return end
 
   local def = ns.SecondaryResourceDefs[specID]
+  -- Druide en forme de felin / d'ours : mana en texte secondaire (option druidFormMana, activee par defaut),
+  -- sauf si la spe a deja sa propre ressource secondaire (Gardien Retail : Fer-poil)
+  if not def and ResourceCircle.DruidFormManaActive() then def = ResourceCircle.DRUID_FORM_MANA_DEF end
   if not def then return end
 
   secResDef = def
@@ -3790,6 +3824,20 @@ function ResourceCircle.UpdateSecondaryResource()
     end
     _secResWasApplied = applied
     -- Le pop-out cache lui-même texte/déco une fois le fondu terminé ; SetSecResShown(false) immédiat ne s'applique que si aucun pop-out n'est en cours.
+    if applied then
+      SetSecResShown(true)
+    elseif not _secResPopTicker then
+      SetSecResShown(false)
+    end
+    return
+  elseif secResDef.useFormMana then
+    local applied = ResourceCircle.ApplyFormManaText(bar.secResText) and true or false
+    if applied and not _secResWasApplied then
+      StartSecResPop()
+    elseif not applied and _secResWasApplied then
+      StartSecResPopOut()
+    end
+    _secResWasApplied = applied
     if applied then
       SetSecResShown(true)
     elseif not _secResPopTicker then

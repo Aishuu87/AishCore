@@ -287,6 +287,8 @@ ns.MISSING_RAID_DIFFICULTIES    = { [14] = "normal", [15] = "heroic", [16] = "my
 -- Epines, Presence de clarte, armures de mage/demoniste, munitions, fragments d'ame).
 -- Retire (retail seul) : postures de guerrier, forme de sélénien, Symbiose, Familier arcanique,
 -- Faveurs, Benedictions, accords, etc.
+-- `blockers` : auras d'un AUTRE sort sur la meme caracteristique (parchemins) ; si leur valeur depasse celle de
+-- notre rang, le serveur refuserait le sort -> pas d'alerte (cf. Bounce dans MissingBuffs.lua).
 if _addon.IsForever then
     local I = "Interface\\Icons\\"
     -- Chaque sort est donne par son spellID de rang 1 (le NOM localise en est deduit a l'execution, donc
@@ -306,7 +308,7 @@ if _addon.IsForever then
         EVOKER = {},
         MAGE = {
             { settingsId = 5, names = { 1459, "Arcane Intellect", 23028, "Arcane Brilliance" },
-              casts = { 1459, "Arcane Intellect" },
+              casts = { 1459, "Arcane Intellect" }, blockers = { 8096, "Intellect" },
               displayName = "Arcane Intellect", icon = I .. "Spell_Holy_MagicalSentry",
               showRaidCount = true, text = "MISSING" },
             { settingsId = 103, onlySelf = true,
@@ -334,13 +336,14 @@ if _addon.IsForever then
         },
         PRIEST = {
             { settingsId = 12, names = { 1243, "Power Word: Fortitude", 21562, "Prayer of Fortitude" },
-              casts = { 1243, "Power Word: Fortitude" }, displayName = "Power Word: Fortitude",
+              casts = { 1243, "Power Word: Fortitude" }, blockers = { 8099, "Stamina" }, displayName = "Power Word: Fortitude",
               icon = I .. "Spell_Holy_WordFortitude", showRaidCount = true, text = "MISSING" },
             { settingsId = 104, onlySelf = true, names = { 588, "Inner Fire" }, casts = { 588, "Inner Fire" },
               displayName = "Inner Fire", icon = I .. "Spell_Holy_InnerFire", text = "MISSING" },
             -- Optionnels (decoches par defaut)
             { settingsId = 115, optIn = true, onlySelf = true,
               names = { 14752, "Divine Spirit", 27681, "Prayer of Spirit" }, casts = { 14752, "Divine Spirit" },
+              blockers = { 8112, "Spirit" },
               displayName = "Divine Spirit", icon = I .. "Spell_Holy_DivineSpirit", text = "MISSING" },
             { settingsId = 116, optIn = true, onlySelf = true,
               names = { 976, "Shadow Protection", 27683, "Prayer of Shadow Protection" },

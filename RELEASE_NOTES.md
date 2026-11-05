@@ -1,5 +1,17 @@
 # AishCore
 
+## [v4.6.4](https://github.com/Aishuu87/AishCore/tree/v4.6.4) (2026-11-05)
+
+### Resource Circle
+- [Druid] Added an option to show your mana as the secondary resource text in Cat / Bear Form
+
+### Missing buffs
+- After 15 s, a hint reminds you that right-click hides the alert
+
+### Fixes
+- [Forever] Missing buffs: no longer suggests a buff the server would refuse because a more powerful spell is already active (scroll, campfire bonus...)
+- [Forever] Resource Circle: Bear / Cat Form showed mana instead of rage / energy
+
 ## [v4.6.3](https://github.com/Aishuu87/AishCore/tree/v4.6.3) (2026-11-05)
 
 ### Movement Buffs

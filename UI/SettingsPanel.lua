@@ -1813,6 +1813,21 @@ function Build.ResourceCircle(container)
     hdr._leSecKey = "SETTINGS_SEC_SECONDARY_RES_TEXT"   -- titre variable selon la spe : cle fixe (mode disposition)
   end
 
+  -- Druide : mana en texte secondaire en forme de felin / d'ours (active par defaut : nil = coche)
+  if ns._playerClass == "DRUID" then
+    local cbFormMana = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_SEC_RES_DRUID_FORM_MANA"],
+      L["SETTINGS_SEC_RES_DRUID_FORM_MANA_TT"], W))
+    BindCheckbox(cbFormMana, "resourceCircle", "druidFormMana")
+    cbFormMana:SetChecked(DBGet("resourceCircle", "druidFormMana") ~= false)
+    cbFormMana.onChanged = function(val)
+      DBSet("resourceCircle", "druidFormMana", val and true or false)
+      LiveApply("resourceCircle")
+      local RC = ns.Modules and ns.Modules.ResourceCircle
+      if RC and RC.DetectSecondaryResource then RC.DetectSecondaryResource() end
+    end
+  end
+
   -- Reglages specifiques a la spec active (ns.SecResSpecKey) : chaque spec garde sa config si personnalisee, sinon fallback sur l'ancienne cle plate.
   -- Police / Taille / Decalage X / Decalage Y sur une seule ligne : dropdown Police a largeur fixe, les 3 sliders partagent le reste.
   local DECO_DD_W = 220

@@ -8,6 +8,18 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.4", date = "2026-11-05",
+    lines = {
+      { k = "h", link = { page = "resourceCircle" }, t = "Resource Circle", fr = "Cercle de ressource" },
+      { k = "li", lvl = 1, link = { page = "resourceCircle" }, t = "[Druid] Added an option to show your mana as the secondary resource text in Cat / Bear Form", fr = "[Druide] Ajout d'une option pour afficher la mana en texte de ressource secondaire en forme de félin / d'ours" },
+      { k = "h", link = { page = "aurasMissingBuffs" }, t = "Missing buffs", fr = "Buffs Manquants" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "After 15 s, a hint reminds you that right-click hides the alert", fr = "Après 15 s, un rappel indique que le clic droit masque l'alerte" },
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] Missing buffs: no longer suggests a buff the server would refuse because a more powerful spell is already active (scroll, campfire bonus...)", fr = "[Forever] Buffs Manquants : ne propose plus un buff que le serveur refuserait parce qu'un sort plus puissant est déjà actif (parchemin, bonus de camp...)" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] Resource Circle: Bear / Cat Form showed mana instead of rage / energy", fr = "[Forever] Cercle de ressource : les formes d'ours / de félin affichaient la mana au lieu de la rage / l'énergie" },
+    },
+  },
+  {
     version = "4.6.3", date = "2026-11-05",
     lines = {
       { k = "h", t = "Movement Buffs", fr = "Buffs de déplacement" },

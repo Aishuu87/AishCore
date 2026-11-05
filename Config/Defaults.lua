@@ -187,6 +187,8 @@ ns.Defaults = {
     -- Abrège les grands nombres de la ressource secondaire (ex: absorb Dur au Mal :
     -- 12345 -> "12.3k") via AbbreviateNumbers. false = nombre brut.
     secResAbsorbAbbreviate = false,
+    -- Druide en forme de felin / d'ours : mana en texte secondaire (nil = active)
+    druidFormMana = true,
     -- Globes de Puissance Sacrée en spé Protection / Vindicte
     holyPowerAllSpecs = false,
     -- Globes d'Essence en spé Dévastation / Augmentation
