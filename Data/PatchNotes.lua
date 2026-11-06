@@ -8,6 +8,13 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.8", date = "2026-11-06",
+    lines = {
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "Missing buffs: the alert now hides once the buff or elixir is applied (it stayed shown when bags were nearly full)", fr = "Buffs Manquants : l'alerte se cache maintenant une fois le buff ou l'élixir appliqué (elle restait affichée quand les sacs étaient presque pleins)" },
+    },
+  },
+  {
     version = "4.6.7", date = "2026-11-06",
     lines = {
       { k = "h", link = { page = "extraBars" }, t = "Dynamic Bars", fr = "Barres dynamiques" },

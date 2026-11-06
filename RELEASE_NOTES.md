@@ -1,5 +1,10 @@
 # AishCore
 
+## [v4.6.8](https://github.com/Aishuu87/AishCore/tree/v4.6.8) (2026-11-06)
+
+### Fixes
+- Missing buffs: the alert now hides once the buff or elixir is applied (it stayed shown when bags were nearly full)
+
 ## [v4.6.7](https://github.com/Aishuu87/AishCore/tree/v4.6.7) (2026-11-06)
 
 ### Dynamic Bars

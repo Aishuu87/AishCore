@@ -63,11 +63,15 @@ local function KnownSpellByName(name)
 end
 
 -- Liste de noms/spellIDs -> liste de NOMS localises : un nombre est un spellID dont on lit le nom dans
--- la langue du client, une chaine est gardee telle quelle. Mise en cache seulement si tout a resolu.
+-- la langue du client, une chaine est gardee telle quelle.
+-- Cache definitif seulement si tout a resolu : au chargement, les donnees de sorts ne sont pas
+-- toujours pretes (nom nil). Cacher ce resultat incomplet ne gardait que le nom ANGLAIS de repli,
+-- introuvable sur un client FR -> "Bouclier de foudre manquant" pour toute la session. Un ID
+-- absent du client (DoesSpellExist faux) compte comme resolu ; sinon nouvel essai toutes les 5 s.
 local _expanded = setmetatable({}, { __mode = "k" })
 local function ExpandNames(list)
     local cached = _expanded[list]
-    if cached then return cached end
+    if cached and not (cached._retryAt and GetTime() >= cached._retryAt) then return cached end
     local out, complete = {}, true
     for _, v in ipairs(list) do
         if type(v) == "number" then
@@ -80,12 +84,17 @@ local function ExpandNames(list)
                 local ok, r = pcall(GetSpellInfo, v)
                 if ok then n = r end
             end
-            if n then out[#out + 1] = n else complete = false end
+            if n then
+                out[#out + 1] = n
+            elseif not (C_Spell and C_Spell.DoesSpellExist and not C_Spell.DoesSpellExist(v)) then
+                complete = false
+            end
         else
             out[#out + 1] = v
         end
     end
-    _expanded[list] = out -- la base de sorts est statique : un ID absent le restera
+    out._retryAt = (not complete) and (GetTime() + 5) or nil -- champ hors partie tableau : ipairs l'ignore
+    _expanded[list] = out
     return out
 end
 
@@ -3317,7 +3326,7 @@ function MissingBuffs.CheckForMissings()
                 -- ToggleAllBags (et non OpenAllBags) : Baganator / EllesmereUIBags le remplacent par leur fenetre, alors que
                 -- Baganator ignore volontairement OpenAllBags (reserve a l'ouverture automatique : marchand...)
                 -- Mode manette : /click (securise) sinon le /run taint le FrameControlsManager (cf. ns.IsGamepadUI)
-                macro = (ns.IsGamepadUI() and _G.MainMenuBarBackpackButton) and "/click MainMenuBarBackpackButton"
+                macro = (_addon.IsGamepadUI() and _G.MainMenuBarBackpackButton) and "/click MainMenuBarBackpackButton"
                     or "/run ToggleAllBags()" } }, string.format("%s (%d)", ns.MISSING_TEXT.BAGS_FULL or "", free))
             return
         end
@@ -3602,9 +3611,15 @@ function MissingBuffs.Init()
 
     -- Rappel "bientot expire" : contrairement au reste du module (event-driven), le franchissement
     -- du seuil de duree n'est pas un evenement -- ticker leger (2s), inoffensif si desactive.
+    -- Alerte affichee hors combat : relecture forcee des auras (cache invalide). Une lecture ratee
+    -- ponctuellement (valeurs encore secretes a la sortie de combat, aura pas encore visible) laissait
+    -- une fausse alerte "manquant" figee, faute d'evenement UNIT_AURA pour la corriger.
     _addon.NewTicker(2, function()
         local cfg = Cfg()
-        if cfg.enabled and cfg.expiringSoonEnabled then
+        if not cfg.enabled then return end
+        local shown = frame and frame:IsShown() and not InCombatLockdown() and not previewMode
+        if shown then auraGen = auraGen + 1 end
+        if shown or cfg.expiringSoonEnabled then
             MissingBuffs.RequestCheck()
         end
     end)
@@ -3732,6 +3747,34 @@ SlashCmdList["AISHBUFFDEBUG"] = function(msg)
         MissingBuffs.SetPreview(false)
         MissingBuffs.RequestCheck()
         print("|cff00ff00[AishCore]|r previewMode force a false, RequestCheck relance.")
+        return
+    end
+    -- "/aishbuffdebug check" : detail des rappels de classe (detection par nom comprise) puis un
+    -- scan complet SANS pcall muet, pour voir une erreur qui figerait l'alerte.
+    if msg == "check" then
+        local P = "|cff00ff00[AishCore check]|r "
+        local class = _addon._playerClass or select(2, UnitClass("player"))
+        print(P .. "classe=" .. tostring(class) .. " spe=" .. tostring(_addon._specID)
+            .. " chute=" .. tostring(IsFalling and IsFalling()) .. " scanPrevu=" .. tostring(scanScheduled))
+        local n = PlayerBuffs()
+        local names = {}
+        for i = 1, n do names[#names + 1] = tostring(bName[i]) .. "(" .. tostring(bSid[i]) .. ")" end
+        print(P .. "cache buffs : " .. table.concat(names, ", "))
+        for _, e in ipairs(ns.MISSING_CLASS_BUFFS[class] or {}) do
+            if not e.kind and not e.weaponEnchantSlot then
+                local ok, learned = pcall(IsEntryLearned, e)
+                local ok2, applies = pcall(EntryApplies, e)
+                local ok3, missing = pcall(AnyoneMissingBuff, e)
+                print(P .. string.format("%s | noms=%s | appris=%s applique=%s manquant=%s",
+                    tostring(e.displayName or e.spellId),
+                    e.names and table.concat(ExpandNames(e.names), "/") or "-",
+                    tostring(ok and learned or learned), tostring(ok2 and applies or applies),
+                    tostring(ok3 and missing or missing)))
+            end
+        end
+        local ok, err = xpcall(MissingBuffs.CheckForMissings, function(m) return tostring(m) .. "\n" .. debugstack(2, 4, 0) end)
+        print(P .. "scan ok=" .. tostring(ok) .. (ok and "" or (" ERREUR : " .. tostring(err))))
+        print(P .. "alerte affichee=" .. tostring(frame and frame:IsShown()) .. " texte=" .. tostring(textFS and textFS:GetText()))
         return
     end
 
