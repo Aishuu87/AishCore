@@ -3281,6 +3281,35 @@ do
   evtFrame:SetScript("OnEvent", OnXPBarEvent)
 end
 
+-- Decalage ecran (px) du grunge (tx, ty) et du chiffre (lx, ly) du badge, par position de barre
+-- et sens de remplissage (cle : position .. N normal / R inverse)
+-- (gauche : ecart avec le bord ; haut : badge rogne)
+local BADGE_OFFSETS = {
+  leftN  = { tx = -20, ty = 4,  lx = -17, ly = 6 },
+  leftR  = { tx = -9,  ty = 2,  lx = -6,  ly = -5 },
+  rightN = { tx = 8,   ty = 2,  lx = 13,  ly = 7 },
+  rightR = { tx = 11,  ty = -1, lx = 16,  ly = -7 },
+  topN   = { tx = 0,   ty = -5, lx = 0,   ly = -5 },
+  topR   = { tx = 0,   ty = -5, lx = 0,   ly = -5 },
+}
+
+function O.BadgeKey()
+  return (O.pos or "bottom") .. (O.reverse and "R" or "N")
+end
+
+local function ApplyBadgeOffsets()
+  if not (levelBg and lbTex) then return end
+  local o = BADGE_OFFSETS[O.BadgeKey()]
+  local tx, ty, lx, ly = o and o.tx or 0, o and o.ty or 0, o and o.lx or 0, o and o.ly or 0
+  lbTex:ClearAllPoints()
+  lbTex:SetPoint("TOPLEFT", levelBg, "TOPLEFT", tx, ty)
+  lbTex:SetPoint("BOTTOMRIGHT", levelBg, "BOTTOMRIGHT", tx, ty)
+  if levelText then
+    levelText:ClearAllPoints()
+    levelText:SetPoint("CENTER", levelBg, "CENTER", lx, ly)
+  end
+end
+
 -- Apply layout visuals (positions/sizes/rotations depuis DB), dans le repere du coin de depart
 local function ApplyLayoutCfg()
   local lb = GetCfgLB()
@@ -3295,6 +3324,7 @@ local function ApplyLayoutCfg()
   if lbTex then
     lbTex:SetRotation(math.rad(O.Rot(lb.rot)))
   end
+  ApplyBadgeOffsets()
   -- Sync hoverFrame sur levelBg pour qu'il suive les déplacements en layout mode
   if hoverFrame then
     hoverFrame:SetSize(HOVER_W * sL, HOVER_H * sL)

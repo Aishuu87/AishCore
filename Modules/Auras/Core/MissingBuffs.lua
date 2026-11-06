@@ -548,9 +548,43 @@ Bounce.frame:SetScript("OnEvent", function(_, event, a1, a2, _, a4)
     if n == 0 then return end
     Bounce.learned[sent.name] = Bounce.learned[sent.name] or {}
     Bounce.learned[sent.name][guid] = { names = names, n = n }
+    MissingBuffs.BumpAuraGen() -- choix memorises (elixirs...) a recalculer
     if MissingBuffs.RequestCheck then MissingBuffs.RequestCheck() end
 end)
 MissingBuffs.BounceBlocked = Bounce.Blocked
+
+-- Caracteristique d'un sort : texte de sa description avant le 1er nombre ("Augmente l'Intelligence de "),
+-- identique pour un elixir et un parchemin de la meme caracteristique, quelle que soit la langue
+function Bounce.StatKey(sid)
+    if not sid then return nil end
+    Bounce.Value(sid) -- charge la description
+    local desc = Bounce.descs[sid]
+    local key = desc and desc:match("^(.-)%d")
+    key = key and key:lower():gsub("%s+", " ")
+    return (key and #key >= 6) and key or nil
+end
+
+-- Consommable (sort d'utilisation `sid`) que le serveur refuserait : refus deja vu sur le joueur, ou buff d'un
+-- autre sort sur la meme caracteristique avec une valeur au moins egale (parchemin plus fort qu'un elixir)
+function MissingBuffs.ConsumableBlocked(sid)
+    if not sid or IsSecret(sid) then return false end
+    if Bounce.Blocked("player", { spellId = sid }) then return true end
+    local mine = Bounce.Value(sid)
+    local desc = Bounce.descs[sid]
+    if not (mine and desc) then return false end
+    local key, low = Bounce.StatKey(sid), desc:lower()
+    return Bounce.ForEach("player", function(name, bsid, v)
+        if not bsid or bsid == sid then return false end
+        -- Meme caracteristique : meme debut de description, ou nom du buff cite par la description de
+        -- l'elixir (parchemin "Armure" / "Augmente l'Armure de 50" : les deux textes sont tournes differemment)
+        local lname = type(name) == "string" and name:lower() or ""
+        local same = (key and Bounce.StatKey(bsid) == key)
+            or (#lname >= 4 and low:find(lname, 1, true) ~= nil)
+        if not same then return false end
+        local theirs = v or Bounce.Value(bsid)
+        return theirs ~= nil and theirs >= mine
+    end)
+end
 end
 
 local function UnitHasBuffRaw(unit, entry)
@@ -2773,6 +2807,8 @@ local function ElixirChoices()
         end
         if active then
             out.anyActive = true
+        elseif okS and MissingBuffs.ConsumableBlocked(sid) then
+            -- Buff plus puissant deja actif sur la meme caracteristique (parchemin...) : refuse par le serveur
         elseif #out < 4 then
             out[#out + 1] = { key = (#out == 0) and ns.MISSING_ELIXIR_KEY or nil, icon = C_Item.GetItemIconByID(id),
                               item = id, macro = "/use item:" .. id, stackHide = true }

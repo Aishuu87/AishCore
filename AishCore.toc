@@ -2,7 +2,7 @@
 ## Title: AishCore
 ## Notes: Custom UI overlay - resource & health circles, spell effects, auras & procs
 ## Author: Aishuu
-## Version: 4.6.6
+## Version: 4.6.7
 ## IconTexture: Interface\AddOns\AishCore\Media\logo_icon
 ## X-Curse-Project-ID: 1689788
 ## SavedVariables: AishaddonDB AishUIAuraDB

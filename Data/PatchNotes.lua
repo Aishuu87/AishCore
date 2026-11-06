@@ -8,6 +8,28 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.7", date = "2026-11-06",
+    lines = {
+      { k = "h", link = { page = "extraBars" }, t = "Dynamic Bars", fr = "Barres dynamiques" },
+      { k = "li", lvl = 1, link = { page = "extraBars" }, t = "Dynamic bars hidden in combat now show on mouseover", fr = "Les barres dynamiques cachées en combat sont maintenant visibles au survol" },
+      { k = "h", link = { page = "menuBar" }, t = "Menu Bar", fr = "Barre de menu" },
+      { k = "li", lvl = 1, link = { page = "menuBar" }, t = "Added the Appearances option", fr = "Ajout de l'option Apparences" },
+      { k = "li", lvl = 1, link = { page = "menuBar" }, t = "Added the Pet Journal option", fr = "Ajout de l'option Codex de mascottes" },
+      { k = "li", lvl = 1, link = { page = "menuBar" }, t = "Added the Toy Box option", fr = "Ajout de l'option Coffre à jouets" },
+      { k = "li", lvl = 1, link = { page = "menuBar" }, t = "Added the Group Finder option", fr = "Ajout de l'option Recherche de groupe" },
+      { k = "li", lvl = 1, link = { page = "menuBar" }, t = "Added shortcuts on the Collections icon:", fr = "Ajout de raccourcis sur l'icône Collections :" },
+      { k = "li", lvl = 2, link = false, t = "Shift + click: mounts", fr = "Maj + clic : montures" },
+      { k = "li", lvl = 2, link = false, t = "Ctrl + click: pets", fr = "Ctrl + clic : mascottes" },
+      { k = "li", lvl = 2, link = false, t = "Alt + click: Toy Box", fr = "Alt + clic : coffre à jouets" },
+      { k = "li", lvl = 2, link = false, t = "Ctrl + Alt + click: Appearances", fr = "Ctrl + Alt + clic : apparences" },
+      { k = "li", lvl = 1, link = { page = "menuBar" }, t = "Added the Equipment Manager option. Shortcuts let you switch from one set to another", fr = "Ajout de l'option Gestionnaire d'équipement. Des raccourcis permettent de passer d'un set à un autre" },
+      { k = "h", link = { page = "aurasMissingBuffs" }, t = "Missing buffs", fr = "Buffs Manquants" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "The Elixirs alert now stays shown while other elixirs can still be used. A new option, \"One elixir is enough\", hides the alert as soon as at least one elixir is applied", fr = "La notification des élixirs reste affichée si d'autres élixirs peuvent être utilisés. Une nouvelle option, « Un seul élixir suffit », cache l'alerte dès qu'au moins un élixir a été appliqué" },
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] Missing buffs: the missing Elixir alert no longer shows when a stronger buff is already active", fr = "[Forever] Buffs Manquants : l'alerte d'élixir manquant ne s'affiche plus lorsqu'un buff plus puissant est déjà actif" },
+    },
+  },
+  {
     version = "4.6.6", date = "2026-11-06",
     lines = {
       { k = "h", t = "Fixes", fr = "Correctifs" },

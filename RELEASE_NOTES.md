@@ -1,5 +1,28 @@
 # AishCore
 
+## [v4.6.7](https://github.com/Aishuu87/AishCore/tree/v4.6.7) (2026-11-06)
+
+### Dynamic Bars
+- Dynamic bars hidden in combat now show on mouseover
+
+### Menu Bar
+- Added the Appearances option
+- Added the Pet Journal option
+- Added the Toy Box option
+- Added the Group Finder option
+- Added shortcuts on the Collections icon:
+  - Shift + click: mounts
+  - Ctrl + click: pets
+  - Alt + click: Toy Box
+  - Ctrl + Alt + click: Appearances
+- Added the Equipment Manager option. Shortcuts let you switch from one set to another
+
+### Missing buffs
+- The Elixirs alert now stays shown while other elixirs can still be used. A new option, "One elixir is enough", hides the alert as soon as at least one elixir is applied
+
+### Fixes
+- [Forever] Missing buffs: the missing Elixir alert no longer shows when a stronger buff is already active
+
 ## [v4.6.6](https://github.com/Aishuu87/AishCore/tree/v4.6.6) (2026-11-06)
 
 ### Fixes

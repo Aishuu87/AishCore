@@ -120,6 +120,75 @@ function _G.AishCoreMenuBar_Adventure()
   end
 end
 
+-- Collections : ouvre (ou ferme) le journal sur un onglet ; key = suffixe de COLLECTIONS_JOURNAL_TAB_INDEX_*
+-- (constantes Blizzard, chargees avec Blizzard_Collections ; ordre Retail par defaut)
+local COLLECTION_TABS = { MOUNTS = 1, PETS = 2, TOYS = 3, HEIRLOOMS = 4, APPEARANCES = 5 }
+function _G.AishCoreMenuBar_Collections(key)
+  if not _G.ToggleCollectionsJournal then return end
+  if C_AddOns and C_AddOns.LoadAddOn and not _G.CollectionsJournal then pcall(C_AddOns.LoadAddOn, "Blizzard_Collections") end
+  local tab = _G["COLLECTIONS_JOURNAL_TAB_INDEX_" .. key] or COLLECTION_TABS[key]
+  if not tab then return end
+  local f = _G.CollectionsJournal
+  if f and f:IsShown() then
+    if _G.PanelTemplates_GetSelectedTab(f) == tab then HideUIPanel(f) else _G.CollectionsJournal_SetTab(f, tab) end
+  else
+    _G.ToggleCollectionsJournal(tab)
+  end
+end
+
+-- Onglet de collection : disponible si le journal et l'API de la collection existent sur ce client
+local function CollectionMacro(key, api)
+  if not (_G.ToggleCollectionsJournal and _G[api]) then return nil end
+  return '/run AishCoreMenuBar_Collections("' .. key .. '")'
+end
+
+-- Raccourci Collections : clics avec modificateur -> onglet precis (seulement ceux presents sur ce client)
+local COLLECTION_MODS = {
+  { mod = "shift-1",    key = "MOUNTS",      api = "C_MountJournal",       label = "MENUBAR_COLL_MOUNTS" },
+  { mod = "ctrl-1",     key = "PETS",        api = "C_PetJournal",         label = "MENUBAR_ACT_PETJOURNAL" },
+  { mod = "alt-1",      key = "TOYS",        api = "C_ToyBox",             label = "MENUBAR_ACT_TOYBOX" },
+  { mod = "alt-ctrl-1", key = "APPEARANCES", api = "C_TransmogCollection", label = "MENUBAR_ACT_TRANSMOG" },
+}
+local MOD_LABEL = { ["shift-1"] = "MENUBAR_MOD_SHIFT", ["ctrl-1"] = "MENUBAR_MOD_CTRL", ["alt-1"] = "MENUBAR_MOD_ALT",
+                    ["alt-ctrl-1"] = "MENUBAR_MOD_CTRLALT" }
+
+-- Ensembles d'equipement : IDs tries par nom (ordre du gestionnaire d'equipement)
+function MenuBar.EquipmentSets()
+  local CE = C_EquipmentSet
+  if not (CE and CE.GetEquipmentSetIDs) then return {} end
+  local list = {}
+  for _, id in ipairs(CE.GetEquipmentSetIDs() or {}) do
+    local name, _, _, isEquipped = CE.GetEquipmentSetInfo(id)
+    if name then list[#list + 1] = { id = id, name = name, equipped = isEquipped } end
+  end
+  table.sort(list, function(a, b) return a.name:lower() < b.name:lower() end)
+  return list
+end
+
+-- Equipe le n-ieme ensemble (hors combat : le jeu refuse le changement d'armure en combat)
+function _G.AishCoreMenuBar_EquipSet(n)
+  local set = MenuBar.EquipmentSets()[n]
+  if set and C_EquipmentSet.UseEquipmentSet then C_EquipmentSet.UseEquipmentSet(set.id) end
+end
+
+-- Fiche de personnage ouverte par la macro (/click CharacterMicroButton, securise : un ToggleCharacter depuis
+-- un /run taint la fiche -> erreurs "secret number" des barres de vie) : on passe ensuite sur le gestionnaire
+-- d'equipement. L'ouverture remet l'onglet des caracteristiques : on bascule tout de suite et au tick suivant.
+function _G.AishCoreMenuBar_EquipTab()
+  -- Index de l'onglet : cherche dans PAPERDOLL_SIDEBARS (l'ordre des onglets change selon les versions)
+  local idx = 2
+  for i, sb in ipairs(_G.PAPERDOLL_SIDEBARS or {}) do
+    if type(sb.frame) == "string" and sb.frame:find("Equipment") then idx = i; break end
+  end
+  local function Select()
+    local cf, tab = _G.CharacterFrame, _G["PaperDollSidebarTab" .. idx]
+    if not (cf and cf:IsShown() and tab) then return end
+    if _G.PaperDollFrame_SetSidebar then _G.PaperDollFrame_SetSidebar(tab, idx) else tab:Click() end
+  end
+  Select()
+  C_Timer.After(0, Select)
+end
+
 -- macro() renvoie le texte de la macro, ou nil si l'action n'existe pas sur ce client
 MenuBar.ACTIONS = {
   { id = "character", icon = "INV_Chest_Cloth_17", macro = function() return ClickBtn("CharacterMicroButton") end },
@@ -146,19 +215,27 @@ MenuBar.ACTIONS = {
   { id = "guild", icon = "INV_Shirt_GuildTabard_01", macro = function()
       return ClickBtn("GuildMicroButton") or ClickBtn("SocialsMicroButton")
     end },
-  { id = "groupfinder", icon = "INV_Misc_GroupNeedMore", macro = function() return ClickBtn("LFDMicroButton") end },
+  { id = "groupfinder", icon = "INV_Misc_GroupNeedMore", macro = function()
+      local m = ClickBtn("LFDMicroButton") or ClickBtn("LFGMicroButton")
+      if m then return m end
+      if _G.PVEFrame_ToggleFrame then return "/run PVEFrame_ToggleFrame()" end
+      if _G.ToggleLFGParentFrame then return "/run ToggleLFGParentFrame()" end
+      return nil
+    end },
   { id = "adventure", icon = "INV_Misc_Head_Dragon_01", macro = function()
       if _G.ToggleEncounterJournal then return "/run AishCoreMenuBar_Adventure()" end
       return ClickBtn("EJMicroButton")
     end },
-  { id = "collections", icon = "Ability_Mount_RidingHorse", macro = function() return ClickBtn("CollectionsMicroButton") end },
-  { id = "toybox", icon = "INV_Misc_Toy_10", macro = function()
-      if not _G.ToggleCollectionsJournal then return nil end
-      return "/run local f=CollectionsJournal if f and f:IsShown() then if PanelTemplates_GetSelectedTab(f)==3 then HideUIPanel(f) else CollectionsJournal_SetTab(f,3) end else ToggleCollectionsJournal(3) end"
+  { id = "collections", icon = "Ability_Mount_RidingHorse", macro = function() return ClickBtn("CollectionsMicroButton") end,
+    mods = function()
+      local t = {}
+      for _, m in ipairs(COLLECTION_MODS) do t[m.mod] = CollectionMacro(m.key, m.api) end
+      return t
     end },
-  { id = "petjournal", icon = "INV_Box_PetCarrier_01", macro = function()
-      if not _G.ToggleCollectionsJournal then return nil end
-      return "/run local f=CollectionsJournal if f and f:IsShown() then if PanelTemplates_GetSelectedTab(f)==2 then HideUIPanel(f) else CollectionsJournal_SetTab(f,2) end else ToggleCollectionsJournal(2) end"
+  { id = "toybox", icon = "INV_Misc_Toy_10", macro = function() return CollectionMacro("TOYS", "C_ToyBox") end },
+  { id = "petjournal", icon = "INV_Box_PetCarrier_01", macro = function() return CollectionMacro("PETS", "C_PetJournal") end },
+  { id = "transmog", icon = "INV_Shirt_White_01", macro = function()
+      return CollectionMacro("APPEARANCES", "C_TransmogCollection")
     end },
   -- Clic gauche : fenetre des metiers ; clics avec modificateur : metier precis (cf. AishCoreMenuBar_Profession)
   { id = "professions", icon = "Trade_BlackSmithing", macro = function() return ClickBtn("ProfessionMicroButton") end,
@@ -192,6 +269,17 @@ MenuBar.ACTIONS = {
   { id = "gamemenu", icon = "INV_Misc_Gear_01", macro = function()
       if not _G.GameMenuFrame then return nil end
       return "/run if GameMenuFrame:IsShown() then HideUIPanel(GameMenuFrame) else ShowUIPanel(GameMenuFrame) end"
+    end },
+  -- Clic : gestionnaire d'equipement ; Maj / Ctrl / Alt / Ctrl + Alt + clic : ensembles 1 a 4
+  { id = "equipment", icon = "INV_Helmet_03", macro = function()
+      if not (C_EquipmentSet and C_EquipmentSet.UseEquipmentSet and _G.CharacterMicroButton and _G.PaperDollSidebarTab2) then
+        return nil
+      end
+      return "/click CharacterMicroButton\n/run AishCoreMenuBar_EquipTab()"
+    end,
+    mods = function()
+      local function Use(i) return "/run AishCoreMenuBar_EquipSet(" .. i .. ")" end
+      return { ["shift-1"] = Use(1), ["ctrl-1"] = Use(2), ["alt-1"] = Use(3), ["alt-ctrl-1"] = Use(4) }
     end },
   { id = "reload", icon = "INV_Misc_Gear_08", macro = function() return "/reload" end },
   { id = "hearthstone", icon = "INV_Misc_Rune_01", macro = function() return "/use item:6948" end },
@@ -235,9 +323,10 @@ for id, names in pairs(GAMEPAD_CLICK) do
   end
 end
 
--- Forever : fonctions qui n'existent pas sur ce client (indisponibles : absentes du menu, grisees si deja posees)
+-- Forever : fonctions qui n'existent pas sur ce client (indisponibles : absentes du menu, grisees si deja posees).
+-- Recherche de groupe et onglets de collection : detection d'API (cf. leur macro)
 if ns.IsForever then
-  for _, id in ipairs({ "groupfinder", "adventure", "toybox", "petjournal", "housing", "shop" }) do
+  for _, id in ipairs({ "adventure", "housing", "shop" }) do
     if BY_ID[id] then BY_ID[id].macro = function() return nil end end
   end
 end
@@ -639,6 +728,22 @@ function Strip:NewSlot()
         return n or Loc(fallback)
       end
       AddLines(string.format(Loc(ns.IsForever and "MENUBAR_PROF_TT_FOREVER" or "MENUBAR_PROF_TT"), PName(p1, "MENUBAR_PROF_MAIN"), PName(p2, "MENUBAR_PROF_SECOND")))
+    elseif self2.actionId == "collections" then
+      AddLines(Loc("MENUBAR_COLL_TT"))
+      for _, m in ipairs(COLLECTION_MODS) do
+        if CollectionMacro(m.key, m.api) then
+          AddLines(string.format(Loc("MENUBAR_TALENTS_SPEC"), Loc(MOD_LABEL[m.mod]), Loc(m.label)))
+        end
+      end
+    elseif self2.actionId == "equipment" then
+      AddLines(Loc("MENUBAR_EQUIP_TT"))
+      local mods = { "MENUBAR_MOD_SHIFT", "MENUBAR_MOD_CTRL", "MENUBAR_MOD_ALT", "MENUBAR_MOD_CTRLALT" }
+      local sets = MenuBar.EquipmentSets()
+      if #sets == 0 then AddLines(Loc("MENUBAR_EQUIP_NONE"), 1, 0.3, 0.3) end
+      for i = 1, math.min(4, #sets) do
+        local line = string.format(Loc("MENUBAR_TALENTS_SPEC"), Loc(mods[i]), sets[i].name)
+        if sets[i].equipped then AddLines(line, 0.3, 1, 0.3) else AddLines(line) end
+      end
     elseif self2.actionId == "volume" then
       local on = GetCVar("Sound_EnableAllSound") == "1"
       local v = math.floor((tonumber(GetCVar("Sound_MasterVolume")) or 1) * 100 + 0.5)

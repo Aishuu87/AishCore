@@ -865,7 +865,9 @@ local function VisibilityDriver(bc)
     return base .. "[combat] show; " .. (PlayerInjured() and "show" or "hide")
   end
   if bc.visibility == "combat" then return base .. "[combat] show; hide" end
-  if bc.visibility == "nocombat" then return base .. "[combat] hide; show" end
+  -- "Hors combat" : jamais cachee par le pilote (une barre cachee ne se survole plus) ; en combat elle passe a
+  -- l'opacite 0 et le survol la fait reapparaitre (cf. HoverLow)
+  if bc.visibility == "nocombat" then return base .. "show" end
   return base .. "show"
 end
 
@@ -873,10 +875,31 @@ end
 -- quelques secondes APRES la fin reelle du combat (le drapeau de combat traine). On les estompe donc des la
 -- sortie de verrou (PLAYER_REGEN_ENABLED) par l'opacite seule (non protegee) ; le pilote finit par les cacher,
 -- et une reprise de combat les ramene a leur opacite normale.
+local inCombat = InCombatLockdown() and true or false
+
+-- Opacite basse du survol, ou nil si la barre n'est pas en mode survol : barre "hors combat" en combat (0),
+-- sinon l'option Survol
+local function HoverLow(bc)
+  if bc.visibility == "nocombat" and inCombat then return 0 end
+  if bc.mouseover then return bc.mouseoverAlpha or 0 end
+end
+
+local StartHover
 local function FadeCombatBars(ended)
   if dragUnlocked then return end
   for _, bar in pairs(bars) do
     local bc = bar.__cfg
+    if bc and bc.visibility == "nocombat" and bar:IsShown() then
+      if ended then
+        -- Fin du combat : retour a l'opacite normale (le mode Survol garde la main sur la sienne)
+        if not bc.mouseover then
+          bar._fading = true
+          StartFade(bar, bar:GetAlpha(), bc.alpha or 1, VIS_FADE_IN, function(b) b._fading = nil end)
+        end
+      else
+        StartHover()
+      end
+    end
     if bc and bc.visibility == "combat" and bar:IsShown() then
       if ended then
         if not bar._combatEnded then
@@ -996,9 +1019,10 @@ local function UpdateHover(_, elapsed)
   local any = false
   for _, bar in pairs(bars) do
     local bc = bar.__cfg
-    if bc and bc.mouseover and bar:IsShown() and not dragUnlocked and not bar._combatEnded then
+    local low = bc and HoverLow(bc)
+    if low and bar:IsShown() and not dragUnlocked and not bar._combatEnded then
       any = true
-      local full, low = bc.alpha or 1, bc.mouseoverAlpha or 0
+      local full = bc.alpha or 1
       local target = bar:IsMouseOver() and full or low
       local cur = bar:GetAlpha()
       if not bar._fading and cur ~= target then
@@ -1020,7 +1044,7 @@ local function UpdateHover(_, elapsed)
     hoverFrame.on = false
   end
 end
-local function StartHover()
+StartHover = function()
   if hoverFrame.on then return end
   hoverFrame.on = true
   hoverFrame:SetScript("OnUpdate", UpdateHover)
@@ -1030,7 +1054,7 @@ function ExtraBars.ApplySettings()
   MigrateBlacklist()
   ExtraBars.Layout()
   for _, bar in pairs(bars) do
-    if bar.__cfg and bar.__cfg.mouseover then StartHover(); break end
+    if bar.__cfg and HoverLow(bar.__cfg) then StartHover(); break end
   end
 end
 
@@ -1085,8 +1109,10 @@ ev:SetScript("OnEvent", function(_, event, _, _, spellID)
   elseif event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
     CheckInjuredSoon()
   elseif event == "PLAYER_REGEN_DISABLED" then
+    inCombat = true
     FadeCombatBars(false)
   elseif event == "PLAYER_REGEN_ENABLED" then
+    inCombat = false
     FadeCombatBars(true)
     if pendingLayout then ExtraBars.Layout() end
     CheckInjuredSoon()
