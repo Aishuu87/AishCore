@@ -1,5 +1,11 @@
 # AishCore
 
+## [v4.6.6](https://github.com/Aishuu87/AishCore/tree/v4.6.6) (2026-11-06)
+
+### Fixes
+- Gamepad: the wider merchant window is now disabled in gamepad mode (it caused the SetPreferredGamepadInteractTarget blocked action error)
+- [Forever] Resource Circle: leaving and re-entering a Druid form during combat now updates the circle and the mana text
+
 ## [v4.6.5](https://github.com/Aishuu87/AishCore/tree/v4.6.5) (2026-11-06)
 
 ### Cast Bars

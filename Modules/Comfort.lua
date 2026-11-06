@@ -149,6 +149,9 @@ local merchantActive, merchantHooked = false, false
 local CONFLICTS = { "ExtVendor", "Krowi_ExtendedVendorUI", "CompactVendor", "ElvUI_WindTools" }
 
 local function MerchantConflict()
+  -- Mode manette : MERCHANT_ITEMS_PER_PAGE reecrit par nous taint MerchantFrame_Update a chaque ouverture, donc
+  -- l'etat du FrameControlsManager (cf. ns.IsGamepadUI) -> SetPreferredGamepadInteractTarget bloque.
+  if ns.IsGamepadUI and ns.IsGamepadUI() then return true end
   for _, a in ipairs(CONFLICTS) do
     if C_AddOns.IsAddOnLoaded(a) then return true end
   end

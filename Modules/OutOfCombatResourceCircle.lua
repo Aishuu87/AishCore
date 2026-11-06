@@ -17,6 +17,7 @@ local ghostBuild        = false   -- construction / rendu de la copie d'apercu d
 -- File d'attente de transition : ne jamais interrompre une animation show/hide en cours, relancer UpdateVisibility() apres
 local ocrcAnimBusy = false
 local ocrcAnimDirty = false
+local _formSyncing = false      -- garde de Update (resynchro de forme druide)
 local lastResourceType  = nil
 local secDots           = {}
 local secDotCount       = 0
@@ -538,6 +539,15 @@ function OutOfCombatResourceCircle.Update()
 
   local resource    = ns.GetPlayerResource()
   local pct         = nil
+
+  -- Forever, druide : en combat, l'event de forme part parfois avant que le client ait change le type de
+  -- puissance, et rien ne le rattrape ensuite. Chaque mise a jour (regen de mana, perte de rage...) resynchronise.
+  if ns.IsForever and ns._playerClass == "DRUID" and resource ~= lastResourceType and not _formSyncing then
+    _formSyncing = true
+    pcall(OutOfCombatResourceCircle.OnResourceChanged)
+    _formSyncing = false
+    return
+  end
   local displayText = nil
 
   if type(resource) == "string" then

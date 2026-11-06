@@ -43,6 +43,7 @@ local lastVisibilityState = nil
 local rcAnimBusy = false
 local rcAnimDirty = false
 local previewMode = false
+local _formSyncing = false     -- garde de ResourceCircle.Update (resynchro de forme druide)
 local lastResourceType = nil  -- dernier type de ressource detecte
 local secDots = {}   -- secondary dot frames (runes, combo points, etc.)
 local secDotCount = 0  -- nombre de secondary dots actifs
@@ -2686,6 +2687,15 @@ function ResourceCircle.Update()
   local pct
   local displayText
 
+  -- Forever, druide : en combat, l'event de forme part parfois avant que le client ait change le type de
+  -- puissance, et rien ne le rattrape ensuite. Chaque mise a jour (regen de mana, perte de rage...) resynchronise.
+  if ns.IsForever and ns._playerClass == "DRUID" and resource ~= lastResourceType and not _formSyncing then
+    _formSyncing = true
+    pcall(ResourceCircle.OnResourceChanged)
+    _formSyncing = false
+    return
+  end
+
   -- Ressource aura (string key, ex: MAELSTROM_WEAPON, ICICLES)
   if type(resource) == "string" then
     if ns.AuraResources[resource] then
@@ -3833,6 +3843,12 @@ function ResourceCircle.UpdateSecondaryResource()
     return
   elseif secResDef.useFormMana then
     local applied = ResourceCircle.ApplyFormManaText(bar.secResText) and true or false
+    -- Retour en forme en plein combat : le cadre n'est montre qu'a l'entree en combat (et seulement si une
+    -- ressource secondaire existait deja) ; on le reaffiche nous-memes, avec son pop.
+    if applied and bar.secResFrame and not bar.secResFrame:IsShown() then
+      bar.secResFrame:Show()
+      _secResWasApplied = false
+    end
     if applied and not _secResWasApplied then
       StartSecResPop()
     elseif not applied and _secResWasApplied then

@@ -8,6 +8,14 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.6", date = "2026-11-06",
+    lines = {
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = false, t = "Gamepad: the wider merchant window is now disabled in gamepad mode (it caused the SetPreferredGamepadInteractTarget blocked action error)", fr = "Manette : l'élargissement de la fenêtre du marchand est désactivé en mode manette (il causait l'erreur d'action bloquée SetPreferredGamepadInteractTarget)" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] Resource Circle: leaving and re-entering a Druid form during combat now updates the circle and the mana text", fr = "[Forever] Cercle de ressource : quitter puis reprendre une forme de druide en combat met maintenant à jour le cercle et le texte de mana" },
+    },
+  },
+  {
     version = "4.6.5", date = "2026-11-06",
     lines = {
       { k = "h", link = { page = "castBars" }, t = "Cast Bars", fr = "Barres d'incantation" },
