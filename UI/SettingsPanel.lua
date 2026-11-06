@@ -2982,8 +2982,20 @@ function Build.WellFed(container)
       if WFm and WFm.PreviewBuff then WFm.PreviewBuff() end
       PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
+    -- Deverrouiller : la copie du cercle affichee en jeu pendant l'apercu se deplace a la souris
+    local function WFLocked() return DBGet("wellFedCircle", "locked") and true or false end
+    local lockBtn = SW.CreateActionBtn(box, WFLocked() and L["UNITBARS_UNLOCK"] or L["UNITBARS_LOCK"], 130)
+    lockBtn:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 10, 10)
+    lockBtn:SetFrameLevel(box:GetFrameLevel() + 20)
+    lockBtn:SetScript("OnClick", function(self)
+      local lock = not WFLocked()
+      if WFm and WFm.SetLocked then WFm.SetLocked(lock) else DBSet("wellFedCircle", "locked", lock) end
+      self._lbl:SetText(lock and L["UNITBARS_UNLOCK"] or L["UNITBARS_LOCK"])
+      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    end)
     container._wfPin = pin
     local function PinUp()
+      lockBtn._lbl:SetText(WFLocked() and L["UNITBARS_UNLOCK"] or L["UNITBARS_LOCK"])
       if ns.SettingsPin then ns.SettingsPin(pin, TITLE_H + PIN_H) end
       -- Apres l'apercu commun du panneau (Build.UpdateWellFedGui, differe d'une frame)
       C_Timer.After(0.05, function()
@@ -3024,11 +3036,6 @@ function Build.WellFed(container)
     -- Taille & Position
     ctx:Spacer(6)
     ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_SIZE_POSITION"], W))
-    local cbWFLock = ctx:Add(SW.CreateCheckbox(container,
-      L["SETTINGS_LOCK_POSITION"],
-      L["SETTINGS_LOCK_POSITION_TT"], W))
-    BindCheckbox(cbWFLock, "wellFedCircle", "locked")
-
     local slWFSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 10, 120, 1, SL_W3)
     BindSlider(slWFSize, "wellFedCircle", "size")
     local slWFArcSize = SW.CreateSlider(container, L["SETTINGS_ARC_SIZE"], 0.5, 1.0, 0.005, SL_W3)
@@ -13599,6 +13606,12 @@ function Build.ComfortQoL(container)
     BindSlider(slTotemAlpha, "comfort", "totemBarHoverAlpha")
     ctx:Depends(cbTotemBar, { cbTotemHover, slTotemAlpha }, true)
     ctx:Depends(cbTotemHover, { slTotemAlpha })
+
+    -- Nouveaux rangs de competence : grimoire classique (rangs de sorts), cf. Modules/SpellRanks.lua
+    ctx:Spacer(6)
+    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_SPELLRANKS"], W))
+    local cbRanks = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_SPELLRANKS_ENABLE"], L["SETTINGS_SPELLRANKS_ENABLE_TT"], W))
+    BindCheckbox(cbRanks, "comfort", "spellRanks")
   end
 
   -- Rendu automatique des quetes : case carree a l'ecran, toujours affichee, deplacable (cf. Modules/Comfort.lua)

@@ -8,6 +8,17 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.9", date = "2026-11-07",
+    lines = {
+      { k = "h", link = { page = "comfortQoL" }, t = "QoL", fr = "QoL" },
+      { k = "li", lvl = 1, link = { page = "comfortQoL", section = "SETTINGS_COMFORT_SEC_SPELLRANKS" }, t = "Added a new option to show when new spell ranks are available (New spell ranks). Clicking the arrow icon automatically updates the lower rank on your action bars", fr = "Ajout d'une nouvelle option pour indiquer la présence de nouveaux rangs de sorts (Nouveaux rangs de compétence). En cliquant sur l'icône de flèche, le sort mettra à jour automatiquement le rang inférieur de votre barre d'actions" },
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = { page = "wellFed" }, t = "Added an \"Unlock\" button in the Well Fed Circle preview", fr = "Ajout d'un bouton « Déverrouiller » dans l'aperçu du Cercle Bien Nourri" },
+      { k = "li", lvl = 1, link = { page = "wellFed" }, t = "The Well Fed Circle shows a preview when its settings page is open", fr = "Le Cercle Bien Nourri affiche un aperçu quand sa page des réglages est ouverte" },
+      { k = "li", lvl = 1, link = { page = "wellFed" }, t = "FIX: The Well Fed Circle can be moved again", fr = "FIX : Le Cercle Bien Nourri est de nouveau déplaçable" },
+    },
+  },
+  {
     version = "4.6.8", date = "2026-11-06",
     lines = {
       { k = "h", t = "Fixes", fr = "Correctifs" },

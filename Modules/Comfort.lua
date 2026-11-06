@@ -869,6 +869,7 @@ function Comfort.ApplySettings()
   ApplyDoubleClickFish()
   ApplyTurnBox()
   if ns.Modules.MapReveal then ns.Modules.MapReveal.ApplySettings() end
+  if ns.Modules.SpellRanks then ns.Modules.SpellRanks.ApplySettings() end
   ApplyMinimapTracking()
   ApplyCVars()
   ApplySlashes()

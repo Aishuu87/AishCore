@@ -5271,7 +5271,6 @@ function PriorityBar.Test()
     PriorityBar.Reset()
     testMode = false
     StartPolling()
-    lastVisState = nil
     PriorityBar.UpdateVisibility()
     print("|cff00b0ff[PB]|r Test: fin, reprise du polling")
   end)
@@ -5290,7 +5289,6 @@ function PriorityBar.LoadEnhancementPreset()
     ns.DB.priorityBar.slots = slots
   end
   print("|cff00b0ff[PB]|r Enhancement preset loaded!")
-  lastVisState = nil
   if not InCombatLockdown() then
     PriorityBar.UpdateVisibility()
   end

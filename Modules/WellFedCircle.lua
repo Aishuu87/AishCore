@@ -22,6 +22,8 @@ local hiddenForGui = false
 local introT = nil           -- animation d'arrivee (slide depuis le bas + fondu), secondes ecoulees
 local INTRO, INTRO_RISE = 0.85, 22
 local host = nil             -- apercu epingle du GUI qui accueille le cercle (cf. SetHostPreview), sinon nil
+local ghostBuild = false     -- construction / rendu de la copie affichee en jeu pendant l'apercu (cf. CreateGhost)
+local ghost = nil
 local fadeT = nil            -- fondu de sortie en cours (secondes ecoulees)
 local FADE = 0.35
 local VERTICAL_CROP_H = 0.88
@@ -851,9 +853,8 @@ end
 -- ============================================================
 -- Creation / reglages
 -- ============================================================
-function WellFedCircle.ApplySettings()
-  if not bar then return end
-  local cfg = Cfg()
+-- Rendu visuel commun au vrai cercle et a sa copie (taille, arcs, angles)
+local function RenderVisual(cfg)
   local size = cfg.size or 28
   bar:SetSize(size, size)
   bar.bgLarge:SetSize(size * 1.1, size * 1.1)
@@ -868,6 +869,13 @@ function WellFedCircle.ApplySettings()
   if overlayPx >= 2 then bar.overlay:SetSize(overlayPx, overlayPx); bar.overlay:Show() else bar.overlay:Hide() end
   bar.bgGlow:SetSize(size * 1.1 * 0.9, size * 1.1 * 0.9)
   ApplyArcAngles()
+end
+
+function WellFedCircle.ApplySettings()
+  if not bar then return end
+  local cfg = Cfg()
+  local size = cfg.size or 28
+  RenderVisual(cfg)
   ApplyFoodIcon()
   if bar._lastSize ~= size then
     bar._lastSize = size
@@ -878,6 +886,7 @@ function WellFedCircle.ApplySettings()
   bar._bx, bar._by = sw * cfg.anchorPctX + cfg.x, sh * cfg.anchorPctY + cfg.y
   if not introT then Place(0) end
   if state == "eating" then ApplyColor(cfg.eatingColor) elseif state == "fed" or previewState == "fed" then ApplyColor(cfg.fedColor) end
+  if WellFedCircle.RenderGhost then WellFedCircle.RenderGhost() end
   if cfg.enabled == false then
     if state then SetState(nil) end
     bar:Hide()
@@ -894,7 +903,7 @@ end
 function WellFedCircle.Create(parent)
   if bar then return bar end
   local cfg = Cfg()
-  bar = CreateFrame("Frame", "AishCoreWellFedRing", parent or UIParent)
+  bar = CreateFrame("Frame", not ghostBuild and "AishCoreWellFedRing" or nil, parent or UIParent)
   bar:SetFrameStrata("MEDIUM")
   bar:SetSize(cfg.size, cfg.size)
 
@@ -948,6 +957,7 @@ function WellFedCircle.Create(parent)
   ft:AddMaskTexture(fm)
   ff:Hide()
   bar.foodFrame, bar.foodTex = ff, ft
+  if ghostBuild then RenderVisual(cfg); return bar end
 
   bar:SetScript("OnUpdate", OnBarUpdate)
   bar:Hide()
@@ -1063,6 +1073,113 @@ local function SetStrataDeep(f, s)
   f:SetFrameStrata(s)
   for _, c in ipairs({ f:GetChildren() }) do SetStrataDeep(c, s) end
 end
+-- Copie en jeu pendant l'apercu de la page : meme construction que le vrai cercle (permute le temps de la construire),
+-- posee a la position enregistree. Elle recopie a chaque image le remplissage, la couleur, l'icone et l'opacite du
+-- vrai cercle (dans l'apercu epingle), et se deplace a la souris quand la position est deverrouillee.
+local function GhostPos()
+  local cfg = Cfg()
+  return UIParent:GetWidth() * (cfg.anchorPctX or 0.5) + (cfg.x or 0), UIParent:GetHeight() * (cfg.anchorPctY or 0.5) + (cfg.y or 0)
+end
+
+local function GhostMirror(self)
+  if not bar then return end
+  local v = (bar.arcV:IsShown() and bar.arcV or bar.arc):GetValue()
+  local r, g, b, a = bar.arc:GetStatusBarColor()
+  for _, sb in ipairs({ self.arc, self.arc2, self.arcV }) do
+    pcall(sb.SetValue, sb, v)
+    sb:SetStatusBarColor(r, g, b, a)
+  end
+  self.bgGlow:SetVertexColor(r, g, b, 1)
+  local showIcon = bar.foodFrame:IsShown()
+  if showIcon then
+    local px = bar.foodTex:GetWidth()
+    self.foodTex:SetSize(px, px)
+    self.foodTex:SetTexture(bar.foodTex:GetTexture())
+  end
+  self.foodFrame:SetShown(showIcon)
+  self:SetAlpha(bar:IsShown() and math.max(bar:GetAlpha(), 0.35) or 0.35)
+end
+
+local function EnsureGhost()
+  if ghost then return ghost end
+  local real = bar
+  bar, ghostBuild = nil, true
+  local ok, g = pcall(WellFedCircle.Create, UIParent)
+  bar, ghostBuild = real, false
+  if not ok then geterrorhandler()(g); return nil end
+  ghost = g
+  g:SetScript("OnUpdate", GhostMirror)
+  g:SetMovable(true)
+  g:SetClampedToScreen(true)
+  g:RegisterForDrag("LeftButton")
+  local hl = g:CreateTexture(nil, "OVERLAY", nil, 7)
+  hl:SetAllPoints(g); hl:SetColorTexture(1, 1, 1, 0.15); hl:Hide()
+  g._dragBorder = hl
+  g:SetScript("OnDragStart", function(self)
+    if Cfg().locked then return end
+    self._dragging = true
+    self:StartMoving()
+  end)
+  g:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    self._dragging = nil
+    local cx, cy = self:GetCenter()
+    local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
+    local db = ns.DB.wellFedCircle
+    db.anchorPctX, db.anchorPctY, db.x, db.y = cx / sw, cy / sh, 0, 0
+    WellFedCircle.ApplySettings()
+  end)
+  g:SetScript("OnEnter", function(self)
+    self._dragBorder:Show()
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText(L["RESOURCE_DRAG_TOOLTIP"])
+    GameTooltip:Show()
+  end)
+  g:SetScript("OnLeave", function(self) self._dragBorder:Hide(); GameTooltip:Hide() end)
+  g:Hide()
+  return g
+end
+
+-- Reglages courants sur la copie (taille, angles, position, verrou)
+function WellFedCircle.RenderGhost()
+  if not (ghost and host) then return end
+  local cfg = Cfg()
+  if cfg.enabled == false then ghost:Hide(); return end
+  ghost:Show()
+  local real = bar
+  bar, ghostBuild = ghost, true
+  local ok, err = pcall(RenderVisual, cfg)
+  bar, ghostBuild = real, false
+  if not ok then geterrorhandler()(err) end
+  if not ghost._dragging then
+    ghost:ClearAllPoints()
+    ghost:SetPoint("CENTER", UIParent, "BOTTOMLEFT", GhostPos())
+  end
+  local unlocked = not cfg.locked
+  ghost:EnableMouse(unlocked)
+  if not unlocked then ghost._dragBorder:Hide() end
+end
+
+local function ShowGhost(on)
+  if on and Cfg().enabled ~= false then
+    local g = EnsureGhost()
+    if not g then return end
+    g:Show()
+    WellFedCircle.RenderGhost()
+    GhostMirror(g)
+  elseif ghost then
+    ghost._dragging = nil
+    ghost:StopMovingOrSizing()
+    ghost:Hide()
+  end
+end
+
+-- Bouton Deverrouiller / Verrouiller de l'apercu
+function WellFedCircle.SetLocked(lock)
+  ns.DB.wellFedCircle.locked = lock and true or false
+  WellFedCircle.RenderGhost()
+end
+
 function WellFedCircle.SetHostPreview(frame)
   if not bar then return end
   if frame then
@@ -1071,8 +1188,10 @@ function WellFedCircle.SetHostPreview(frame)
     SetStrataDeep(bar, "FULLSCREEN")
     Place(0)
     WellFedCircle.SetPreview(true)
+    ShowGhost(true)
   elseif host then
     host = nil
+    ShowGhost(false)
     SetStrataDeep(bar, "MEDIUM")
     WellFedCircle.ApplySettings()
   end

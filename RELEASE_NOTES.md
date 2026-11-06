@@ -1,5 +1,15 @@
 # AishCore
 
+## [v4.6.9](https://github.com/Aishuu87/AishCore/tree/v4.6.9) (2026-11-07)
+
+### QoL
+- Added a new option to show when new spell ranks are available (New spell ranks). Clicking the arrow icon automatically updates the lower rank on your action bars
+
+### Fixes
+- Added an "Unlock" button in the Well Fed Circle preview
+- The Well Fed Circle shows a preview when its settings page is open
+- FIX: The Well Fed Circle can be moved again
+
 ## [v4.6.8](https://github.com/Aishuu87/AishCore/tree/v4.6.8) (2026-11-06)
 
 ### Fixes

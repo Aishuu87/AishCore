@@ -165,10 +165,13 @@ function MenuBar.EquipmentSets()
   return list
 end
 
--- Equipe le n-ieme ensemble (hors combat : le jeu refuse le changement d'armure en combat)
+-- Ensemble n lance par la macro securisee /equipset (seule voie permise en combat, ou le jeu ne change que
+-- les armes) : en combat, retenu ici et reequipe en entier a la sortie (cf. PLAYER_REGEN_ENABLED plus bas)
 function _G.AishCoreMenuBar_EquipSet(n)
   local set = MenuBar.EquipmentSets()[n]
-  if set and C_EquipmentSet.UseEquipmentSet then C_EquipmentSet.UseEquipmentSet(set.id) end
+  if not set or not InCombatLockdown() then MenuBar._pendingSet = nil; return end
+  MenuBar._pendingSet = set.id
+  if UIErrorsFrame then UIErrorsFrame:AddMessage(string.format(Loc("MENUBAR_EQUIP_QUEUED"), set.name), 1, 0.82, 0) end
 end
 
 -- Fiche de personnage ouverte par la macro (/click CharacterMicroButton, securise : un ToggleCharacter depuis
@@ -278,7 +281,13 @@ MenuBar.ACTIONS = {
       return "/click CharacterMicroButton\n/run AishCoreMenuBar_EquipTab()"
     end,
     mods = function()
-      local function Use(i) return "/run AishCoreMenuBar_EquipSet(" .. i .. ")" end
+      -- /equipset (commande securisee) plutot qu'un /run : un appel d'addon a UseEquipmentSet est bloque en
+      -- combat, meme pour les armes. Macros refaites a EQUIPMENT_SETS_CHANGED (nom ou ordre modifie).
+      local sets = MenuBar.EquipmentSets()
+      local function Use(i)
+        if not sets[i] then return nil end
+        return "/equipset " .. sets[i].name .. "\n/run AishCoreMenuBar_EquipSet(" .. i .. ")"
+      end
       return { ["shift-1"] = Use(1), ["ctrl-1"] = Use(2), ["alt-1"] = Use(3), ["alt-ctrl-1"] = Use(4) }
     end },
   { id = "reload", icon = "INV_Misc_Gear_08", macro = function() return "/reload" end },
@@ -1100,6 +1109,7 @@ local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("BAG_UPDATE_COOLDOWN")
+pcall(ev.RegisterEvent, ev, "EQUIPMENT_SETS_CHANGED")   -- macros /equipset des raccourcis a refaire
 pcall(ev.RegisterEvent, ev, "INPUT_DEVICE_INTERFACE_TRANSITION")   -- bascule manette / clavier : macros a refaire
 ev:SetScript("OnEvent", function(_, event)
   if event == "BAG_UPDATE_COOLDOWN" then
@@ -1107,6 +1117,12 @@ ev:SetScript("OnEvent", function(_, event)
       for _, b in ipairs(S.pool) do if b:IsShown() then MenuBar.UpdateCooldown(b) end end
     end
     return
+  end
+  if event == "PLAYER_REGEN_ENABLED" and MenuBar._pendingSet then
+    local id = MenuBar._pendingSet
+    MenuBar._pendingSet = nil
+    local equipped = select(4, C_EquipmentSet.GetEquipmentSetInfo(id))
+    if not equipped then C_EquipmentSet.UseEquipmentSet(id) end
   end
   if event == "PLAYER_REGEN_ENABLED" and not pendingApply then return end
   MenuBar.ApplySettings()

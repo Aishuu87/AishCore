@@ -71,6 +71,7 @@ SlashCmdList["AISHCORE"] = function(msg)
   msg = strtrim((msg or ""):lower())
   if msg == "mem" then ns.PrintMemoryReport(); return end
   if msg == "rest" then ns.RestAreaDebug(); return end
+  if msg == "ranks" and ns.Modules.SpellRanks then ns.Modules.SpellRanks.Debug(); return end
   if msg == "show bars" or msg == "hide bars" then ns.SwitchBarsProfile(msg == "show bars"); return end
   if msg == "role" then ns.AskRoleProfile(); return end
   if msg == "setup" then SlashCmdList["AISHSETUP"](); return end

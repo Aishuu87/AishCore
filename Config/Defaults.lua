@@ -1119,6 +1119,7 @@ ns.Defaults = {
     hideTotemBar   = false,   -- barre de totems Blizzard masquee
     totemBarHoverOnly = false, -- ... ou affichee seulement au survol
     totemBarHoverAlpha = 0,   -- opacite hors survol
+    spellRanks     = true,    -- grimoire (Forever) : nouveau rang a poser sur les barres (Modules/SpellRanks.lua)
   },
 
   -- Barre de cible détaillée (haut d'écran) + cible de la cible

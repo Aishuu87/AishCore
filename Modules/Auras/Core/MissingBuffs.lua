@@ -1310,7 +1310,7 @@ local function BuildAppearAnimGroup()
 end
 
 --- Clic droit sur l'alerte : la masque tant que la meme alerte (meme signature) revient au rescan ;
---- levee quand elle change, se resout, au prochain ecran de chargement ou changement de zone. Champ du module, pas une
+--- levee quand elle change, se resout, au prochain ecran de chargement, changement de zone ou sortie de combat. Champ du module, pas une
 --- locale (limite des 200 locales du chunk).
 function MissingBuffs.DismissAlert(_, button, down)
     if button ~= "RightButton" or down or not currentSig then return end
@@ -3539,8 +3539,9 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
         AishUILearnDB = AishUILearnDB or { learnedDurations = {}, verbose = false }
         AishUILearnDB.hunterPetDead = true
     end
-    -- Alerte masquee au clic droit : reproposee au chargement et au changement de zone (pas de sous-zone)
-    if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
+    -- Alerte masquee au clic droit : reproposee au chargement, au changement de zone (pas de sous-zone)
+    -- et a la sortie de combat
+    if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_REGEN_ENABLED" then
         MissingBuffs._dismissedSig = nil
     end
     -- Cache des buffs du joueur (cf. PlayerBuffs) ; sortie de combat : des valeurs lues secretes en combat

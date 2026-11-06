@@ -819,6 +819,7 @@ local castingGen       = 0    -- compteur de génération (incrémenté à chaqu
 -- Evoker empower : SUCCEEDED fire au début du cast, le onhit est donc différé à EMPOWER_STOP.
 local empowerSpellID       = nil   -- spellID du sort augmenté en cours
 local empowerPendingOnhit  = nil   -- timer handle pour le onhit différé
+local StopCasting                  -- forward (defini plus bas, local : pas de globale)
 
 --- Joue les animations "casting" d'un combo pendant toute la durée du cast.
 --- isChannel : true si appelé depuis CHANNEL_START (garde les anims en place si WoW re-fire START).
@@ -947,7 +948,7 @@ local function PlayCasting(spellID, castDuration, isChannel)
 end
 
 --- Stoppe les animations de casting en cours.
-function StopCasting()
+StopCasting = function()
   castingSpellID = nil
   if castingTicker then
     if type(castingTicker) == "table" and castingTicker.Cancel then
