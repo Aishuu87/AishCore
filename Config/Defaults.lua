@@ -775,6 +775,7 @@ ns.Defaults = {
   -- Barre de cast joueur
   castBar = {
     enabled       = true,
+    hideBlizzard  = true,    -- masque la barre d'incantation Blizzard du joueur
     locked        = false,
     width         = 260,
     height        = 3,

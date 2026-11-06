@@ -2146,7 +2146,7 @@ function NL.CityLine(c, cities, tw)
     c.city = cb
   end
   local font, size, flags = c.rank:GetFont()
-  cb.text:SetFont(font or "Fonts\\2002.TTF", size or 10, flags or "")
+  cb.text:SetFont(font or ns.FONT_FALLBACK, size or 10, flags or "")
   cb.text:SetTextColor(c.rank:GetTextColor())
   cb.text:SetShadowColor(c.rank:GetShadowColor())
   cb.text:SetShadowOffset(c.rank:GetShadowOffset())

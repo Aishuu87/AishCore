@@ -109,7 +109,7 @@ end
 -- ── Texte des stacks ────────────────────────────────────────────────────────
 -- Point du texte : au-dessus / en dessous de la rangee selon l'ancrage, et cote d'accroche selon l'alignement
 -- (le texte n'a pas de largeur fixe : c'est ce point qui decide de quel cote il s'etend)
-local STACK_FONT = "Fonts\\2002.TTF"
+local STACK_FONT = ns.FONT_FALLBACK
 local STACK_V = { TOPLEFT = "BOTTOM", TOP = "BOTTOM", TOPRIGHT = "BOTTOM",
                   BOTTOMLEFT = "TOP", BOTTOM = "TOP", BOTTOMRIGHT = "TOP" }
 

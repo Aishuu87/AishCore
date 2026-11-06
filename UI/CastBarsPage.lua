@@ -494,6 +494,9 @@ function ns.BuildCastBarsPage(container, W, NewLayout)
   slX = Bind(SL(L["SETTINGS_OFFSET_X"], -1500, 1500, 1, 4), "x", "number")
   slY = Bind(SL(L["SETTINGS_OFFSET_Y"], -1000, 1000, 1, 4), "y", "number")
   Row(4, slW, slH, slX, slY)
+  if isPlayer then
+    Row(4, Bind(CB(L["CASTBARS_HIDE_BLIZZARD"], L["CASTBARS_HIDE_BLIZZARD_TT"], 4, 2), "hideBlizzard", "bool"), false, false)
+  end
 
   -- Remplissage (4 colonnes) -----------------------------------------------------------------------------------------
   ctx:Spacer(6)

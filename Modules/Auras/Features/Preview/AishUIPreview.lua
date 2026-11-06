@@ -2,7 +2,7 @@
 local addonName, _addon = ...; _addon.Auras = _addon.Auras or {}; local ns = _addon.Auras
 local AP = {}; ns.AishUIPreview = AP
 local frames = {}
-local FONT = "Fonts\\FRIZQT__.TTF"
+local FONT = (_addon.Media and _addon.Media.fontGui) or "Fonts\\FRIZQT__.TTF"
 local CIRCLE_TEX = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMaskSmall"
 local GLOW_TEX = "Interface\\AddOns\\AishCore\\Media\\UI\\GlowTex"
 local GLOW_FALLBACK = "Interface\\SpellActivationOverlay\\IconAlert"

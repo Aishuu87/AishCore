@@ -9,7 +9,7 @@ ns.Modules = ns.Modules or {}
 local MenuBar = {}
 ns.Modules.MenuBar = MenuBar
 
-local DEFAULT_FONT = "Fonts\\2002.TTF"
+local DEFAULT_FONT = ns.FONT_FALLBACK
 local HOVER_TIME, SWAP_TIME = 0.12, 0.22
 local HOVER_GROW = 0.12
 local TEX_COORD = { 0.08, 0.92, 0.08, 0.92 }
@@ -210,6 +210,30 @@ MenuBar.ACTIONS = {
 }
 local BY_ID = {}
 for _, a in ipairs(MenuBar.ACTIONS) do BY_ID[a.id] = a end
+
+-- Mode manette : un /run qui ouvre une fenetre Blizzard taint le FrameControlsManager (cf. ns.IsGamepadUI),
+-- alors qu'un /click sur le bouton Blizzard s'execute en securise. On prend le bouton quand il existe.
+local GAMEPAD_CLICK = {
+  talents   = { "PlayerSpellsMicroButton", "TalentMicroButton" },
+  adventure = { "EJMicroButton" },
+  housing   = { "HousingMicroButton" },
+  gamemenu  = { "MainMenuMicroButton" },
+  bags      = { "MainMenuBarBackpackButton" },
+}
+for id, names in pairs(GAMEPAD_CLICK) do
+  local a, orig = BY_ID[id], BY_ID[id] and BY_ID[id].macro
+  if orig then
+    a.macro = function()
+      if ns.IsGamepadUI() then
+        for _, n in ipairs(names) do
+          local m = ClickBtn(n)
+          if m then return m end
+        end
+      end
+      return orig()
+    end
+  end
+end
 
 -- Forever : fonctions qui n'existent pas sur ce client (indisponibles : absentes du menu, grisees si deja posees)
 if ns.IsForever then
@@ -971,6 +995,7 @@ local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("BAG_UPDATE_COOLDOWN")
+pcall(ev.RegisterEvent, ev, "INPUT_DEVICE_INTERFACE_TRANSITION")   -- bascule manette / clavier : macros a refaire
 ev:SetScript("OnEvent", function(_, event)
   if event == "BAG_UPDATE_COOLDOWN" then
     for _, S in ipairs(strips) do

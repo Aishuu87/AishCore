@@ -11,6 +11,14 @@ ns.addonVersion = C_AddOns.GetAddOnMetadata(addonName, "Version") or "?"
 ns.CLIENT    = (select(4, GetBuildInfo()) < 20000) and "forever" or "retail"
 ns.IsForever = ns.CLIENT == "forever"
 
+-- Interface manette active. Dans ce mode, le FrameControlsManager de Blizzard memorise chaque fenetre
+-- ouverte / fermee : si c'est AishCore qui l'ouvre (ShowUIPanel, CloseAllWindows, UIParent:Hide...),
+-- son etat devient tainted et SetPreferredGamepadInteractTarget est bloque au clic suivant dans le monde.
+function ns.IsGamepadUI()
+  local IU = _G.InputUtil
+  return (IU and IU.IsGamepadUIEnabled and IU.IsGamepadUIEnabled()) and true or false
+end
+
 -- Disponibilite des modules selon le client. Cle = id de categorie du GUI ou nom de module
 -- (initiale en minuscule : "Skyriding" -> "skyriding"). Absent de la table = disponible partout.
 -- Un module indisponible ne s'enregistre pas (ns.Modules.X reste nil) et disparait du GUI

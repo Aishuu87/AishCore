@@ -39,7 +39,7 @@ local function Hash(s)
   return string.format("%08x", h)
 end
 
-local FONT = "Fonts\\2002.TTF"
+local FONT = ns.FONT_FALLBACK
 local GOLD = { 0.78, 0.62, 0.30 }
 
 -- Popups au thème du GUI. Strate TOOLTIP : passe au-dessus des popups d'Ellesmere (FULLSCREEN_DIALOG),

@@ -284,6 +284,43 @@ local function CreateMiniThreshold(parent, y, W, t)
     return f
 end
 
+-- Option d'une alerte, en petit sous sa ligne comme les seuils : { cle, libelle } (case cochee = cle vraie)
+local function ToggleOf(entry)
+    if entry.dbKey == "ignoreElixirs" then return { "elixirSingle", L["MISSINGBUFFS_ELIXIR_SINGLE"] } end
+end
+
+local function CreateMiniToggle(parent, y, W, t)
+    local Theme = ns.THEME
+    local f = CreateFrame("Button", nil, parent)
+    f:SetSize(W, MINI_H)
+    f:SetPoint("TOPLEFT", 0, -y)
+    local box = f:CreateTexture(nil, "ARTWORK")
+    box:SetSize(9, 9); box:SetPoint("LEFT", 24, 0)
+    local check = f:CreateTexture(nil, "OVERLAY")
+    check:SetSize(8, 8); check:SetPoint("CENTER", box)
+    check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    local lbl = f:CreateFontString(nil, "OVERLAY")
+    ns.ApplyFont(lbl, ns.Media.font, 9)
+    lbl:SetPoint("LEFT", box, "RIGHT", 5, 0)
+    lbl:SetPoint("RIGHT", -4, 0)
+    lbl:SetJustifyH("LEFT")
+    lbl:SetWordWrap(false)
+    lbl:SetTextColor(unpack(Theme.textDim or Theme.textNormal))
+    lbl:SetText(t[2])
+    local function Refresh()
+        local on = Cfg()[t[1]] and true or false
+        box:SetColorTexture(unpack(on and Theme.checkboxOn or Theme.checkboxOff))
+        check:SetShown(on)
+    end
+    Refresh()
+    f:SetScript("OnClick", function()
+        Cfg()[t[1]] = not Cfg()[t[1]]
+        Refresh()
+        if ns.MissingBuffs then ns.MissingBuffs.RequestCheck() end
+    end)
+    return f
+end
+
 -- Titre de colonne : nom (couleur de classe, ocre pour "General") + filet fin dessous, comme la page Modules
 local function CreateColumnHeader(parent, x, y, W, text, color)
     local Theme = ns.THEME
@@ -335,6 +372,8 @@ local function BuildAlertsSection(c, w)
             cy = cy + ROW_H
             local t = ThresholdOf(entry)
             if t then CreateMiniThreshold(holder, cy - 4, colW, t); cy = cy + MINI_H - 4 end
+            local tg = ToggleOf(entry)
+            if tg then CreateMiniToggle(holder, cy - 4, colW, tg); cy = cy + MINI_H - 4 end
         end
         holder:SetSize(colW, math.max(1, cy))
         lineH = math.max(lineH, HEAD_H + cy)

@@ -1329,7 +1329,10 @@ local function EnsureSlot(i)
     sl:SetScript("OnLeave", function() GameTooltip:Hide() end)
     -- Clic droit : type inconnu (aucune action securisee), l'alerte est masquee dans PostClick
     sl:SetAttribute("type2", "aishdismiss")
-    sl:SetScript("PostClick", MissingBuffs.DismissAlert)
+    sl:SetScript("PostClick", function(s, button, down)
+        MissingBuffs.DismissAlert(s, button, down)
+        MissingBuffs._OnStackClick(s, button)
+    end)
     slots[i] = sl
     return sl
 end
@@ -1396,6 +1399,72 @@ local function ApplySlotAppearance(sl, cfg)
     sl.border:SetShown(cfg.borderEnabled ~= false)
 end
 
+-- Consommable cumulable (elixirs) clique : l'icone se masque aussitot (alpha 0, le bouton securise reste en place)
+-- et une copie non securisee glisse vers le bas en s'effacant. Objet "en attente" 2 s : un rescan avant l'arrivee
+-- du buff (sacs) le garde masque ; passe ce delai sans buff (utilisation ratee), l'icone revient.
+-- Bloc : le chunk est a la limite des 200 locales.
+do
+local pending, ghosts = {}, {}
+MissingBuffs._stackPending = pending
+
+local function Ghost(i)
+    local g = ghosts[i]
+    if g then return g end
+    g = CreateFrame("Frame", nil, frame)
+    g:SetFrameLevel(frame:GetFrameLevel() + 3)
+    g.icon = g:CreateTexture(nil, "ARTWORK")
+    g.icon:SetAllPoints()
+    g.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    g.mask = g:CreateMaskTexture(nil, "OVERLAY")
+    g.mask:SetAllPoints(g.icon)
+    g.mask:SetTexture(NO_MASK_TEXTURE)
+    g.icon:AddMaskTexture(g.mask)
+    g.border = g:CreateTexture(nil, "BACKGROUND")
+    local ag = g:CreateAnimationGroup()
+    g.move = ag:CreateAnimation("Translation")
+    g.move:SetDuration(0.35)
+    g.move:SetSmoothing("IN")
+    local fade = ag:CreateAnimation("Alpha")
+    fade:SetFromAlpha(1)
+    fade:SetToAlpha(0)
+    fade:SetDuration(0.35)
+    fade:SetSmoothing("IN")
+    ag:SetScript("OnFinished", function() g:Hide() end)
+    g.anim = ag
+    ghosts[i] = g
+    return g
+end
+
+function MissingBuffs._OnStackClick(sl, button)
+    local item = sl._stackItem
+    if button ~= "LeftButton" or not item or not Cfg().makeIconClickable then return end
+    if pending[item] and pending[item] > GetTime() then return end   -- appui + relache : un seul passage
+    pending[item] = GetTime() + 2
+    local i = 1
+    for k, s in ipairs(slots) do if s == sl then i = k end end
+    local g = Ghost(i)
+    local cfg = Cfg()
+    ApplySlotAppearance(g, cfg)
+    g.icon:SetTexture(sl.icon:GetTexture())
+    -- Ancre fixe a l'ecran (meme echelle que l'icone) : la rangee peut se recentrer pendant l'animation
+    g:ClearAllPoints()
+    g:SetSize(sl:GetWidth(), sl:GetHeight())
+    g:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", sl:GetLeft() or 0, sl:GetBottom() or 0)
+    g.move:SetOffset(0, -math.floor((cfg.iconSize or ICON_SIZE) * 0.5))
+    g.anim:Stop()
+    g:Show()
+    g.anim:Play()
+    sl:SetAlpha(0)   -- badge de qualite compris (texture du slot)
+    GameTooltip:Hide()
+    C_Timer.After(2.05, function()
+        if pending[item] and pending[item] <= GetTime() then pending[item] = nil end
+        for _, s in ipairs(slots) do
+            if s._stackItem == item and s:IsShown() then s:SetAlpha(1) end
+        end
+    end)
+end
+end
+
 --- Dispose n icones cote a cote, centrees sur `frame` (la 2e de 3 reste a la position d'une icone
 --- seule), legerement espacees pour eviter les faux clics. Hors combat uniquement (frames securises).
 local function LayoutSlots(n)
@@ -1435,7 +1504,7 @@ function MissingBuffs.RefreshAppearance()
     ns.ApplyTextOutlineStyle(textFS, slugFS, cfg.textFont or ns.Media.font, cfg.textSize or 12, cfg.textOutlineStyle)
     textFS:SetTextColor(unpack(cfg.textColor or { 1, 0.9, 0.3 }))
     if MissingBuffs._hintFS then
-        ns.ApplyFont(MissingBuffs._hintFS, "Fonts\\2002.TTF", math.max(8, math.floor((cfg.textSize or 12) * 0.75)), "OUTLINE")
+        ns.ApplyFont(MissingBuffs._hintFS, _addon.FONT_FALLBACK, math.max(8, math.floor((cfg.textSize or 12) * 0.75)), "OUTLINE")
     end
     -- Texte deja affiche : le client ne redessine pas les glyphes a la nouvelle police / taille tant que le texte ne
     -- change pas (seul un /reload le montrait). Reposer le texte force ce rendu (l'anneau SLUG suit, cf. CreateSlugRing).
@@ -1524,7 +1593,7 @@ local function EnsureFrame()
     hintHolder:SetAllPoints(frame)
     hintHolder:SetFrameLevel(frame:GetFrameLevel() + 10)
     local hint = hintHolder:CreateFontString(nil, "OVERLAY")
-    ns.ApplyFont(hint, "Fonts\\2002.TTF", 9, "OUTLINE")   -- police avant SetText (taille reelle : RefreshAppearance)
+    ns.ApplyFont(hint, _addon.FONT_FALLBACK, 9, "OUTLINE")   -- police avant SetText (taille reelle : RefreshAppearance)
     hint:SetPoint("TOP", textFS, "BOTTOM", 0, -2)
     hint:SetTextColor(0.8, 0.8, 0.8)
     hint:SetText(_addon.L["MISSINGBUFFS_DISMISS_HINT"])
@@ -1771,6 +1840,10 @@ function MissingBuffs.ShowAlertChoices(choices, text)
         end
         sl.icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
         sl._spellId = c.spellId
+        -- Consommable cumulable deja clique (buff pas encore arrive) : reste masque, cf. _OnStackClick
+        sl._stackItem = c.stackHide and c.item or nil
+        local pend = sl._stackItem and MissingBuffs._stackPending[sl._stackItem]
+        sl:SetAlpha((pend and pend > GetTime()) and 0 or 1)
         ApplySlotAppearance(sl, cfg)
         SetQualityBadge(sl, sl, sl.icon, c.item, cfg.iconSize or ICON_SIZE)
         -- Attributs securises (type/spell/macrotext) : hors combat seulement, garanti plus haut.
@@ -2676,12 +2749,36 @@ local function FlaskChoices()
     return ConsumableChoices(items, ns.MISSING_FLASK_KEY)
 end
 
+-- Elixirs cumulables : une icone par elixir dont le buff manque encore (sort d'utilisation ou nom du sort parmi
+-- les buffs). Liste vide si tous sont actifs ; champ anyActive = au moins un elixir actif (option "Un seul
+-- elixir suffit", lue hors memo). Le clic masque l'icone tout de suite (stackHide, cf. ShowAlertChoices).
 local function ElixirChoices()
     local items, spellIDs = BagConsumables(ELIXIR_SUB)
-    if #items == 0 or ConsumableBuffActive(spellIDs, ELIXIR_WORDS) then return nil end
+    if #items == 0 then return nil end
     local _, flaskIDs = BagConsumables(FLASK_SUB)
     if ConsumableBuffActive(flaskIDs, FLASK_WORDS) then return nil end
-    return ConsumableChoices(items, ns.MISSING_ELIXIR_KEY)
+    local n = PlayerBuffs()
+    table.sort(items, function(a, b) return a > b end)
+    local out = { anyActive = ConsumableBuffActive({}, ELIXIR_WORDS) }
+    for _, id in ipairs(items) do
+        local okS, sname, sid = pcall(C_Item.GetItemSpell, id)
+        local active = false
+        if okS then
+            for i = 1, n do
+                local bs, bn = bSid[i], bName[i]
+                if (not IsSecret(bs) and sid and bs == sid) or (not IsSecret(bn) and sname and bn == sname) then
+                    active = true; break
+                end
+            end
+        end
+        if active then
+            out.anyActive = true
+        elseif #out < 4 then
+            out[#out + 1] = { key = (#out == 0) and ns.MISSING_ELIXIR_KEY or nil, icon = C_Item.GetItemIconByID(id),
+                              item = id, macro = "/use item:" .. id, stackHide = true }
+        end
+    end
+    return out
 end
 
 -- Points de talents a depenser : arbre de traits (Retail et Forever), sinon API des anciens clients
@@ -3163,7 +3260,9 @@ function MissingBuffs.CheckForMissings()
     -- 7b) Consommables : elixir (sans flacon actif)
     if not cfg.ignoreElixirs and not ConsumablesBlocked(true) then
         local choices = ElixirChoices()
-        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_ELIXIR); return end
+        if choices and #choices > 0 and not (cfg.elixirSingle and choices.anyActive) then
+            MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_ELIXIR); return
+        end
     end
 
     Probe("8")
@@ -3181,7 +3280,9 @@ function MissingBuffs.CheckForMissings()
             MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_BAGS_KEY, icon = "Interface\\Icons\\INV_Misc_Bag_08",
                 -- ToggleAllBags (et non OpenAllBags) : Baganator / EllesmereUIBags le remplacent par leur fenetre, alors que
                 -- Baganator ignore volontairement OpenAllBags (reserve a l'ouverture automatique : marchand...)
-                macro = "/run ToggleAllBags()" } }, string.format("%s (%d)", ns.MISSING_TEXT.BAGS_FULL or "", free))
+                -- Mode manette : /click (securise) sinon le /run taint le FrameControlsManager (cf. ns.IsGamepadUI)
+                macro = (ns.IsGamepadUI() and _G.MainMenuBarBackpackButton) and "/click MainMenuBarBackpackButton"
+                    or "/run ToggleAllBags()" } }, string.format("%s (%d)", ns.MISSING_TEXT.BAGS_FULL or "", free))
             return
         end
     end

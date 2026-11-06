@@ -662,6 +662,17 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
       OCRC.OnResourceChanged()
       OCRC.DetectSecondaryDots()
     end
+    -- Druide : l'etat de forme / de puissance n'est pas toujours a jour au moment de l'event (en combat
+    -- surtout) ; on revérifie juste apres. OnResourceChanged ne fait rien si la ressource n'a pas change.
+    if event ~= "PLAYER_SPECIALIZATION_CHANGED" and ns._playerClass == "DRUID" then
+      C_Timer.After(0.1, function()
+        if RC and RC.OnResourceChanged() then
+          RC.DetectSecondaryDots()
+          if RC.DetectSecondaryResource then RC.DetectSecondaryResource() end
+        end
+        if OCRC and OCRC.OnResourceChanged() then OCRC.DetectSecondaryDots() end
+      end)
+    end
 
   elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_TARGET_CHANGED" then
     if RC   then RC.UpdateVisibility()   end

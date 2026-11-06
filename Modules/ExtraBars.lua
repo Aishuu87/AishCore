@@ -17,7 +17,7 @@ ns.Modules.ExtraBars = ExtraBars
 
 local NUM_BARS, MAX_BUTTONS, NUM_BINDINGS = 5, 24, 12
 local PLACEHOLDER_ICON = 134400 -- point d'interrogation
-local DEFAULT_FONT = "Fonts\\2002.TTF"
+local DEFAULT_FONT = ns.FONT_FALLBACK
 ExtraBars.NUM_BARS = NUM_BARS
 
 -- Tags -------------------------------------------------------------------------------------------

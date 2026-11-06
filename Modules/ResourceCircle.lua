@@ -2833,7 +2833,8 @@ function ResourceCircle.DetectSecondaryDots()
     newCount = (maxCP and maxCP > 0) and maxCP or 5
   elseif playerClass == "DRUID" then
     local formID = GetShapeshiftFormID()
-    if formID == DRUID_CAT_FORM then
+    -- Forever : les ID de forme ne correspondent pas a DRUID_CAT_FORM, le felin se reconnait a l'energie
+    if formID == DRUID_CAT_FORM or (ns.IsForever and ns.GetPlayerResource() == Enum.PowerType.Energy) then
       newType = "COMBO_DRUID"
       local maxCP = UnitPowerMax("player", Enum.PowerType.ComboPoints)
       newCount = (maxCP and maxCP > 0) and maxCP or 5

@@ -11,7 +11,7 @@ ns.Modules = ns.Modules or {}
 local AC = {}
 ns.Modules.AddonCompartment = AC
 
-local DEFAULT_FONT = "Fonts\\2002.TTF"
+local DEFAULT_FONT = ns.FONT_FALLBACK
 local MEDIA = "Interface\\AddOns\\AishCore\\Media\\"
 local SELF_BUTTON = "AishCoreMinimapButton"
 local SELF_ICON = MEDIA .. "logo_icon.tga"

@@ -10,7 +10,7 @@ ns.Modules.Location = Location
 local DEFAULTS = {
     point = "TOP", relativePoint = "TOP", x = 0, y = -12,
     width = 240, fontSize = 14, align = "CENTER",
-    font = "Fonts\\2002.TTF",
+    font = ns.FONT_FALLBACK,
 }
 
 -- Couleurs de statut PvP (memes valeurs que LocationPlus, pour retrouver le meme rendu)

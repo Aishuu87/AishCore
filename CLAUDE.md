@@ -118,6 +118,6 @@ Différences de client dans le code, jamais par fichiers séparés (cf. `docs/PL
 
 ## Polices
 
-Tout **nouveau champ texte** ajouté doit utiliser la police **2002** par défaut.
+Tout **nouveau champ texte** ajouté doit utiliser la police **2002** par défaut, via `ns.FONT_FALLBACK` (jamais `"Fonts\\2002.TTF"` en dur) : sur un client zhCN elle vaut `ARKai_T.ttf`, 2002 n'ayant pas les glyphes chinois (carrés à la place du texte).
 
 Raison : garantir que les nouveaux profils ne dépendent pas d'une police absente chez l'utilisateur (2002 est embarquée dans le client WoW).

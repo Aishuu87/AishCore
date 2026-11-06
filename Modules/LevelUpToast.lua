@@ -59,7 +59,7 @@ LUT.DEFAULTS = {
   toastFontScale = 1, toastBgScale = 1, toastBgAlpha = 0.85, toastTitleColor = { 1, 0.82, 0.10, 1 },
   toastX = 0, toastY = 220,
   -- Polices du niveau, des stats et des competences (2002 : embarquee dans le client)
-  toastTitleFont = "Fonts\\2002.TTF", toastStatsFont = "Fonts\\2002.TTF", toastSpellFont = "Fonts\\2002.TTF",
+  toastTitleFont = ns.FONT_FALLBACK, toastStatsFont = ns.FONT_FALLBACK, toastSpellFont = ns.FONT_FALLBACK,
   toastSpellScale = 1,   -- GUI seulement : le module lit le reglage brut (absent = taille des stats)
 }
 local function V(k)

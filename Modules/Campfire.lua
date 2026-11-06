@@ -171,7 +171,7 @@ end
 -- ── HUD ─────────────────────────────────────────────────────────────────────
 
 local hud, hint
-local LABEL_FONT = "Fonts\\2002.TTF"
+local LABEL_FONT = ns.FONT_FALLBACK
 local MEDIA_UI   = "Interface\\AddOns\\AishCore\\Media\\UI\\"
 local FRAME_TEX  = MEDIA_UI .. "camp_hud_frame.png"
 local GRUNGE     = { MEDIA_UI .. "frame_jailer1.png", MEDIA_UI .. "frame_jailer2.png", MEDIA_UI .. "frame_jailer3.png" }

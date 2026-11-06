@@ -1053,7 +1053,47 @@ function CastBar.SetDragUnlocked(val)
 end
 
 -- ApplySettings : remet à jour dimensions/position/couleurs
+-- Barre d'incantation Blizzard du joueur (Retail : PlayerCastingBarFrame ; Forever : CastingBarFrame).
+-- SetUnit(nil) lui retire ses events, elle ne se reaffiche plus (meme methode qu'ElvUI). On ne la rend
+-- que si c'est nous qui l'avons coupee, pour ne pas reactiver celle qu'un autre addon a masquee.
+local blizzHidden = false
+local function BlizzCastBar() return _G.PlayerCastingBarFrame or _G.CastingBarFrame end
+local function SetBlizzUnit(f, unit)
+    if f.SetUnit then
+        pcall(f.SetUnit, f, unit, unit and true or nil, unit and false or nil)
+    elseif _G.CastingBarFrame_SetUnit then
+        pcall(_G.CastingBarFrame_SetUnit, f, unit, unit and true or nil, unit and false or nil)
+    elseif not unit then
+        f:UnregisterAllEvents()
+    end
+end
+function CastBar.UpdateBlizzardBar()
+    local f = BlizzCastBar()
+    if not f then return end
+    local cfg = Cfg()
+    local hide = cfg.enabled ~= false and cfg.hideBlizzard ~= false
+    if hide and not f._aishHideHook then
+        -- Filet : si Blizzard lui rend une unite (vehicule...), elle se recache ; mode Edition laisse libre
+        f._aishHideHook = true
+        f:HookScript("OnShow", function(self)
+            if not blizzHidden then return end
+            local em = _G.EditModeManagerFrame
+            if em and em.IsEditModeActive and em:IsEditModeActive() then return end
+            self:Hide()
+        end)
+    end
+    if hide and not blizzHidden then
+        SetBlizzUnit(f, nil)
+        f:Hide()
+        blizzHidden = true
+    elseif not hide and blizzHidden then
+        SetBlizzUnit(f, "player")
+        blizzHidden = false
+    end
+end
+
 function CastBar.ApplySettings()
+    pcall(CastBar.UpdateBlizzardBar)
     if not frame then return end
     ApplySpark()
 

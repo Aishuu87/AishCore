@@ -1,5 +1,19 @@
 # AishCore
 
+## [v4.6.5](https://github.com/Aishuu87/AishCore/tree/v4.6.5) (2026-11-06)
+
+### Cast Bars
+- Added a "Hide Blizzard cast bar" option (player bar, on by default)
+
+### Missing buffs
+- Added a "One elixir is enough" option
+
+### Fixes
+- Gamepad: fixed the blocked action error (SetPreferredGamepadInteractTarget) that forced reloads
+- Simplified Chinese: the AishUI setup window and several texts showed squares instead of characters
+- [Forever] Resource Circle: shapeshifting in combat now updates the resource (rage / energy / mana)
+- [Forever] Resource Circle: Cat Form now shows combo points
+
 ## [v4.6.4](https://github.com/Aishuu87/AishCore/tree/v4.6.4) (2026-11-05)
 
 ### Resource Circle

@@ -8,6 +8,20 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.5", date = "2026-11-06",
+    lines = {
+      { k = "h", link = { page = "castBars" }, t = "Cast Bars", fr = "Barres d'incantation" },
+      { k = "li", lvl = 1, link = { page = "castBars" }, t = "Added a \"Hide Blizzard cast bar\" option (player bar, on by default)", fr = "Ajout d'une option « Masquer la barre d'incantation Blizzard » (barre du joueur, activée par défaut)" },
+      { k = "h", link = { page = "aurasMissingBuffs" }, t = "Missing buffs", fr = "Buffs Manquants" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "Added a \"One elixir is enough\" option", fr = "Ajout d'une option « Un seul élixir suffit »" },
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = false, t = "Gamepad: fixed the blocked action error (SetPreferredGamepadInteractTarget) that forced reloads", fr = "Manette : correction de l'erreur d'action bloquée (SetPreferredGamepadInteractTarget) qui obligeait à recharger" },
+      { k = "li", lvl = 1, link = false, t = "Simplified Chinese: the AishUI setup window and several texts showed squares instead of characters", fr = "Chinois simplifié : la fenêtre de configuration AishUI et plusieurs textes affichaient des carrés au lieu des caractères" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] Resource Circle: shapeshifting in combat now updates the resource (rage / energy / mana)", fr = "[Forever] Cercle de ressource : changer de forme en combat met maintenant à jour la ressource (rage / énergie / mana)" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] Resource Circle: Cat Form now shows combo points", fr = "[Forever] Cercle de ressource : la forme de félin affiche maintenant les points de combo" },
+    },
+  },
+  {
     version = "4.6.4", date = "2026-11-05",
     lines = {
       { k = "h", link = { page = "resourceCircle" }, t = "Resource Circle", fr = "Cercle de ressource" },

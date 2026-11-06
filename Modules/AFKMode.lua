@@ -542,8 +542,11 @@ function AFKMode:SetAFKState(status)
     if AFKMode.isAFK then return end
 
     -- pcall : evite qu'une erreur laisse UIParent masque en permanence
+    -- Mode manette : ni CloseAllWindows ni UIParent:Hide/Show (taint du FrameControlsManager, cf.
+    -- ns.IsGamepadUI) ; UIParent est seulement rendu transparent, ce qui ne declenche aucun OnHide.
+    AFKMode._alphaHide = ns.IsGamepadUI and ns.IsGamepadUI() or false
     local ok, err = pcall(function()
-      CloseAllWindows()
+      if not AFKMode._alphaHide then CloseAllWindows() end
       if cfg.cameraSpin then MoveViewLeftStart(0.035) end
 
       RefreshTextStrings()
@@ -568,20 +571,20 @@ function AFKMode:SetAFKState(status)
       elapsedSeconds, timerElapsed, tipsElapsed = 0, 0, 0
       frame:SetFrameStrata("FULLSCREEN_DIALOG") -- au cas ou un apercu GUI (strata HIGH) etait actif
       frame:Show()
-      UIParent:Hide()
+      if AFKMode._alphaHide then UIParent:SetAlpha(0) else UIParent:Hide() end
       PlayPanelAnimations()
     end)
 
     if not ok then
       print("|cffff4444[AishCore AFKMode]|r Erreur a l'activation : " .. tostring(err))
-      UIParent:Show()
+      if AFKMode._alphaHide then UIParent:SetAlpha(1) else UIParent:Show() end
       frame:Hide()
       return
     end
 
     AFKMode.isAFK = true
   elseif AFKMode.isAFK then
-    UIParent:Show()
+    if AFKMode._alphaHide then UIParent:SetAlpha(1) else UIParent:Show() end
     if cfg.cameraSpin then MoveViewLeftStop() end
 
     chatFrame:UnregisterAllEvents()
