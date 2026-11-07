@@ -57,6 +57,11 @@ end
 
 MN._dbg = { probes = 0, withData = 0, names = {}, found = 0, scans = 0, sample = {} }
 
+-- MN._dead : le client ignore le point sonde, aucun balayage possible. Il reste l'icone dans l'infobulle de la
+-- minimap (cf. DecorateTooltip). Forever (1.60.1) l'est d'emblee : aucune API ne le dit avant que la vraie souris
+-- passe sur la minimap, et d'ici la chaque balayage (~300 infobulles) ne produirait que du garbage.
+if ns.IsForever then MN._dead = true end
+
 local function IsSecret(v)
   return issecretvalue and issecretvalue(v)
 end
@@ -68,7 +73,6 @@ function MN.Missing()
   if Minimap.UpdateMouseoverAtPoint == nil then missing[#missing + 1] = "Minimap:UpdateMouseoverAtPoint" end
   if Minimap.SetUsingSoftCursor == nil then missing[#missing + 1] = "Minimap:SetUsingSoftCursor" end
   if C_TooltipInfo == nil or C_TooltipInfo.GetMinimapMouseover == nil then missing[#missing + 1] = "C_TooltipInfo.GetMinimapMouseover" end
-  if MN._dead then missing[#missing + 1] = "Minimap:UpdateMouseoverAtPoint (sans effet)" end
   return missing
 end
 
@@ -663,7 +667,7 @@ end
 
 function MN.ApplySettings()
   local cfg = Cfg()
-  if cfg.enabled == true and MN.Available() then
+  if cfg.enabled == true and MN.Available() and not MN._dead then
     for _, f in ipairs(pool) do f._styled = nil end
     if Minimap.SetIconScale then Minimap:SetIconScale((cfg.dotScale or 100) / 100) end
     lastKey = nil
@@ -675,6 +679,7 @@ function MN.ApplySettings()
     HideFrom(1)
     if Minimap and Minimap.SetIconScale then Minimap:SetIconScale(1) end
   end
+  if MN._preview then MN._preview() end
 end
 
 local ev = CreateFrame("Frame")
@@ -691,9 +696,87 @@ ev:SetScript("OnEvent", function(_, event)
   else
     nextScan, scanForce = 0, true   -- pistage ou zoom change : balayer tout de suite
     lastKey = nil
-    if event == "MINIMAP_UPDATE_TRACKING" and Cfg().enabled == true and MN.Available() then UpdateDriver() end
+    if event == "MINIMAP_UPDATE_TRACKING" and Cfg().enabled == true and MN.Available() and not MN._dead then UpdateDriver() end
   end
 end)
+
+-- Icone dans l'infobulle de la minimap ------------------------------------------------------------------------
+-- Devant chaque nom de plante / filon reconnu, son icone. Seul affichage du module quand le balayage est impossible
+-- (MN._dead) ; en plus des icones sur la minimap sinon.
+-- Ligne d'infobulle avec l'icone, selon les reglages (aussi utilisee par l'apercu du GUI)
+function MN.TipLine(text, icon)
+  local cfg = Cfg()
+  local size = cfg.tipSize or 0
+  local tex = "|T" .. icon .. ":" .. size .. ":" .. size
+  -- Rognee : texels 5 a 59 d'une icone de 64 (sans sa bordure)
+  if cfg.tipCrop ~= false then tex = tex .. ":0:0:64:64:5:59:5:59" end
+  tex = tex .. "|t"
+  if cfg.tipPos == "after" then return text .. " " .. tex end
+  return tex .. " " .. text
+end
+
+-- Exemples pour l'apercu : { nom localise, icone } de deux plantes
+function MN.PreviewSamples()
+  local out = {}
+  for _, id in ipairs({ 785, 765 }) do
+    local name = ItemName(id)
+    if not name and C_Item and C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(id) end
+    out[#out + 1] = { name or "...", ItemIcon(id) }
+  end
+  return out
+end
+
+local decorated = setmetatable({}, { __mode = "k" })   -- ligne d'infobulle -> texte qu'on y a pose
+local relayout = false
+local function DecorateTooltip(tt)
+  if relayout or tt ~= GameTooltip or Cfg().enabled ~= true or not Minimap:IsMouseOver() then return end
+  local base = tt:GetName()
+  if not base then return end
+  if indexMissing then BuildIndex() end
+  local _, _, _, finderKind = Trackers()
+  local changed = false
+  for i = 1, tt:NumLines() do
+    local fs = _G[base .. "TextLeft" .. i]
+    local text = fs and fs:GetText()
+    if text and not IsSecret(text) and decorated[fs] ~= text then
+      local out, any = {}, false
+      for piece in (text .. "\n"):gmatch("(.-)\n") do
+        local c = Clean(piece)
+        local icon
+        -- Objectifs de quete ("- Fleur de serpent : 0/10") : pas des noms de points
+        if c ~= "" and not c:find("^[%-%d]") and not c:find(":") then
+          local _
+          _, icon = Resolve(c, nil, finderKind)
+        end
+        if icon then
+          out[#out + 1] = MN.TipLine(piece, icon)
+          any = true
+        else
+          out[#out + 1] = piece
+        end
+      end
+      if any then
+        local new = table.concat(out, "\n")
+        fs:SetText(new)
+        decorated[fs] = new
+        changed = true
+      end
+    end
+  end
+  -- Largeur recalculee pour l'icone ajoutee
+  if changed and tt:IsShown() then
+    relayout = true
+    tt:Show()
+    relayout = false
+  end
+end
+
+hooksecurefunc(GameTooltip, "Show", DecorateTooltip)
+hooksecurefunc(GameTooltip, "SetText", DecorateTooltip)
+if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum.TooltipDataType
+  and Enum.TooltipDataType.MinimapMouseover then
+  TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.MinimapMouseover, DecorateTooltip)
+end
 
 -- /aishnodes test : quelle convention de coordonnees Minimap:UpdateMouseoverAtPoint suit sur ce client (souris hors de
 -- la minimap). Pour chaque mode : points qui repondent / points sondes, et les noms lus.

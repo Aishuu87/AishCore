@@ -1,5 +1,19 @@
 # AishCore
 
+## [v4.6.11](https://github.com/Aishuu87/AishCore/tree/v4.6.11) (2026-11-07)
+
+### QoL
+- Blizzard no longer allows placing resource icons on the minimap. To make up for it, the icons are still shown, but you now have to hover the gold dots on the minimap yourself
+- Replacing the old feature that showed the icons on the gold dots, the icons now appear in the tooltips
+- The Blizzard raid manager panel can now be hidden (still available on hover). (Extras > QoL > Interface)
+
+### EllesmereUI Action Bars
+- Bars 4, 5 and 9 can now behave like bars 1, 2 and 3 in "Show Bars" profiles. (Extras > Integration > EllesmereUI Action Bars)
+- The pet bar can now behave like bars 1, 2 and 3 in "Show Bars" profiles. (Extras > Integration > EllesmereUI Action Bars)
+
+### Fixes
+- FIX: Errors when entering dungeons (some of them at least)
+
 ## [v4.6.10](https://github.com/Aishuu87/AishCore/tree/v4.6.10) (2026-11-07)
 
 ### Camping HUD

@@ -86,6 +86,7 @@ ns.GUI_LAYOUT = {
       { [1] = "comfort.merchantExtend", [3] = "comfort.merchantPages" },
       { [1] = "comfort.horizonOffWithRXP" },
       { [1] = "comfort.hideErrors" },
+      { [1] = "comfort.raidManagerHover", [3] = "comfort.raidManagerAlpha" },
       { [1] = "comfort.spellIDTooltip", [3] = "comfort.spellIDModifier" },
     } },
     ["SETTINGS_COMFORT_SEC_SHORTCUTS"] = { cols = 5, rows = {
@@ -252,7 +253,7 @@ ns.GUI_LAYOUT = {
   movementBuffs = {
     ["SETTINGS_MVB_SEC_STACKS"] = { cols = 5, rows = {
       { [1] = "movementBuffs.stackFont", [2] = "movementBuffs.stackSize", [3] = "movementBuffs.stackColor", [4] = "movementBuffs.stackOutline" },
-      { [1] = "movementBuffs.stackAnchor", [2] = "movementBuffs.stackJustify", [3] = "movementBuffs.stackX", [4] = "movementBuffs.stackY" },
+      { [1] = "movementBuffs.stackAnchor", [2] = "movementBuffs.stackX", [3] = "movementBuffs.stackY" },
     } },
   },
   castBars = {
@@ -488,8 +489,8 @@ ns.GUI_LAYOUT = {
       { [2] = "visibility.elvuiBuffsOocAlpha", [3] = "visibility.elvuiBuffsCombatAlpha", [4] = "visibility.elvuiBuffsHoverReveal" },
     } },
     ["SETTINGS_SEC_VIS_EUI_BARS"] = { cols = 5, rows = {
-      { [1] = "visibility.euiBarsEnabled" },
-      { [1] = "visibility.euiBarsAlpha" },
+      { [1] = "visibility.euiBarsEnabled", [2] = "visibility.euiBars459Enabled", [3] = "visibility.euiPetBarEnabled" },
+      { [1] = "visibility.euiBarsAlpha", [2] = "visibility.euiBars459Alpha", [3] = "visibility.euiPetBarAlpha" },
     } },
   },
   addonCompartment = {

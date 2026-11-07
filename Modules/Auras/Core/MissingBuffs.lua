@@ -1575,7 +1575,14 @@ local function EnsureFrame()
     -- Le frame EST le bouton securise (SecureActionButtonTemplate) : drag et clic doivent vivre
     -- sur le MEME frame (un frame de drag separe par-dessus se bat pour le hit-test au clic --
     -- cf. PriorityBar.lua:CreateSlotFrame, seul pattern drag+clic confirme fonctionnel ici).
-    frame = CreateFrame("Button", "AishCoreMissingBuffFrame", UIParent, "SecureActionButtonTemplate")
+    -- Parent masque en combat par le client lui-meme (pilote d'etat securise) : en combat, l'alerte ne peut ni
+    -- s'afficher (ShowAlert) ni se cacher (Hide protege) -- disparue en fondu, elle restait invisible mais
+    -- cliquable (relancait le sort, bloquait les clics sur les cadres de groupe dessous). Meme rectangle et
+    -- meme echelle que UIParent : positions inchangees.
+    local gate = CreateFrame("Frame", "AishCoreMissingBuffGate", UIParent, "SecureHandlerStateTemplate")
+    gate:SetAllPoints(UIParent)
+    RegisterStateDriver(gate, "visibility", "[combat] hide; show")
+    frame = CreateFrame("Button", "AishCoreMissingBuffFrame", gate, "SecureActionButtonTemplate")
     frame:SetSize(ICON_SIZE, ICON_SIZE + 20)
     frame:SetFrameStrata("HIGH")
     frame:SetMovable(true)

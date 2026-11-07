@@ -599,10 +599,14 @@ local function ApplyHideErrors()
   if want then f:UnregisterEvent("UI_ERROR_MESSAGE") else f:RegisterEvent("UI_ERROR_MESSAGE") end
 end
 
--- Barre de totems Blizzard (MultiCastActionBarFrame, Forever seulement) : boutons securises, donc pas de SetParent en combat (repris a la
--- sortie). Reparentee vers un frame masque, Blizzard peut continuer a faire ses Show() sans la reafficher.
+-- Barre de totems Blizzard (MultiCastActionBarFrame, Forever seulement) : boutons securises, donc pas de SetParent en combat
+-- (repris a la sortie). Jamais de SetAlpha / Show / Hide sur la barre elle-meme : le client marque alors ses boutons
+-- (ForceTaint_Strong) et leurs temps de recharge (valeurs secretes) levent des erreurs. On change seulement son parent :
+-- - masquee : un cadre cache, Blizzard peut continuer a faire ses Show() sans la reafficher ;
+-- - mode survol : un cadre d'AishCore pose sur le parent d'origine (meme rectangle, meme echelle), dont on regle l'opacite.
 local totemHider = CreateFrame("Frame")
 totemHider:Hide()
+local totemFader
 local totemOrigParent, totemPending = nil, false
 local function ApplyTotemBar()
   if not ns.IsForever then return end
@@ -610,29 +614,34 @@ local function ApplyTotemBar()
   if not bar then return end
   if InCombatLockdown() then totemPending = true; return end
   totemPending = false
-  if Cfg().hideTotemBar then
-    if bar:GetParent() ~= totemHider then
-      totemOrigParent = bar:GetParent()
-      bar:SetParent(totemHider)
+  local cfg = Cfg()
+  if not totemOrigParent then totemOrigParent = bar:GetParent() end
+  local want = totemOrigParent
+  if cfg.hideTotemBar then
+    want = totemHider
+  elseif cfg.totemBarHoverOnly and totemOrigParent then
+    if not totemFader then
+      totemFader = CreateFrame("Frame", nil, totemOrigParent)
+      totemFader:SetAllPoints(totemOrigParent)
     end
-  elseif totemOrigParent then
-    bar:SetParent(totemOrigParent)
-    totemOrigParent = nil
+    want = totemFader
   end
+  if want and bar:GetParent() ~= want then bar:SetParent(want) end
+  if want ~= totemFader and totemFader then totemFader:SetAlpha(1) end
 end
 
--- Mode survol : SetAlpha n'est pas bloque en combat. Le menu de totems (MultiCastFlyoutFrame) garde la barre visible.
+-- Mode survol : opacite du cadre parent (pas de la barre). Le menu de totems (MultiCastFlyoutFrame) garde la barre visible.
 local TOTEM_FADE_SPEED, TOTEM_TICK = 8, 0.02
 local totemAlpha       -- opacite courante, nil tant que le mode survol ne pilote pas la barre
 local totemAcc = 0
 local totemTicker = ns.IsForever and CreateFrame("Frame")
 if totemTicker then totemTicker:SetScript("OnUpdate", function(_, elapsed)
   local bar = _G.MultiCastActionBarFrame
-  if not bar then return end
+  if not bar or not totemFader then return end
   local cfg = Cfg()
-  if not cfg.totemBarHoverOnly or cfg.hideTotemBar then
+  if not cfg.totemBarHoverOnly or cfg.hideTotemBar or bar:GetParent() ~= totemFader then
     if totemAlpha then
-      bar:SetAlpha(1)
+      totemFader:SetAlpha(1)
       totemAlpha = nil
     end
     return
@@ -650,10 +659,45 @@ if totemTicker then totemTicker:SetScript("OnUpdate", function(_, elapsed)
     cur = target
   end
   if cur ~= totemAlpha then
-    bar:SetAlpha(cur)
+    totemFader:SetAlpha(cur)
     totemAlpha = cur
   end
 end) end
+
+-- Panneau de gestion du raid Blizzard (CompactRaidFrameManager, bord gauche de l'ecran) : attenue a raidManagerAlpha,
+-- opacite pleine au survol (deplie compris : le cadre s'agrandit avec son contenu). SetAlpha n'est pas bloque en combat.
+local RM_FADE_SPEED, RM_TICK = 8, 0.02
+local rmAlpha          -- opacite courante, nil tant que l'option ne pilote pas le panneau
+local rmAcc = 0
+local rmTicker = CreateFrame("Frame")
+rmTicker:SetScript("OnUpdate", function(_, elapsed)
+  local f = _G.CompactRaidFrameManager
+  if not f then return end
+  local cfg = Cfg()
+  if not cfg.raidManagerHover then
+    if rmAlpha then
+      f:SetAlpha(1)
+      rmAlpha = nil
+    end
+    return
+  end
+  rmAcc = rmAcc + elapsed
+  if rmAcc < RM_TICK then return end
+  local dt = rmAcc
+  rmAcc = 0
+  local ok, over = pcall(f.IsMouseOver, f)
+  local target = (ok and over == true) and 1 or (cfg.raidManagerAlpha or 0)
+  local cur = rmAlpha or f:GetAlpha() or 1
+  if math.abs(cur - target) > 0.002 then
+    cur = cur + (target - cur) * (1 - math.exp(-RM_FADE_SPEED * dt))
+  else
+    cur = target
+  end
+  if cur ~= rmAlpha then
+    f:SetAlpha(cur)
+    rmAlpha = cur
+  end
+end)
 
 -- Ctrl + clic gauche sur une unite (dans le monde) : la met en focalisation. Bouton securise "/focus mouseover" lie a
 -- CTRL-BUTTON1 par une liaison prioritaire, posee hors combat seulement. Client sans focalisation (pas de FocusFrame) :

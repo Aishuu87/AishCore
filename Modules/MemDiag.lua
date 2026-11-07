@@ -201,6 +201,10 @@ SlashCmdList["AISHMEM"] = function(msg)
   end
   if msg and msg:lower():find("bench") then RunBench() return end
   if msg and msg:lower():find("prof") then RunProfile() return end
+  if msg and msg:lower():find("hooks") then
+    if ns._memTrace then ns._memTrace.ToggleHooks() else print(P .. "hooks : Forever seulement") end
+    return
+  end
   if msg and msg:lower():find("trace") then
     if ns._memTrace then ns._memTrace.Run() else print(P .. "trace : Forever seulement") end
     return

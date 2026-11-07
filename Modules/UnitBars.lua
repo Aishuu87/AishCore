@@ -115,12 +115,32 @@ local CLASS_COLORS = {
     WARRIOR     = { 0.780, 0.612, 0.431, 1 },
 }
 
--- Couleurs de réaction PNJ (identiques à TopTargetBar)
-local REACTION_COLORS = {
+-- Couleurs de réaction PNJ : réglables (unitBars.hostileColor...), repli identique à TopTargetBar
+local REACTION_DEFAULTS = {
     neutral  = { 0.855, 0.773, 0.361, 1 },
     friendly = { 0.294, 0.686, 0.298, 1 },
     hostile  = { 0.780, 0.251, 0.251, 1 },
+    lowLevel = { 0.5, 0.5, 0.5, 1 },
 }
+local function ReactionColor(kind)
+    local db = ns.GetCfg("unitBars")
+    return db and db[kind .. "Color"] or REACTION_DEFAULTS[kind]
+end
+
+-- PNJ "gris" (trop bas niveau pour rapporter de l'XP) : difficulté relative si l'API existe, sinon écart de niveau
+local function IsLowLevel(unit)
+    local ok, low = pcall(function()
+        local api = C_PlayerInfo and C_PlayerInfo.GetContentDifficultyCreatureForPlayer
+        if api and Enum and Enum.RelativeContentDifficulty then
+            return api(unit) == Enum.RelativeContentDifficulty.Trivial
+        end
+        local lvl = tonumber(tostring(UnitLevel(unit))) or 0
+        if lvl <= 0 then return false end
+        local green = (GetQuestGreenRange and GetQuestGreenRange()) or 8
+        return lvl < UnitLevel("player") - green
+    end)
+    return ok and low or false
+end
 
 -- Descripteurs de chaque barre (ordre de creation : le pet s'ancre sur le joueur). Les reglages par defaut d'une barre
 -- sont dans Config/Defaults.lua (unitBars.bars) ; `defaults` ne sert que de repli de position / couleur.
@@ -538,16 +558,16 @@ local function GetClassFillColor(unit, fallback)
             return color
         end
         -- Lecture ratée : repli "allié visible" plutôt que le gris de config par défaut (evite un gris fige)
-        return REACTION_COLORS.friendly
+        return ReactionColor("friendly")
     end
     local ok, reaction = pcall(function() return UnitReaction(unit, "player") end)
     if ok and reaction then
         -- UnitReaction peut être un nombre privé en raid : détainter avant comparaison (sinon erreur Lua)
         local r = tonumber(tostring(reaction)) or 0
-        if     r == 4 then return REACTION_COLORS.neutral
-        elseif r  > 4 then return REACTION_COLORS.friendly
-        else               return REACTION_COLORS.hostile
-        end
+        if r > 4 then return ReactionColor("friendly") end
+        -- Bas niveau : seulement les PNJ hostiles / neutres (les amicaux gardent leur couleur)
+        if IsLowLevel(unit) then return ReactionColor("lowLevel") end
+        return ReactionColor(r == 4 and "neutral" or "hostile")
     end
     return fallback
 end

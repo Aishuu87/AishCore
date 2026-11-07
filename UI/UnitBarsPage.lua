@@ -336,6 +336,14 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
   Row(5, Sub("UNITBARS_SUB_COLORS"), false, false, false, false)
   Row(5, cbThemed, false, false, false, false)
   Row(5, colBar, colBg, false, false, false)
+  -- Reaction des PNJ (cible, cible de la cible) : grisees hors couleurs thematiques
+  local colReact = {
+    GBind(COL(L["UNITBARS_COLOR_HOSTILE"], 5), "hostileColor", "color"),
+    GBind(COL(L["UNITBARS_COLOR_NEUTRAL"], 5), "neutralColor", "color"),
+    GBind(COL(L["UNITBARS_COLOR_FRIENDLY"], 5), "friendlyColor", "color"),
+    GBind(COL(L["UNITBARS_COLOR_LOWLEVEL"], 5), "lowLevelColor", "color"),
+  }
+  Row(5, colReact[1], colReact[2], colReact[3], colReact[4], false)
   Row(5, cbInvert, false, false, false, false)
   -- Hauteur elargie en spe tank (joueur, cible, focalisation) : slider sans titre, grise tant que la case est decochee
   local cbTank = GBind(CB(L["SETTINGS_UB_TANK_HEIGHT"], L["SETTINGS_UB_TANK_HEIGHT_TT"],3), "useTankHeight", "bool")
@@ -833,6 +841,7 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
     for _, w in ipairs(dotWidgets) do Gray(w, not BV("showDots"), off) end
     Gray(slTank, not GV("useTankHeight"), off)
     Gray(colBar, GV("themedColors") ~= false, off)
+    for _, w in ipairs(colReact) do Gray(w, GV("themedColors") == false, off) end
     -- Nom du joueur : au survol seulement (hors combat)
     cbName.label:SetText(key == "player" and L["UNITBARS_SHOW_NAME_HOVER"] or L["UNITBARS_SHOW_NAME"])
     cbName.tooltipText = key == "player" and L["SETTINGS_UB_PLAYER_NAME_HOVER_TT"] or nil

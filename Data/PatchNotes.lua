@@ -8,6 +8,20 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.11", date = "2026-11-07",
+    lines = {
+      { k = "h", link = { page = "comfortQoL" }, t = "QoL", fr = "QoL" },
+      { k = "li", lvl = 1, link = { page = "comfortQoL", section = "SETTINGS_MMN_TITLE" }, t = "Blizzard no longer allows placing resource icons on the minimap. To make up for it, the icons are still shown, but you now have to hover the gold dots on the minimap yourself", fr = "Blizzard ne permet plus de placer les icônes des ressources sur la minimap. Pour compenser, l'affichage des icônes se fera toujours mais il faudra passer manuellement le curseur de la souris sur les points dorés de la minimap" },
+      { k = "li", lvl = 1, link = { page = "comfortQoL", section = "SETTINGS_MMN_TITLE" }, t = "Replacing the old feature that showed the icons on the gold dots, the icons now appear in the tooltips", fr = "En remplacement de l'ancienne fonctionnalité qui permettait d'avoir les icônes sur les points dorés, les icônes s'afficheront dans les infobulles" },
+      { k = "li", lvl = 1, link = { page = "comfortQoL", section = "SETTINGS_COMFORT_SEC_INTERFACE" }, t = "The Blizzard raid manager panel can now be hidden (still available on hover). (Extras > QoL > Interface)", fr = "Le « Panneau de raid » Blizzard est maintenant dissimulable (toujours disponible au survol). (Extras > QoL > Interface)" },
+      { k = "h", link = { page = "visibility" }, t = "EllesmereUI Action Bars", fr = "Barres d'action EllesmereUI" },
+      { k = "li", lvl = 1, link = { page = "visibility", section = "SETTINGS_SEC_VIS_EUI_BARS" }, t = "Bars 4, 5 and 9 can now behave like bars 1, 2 and 3 in \"Show Bars\" profiles. (Extras > Integration > EllesmereUI Action Bars)", fr = "Les barres 4, 5 et 9 pourront avoir les mêmes comportements que les barres 1, 2 et 3 en profils « Barres montrées ». (Extras > Intégration > Barres d'action EllesmereUI)" },
+      { k = "li", lvl = 1, link = { page = "visibility", section = "SETTINGS_SEC_VIS_EUI_BARS" }, t = "The pet bar can now behave like bars 1, 2 and 3 in \"Show Bars\" profiles. (Extras > Integration > EllesmereUI Action Bars)", fr = "La barre du familier peut avoir les mêmes comportements que les barres 1, 2 et 3 en profils « Barres montrées ». (Extras > Intégration > Barres d'action EllesmereUI)" },
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = false, t = "FIX: Errors when entering dungeons (some of them at least)", fr = "FIX : erreurs en entrée de donjons (en tout cas, certaines)" },
+    },
+  },
+  {
     version = "4.6.9", date = "2026-11-07",
     lines = {
       { k = "h", link = { page = "comfortQoL" }, t = "QoL", fr = "QoL" },
@@ -697,7 +711,7 @@ ns.NewByVersion = {
     headers = {
       "SETTINGS_CAT_CAST_BARS", "SETTINGS_CAT_CAMPFIRE", "SETTINGS_CAT_CDM_APPEARANCE", "SETTINGS_CAT_ADDON_COMPARTMENT",
       "UNITBARS_SEC_FILL", "UNITBARS_SEC_DOTS", "SETTINGS_SEC_XP_RESTED", "ADDONFONTS_SEC_BAGANATOR",
-      "SETTINGS_MVB_SEC_STACKS", "SETTINGS_COMFORT_SEC_TOTEM_BAR",
+      "SETTINGS_MVB_SEC_STACKS", "SETTINGS_COMFORT_SEC_TOTEM_BAR", "SETTINGS_SEC_VIS_EUI_BARS",
     },
   },
   {

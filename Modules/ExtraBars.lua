@@ -178,6 +178,13 @@ local weaponEnhCache = {}
 local function IsWeaponEnhancement(itemID)
   local c = weaponEnhCache[itemID]
   if c ~= nil then return c end
+  -- Recettes (formule d'enchantement d'arme : "Utiliser : Vous apprend a enchanter... une arme") : jamais
+  local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(itemID)
+  local RECIPE = Enum and Enum.ItemClass and Enum.ItemClass.Recipe or 9
+  if classID == RECIPE then
+    weaponEnhCache[itemID] = false
+    return false
+  end
   local ok, data = pcall(C_TooltipInfo.GetItemByID, itemID)
   if not (ok and data and data.lines) then return false end -- pas encore en cache : retenté plus tard
   if C_Item.IsItemDataCachedByID and not C_Item.IsItemDataCachedByID(itemID) then

@@ -11189,7 +11189,7 @@ function Build.Visibility(container)
   BindCheckbox(cbHover, "visibility", "elvuiBuffsHoverReveal")
   ctx:Depends(cbEnable, { slOoc, slCombat, cbHover })
 
-  -- Barres d'action 1 a 3 d'EllesmereUI : attenuees, opacite d'origine en monture, en combat, avec une cible, au survol,
+  -- Barres d'action d'EllesmereUI (1-3, 4-6, familier) : attenuees, opacite d'origine en monture, en combat, avec une cible, au survol,
   -- grimoire ouvert ou blesse (cf. Modules/Visibility.lua)
   ctx:Spacer(6)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_VIS_EUI_BARS"], W))
@@ -11198,6 +11198,16 @@ function Build.Visibility(container)
   local slEuiBars = ctx:Add(SW.CreateSlider(container, L["SETTINGS_OPACITY"], 0, 1, 0.05, SL_W2))
   BindSlider(slEuiBars, "visibility", "euiBarsAlpha")
   ctx:Depends(cbEuiBars, { slEuiBars })
+  local cbEuiBars459 = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_VIS_EUI_BARS459_ENABLE"], L["SETTINGS_VIS_EUI_BARS459_ENABLE_TT"], W))
+  BindCheckbox(cbEuiBars459, "visibility", "euiBars459Enabled")
+  local slEuiBars459 = ctx:Add(SW.CreateSlider(container, L["SETTINGS_OPACITY"], 0, 1, 0.05, SL_W2))
+  BindSlider(slEuiBars459, "visibility", "euiBars459Alpha")
+  ctx:Depends(cbEuiBars459, { slEuiBars459 })
+  local cbEuiPet = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_VIS_EUI_PETBAR_ENABLE"], L["SETTINGS_VIS_EUI_PETBAR_ENABLE_TT"], W))
+  BindCheckbox(cbEuiPet, "visibility", "euiPetBarEnabled")
+  local slEuiPet = ctx:Add(SW.CreateSlider(container, L["SETTINGS_OPACITY"], 0, 1, 0.05, SL_W2))
+  BindSlider(slEuiPet, "visibility", "euiPetBarAlpha")
+  ctx:Depends(cbEuiPet, { slEuiPet })
 
   -- Polices forcées sur Platynator / Baganator (Modules/AddonFonts.lua)
   local SL_W3 = math.floor((W - 16) / 3)
@@ -13561,6 +13571,12 @@ function Build.ComfortQoL(container)
   BindCheckbox(cbHor, "comfort", "horizonOffWithRXP")
   local cbErr = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_HIDE_ERRORS"], L["SETTINGS_COMFORT_HIDE_ERRORS_TT"], W))
   BindCheckbox(cbErr, "comfort", "hideErrors")
+  -- Panneau de gestion du raid Blizzard : au survol seulement (cf. Modules/Comfort.lua)
+  local cbRaidMgr = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_RAIDMGR_HOVER"], L["SETTINGS_COMFORT_RAIDMGR_HOVER_TT"], W))
+  BindCheckbox(cbRaidMgr, "comfort", "raidManagerHover")
+  local slRaidMgr = ctx:Add(SW.CreateSlider(container, L["SETTINGS_COMFORT_RAIDMGR_ALPHA"], 0, 1, 0.05, W))
+  BindSlider(slRaidMgr, "comfort", "raidManagerAlpha")
+  ctx:Depends(cbRaidMgr, { slRaidMgr })
   -- spellID dans l'infobulle des auras : case + touche requise sur la meme ligne
   local halfW = math.floor((W - 8) / 2)
   local cbSid = SW.CreateCheckbox(container, L["SETTINGS_COMFORT_SPELLID"], L["SETTINGS_COMFORT_SPELLID_TT"], halfW)
@@ -13660,6 +13676,8 @@ function Build.ComfortQoL(container)
     ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_MMN_TITLE"], W))
     local cbMmn = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_MMN_ENABLE"], L["SETTINGS_MMN_ENABLE_TT"], W))
     BindCheckbox(cbMmn, "minimapNodes", "enabled")
+    -- Client sans balayage (Forever) : seulement l'icone dans l'infobulle, rien a regler
+    if not MMN._dead then
     local mmnStyles = {}
     for _, st in ipairs(MMN.STYLES) do
       mmnStyles[#mmnStyles + 1] = { value = st.id, text = L["SETTINGS_MMN_STYLE_" .. st.id:upper()] }
@@ -13675,6 +13693,58 @@ function Build.ComfortQoL(container)
     BindSlider(slFrame, "minimapNodes", "frameScale")
     ctx:AddRow(8, slDots, slFrame)
     ctx:Depends(cbMmn, { ddMmn, slMmn, slDots, slFrame })
+    end
+
+    -- Icone dans l'infobulle de la minimap, avec apercu
+    local ddTipPos = SW.CreateDropdown(container, L["SETTINGS_MMN_TIP_POS"], {
+      { value = "before", text = L["SETTINGS_MMN_TIP_BEFORE"] },
+      { value = "after",  text = L["SETTINGS_MMN_TIP_AFTER"] },
+    }, halfW)
+    BindDropdown(ddTipPos, "minimapNodes", "tipPos")
+    local slTip = SW.CreateSlider(container, L["SETTINGS_MMN_TIP_SIZE"], 0, 32, 1, halfW)
+    BindSlider(slTip, "minimapNodes", "tipSize")
+    ctx:AddRow(8, ddTipPos, slTip)
+    local cbTipCrop = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_MMN_TIP_CROP"], L["SETTINGS_MMN_TIP_CROP_TT"], W))
+    BindCheckbox(cbTipCrop, "minimapNodes", "tipCrop")
+
+    -- Apercu : fausse infobulle de minimap, rafraichie a chaque reglage (MinimapNodes.ApplySettings). Elle change de
+    -- taille avec l'icone : posee dans un support de hauteur fixe (celle de la plus grande icone) pour la mise en page.
+    local pvHolder = CreateFrame("Frame", nil, container)
+    pvHolder:SetSize(W, 2 * 32 + 30)
+    local pv = CreateFrame("Frame", nil, pvHolder, "BackdropTemplate")
+    pv:SetPoint("TOPLEFT")
+    pv:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                     tile = true, tileSize = 16, edgeSize = 16, insets = { left = 4, right = 4, top = 4, bottom = 4 } })
+    pv:SetBackdropColor(0.05, 0.05, 0.05, 0.92)
+    pv:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+    local pvLines = {}
+    for i = 1, 2 do
+      local fs = pv:CreateFontString(nil, "OVERLAY")
+      fs:SetFont(ns.FONT_FALLBACK, 12, "")
+      fs:SetTextColor(1, 1, 1)
+      fs:SetJustifyH("LEFT")
+      if i == 1 then fs:SetPoint("TOPLEFT", pv, "TOPLEFT", 10, -10)
+      else fs:SetPoint("TOPLEFT", pvLines[i - 1], "BOTTOMLEFT", 0, -3) end
+      pvLines[i] = fs
+    end
+    local function RefreshPreview()
+      local w, h = 0, 0
+      for i, smp in ipairs(MMN.PreviewSamples()) do
+        local fs = pvLines[i]
+        fs:SetText(smp[2] and MMN.TipLine(smp[1], smp[2]) or smp[1])
+        -- Hauteur de ligne : la plus grande du texte ou de l'icone
+        local lh = math.max(fs:GetStringHeight(), (ns.GetCfg("minimapNodes") or {}).tipSize or 0)
+        fs:SetHeight(lh)
+        w = math.max(w, fs:GetStringWidth())
+        h = h + lh + (i > 1 and 3 or 0)
+      end
+      pv:SetSize(math.max(80, w + 20), h + 20)
+    end
+    RefreshPreview()
+    pv:SetScript("OnShow", RefreshPreview)
+    MMN._preview = function() if pv:IsVisible() then RefreshPreview() end end
+    ctx:Add(pvHolder)
+    ctx:Depends(cbMmn, { ddTipPos, slTip, cbTipCrop })
   end
 
   -- Curseur en combat (ex-page a part)

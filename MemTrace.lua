@@ -59,6 +59,8 @@ local function OnSetScript(self, script, handler)
   self:SetScript(script, w)
 end
 
+local metas = {}   -- tables de methodes des frames (pour HookScript, cf. crochets en option)
+
 -- Pas d'EditBox : creee, elle prend le focus clavier (autoFocus) et bloque le clavier du jeu
 for _, kind in ipairs({ "Frame", "Button", "CheckButton", "StatusBar", "Slider", "ScrollFrame",
                         "Cooldown", "PlayerModel", "Model", "ModelScene", "SimpleHTML", "MessageFrame", "GameTooltip" }) do
@@ -69,6 +71,7 @@ for _, kind in ipairs({ "Frame", "Button", "CheckButton", "StatusBar", "Slider",
     local idx = mt and mt.__index
     if type(idx) == "table" and not T[idx] then
       T[idx] = true
+      metas[#metas + 1] = idx
       hooksecurefunc(idx, "SetScript", OnSetScript)
     end
   end)
@@ -88,6 +91,7 @@ pcall(function()
     local idx = mt and mt.__index
     if type(idx) == "table" and not T[idx] and idx.SetScript then
       T[idx] = true
+      metas[#metas + 1] = idx
       hooksecurefunc(idx, "SetScript", OnSetScript)
     end
   end
@@ -104,6 +108,51 @@ end
 ns.NewTicker = function(d, fn, n) return C_Timer.NewTicker(d, TimerArg(fn, "Ticker"), n) end
 
 local P = "|cff33ff99[AishCore mem]|r "
+
+-- Crochets en option (/aishmem hooks, puis /reload) : hooksecurefunc et HookScript sont remplaces des le chargement
+-- des SavedVariables, pour etiqueter les callbacks qu'AishCore pose ensuite (fichier:ligne). Remplacer ces fonctions
+-- globales peut tainter le code Blizzard qui les appelle : outil de diagnostic, jamais actif par defaut.
+-- Les crochets poses pendant le chargement des fichiers (avant les SavedVariables) restent non attribues.
+local function InstallHookTrace()
+  local origHSF = hooksecurefunc
+  hooksecurefunc = function(a, b, c)
+    if type(a) == "string" then
+      local key = type(b) == "function" and Site()
+      if key then b = Wrap("Hook " .. a .. " " .. key, b) end
+      return origHSF(a, b)
+    end
+    local key = type(c) == "function" and Site()
+    if key then c = Wrap("Hook " .. tostring(b) .. " " .. key, c) end
+    return origHSF(a, b, c)
+  end
+  for _, idx in ipairs(metas) do
+    local orig = idx.HookScript
+    if type(orig) == "function" then
+      idx.HookScript = function(self, script, fn, ...)
+        local key = type(fn) == "function" and Site()
+        if key then fn = Wrap("HookScript " .. tostring(script) .. " " .. key, fn) end
+        return orig(self, script, fn, ...)
+      end
+    end
+  end
+end
+
+local hookEv = CreateFrame("Frame")
+hookEv:RegisterEvent("ADDON_LOADED")
+hookEv:SetScript("OnEvent", function(self, _, name)
+  if name ~= addonName then return end
+  self:UnregisterEvent("ADDON_LOADED")
+  if type(AishaddonDB) == "table" and AishaddonDB._memTraceHooks then
+    InstallHookTrace()
+    print(P .. "crochets traces (hooksecurefunc / HookScript) : |cffff4444ACTIF|r -- /aishmem hooks pour couper")
+  end
+end)
+
+function T.ToggleHooks()
+  AishaddonDB = AishaddonDB or {}
+  AishaddonDB._memTraceHooks = not AishaddonDB._memTraceHooks or nil
+  print(P .. "crochets traces au prochain /reload : " .. (AishaddonDB._memTraceHooks and "|cff00ff00ON|r" or "|cffff4444OFF|r"))
+end
 
 function T.Run()
   if T.on then return end

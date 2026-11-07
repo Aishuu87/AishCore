@@ -761,6 +761,10 @@ ns.Defaults = {
     -- Barres d'action 1 a 3 d'EllesmereUI attenuees hors situations utiles (cf. Modules/Visibility.lua)
     euiBarsEnabled          = false,
     euiBarsAlpha            = 0.2,
+    euiBars459Enabled       = false, -- barres 4, 5 et 9, meme logique
+    euiBars459Alpha         = 0.2,
+    euiPetBarEnabled        = false, -- barre du familier, meme logique
+    euiPetBarAlpha          = 0.2,
   },
 
   -- Polices forcees sur des textes d'addons tiers (Modules/AddonFonts.lua). Decoche = visuel d'origine.
@@ -955,6 +959,11 @@ ns.Defaults = {
     showPlayerNameHover = false,              -- nom du personnage au survol de sa barre de vie (hors combat)
     showTargetLevel = false,                  -- niveau devant le nom de la barre de cible ("7 \226\128\162 Nom")
     barColor = { 0.71, 0.60, 0.49, 1 },       -- couleur des barres de vie (hors couleurs thematiques)
+    -- Couleurs de reaction des PNJ (cible, cible de la cible ; couleurs thematiques)
+    hostileColor  = { 0.780, 0.251, 0.251, 1 },
+    neutralColor  = { 0.855, 0.773, 0.361, 1 },
+    friendlyColor = { 0.294, 0.686, 0.298, 1 },
+    lowLevelColor = { 0.5, 0.5, 0.5, 1 },
     -- Réglages par barre (cf. UnitBarDefaults). Nom du joueur : au survol seulement (showName), décalé
     -- automatiquement en miroir de celui de la cible (EnsurePlayerNameOffset).
     bars = {
@@ -1040,6 +1049,9 @@ ns.Defaults = {
     style = "ring",       -- "square", "round", "ring" (rond + anneau dore du jeu) ou un cadre d'atlas (cf. MinimapNodes.STYLES)
     frameScale = 100,     -- taille du cadre d'atlas, en % de sa taille d'origine
     dotScale = 100,       -- taille des points d'origine du jeu, en % (10 a 100)
+    tipSize = 0,          -- icone dans l'infobulle de la minimap : taille en px (0 = hauteur du texte)
+    tipPos = "before",    -- "before" / "after" le nom
+    tipCrop = true,       -- bordure de l'icone rognee
   },
 
   -- Barre de menu, cf. Modules/MenuBar.lua. Les listes de raccourcis (left / right) n'ont volontairement pas de defaut ici :
@@ -1107,6 +1119,8 @@ ns.Defaults = {
     spellIDTooltip = false,   -- spellID dans l'infobulle des buffs/debuffs
     minimapTracking = false,  -- clic droit sur la minimap : ouvre le menu de pistage
     hideErrors     = false,   -- masque les messages d'erreur rouges au centre de l'ecran
+    raidManagerHover = false, -- panneau de gestion du raid Blizzard visible au survol seulement
+    raidManagerAlpha = 0,     -- son opacite hors survol
     ctrlFocus      = false,   -- Ctrl + clic gauche sur une unite : focalisation
     doubleClickFish = false,  -- double clic droit (Retail : Ctrl + double clic) : peche
     questTurnInBox = false,   -- case "rendu auto des quetes" pendant une discussion avec un PNJ
