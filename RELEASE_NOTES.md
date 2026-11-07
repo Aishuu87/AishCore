@@ -3,7 +3,7 @@
 ## [v4.6.10](https://github.com/Aishuu87/AishCore/tree/v4.6.10) (2026-11-07)
 
 ### Camping HUD
-- Added the Purple Dust Pouch to the camping items
+- Added the Pouch of Violet Dust to the camping items
 
 ### Fixes
 - FIX: The XP Bar info text was shown too low on new AishCore profiles
