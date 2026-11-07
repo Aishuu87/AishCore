@@ -325,7 +325,7 @@ ns.Defaults = {
     levelBg = { x = -20, y = -6.5, w = 87, h = 54, rot = 175 },
     -- Tooltip infos XP (grunge bg)
     tooltipFrame = {
-      x = 46, y = 1.5, w = 175, h = 48,
+      x = 43.4, y = 23.9, w = 175, h = 28,
       bgRot = 14, bgW = 244, bgH = 97, bgOffX = -100, bgOffY = 37,
     },
     fontLevel = "Fonts\\2002.TTF",

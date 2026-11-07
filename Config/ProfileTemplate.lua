@@ -2091,10 +2091,10 @@ ns.ProfileTemplate = {
       bgOffY = 37,
       bgRot = 14,
       bgW = 244,
-      h = 48,
+      h = 28,
       w = 175,
-      x = 46,
-      y = 1.5,
+      x = 43.4,
+      y = 23.9,
     },
   },
 }

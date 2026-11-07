@@ -3878,8 +3878,12 @@ function PBEdit.Setup()
       -- Le grimoire est un addon Blizzard charge a la demande
       if arg1 == "Blizzard_PlayerSpells" or arg1 == "Blizzard_SpellBook" then HookSpellBook() end
     elseif event == "PLAYER_REGEN_DISABLED" then
-      -- Zones de depot non securisees : on les retire pour que la barre redevienne cliquable
-      if PBEdit.on then ShowDropZones(false) end
+      -- Entree en combat grimoire ouvert : l'edition est coupee (dernier instant hors verrouillage,
+      -- l'apercu peut encore etre retire) et reprend a la sortie du combat si le grimoire est toujours ouvert
+      if PBEdit.on then
+        PBEdit.SetOn(false)
+        PBEdit.pending = PBEdit.bookOpen or nil
+      end
     else -- PLAYER_REGEN_ENABLED
       for i = 1, MAX_SLOTS do
         local slot = slotFrames[i]

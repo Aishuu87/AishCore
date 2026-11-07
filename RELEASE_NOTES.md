@@ -1,5 +1,14 @@
 # AishCore
 
+## [v4.6.10](https://github.com/Aishuu87/AishCore/tree/v4.6.10) (2026-11-07)
+
+### Camping HUD
+- Added the Purple Dust Pouch to the camping items
+
+### Fixes
+- FIX: The XP Bar info text was shown too low on new AishCore profiles
+- FIX: The Priority Bar edit mode now closes when entering combat with the spellbook open
+
 ## [v4.6.9](https://github.com/Aishuu87/AishCore/tree/v4.6.9) (2026-11-07)
 
 ### QoL

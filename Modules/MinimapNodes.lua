@@ -68,6 +68,7 @@ function MN.Missing()
   if Minimap.UpdateMouseoverAtPoint == nil then missing[#missing + 1] = "Minimap:UpdateMouseoverAtPoint" end
   if Minimap.SetUsingSoftCursor == nil then missing[#missing + 1] = "Minimap:SetUsingSoftCursor" end
   if C_TooltipInfo == nil or C_TooltipInfo.GetMinimapMouseover == nil then missing[#missing + 1] = "C_TooltipInfo.GetMinimapMouseover" end
+  if MN._dead then missing[#missing + 1] = "Minimap:UpdateMouseoverAtPoint (sans effet)" end
   return missing
 end
 
@@ -484,8 +485,12 @@ local function Finish(hits, only, finderKind)
   local sin, cos = math.sin(facing), math.cos(facing)
 
   local found = {}
+  -- Un vrai point de minimap repond sur quelques points de grille ; un nom present sur plus d'un tiers de la grille
+  -- vient d'une infobulle qui ne suit pas le point sonde : ignore (sinon icones partout)
+  local tooMany = math.max(SINGLE_MAX * 3, (grid and #grid or 0) / 3)
   for name, points in pairs(hits) do
-    local kind, icon, id = Resolve(name, only, finderKind)
+    local kind, icon, id
+    if #points <= tooMany then kind, icon, id = Resolve(name, only, finderKind) end
     if kind then
       for _, c in ipairs(Cluster(points)) do
        -- Un seul point de grille qui repond n'est pas un vrai point de minimap (un vrai en donne 4 a 9) : bruit,
@@ -553,6 +558,26 @@ local function ScanSome()
   local left, bottom = Minimap:GetLeft(), Minimap:GetBottom()
   if not (left and bottom and Minimap:IsVisible()) or InCombatLockdown() then
     scan = nil
+    return
+  end
+  -- Vraie souris sur la minimap : le jeu peut rendre son infobulle a la place du point sonde (chaque point
+  -- repondrait le nom du noeud survole). Balayage abandonne, les icones deja placees restent.
+  if Minimap:IsMouseOver() then
+    scan = nil
+    nextScan = GetTime() + 0.5
+    -- Controle : point sonde hors de la minimap. Si l'infobulle reste remplie, le client ignore le point sonde
+    -- (Forever 1.60.1) : le balayage ne peut rien trouver, le module se coupe pour la session.
+    local before = C_TooltipInfo.GetMinimapMouseover()
+    if before and not IsSecret(before) and before.lines and before.lines[1] then
+      Minimap:SetUsingSoftCursor(true)
+      Minimap:UpdateMouseoverAtPoint(0, 0)
+      local after = C_TooltipInfo.GetMinimapMouseover()
+      Minimap:SetUsingSoftCursor(false)
+      if after and not IsSecret(after) and after.lines and after.lines[1] then
+        MN._dead = true
+        MN.ApplySettings()
+      end
+    end
     return
   end
   local scale = Minimap:GetEffectiveScale()
@@ -670,9 +695,79 @@ ev:SetScript("OnEvent", function(_, event)
   end
 end)
 
+-- /aishnodes test : quelle convention de coordonnees Minimap:UpdateMouseoverAtPoint suit sur ce client (souris hors de
+-- la minimap). Pour chaque mode : points qui repondent / points sondes, et les noms lus.
+local function ProbeTest()
+  local P = "|cff00ffff[AishCore]|r "
+  local left, bottom = Minimap:GetLeft(), Minimap:GetBottom()
+  if not left then print(P .. "test : minimap invisible"); return end
+  local width, scale = Minimap:GetWidth(), Minimap:GetEffectiveScale()
+  local half = width / 2
+  local build, _, _, toc = GetBuildInfo()
+  print(P .. "test : build=" .. tostring(build) .. " toc=" .. tostring(toc) .. " echelle=" .. string.format("%.3f", scale)
+    .. " minimap=" .. string.format("%.0f,%.0f l=%.0f", left, bottom, width) .. " souris sur minimap=" .. tostring(Minimap:IsMouseOver()))
+  local modes = {
+    { "ecran pixels", function(x, y) return (left + x) * scale, (bottom + y) * scale end },
+    { "ecran UI",     function(x, y) return left + x, bottom + y end },
+    { "local pixels", function(x, y) return x * scale, y * scale end },
+    { "local UI",     function(x, y) return x, y end },
+    { "centre UI",    function(x, y) return x - half, y - half end },
+    { "haut-gauche",  function(x, y) return x, width - y end },
+  }
+  local pts = {}
+  for x = 0, width, 8 do
+    for y = 0, width, 8 do
+      if (x - half) ^ 2 + (y - half) ^ 2 <= half * half then pts[#pts + 1] = { x, y } end
+    end
+  end
+  local function Read(names)
+    local data = C_TooltipInfo.GetMinimapMouseover()
+    local lines = data and not IsSecret(data) and data.lines
+    local any = false
+    if lines and not IsSecret(lines) then
+      for _, line in ipairs(lines) do
+        local t = line.leftText
+        if t and not IsSecret(t) and t ~= "" then any = true; names[Clean(t)] = (names[Clean(t)] or 0) + 1 end
+      end
+    end
+    return any
+  end
+  local function Report(label, hit, names)
+    local list = {}
+    for n, c in pairs(names) do if #list < 4 then list[#list + 1] = n .. " x" .. c end end
+    print(P .. label .. " : " .. hit .. "/" .. #pts .. "  " .. table.concat(list, " | "))
+  end
+  for _, mode in ipairs(modes) do
+    local hit, names = 0, {}
+    Minimap:SetUsingSoftCursor(true)
+    for _, p in ipairs(pts) do
+      Minimap:UpdateMouseoverAtPoint(mode[2](p[1], p[2]))
+      if Read(names) then hit = hit + 1 end
+    end
+    Minimap:SetUsingSoftCursor(false)
+    Report(mode[1], hit, names)
+  end
+  -- Variante differee : point pose a une image, lu a la suivante (curseur souple garde actif entre les deux)
+  local i, hit, names = 0, 0, {}
+  local f = CreateFrame("Frame")
+  Minimap:SetUsingSoftCursor(true)
+  f:SetScript("OnUpdate", function(self)
+    if i > 0 and Read(names) then hit = hit + 1 end
+    i = i + 1
+    if i > #pts then
+      self:SetScript("OnUpdate", nil)
+      Minimap:SetUsingSoftCursor(false)
+      Report("differe (ecran pixels)", hit, names)
+      return
+    end
+    Minimap:UpdateMouseoverAtPoint((left + pts[i][1]) * scale, (bottom + pts[i][2]) * scale)
+  end)
+end
+
 -- /aishnodes : etat du balayage (a donner en cas de souci)
 SLASH_AISHNODES1 = "/aishnodes"
-SlashCmdList["AISHNODES"] = function()
+SlashCmdList["AISHNODES"] = function(msg)
+  if msg and msg:lower():find("test") then ProbeTest(); return end
   local P = "|cff00ffff[AishCore]|r "
   local cfg = Cfg()
   local miss = MN.Missing()

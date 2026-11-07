@@ -1039,6 +1039,10 @@ local placeSpell
 local CAMP_ITEMS = {
   [279962] = true,   -- Bougie d'encens
 }
+-- Jouets de camp (coffre a jouets, hors sacs) : ajoutes apres les objets des sacs s'ils sont connus
+local CAMP_TOYS = {
+  289439,   -- Bourse de poussiere pourpre (Forever)
+}
 local function CampItems(diag)
   local CC = C_Container
   local NumSlots = CC and CC.GetContainerNumSlots or GetContainerNumSlots
@@ -1101,6 +1105,14 @@ local function CampItems(diag)
     end
   end
   table.sort(list, function(a, b) if a.fi ~= b.fi then return a.fi < b.fi end return a.id < b.id end)
+  if PlayerHasToy then
+    for _, id in ipairs(CAMP_TOYS) do
+      if PlayerHasToy(id) then
+        list[#list + 1] = { id = id, toy = id, icon = Icon and Icon(id) }
+        if diag then diag[#diag + 1] = "jouet " .. id .. " : connu" end
+      end
+    end
+  end
   if diag then diag[#diag + 1] = "objets lus dans les sacs : " .. scanned end
   return list
 end
@@ -1186,6 +1198,7 @@ local function CreatePanels()
       SetGlow(self.glow, true)
       GameTooltip:SetOwner(self, "ANCHOR_TOP")
       if self._bag then GameTooltip:SetBagItem(self._bag, self._slot)
+      elseif self._toy then GameTooltip:SetToyByItemID(self._toy)
       elseif self._ph then GameTooltip:SetText(self._ph, 1, 1, 1) end   -- objet fictif de l'apercu
       GameTooltip:Show()
     end)
@@ -1305,14 +1318,16 @@ local function SetupItems()
       s.glow:SetSize(SW * 1.75, SH * 1.75)
       s.icon:SetTexture(it.icon or 134400)
       s.count:SetText((it.count or 1) > 1 and it.count or "")
-      s._ph = it.name
-      s:SetAttribute("type", it.bag and "item" or nil)
+      s._ph, s._toy = it.name, it.toy
+      s:SetAttribute("type", it.bag and "item" or (it.toy and "toy") or nil)
       s:SetAttribute("item", it.bag and (it.bag .. " " .. it.slot) or nil)
+      s:SetAttribute("toy", it.toy)
       if panelOpen then s:Show() end
     else
-      s._side, s._bag, s._slot, s._ph = nil, nil, nil, nil
+      s._side, s._bag, s._slot, s._ph, s._toy = nil, nil, nil, nil, nil
       s:SetAttribute("type", nil)
       s:SetAttribute("item", nil)
+      s:SetAttribute("toy", nil)
       s:Hide()
     end
   end
