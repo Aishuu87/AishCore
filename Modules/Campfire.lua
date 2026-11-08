@@ -1074,14 +1074,20 @@ local function CampItems(diag)
       -- Nourriture et boissons (0/5) ecartees aussi : les objets de camp sont en Consommable / Autre (0/8)
       local classID, subID
       if id and C_Item and C_Item.GetItemInfoInstant then classID, subID = select(6, C_Item.GetItemInfoInstant(id)) end
-      if classID == ((Enum.ItemClass and Enum.ItemClass.Recipe) or 9) or (classID == 0 and subID == 5) then id = nil end
+      -- Objets de quete (12) ecartes aussi : leur infobulle peut parler de feu de camp
+      if classID == ((Enum.ItemClass and Enum.ItemClass.Recipe) or 9) or (classID == 0 and subID == 5)
+        or classID == ((Enum.ItemClass and Enum.ItemClass.Questitem) or 12) then id = nil end
+      local sname, sid
       if id and not done[id] then
         scanned = scanned + 1
-        local sname, sid
         if ItemSpell then
           local ok, a, b = pcall(ItemSpell, id)
           if ok then sname, sid = a, b end
         end
+        -- Objet sans effet d'utilisation : rien a lancer depuis la barre, sauf objet connu par son ID
+        if ItemSpell and not sid and not Plain(sname) and not CAMP_ITEMS[id] then id = nil end
+      end
+      if id and not done[id] then
         local fi = (sid and placeSpell[sid]) or (CAMP_ITEMS[id] and #FEATURES + 1)
         if not fi and Plain(sname) then
           local low = sname:lower()
@@ -1735,13 +1741,13 @@ end
 
 local sitting, sitExp = false, 0
 
--- Pas de HUD en vol (taxi) ni en peche. Le rang de Peche change l'ID du sort, pas son nom. Delai apres la fin d'un
+-- Pas de HUD mort, en vol (taxi) ni en peche. Le rang de Peche change l'ID du sort, pas son nom. Delai apres la fin d'un
 -- lancer : le HUD ne reapparait pas entre deux lancers.
 local FISH_SPELL, FISH_GRACE = 7620, 3
 local fishUntil = 0
 
 local function HudSuppressed()
-  if UnitOnTaxi("player") or GetTime() < fishUntil then return true end
+  if UnitIsDeadOrGhost("player") or UnitOnTaxi("player") or GetTime() < fishUntil then return true end
   local channel = UnitChannelInfo("player")
   return Plain(channel) and channel == SpellName(FISH_SPELL)
 end
@@ -2030,6 +2036,9 @@ ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("BAG_UPDATE_DELAYED")
+ev:RegisterEvent("PLAYER_DEAD")
+ev:RegisterEvent("PLAYER_ALIVE")
+ev:RegisterEvent("PLAYER_UNGHOST")
 ev:RegisterUnitEvent("UNIT_AURA", "player")
 ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
 ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")

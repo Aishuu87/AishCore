@@ -573,6 +573,23 @@ function Bounce.StatKey(sid)
     return (key and #key >= 6) and key or nil
 end
 
+-- Mot de la caracteristique : le plus long de StatKey hors verbe initial ("augmente l'intelligence de " ->
+-- "intelligence"). Rapproche un elixir d'un buff de classe tourne autrement ("Augmente l'Intelligence de la cible
+-- de 7" : Intelligence des Arcanes face a l'Elixir de sagesse).
+function Bounce.StatWord(sid)
+    local key = Bounce.StatKey(sid)
+    if not key then return nil end
+    local best, first = nil, true
+    for w in key:gmatch("%S+") do
+        if first then first = false
+        else
+            w = w:gsub("^.*\226\128\153", ""):gsub("^.*'", ""):gsub("[%p]+$", "")   -- article elide (l', d'...)
+            if #w >= 5 and (not best or #w > #best) then best = w end
+        end
+    end
+    return best
+end
+
 -- Consommable (sort d'utilisation `sid`) que le serveur refuserait : refus deja vu sur le joueur, ou buff d'un
 -- autre sort sur la meme caracteristique avec une valeur au moins egale (parchemin plus fort qu'un elixir)
 function MissingBuffs.ConsumableBlocked(sid)
@@ -582,13 +599,16 @@ function MissingBuffs.ConsumableBlocked(sid)
     local desc = Bounce.descs[sid]
     if not (mine and desc) then return false end
     local key, low = Bounce.StatKey(sid), desc:lower()
+    local word = Bounce.StatWord(sid)
     return Bounce.ForEach("player", function(name, bsid, v)
         if not bsid or bsid == sid then return false end
         -- Meme caracteristique : meme debut de description, ou nom du buff cite par la description de
         -- l'elixir (parchemin "Armure" / "Augmente l'Armure de 50" : les deux textes sont tournes differemment)
         local lname = type(name) == "string" and name:lower() or ""
-        local same = (key and Bounce.StatKey(bsid) == key)
+        local theirKey = Bounce.StatKey(bsid)
+        local same = (key and theirKey == key)
             or (#lname >= 4 and low:find(lname, 1, true) ~= nil)
+            or (word and theirKey and theirKey:find(word, 1, true) ~= nil)
         if not same then return false end
         local theirs = v or Bounce.Value(bsid)
         return theirs ~= nil and theirs >= mine
@@ -1319,7 +1339,7 @@ function MissingBuffs.DismissAlert(_, button, down)
     MissingBuffs.HideAlert()
 end
 
---- Rappel "Clic droit : masquer cette alerte" sous le texte, quand la meme alerte reste affichee plus de 15 s.
+--- Rappel "Clic droit : masquer" sous le texte, quand la meme alerte reste affichee plus de 15 s.
 --- Relance a chaque nouvelle alerte (signature differente ou reapparition), coupe des que l'alerte se masque.
 function MissingBuffs._ArmDismissHint()
     local h = MissingBuffs._hintFS

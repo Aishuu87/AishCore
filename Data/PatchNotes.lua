@@ -8,6 +8,19 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.13", date = "2026-11-08",
+    lines = {
+      { k = "h", link = { page = "taxiMode" }, t = "Taxi Mode", fr = "Mode Taxi" },
+      { k = "li", lvl = 1, link = { page = "taxiMode" }, t = "Added the Taxi Mode (flight timer). This is a beta version, enable it at your own risk!", fr = "Ajout du Mode Taxi (minuteur de vol). C'est une version Beta, à activer en connaissance de cause !" },
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = { page = "xpBar" }, t = "FIX: The level in the XP Bar could stop showing in some conditions", fr = "FIX : Le niveau dans la barre d'XP pouvait ne plus s'afficher dans certaines conditions" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "FIX: Some Missing Buffs alerts could still be suggested while a stronger buff was applied", fr = "FIX : certaines alertes de Buffs Manquants pouvaient encore être proposées alors qu'un buff plus puissant était appliqué" },
+      { k = "li", lvl = 1, link = { page = "campfire" }, t = "FIX: The Camping HUD no longer shows when you are dead", fr = "FIX : le Camping HUD ne se montre plus quand vous êtes mort" },
+      { k = "li", lvl = 1, link = false, t = "FIX: Creating and editing Tags in the Model Library showed the windows in the background", fr = "FIX : La création et l'édition des Tags dans la Bibliothèque d'animations affichait les fenêtres en arrière-plan" },
+      { k = "li", lvl = 1, link = { page = "cdmLayout" }, t = "FIX: The Cooldown Manager notification could stay shown even after a UI reload and/or after clicking \"Don't ask for this spec\"", fr = "FIX : La notification du Gestionnaire de CDs pouvait rester affichée même après un rechargement de l'interface et/ou après avoir cliqué sur « Ne plus demander »" },
+    },
+  },
+  {
     version = "4.6.12", date = "2026-11-08",
     lines = {
       { k = "h", link = { page = "resourceCircle" }, t = "Central Circle", fr = "Cercle central" },
@@ -716,10 +729,10 @@ ns.PatchNoteLinks = {
 ns.NewByVersion = {
   {
     version = "4.6",
-    categories = { castBars = true, campfire = true, cdmAppearance = true, addonCompartment = true },
+    categories = { castBars = true, campfire = true, cdmAppearance = true, addonCompartment = true, taxiMode = true },
     containers = { unitBars = true, xpBar = true, comfortQoL = true, visibility = true, movementBuffs = true },
     headers = {
-      "SETTINGS_CAT_CAST_BARS", "SETTINGS_CAT_CAMPFIRE", "SETTINGS_CAT_CDM_APPEARANCE", "SETTINGS_CAT_ADDON_COMPARTMENT",
+      "SETTINGS_CAT_CAST_BARS", "SETTINGS_CAT_CAMPFIRE", "SETTINGS_CAT_TAXI_MODE", "SETTINGS_CAT_CDM_APPEARANCE", "SETTINGS_CAT_ADDON_COMPARTMENT",
       "UNITBARS_SEC_FILL", "UNITBARS_SEC_DOTS", "SETTINGS_SEC_XP_RESTED", "ADDONFONTS_SEC_BAGANATOR",
       "SETTINGS_MVB_SEC_STACKS", "SETTINGS_COMFORT_SEC_TOTEM_BAR", "SETTINGS_SEC_VIS_EUI_BARS",
     },

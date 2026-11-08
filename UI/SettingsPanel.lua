@@ -1201,6 +1201,7 @@ local function GetModKey(dbKey)
     cdmLayout                  = "CDMLayout",
     characterArmory            = "CharacterArmory",
     afkMode                    = "AFKMode",
+    taxiMode                   = "TaxiMode",
     bigCursor                  = "BigCursor",
     stealthMode                = "StealthMode",
     campfire                   = "Campfire",
@@ -4920,7 +4921,7 @@ local function EnsureModelPicker()
 
   local kwEditor = CreateFrame("Frame", "AishCoreKwEditor", f, "BackdropTemplate")
   kwEditor:SetSize(KW_W, KW_H)
-  kwEditor:SetFrameStrata("DIALOG")
+  kwEditor:SetFrameStrata("FULLSCREEN_DIALOG")   -- meme strate que le picker (DIALOG passait derriere)
   kwEditor:SetFrameLevel(f:GetFrameLevel() + 20)
   kwEditor:SetBackdrop({
     bgFile   = "Interface\\Buttons\\WHITE8X8",
@@ -5130,6 +5131,20 @@ local function EnsureModelPicker()
         f:RebuildTagSidebar()
       end,
     })
+    -- Le color picker de Blizzard est en DIALOG, sous le picker (FULLSCREEN_DIALOG) : remonte au-dessus de tout le
+    -- temps de cette ouverture, strate d'origine rendue a la fermeture
+    local cp = ColorPickerFrame
+    if not cp._aishStrata then
+      cp._aishStrata = cp:GetFrameStrata()
+      cp:SetFrameStrata("TOOLTIP")
+      if not cp._aishHook then
+        cp._aishHook = true
+        cp:HookScript("OnHide", function(self)
+          if self._aishStrata then self:SetFrameStrata(self._aishStrata); self._aishStrata = nil end
+        end)
+      end
+    end
+    cp:Raise()
   end)
 
   function kwEditor:Rebuild()
@@ -5158,6 +5173,7 @@ local function EnsureModelPicker()
       chip:SetWidth(chipW)
       chip:Show()
       local idx = i
+      chip._xb:Show()   -- la case 1 sert aussi au message "aucun mot-cle", qui masque sa croix
       chip._xb:SetScript("OnClick", function()
         table.remove(tag.keywords, idx)
         SaveTagKeywords(tag)
@@ -12341,6 +12357,7 @@ local MODULE_CATEGORIES = {
       ModEntry("qol",         L["SETTINGS_COMFORT_SEC_QOL"],  "comfort",     "enabled", L["SETTINGS_COMFORT_ENABLE_TT"]),
       ModEntry("location",    L["SETTINGS_CAT_LOCATION"],     "location",    "enabled", L["SETTINGS_LOC_ENABLE_TT"]),
       ModEntry("afkMode",     L["SETTINGS_CAT_AFK_MODE"],     "afkMode",     "enabled"),
+      ModEntry("taxiMode",    L["SETTINGS_CAT_TAXI_MODE"],    "taxiMode",    "enabled"),
       ModEntry("menuBar",     L["SETTINGS_CAT_MENU_BAR"],     "menuBar",     "enabled"),
       ModEntry("addonCompartment", L["SETTINGS_CAT_ADDON_COMPARTMENT"], "addonCompartment", "enabled", L["SETTINGS_CAT_ADDON_COMPARTMENT_TT"]),
     },
@@ -13966,6 +13983,54 @@ function Build.Campfire(container)
   return ctx.widgets
 end
 
+-- BUILD : Mode Taxi (CONFORT) -- route du vol dans des bandes facon cinema, cf. Modules/TaxiMode.lua.
+-- Apercu (vol fictif) actif tant que la page est ouverte (cf. SelectCategory).
+function Build.TaxiMode(container)
+  local ctx = NewLayout(container)
+  local W = CONTENT_W
+  local W2 = math.floor((W - 8) / 2)
+  local W3 = math.floor((W - 16) / 3)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_TAXI_MODE"], W))
+  local cbEn = ctx:TitleToggle(SW.CreateCheckbox(container, L["SETTINGS_TAXI_ENABLE"], L["SETTINGS_TAXI_ENABLE_TT"], W))
+  BindCheckbox(cbEn, "taxiMode", "enabled")
+
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TAXI_INTERFACE"], W))
+  local cbHide = SW.CreateCheckbox(container, L["SETTINGS_TAXI_HIDE_UI"], L["SETTINGS_TAXI_HIDE_UI_TT"], W2)
+  BindCheckbox(cbHide, "taxiMode", "hideUI")
+  local cbHover = SW.CreateCheckbox(container, L["SETTINGS_TAXI_REVEAL_HOVER"], L["SETTINGS_TAXI_REVEAL_HOVER_TT"], W2)
+  BindCheckbox(cbHover, "taxiMode", "revealOnHover")
+  ctx:AddRow(8, cbHide, cbHover)
+  ctx:Depends(cbHide, { cbHover })
+
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TAXI_LOOK"], W))
+  local slTop = SW.CreateSlider(container, L["SETTINGS_TAXI_TOP_HEIGHT"], 0, 200, 1, W3)
+  BindSlider(slTop, "taxiMode", "panelTopHeight")
+  local slBottom = SW.CreateSlider(container, L["SETTINGS_TAXI_BOTTOM_HEIGHT"], 50, 240, 1, W3)
+  BindSlider(slBottom, "taxiMode", "panelBottomHeight")
+  local slWidth = SW.CreateSlider(container, L["SETTINGS_TAXI_WIDTH"], 0.2, 0.9, 0.05, W3)
+  BindSlider(slWidth, "taxiMode", "width")
+  ctx:AddRow(8, slTop, slBottom, slWidth)
+
+  local ddFont = SW.CreateDropdown(container, L["SETTINGS_TAXI_FONT"], ns.GetFontList(), W2)
+  BindDropdown(ddFont, "taxiMode", "font")
+  local slSize = SW.CreateSlider(container, L["SETTINGS_TAXI_FONT_SIZE"], 10, 32, 1, W2)
+  BindSlider(slSize, "taxiMode", "fontSize")
+  ctx:AddRow(8, ddFont, slSize)
+
+  local colBg = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TAXI_BAND_COLOR"], W))
+  BindColorButton(colBg, "taxiMode", "panelBgColor")
+  local colAccent = SW.CreateColorButton(container, L["SETTINGS_TAXI_ACCENT"], W2)
+  BindColorButton(colAccent, "taxiMode", "accentColor")
+  local cbTheme = SW.CreateCheckbox(container, L["SETTINGS_AFK_USE_THEME_COLORS"], L["SETTINGS_AFK_USE_THEME_COLORS_TT"], W2)
+  BindCheckbox(cbTheme, "taxiMode", "useThemeColors")
+  ctx:AddRow(8, colAccent, cbTheme)
+
+  ctx:Finalize()
+  return ctx.widgets
+end
+
 function Build.StealthMode(container)
   local ctx = NewLayout(container)
   local W = CONTENT_W
@@ -14724,6 +14789,12 @@ local CATEGORIES = {
     build = Build.AFKMode,
   },
   {
+    id    = "taxiMode",
+    label = L["SETTINGS_CAT_TAXI_MODE"],
+    icon  = "Interface\\Icons\\Ability_Mount_Gryphon_01",
+    build = Build.TaxiMode,
+  },
+  {
     id    = "characterArmory",
     label = L["SETTINGS_CAT_CHARACTER_ARMORY"],
     icon  = "Interface\\Icons\\INV_Chest_Cloth_17",
@@ -14864,7 +14935,7 @@ local SIDEBAR_GROUPS = {
   { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasMissingBuffs", "movementBuffs" } },
   -- Groupes sans sous-section : le clic sur le header ouvre directement la page (single)
   { label = L["SETTINGS_GROUP_ANIMATIONS"],  ids = { "spellEffects" }, single = true },
-  { label = L["SETTINGS_GROUP_COMFORT"],     ids = { "comfortQoL", "comfortRender", "visibility", "menuBar", "addonCompartment", "location", "afkMode" } },
+  { label = L["SETTINGS_GROUP_COMFORT"],     ids = { "comfortQoL", "comfortRender", "visibility", "menuBar", "addonCompartment", "location", "afkMode", "taxiMode" } },
 }
 for _, grp in ipairs(SIDEBAR_GROUPS) do ns.PruneUnavailable(grp.ids) end
 ns._sidebarGroups = SIDEBAR_GROUPS   -- export du mode disposition (UI/LayoutEditor.lua)
@@ -15609,6 +15680,13 @@ function MainFrame:SelectCategory(catId)
     local SMo = ns.Modules.StealthMode
     if SMo and SMo.SetPreview then SMo.SetPreview(true) end
   end
+  -- Mode Taxi : vol fictif tant que sa page est ouverte
+  do
+    local TXM = ns.Modules.TaxiMode
+    if TXM and TXM.SetPreview and (prevCat == "taxiMode") ~= (catId == "taxiMode") then
+      TXM.SetPreview(catId == "taxiMode")
+    end
+  end
 
   -- Quitter une section "Auras & Procs" ? réafficher le cercle de vie +
   -- OutOfCombatResourceCircle tout de suite (nécessaire même si on va vers
@@ -16214,6 +16292,10 @@ MainFrame:SetScript("OnShow", function(self)
     local SMo = ns.Modules.StealthMode
     if SMo and SMo.SetPreview then SMo.SetPreview(true) end
   end
+  if activeCategory == "taxiMode" then
+    local TXM = ns.Modules.TaxiMode
+    if TXM and TXM.SetPreview then TXM.SetPreview(true) end
+  end
   -- Panneau rouvert directement sur les cercles hors combat : meme masquage que dans SelectCategory
   if activeCategory == "outOfCombat" or activeCategory == "wellFed" then
     C_Timer.After(0, function()
@@ -16295,6 +16377,8 @@ MainFrame:SetScript("OnHide", function(self)
   if AM   and AM.SetPreview      then AM.SetPreview(false)      end
   local SMd = ns.Modules.StealthMode
   if SMd  and SMd.SetPreview     then SMd.SetPreview(false)     end
+  local TXM = ns.Modules.TaxiMode
+  if TXM  and TXM.SetPreview     then TXM.SetPreview(false)     end
   -- Buffs manquants : meme filet de securite -- SetPreview(true) est lance a
   -- l'entree de la categorie "aurasMissingBuffs" (cf. bloc SelectCategory
   -- plus haut) mais son pendant SetPreview(false) n'est appele QUE sur un

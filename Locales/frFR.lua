@@ -377,6 +377,7 @@ L["CDM_LAYOUT_ERR_COMBAT"] = "Impossible de modifier le Cooldown Manager en comb
 L["CDM_LAYOUT_ERR_NO_CONFIG"] = "Aucune configuration du Gestionnaire de CDs pour cette spé dans le profil."
 L["CDM_LAYOUT_ERR_UNAVAILABLE"] = "Cooldown Manager indisponible (pas encore chargé)."
 L["CDM_LAYOUT_ERR_REFUSED"] = "Le Cooldown Manager a refusé certaines modifications : %s"
+L["CDM_LAYOUT_STILL_DIFF"] = "Le Cooldown Manager diffère encore du build « %s » après application. Tape /cdmdiff pour le détail."
 L["CDM_LAYOUT_NONE"] = "Aucun (Cooldown Manager libre)"
 L["CDM_LAYOUT_BUILD_DEFAULT"] = "Défaut (Blizzard)"
 L["CDM_LAYOUT_SAVEAS_BTN"] = "Enregistrer le CDM actuel sous..."
@@ -1995,6 +1996,32 @@ L["AFKMODE_TIPS"] = {
   "Guilde et chuchotements continuent de s'afficher pendant votre absence.",
 }
 
+-- Mode Taxi (cf. Modules/TaxiMode.lua)
+L["SETTINGS_CAT_TAXI_MODE"] = "Mode Taxi (beta)"
+L["SETTINGS_TAXI_ENABLE"] = "Activer le Mode Taxi"
+L["SETTINGS_TAXI_ENABLE_TT"] = "Pendant un vol, affiche des bandes façon cinéma avec la route : départ, étapes, destination, temps écoulé et heures d'arrivée estimées. Survolez une étape pour vous y arrêter. Les durées s'affinent à chaque vol."
+L["SETTINGS_SEC_TAXI_INTERFACE"] = "Interface pendant le vol"
+L["SETTINGS_TAXI_HIDE_UI"] = "Masquer l'interface"
+L["SETTINGS_TAXI_HIDE_UI_TT"] = "Rend l'interface transparente pendant le vol. Elle reste utilisable : chat, minimap, barres..."
+L["SETTINGS_TAXI_REVEAL_HOVER"] = "Afficher au survol"
+L["SETTINGS_TAXI_REVEAL_HOVER_TT"] = "Un élément de l'interface (chat, minimap, barres...) réapparaît tant que la souris le survole."
+L["SETTINGS_SEC_TAXI_LOOK"] = "Apparence"
+L["SETTINGS_TAXI_TOP_HEIGHT"] = "Hauteur de la bande du haut"
+L["SETTINGS_TAXI_BOTTOM_HEIGHT"] = "Hauteur de la bande du bas"
+L["SETTINGS_TAXI_WIDTH"] = "Largeur de la route"
+L["SETTINGS_TAXI_BAND_COLOR"] = "Couleur des bandes"
+L["SETTINGS_TAXI_FONT"] = "Police"
+L["SETTINGS_TAXI_FONT_SIZE"] = "Taille du texte"
+L["SETTINGS_TAXI_ACCENT"] = "Couleur d'accent"
+L["TAXIMODE_STOP_HERE"] = "ARRÊT\nICI"
+-- Route de l'apercu : nom, zone, temps de vol (secondes)
+L["TAXIMODE_DEMO"] = {
+  { "Cabestan", "Tarides du Nord", 0 },
+  { "La Croisée", "Tarides du Nord", 275 },
+  { "Poste de Bois-Brisé", "Orneval", 302 },
+  { "Orgrimmar", "Durotar", 449 },
+}
+
 -- Localisation (nom de zone / sous-zone)
 L["SETTINGS_CAT_LOCATION"] = "Localisation"
 L["SETTINGS_CAT_EXTRA_BARS"] = "Barres Dynamiques"
@@ -2347,7 +2374,7 @@ L["SETTINGS_PSEUDO_MB_POISON_APPLY"] = "Buff manquant - Appliquer un poison"
 L["SETTINGS_PSEUDO_MB_POISON_STOCK"] = "Buff manquant - Stock de poison"
 L["MISSINGBUFFS_GATHER_TRACKING"] = "Découverte des herbes/minerais"
 L["MISSINGBUFFS_ALERT_TRACKING_OFF"] = "DÉCOUVERTE DÉSACTIVÉE"
-L["MISSINGBUFFS_DISMISS_HINT"] = "Clic droit : masquer cette alerte"
+L["MISSINGBUFFS_DISMISS_HINT"] = "Clic droit : masquer"
 L["SETTINGS_PSEUDO_MB_TRACKING_HERBS"] = "Buff manquant - Découverte désactivée (herbes)"
 L["SETTINGS_PSEUDO_MB_TRACKING_ORE"] = "Buff manquant - Découverte désactivée (minerais)"
 L["SETTINGS_RC_ELITE_HEADER"] = "Dragons élites"

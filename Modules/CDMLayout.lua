@@ -453,7 +453,8 @@ function CDMLayout.Diff(specID)
     -- illisible depuis les frames. On ne le compare pas ; Apply, lui, le range quand meme.
     if e.isKnown and not ignore and want ~= e.current then diffs[#diffs + 1] = { entry = e, want = want, current = e.current } end
     -- Meme filtre que l'ordre voulu : un cooldown "non appris" peut avoir une frame (ex. Haymaker)
-    if e.current == ESSENTIAL and e.isKnown then currentEss[#currentEss + 1] = e.cooldownID end
+    -- Racial ignoré par le build : hors comparaison d'ordre aussi (sinon "ordre différent" en boucle)
+    if e.current == ESSENTIAL and e.isKnown and not ignore then currentEss[#currentEss + 1] = e.cooldownID end
   end
   local orderDiffers = false
   if #diffs == 0 then
@@ -549,8 +550,10 @@ function CDMLayout.Apply(specID)
 
   pcall(lm.SaveLayouts, lm)
   CDMLayout.SetLastApplied(specID, CDMLayout.GetActiveName(specID))
+  AishUISetupCharDB = AishUISetupCharDB or {}
+  -- Lu par CheckSpec après le rechargement : si le CDM diffère encore, pas de nouvelle popup (boucle)
+  AishUISetupCharDB.cdmJustApplied = specID
   if #failures > 0 then
-    AishUISetupCharDB = AishUISetupCharDB or {}
     AishUISetupCharDB.cdmApplyErrors = failures
   end
   ReloadUI()
@@ -597,8 +600,16 @@ CheckSpec = function(tries)
   if InCombatLockdown() then pendingCheck = true; return end
   -- Barres du CDM vides (masquees, pas encore peuplees) : la vraie disposition est illisible, on ne propose rien
   if not CDMLayout.IsExact() then RetryLater(tries); return end
+  -- Rechargement qui suit un Apply sur cette spé : on ne redemande pas, même si le CDM diffère
+  -- encore (changement refusé par le client) -- sinon Appliquer -> reload -> popup, en boucle.
+  local just = AishUISetupCharDB and AishUISetupCharDB.cdmJustApplied
+  if just ~= nil then AishUISetupCharDB.cdmJustApplied = nil end
   if CDMLayout.IsApplied(specID) then return end
   askedThisSession[specID] = true
+  if just == specID then
+    print("|cffff4444[AishCore]|r " .. string.format(L["CDM_LAYOUT_STILL_DIFF"], CDMLayout.BuildLabel(CDMLayout.GetActiveName(specID) or "?")))
+    return
+  end
   if not ns.ShowSetupPopup then return end
   ns.ShowSetupPopup("AishCoreCDMLayoutPrompt", L["CDM_LAYOUT_TITLE"],
     string.format(L["CDM_LAYOUT_PROMPT"], CDMLayout.GetActiveName(specID) or "?"), {
@@ -630,7 +641,10 @@ SlashCmdList["AISHCDMDIFF"] = function()
   end
   if orderDiffers then
     local cur, byId = {}, {}
-    for _, e in ipairs(list) do byId[e.cooldownID] = e; if e.current == ESSENTIAL and e.isKnown then cur[#cur + 1] = e end end
+    for _, e in ipairs(list) do
+      byId[e.cooldownID] = e
+      if e.current == ESSENTIAL and e.isKnown and not (e.racial and CatOf(conf, e) == nil) then cur[#cur + 1] = e end
+    end
     local want = {}
     for _, cid in ipairs(CDMLayout.OrderedEssentials(conf, list)) do
       if byId[cid] and byId[cid].isKnown then want[#want + 1] = cid end

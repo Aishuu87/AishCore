@@ -97,6 +97,7 @@ ns.ProfileTree = {
       } },
     { id = "location", label = "SETTINGS_CAT_LOCATION", core = { "location" }, apply = { "Location" } },
     { id = "afkMode", label = "SETTINGS_CAT_AFK_MODE", core = { "afkMode" }, apply = { "AFKMode" } },
+    { id = "taxiMode", label = "SETTINGS_CAT_TAXI_MODE", core = { "taxiMode" }, apply = { "TaxiMode" } },
     { id = "menuBar", label = "SETTINGS_CAT_MENU_BAR", core = { "menuBar" }, apply = { "MenuBar" } },
     { id = "addonCompartment", label = "SETTINGS_CAT_ADDON_COMPARTMENT", core = { "addonCompartment" }, apply = { "AddonCompartment" } },
     { id = "visibility", label = "SETTINGS_CAT_VISIBILITY", core = { "visibility", "addonFonts" }, apply = { "Visibility", "AddonFonts" }, children = {

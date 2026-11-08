@@ -1,5 +1,17 @@
 # AishCore
 
+## [v4.6.13](https://github.com/Aishuu87/AishCore/tree/v4.6.13) (2026-11-08)
+
+### Taxi Mode
+- Added the Taxi Mode (flight timer). This is a beta version, enable it at your own risk!
+
+### Fixes
+- FIX: The level in the XP Bar could stop showing in some conditions
+- FIX: Some Missing Buffs alerts could still be suggested while a stronger buff was applied
+- FIX: The Camping HUD no longer shows when you are dead
+- FIX: Creating and editing Tags in the Model Library showed the windows in the background
+- FIX: The Cooldown Manager notification could stay shown even after a UI reload and/or after clicking "Don't ask for this spec"
+
 ## [v4.6.12](https://github.com/Aishuu87/AishCore/tree/v4.6.12) (2026-11-08)
 
 ### Central Circle

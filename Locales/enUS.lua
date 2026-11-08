@@ -377,6 +377,7 @@ L["CDM_LAYOUT_ERR_COMBAT"] = "Cannot change the Cooldown Manager in combat."
 L["CDM_LAYOUT_ERR_NO_CONFIG"] = "No Cooldown Manager setup for this spec in the profile."
 L["CDM_LAYOUT_ERR_UNAVAILABLE"] = "Cooldown Manager unavailable (not loaded yet)."
 L["CDM_LAYOUT_ERR_REFUSED"] = "The Cooldown Manager refused some changes: %s"
+L["CDM_LAYOUT_STILL_DIFF"] = "The Cooldown Manager still differs from the build \"%s\" after applying it. Type /cdmdiff for details."
 L["CDM_LAYOUT_NONE"] = "None (free Cooldown Manager)"
 L["CDM_LAYOUT_BUILD_DEFAULT"] = "Default (Blizzard)"
 L["CDM_LAYOUT_SAVEAS_BTN"] = "Save current Cooldown Manager as..."
@@ -1988,6 +1989,32 @@ L["AFKMODE_TIPS"] = {
   "Guild and whispers keep showing up on screen while you're away.",
 }
 
+-- Taxi Mode (cf. Modules/TaxiMode.lua)
+L["SETTINGS_CAT_TAXI_MODE"] = "Taxi Mode (beta)"
+L["SETTINGS_TAXI_ENABLE"] = "Enable Taxi Mode"
+L["SETTINGS_TAXI_ENABLE_TT"] = "During a flight path, shows cinematic bands with your route: departure, stops, destination, elapsed time and estimated arrival times. Hover a stop to land there. Flight times get more accurate with each flight."
+L["SETTINGS_SEC_TAXI_INTERFACE"] = "Interface during the flight"
+L["SETTINGS_TAXI_HIDE_UI"] = "Hide the interface"
+L["SETTINGS_TAXI_HIDE_UI_TT"] = "Makes the interface transparent during the flight. It remains usable: chat, minimap, bars..."
+L["SETTINGS_TAXI_REVEAL_HOVER"] = "Show on mouseover"
+L["SETTINGS_TAXI_REVEAL_HOVER_TT"] = "An interface element (chat, minimap, bars...) reappears while the mouse is over it."
+L["SETTINGS_SEC_TAXI_LOOK"] = "Appearance"
+L["SETTINGS_TAXI_TOP_HEIGHT"] = "Top band height"
+L["SETTINGS_TAXI_BOTTOM_HEIGHT"] = "Bottom band height"
+L["SETTINGS_TAXI_WIDTH"] = "Route width"
+L["SETTINGS_TAXI_BAND_COLOR"] = "Band color"
+L["SETTINGS_TAXI_FONT"] = "Font"
+L["SETTINGS_TAXI_FONT_SIZE"] = "Text size"
+L["SETTINGS_TAXI_ACCENT"] = "Accent color"
+L["TAXIMODE_STOP_HERE"] = "STOP\nHERE"
+-- Preview route: name, zone, flight time (seconds)
+L["TAXIMODE_DEMO"] = {
+  { "Ratchet", "Northern Barrens", 0 },
+  { "Crossroads", "Northern Barrens", 275 },
+  { "Splintertree Post", "Ashenvale", 302 },
+  { "Orgrimmar", "Durotar", 449 },
+}
+
 -- Location (zone / subzone name)
 L["SETTINGS_CAT_LOCATION"] = "Location"
 L["SETTINGS_CAT_EXTRA_BARS"] = "Dynamic Bars"
@@ -2340,7 +2367,7 @@ L["SETTINGS_PSEUDO_MB_POISON_APPLY"] = "Missing buff - Apply poison"
 L["SETTINGS_PSEUDO_MB_POISON_STOCK"] = "Missing buff - Poison stock"
 L["MISSINGBUFFS_GATHER_TRACKING"] = "Find Herbs/Minerals"
 L["MISSINGBUFFS_ALERT_TRACKING_OFF"] = "TRACKING OFF"
-L["MISSINGBUFFS_DISMISS_HINT"] = "Right-click: hide this alert"
+L["MISSINGBUFFS_DISMISS_HINT"] = "Right-click: hide"
 L["SETTINGS_PSEUDO_MB_TRACKING_HERBS"] = "Missing buff - Tracking off (herbs)"
 L["SETTINGS_PSEUDO_MB_TRACKING_ORE"] = "Missing buff - Tracking off (minerals)"
 L["SETTINGS_RC_ELITE_HEADER"] = "Elite Dragons"

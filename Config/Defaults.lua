@@ -1070,6 +1070,21 @@ ns.Defaults = {
     clockFont = "Fonts\\2002.TTF", clockOutline = "OUTLINE", clockSize = 22, clockColor = { 0.95, 0.78, 0.4, 1 }, clockThemed = true,
   },
 
+  -- Mode Taxi, cf. Modules/TaxiMode.lua : bandes facon cinema et route du vol (maitre de vol)
+  taxiMode = {
+    enabled           = false,   -- beta : desactive par defaut
+    hideUI            = true,    -- interface transparente pendant le vol
+    revealOnHover     = true,    -- l'element survole (chat, minimap...) reapparait
+    panelTopHeight    = 60,
+    panelBottomHeight = 90,
+    panelBgColor      = { 0, 0, 0, 0.92 },
+    width             = 0.5,     -- largeur de la route (part de l'ecran)
+    font              = ns.FONT_FALLBACK,
+    fontSize          = 18,      -- noms du depart / de la destination ; le reste en proportion
+    accentColor       = { 1, 0.76, 0.25, 1 },
+    useThemeColors    = false,
+  },
+
   -- Mode furtif, cf. Modules/StealthMode.lua : vignettage qui assombrit l'ecran en furtivite
   stealthMode = {
     enabled  = false,
