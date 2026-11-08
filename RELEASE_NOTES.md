@@ -1,5 +1,14 @@
 # AishCore
 
+## [v4.6.12](https://github.com/Aishuu87/AishCore/tree/v4.6.12) (2026-11-08)
+
+### Central Circle
+- The orbs (combo points, essence, chi, etc.) now move so they are no longer covered by the Elite Dragons when they are shown
+- Orbs already placed at the bottom of the circle stay there
+
+### Fixes
+- FIX: The level in the XP Bar could stop showing in some conditions
+
 ## [v4.6.11](https://github.com/Aishuu87/AishCore/tree/v4.6.11) (2026-11-07)
 
 ### QoL

@@ -1071,8 +1071,10 @@ local function CampItems(diag)
     for slot = 1, (NumSlots(bag) or 0) do
       local id = ItemID(bag, slot)
       -- Recettes ecartees : leur infobulle reprend celle de l'objet fabrique (nourriture, objet de camp...)
-      local classID = id and C_Item and C_Item.GetItemInfoInstant and select(6, C_Item.GetItemInfoInstant(id))
-      if classID == ((Enum.ItemClass and Enum.ItemClass.Recipe) or 9) then id = nil end
+      -- Nourriture et boissons (0/5) ecartees aussi : les objets de camp sont en Consommable / Autre (0/8)
+      local classID, subID
+      if id and C_Item and C_Item.GetItemInfoInstant then classID, subID = select(6, C_Item.GetItemInfoInstant(id)) end
+      if classID == ((Enum.ItemClass and Enum.ItemClass.Recipe) or 9) or (classID == 0 and subID == 5) then id = nil end
       if id and not done[id] then
         scanned = scanned + 1
         local sname, sid

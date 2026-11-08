@@ -2998,24 +2998,50 @@ function ResourceCircle.LayoutSecDots()
   local revKey     = pfx ~= "" and cfg[pfx.."reversed"]
   local reversed   = revKey ~= nil and revKey or cfg.secondaryDotsReversed
 
+  ResourceCircle._secDotCenter = centerAngle
   for i = 1, secDotCount do
     local f = secDots[i]
     if f then
-      -- Calculer l'angle : centre +/- spread (inversé si option active)
+      -- Angle : centre +/- spread (inversé si option active)
       local idx = reversed and (secDotCount + 1 - i) or i
-      local offset = (idx - (secDotCount + 1) / 2) * spread
-      local angle = math.rad(centerAngle + offset)
-      local rx = math.cos(angle) * radius
-      local ry = math.sin(angle) * radius
-
-      -- Mémoriser la position "home" pour l'animation slide
-      f._homeX = rx
-      f._homeY = ry
-
+      f._off = (idx - (secDotCount + 1) / 2) * spread
+      f._rad = radius
+    end
+  end
+  -- Position "home" (cf. animation slide), tournee du cote oppose au dragon elite si affiche
+  ResourceCircle.UpdateSecDotHomes()
+  for i = 1, secDotCount do
+    local f = secDots[i]
+    if f then
+      -- Au-dessus du dragon elite (bar + 30, cf. UpdateEliteDragon)
+      f:SetFrameLevel(bar:GetFrameLevel() + 31)
+      if f.radial then f.radial:SetFrameLevel(f:GetFrameLevel() + 1) end
       f:SetSize(dotSize, dotSize)
       f:ClearAllPoints()
-      f:SetPoint("CENTER", bar, "CENTER", rx, ry)
+      f:SetPoint("CENTER", bar, "CENTER", f._homeX, f._homeY)
       f.fill:SetSize(dotSize, dotSize)
+    end
+  end
+end
+
+-- Recalcule la position "home" des globes : centre de l'arc interpole vers _eliteDotAngle (0 : dragon a gauche, 180 :
+-- a droite) selon _eliteDotBlend (0..1, anime par Elite.Dots), par le plus court chemin. L'OnUpdate du slide
+-- (CreateSecAnimFrame) replace les globes a chaque frame.
+function ResourceCircle.UpdateSecDotHomes()
+  if not bar or secDotCount == 0 then return end
+  local center = ResourceCircle._secDotCenter or 90
+  local eb = ResourceCircle._eliteDotBlend or 0
+  -- Globes en bas (260-280) : pas genes par le dragon, on n'y touche pas
+  local low = center % 360 >= 260 and center % 360 <= 280
+  if eb ~= 0 and not low then
+    local target = ResourceCircle._eliteDotAngle or 180
+    center = center + (((target - center + 180) % 360) - 180) * eb
+  end
+  for i = 1, secDotCount do
+    local f = secDots[i]
+    if f and f._rad then
+      local a = math.rad(center + f._off)
+      f._homeX, f._homeY = math.cos(a) * f._rad, math.sin(a) * f._rad
     end
   end
 end
@@ -4685,12 +4711,35 @@ function Elite.Layout(t, cfg)
   if f._dir < 0 then tx:SetTexCoord(1, 0, 0, 1) else tx:SetTexCoord(0, 1, 0, 1) end
 end
 
+-- Globes secondaires tournes du cote oppose au dragon (sinon caches derriere) : rotation 180 dragon a droite, 0 a
+-- gauche. on = dragon affiche ; dir = cote du dragon (f._dir). Glissement amorti depuis la position courante.
+function Elite.Dots(on, dir)
+  local RC = ResourceCircle
+  if dir then RC._eliteDotAngle = dir < 0 and 0 or 180 end
+  local to = on and 1 or 0
+  local df = Elite.dotFrame
+  local running = df and df:GetScript("OnUpdate")
+  if (running and df._to == to) or (not running and (RC._eliteDotBlend or 0) == to) then
+    RC.UpdateSecDotHomes()   -- cote du dragon modifie dans les reglages : position directe
+    return
+  end
+  if not df then df = CreateFrame("Frame"); Elite.dotFrame = df end
+  df._from, df._to, df._t0 = RC._eliteDotBlend or 0, to, GetTime()
+  df:SetScript("OnUpdate", function(self)
+    local t = math.min(1, (GetTime() - self._t0) / 0.5)
+    RC._eliteDotBlend = self._from + (self._to - self._from) * Elite.ease.quintOut(t)
+    RC.UpdateSecDotHomes()
+    if t >= 1 then self:SetScript("OnUpdate", nil) end
+  end)
+end
+
 function ResourceCircle.UpdateEliteDragon()
   if not bar then return end
   local cfg = ns.GetCfg("resourceCircle") or {}
   local kind = Elite.Kind(cfg)
   local t = kind and Elite.tex[kind]
   local f = Elite.frame
+  Elite.Dots(t ~= nil, cfg.eliteDragonsLeft and -1 or 1)
   if not t then
     -- Plus de dragon : depart vers la droite (inverse de l'arrivee), puis masquage
     if f and Elite.shown then
@@ -4939,6 +4988,7 @@ function ResourceCircle.NewGhost(parent)
     local dotSize = size * (pv("size", "secondaryDotsSize") or 0.16)
     local radius = size * (pv("radius", "secondaryDotsRadius") or 0.62)
     local center = pv("rotation", "secondaryDotsRotation") or 90
+    if opts.elite and not (center % 360 >= 260 and center % 360 <= 280) then center =cfg.eliteDragonsLeft and 0 or 180 end   -- cote oppose au dragon (cf. Elite.Dots)
     local spread = pv("spread", "secondaryDotsSpread") or 24
     local rev = cfg[pfx .. "reversed"]
     if rev == nil then rev = cfg.secondaryDotsReversed end
@@ -4949,7 +4999,7 @@ function ResourceCircle.NewGhost(parent)
       local f = g.secDots[i]
       if not f then
         f = CreateFrame("Frame", nil, g)
-        f:SetFrameLevel(g.txt:GetFrameLevel())
+        f:SetFrameLevel(g:GetFrameLevel() + 31)   -- au-dessus du dragon (eliteF)
         f.bg = f:CreateTexture(nil, "BACKGROUND")
         f.bg:SetTexture(SEC_DOT_TEX)
         f.bg:SetAllPoints()

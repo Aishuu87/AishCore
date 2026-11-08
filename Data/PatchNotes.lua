@@ -8,6 +8,16 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.12", date = "2026-11-08",
+    lines = {
+      { k = "h", link = { page = "resourceCircle" }, t = "Central Circle", fr = "Cercle central" },
+      { k = "li", lvl = 1, link = { page = "resourceCircle", section = "SETTINGS_RC_ELITE_HEADER" }, t = "The orbs (combo points, essence, chi, etc.) now move so they are no longer covered by the Elite Dragons when they are shown", fr = "Les orbes (combos, essence, chi, etc) se déplaceront pour ne plus être obstruées par la décoration Elite si cette dernière s'affiche" },
+      { k = "li", lvl = 1, link = { page = "resourceCircle" }, t = "Orbs already placed at the bottom of the circle stay there", fr = "Si les orbes sont déjà placées en bas du cercle, elles y resteront" },
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = { page = "xpBar" }, t = "FIX: The level in the XP Bar could stop showing in some conditions", fr = "FIX : Le niveau dans la barre d'XP pouvait ne plus s'afficher dans certaines conditions" },
+    },
+  },
+  {
     version = "4.6.11", date = "2026-11-07",
     lines = {
       { k = "h", link = { page = "comfortQoL" }, t = "QoL", fr = "QoL" },

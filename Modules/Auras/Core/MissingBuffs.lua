@@ -2883,61 +2883,18 @@ ElixirChoices = Memo(ElixirChoices)
 UnspentTalentPoints = Memo(UnspentTalentPoints)
 MissingBuffs.UnspentTalentPoints = UnspentTalentPoints
 
--- Forever : points d'Heritage a depenser (LegacySystem.GetCurrencyInfo, cf. LEGACY_POINTS_CURR_MAX "%d/%d").
--- Format de retour non documente : nombre, info de monnaie de traits ({ quantity, maxQuantity }) ou liste de celles-ci.
-local function LegacyQuantity(v)
-    if type(v) == "number" then return v end
-    if type(v) ~= "table" then return nil end
-    local q = tonumber(v.quantity or v.availableQuantity or v.unspent or v.current)
-    if q then return q end
-    local sum
-    for _, c in ipairs(v) do
-        local n = LegacyQuantity(c)
-        if n then sum = (sum or 0) + n end
-    end
-    return sum
-end
--- LegacySystem vit dans Blizzard_LegacySystem, charge a la demande (ouverture du panneau) : on le charge nous-memes,
--- une fois, hors combat, sinon l'alerte ne voit rien tant que le panneau n'a pas ete ouvert.
--- Le cache de LegacySystem n'est rempli qu'apres UpdateCurrencyInfo (appele par le panneau a son ouverture) : on le
--- demande une fois au chargement ; le callback relance l'evaluation quand les donnees arrivent. Pas d'appel a chaque
--- evaluation (le callback reboucherait).
-local legacyLoadTries, legacyReady = 0, false
-local function EnsureLegacyUI()
-    if not _G.LegacySystem and legacyLoadTries < 3 and _G.LegacySystemFrame_LoadUI and not InCombatLockdown() then
-        legacyLoadTries = legacyLoadTries + 1
-        pcall(_G.LegacySystemFrame_LoadUI)
-    end
-    local LS = _G.LegacySystem
-    if LS and not legacyReady then
-        legacyReady = true
-        if LS.RegisterCurrencyInfoCallback then
-            pcall(LS.RegisterCurrencyInfoCallback, LS, function() MissingBuffs.RequestCheck() end)
-        end
-        if LS.UpdateCurrencyInfo then pcall(LS.UpdateCurrencyInfo, LS) end
-        C_Timer.After(2, function() MissingBuffs.RequestCheck() end)
-    end
-    return LS
-end
+-- Forever : points d'Heritage a depenser. Meme calcul que LegacySystem.GetCurrencyInfo (Blizzard_LegacySystemUtil.lua),
+-- fait en direct : pas de chargement de l'interface ni de cache perime. Le compteur du bouclier du panneau affiche
+-- le niveau de renom, pas les points (ancienne source de fausses alertes).
 local function UnspentLegacyPoints()
-    if not _G.LegacySystemFrame_LoadUI and not _G.LegacySystem then return false end  -- client sans Heritage
-    local LS = EnsureLegacyUI()
-    if LS and LS.GetCurrencyInfo then
-        local ok, a = pcall(LS.GetCurrencyInfo, LS)
-        if not ok or a == nil then ok, a = pcall(LS.GetCurrencyInfo) end
-        local q = ok and LegacyQuantity(a)
-        if q then return q > 0 end
-    end
-    -- Repli : compteur "Points disponibles" du panneau (LegacyTreePointSummary.Shield.Points)
-    local f = _G.LegacySystemFrame
-    local fs = f and f.TreePage and f.TreePage.LegacyTreePointSummary and f.TreePage.LegacyTreePointSummary.Shield
-        and f.TreePage.LegacyTreePointSummary.Shield.Points
-    if fs and fs.GetText then
-        local ok, t = pcall(fs.GetText, fs)
-        local n = ok and type(t) == "string" and tonumber(t:match("%d+"))
-        if n then return n > 0 end
-    end
-    return false
+    local LC = _G.Constants and _G.Constants.LegacyConsts
+    local treeID = LC and LC.LEGACY_TREE_PROFESSIONS_ID
+    if not treeID or not (C_Traits and C_Traits.GetConfigIDByTreeID and C_Traits.GetTreeCurrencyInfo) then return false end
+    local ok, configID = pcall(C_Traits.GetConfigIDByTreeID, treeID)
+    if not ok or not configID then return false end
+    local ok2, infos = pcall(C_Traits.GetTreeCurrencyInfo, configID, treeID, false)
+    local c = ok2 and type(infos) == "table" and infos[1]
+    return (c and tonumber(c.quantity) or 0) > 0
 end
 MissingBuffs.UnspentLegacyPoints = UnspentLegacyPoints
 
@@ -3281,7 +3238,7 @@ function MissingBuffs.CheckForMissings()
     -- 5b) Forever : points d'Heritage a depenser
     if not cfg.ignoreLegacyPoints and not TalentFrameOpen() and UnspentLegacyPoints() then
         MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_LEGACY_KEY, icon = "Interface\\Icons\\INV_Misc_Book_11",
-            macro = "/run if LegacySystemFrame then ShowUIPanel(LegacySystemFrame) elseif ToggleLegacyChallenges then ToggleLegacyChallenges() end" } },
+            macro = "/run if LegacySystemFrame then ShowUIPanel(LegacySystemFrame) elseif ToggleLegacySystemUI then ToggleLegacySystemUI() end" } },
             ns.MISSING_TEXT.SPEND_LEGACY)
         return
     end

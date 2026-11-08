@@ -76,6 +76,16 @@ local function SetLevelTextFont(size)
     ns.DB.xpBar and ns.DB.xpBar.levelOutlineStyle, true)
 end
 
+--- Lancement a froid : une police externe (ex. SharedMedia) pas encore chargee par le client reste invisible,
+--- et un SetFont sur le meme chemin ne la relit pas. On passe par la police de secours puis on re-applique.
+local function ReloadLevelFont()
+  if not levelText or xpFontLevel == ns.FONT_FALLBACK then return end
+  pcall(levelText.SetFont, levelText, ns.FONT_FALLBACK, 12, "")
+  for _, fs in ipairs(levelText.slugRing or {}) do pcall(fs.SetFont, fs, ns.FONT_FALLBACK, 12, "") end
+  SetLevelTextFont(levelText.baseSize or 19)
+  levelText:SetText(levelText:GetText() or "")
+end
+
 -- Elements layout mode
 local lbBorder        -- Frame bordure rouge autour de levelBg
 local lbCoordText     -- FontString coordonnees levelBg
@@ -3203,6 +3213,7 @@ local function OnXPBarEvent(_, event, arg1, ...)
     -- Retries échelonnés pour rattraper les APIs qui se stabilisent après le loading screen
     for _, delay in ipairs({0.5, 1.5, 3, 6}) do
       C_Timer.After(delay, function()
+        ReloadLevelFont()
         if XPBar.UpdateVisibility then XPBar.UpdateVisibility() end
         if XPBar.Update then XPBar.Update() end
         -- Initialiser prevRepPct si les APIs n'étaient pas prêtes à PLAYER_ENTERING_WORLD
