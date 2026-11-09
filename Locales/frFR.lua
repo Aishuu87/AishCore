@@ -1009,6 +1009,8 @@ L["UISWITCH_COMBAT"] = "Indisponible en combat."
 L["BARS_TITLE"] = "Profil changé"
 L["BARS_RELOAD"] = "Ce profil change la police, les skins ou le style.\nUn rechargement est nécessaire pour les appliquer."
 L["BARS_NO_UI"] = "Ni ElvUI ni EllesmereUI n'est chargé."
+L["SETUP_NOTHING_TO_DO"] = "Tout est déjà configuré sur ce personnage : rien à changer."
+L["SETUP_NOT_AISHUI"] = "Le setup auto n'est disponible qu'avec la version complète AishUI."
 L["BARS_ALREADY"] = "Déjà sur %s."
 L["BARS_NOMATCH"] = "Le profil actuel (%s) n'a pas de variante Show Bars / Hide Bars."
 L["BARS_MISSING"] = "Profil %s introuvable."
@@ -1255,6 +1257,7 @@ L["MISSINGBUFFS_ENABLE"] = "Activer"
 L["MISSINGBUFFS_CLICKABLE"] = "Icône cliquable (lance le sort manquant)"
 L["MISSINGBUFFS_IGNORE_MOUNTED"] = "Ignorer si monté"
 L["MISSINGBUFFS_IGNORE_RESTING"] = "Ignorer en zone de repos"
+L["MISSINGBUFFS_IGNORE_TRAVEL_FORMS"] = "Ignorer en forme de voyage / Loup fantôme"
 L["MISSINGBUFFS_HIDE_TEXT"] = "Cacher le texte sous l'icône"
 L["MISSINGBUFFS_LOCK"] = "Verrouiller la position"
 L["MISSINGBUFFS_THROTTLE"] = "Délai entre 2 vérifications (s)"
@@ -2013,12 +2016,27 @@ L["SETTINGS_TAXI_BAND_COLOR"] = "Couleur des bandes"
 L["SETTINGS_TAXI_FONT"] = "Police"
 L["SETTINGS_TAXI_FONT_SIZE"] = "Taille du texte"
 L["SETTINGS_TAXI_ACCENT"] = "Couleur d'accent"
+L["SETTINGS_TAXI_DONE_TEXTURE"] = "Texture du trajet parcouru"
+L["SETTINGS_TAXI_DONE_TEX_DEFAULT"] = "Mode Taxi (par défaut)"
+L["SETTINGS_TAXI_ROUTE_X"] = "Décalage X de la route"
+L["SETTINGS_TAXI_ROUTE_Y"] = "Décalage Y de la route"
+L["SETTINGS_TAXI_GROUP_X"] = "Décalage X du groupe (nom + zone)"
+L["SETTINGS_TAXI_GROUP_Y"] = "Décalage Y du groupe (nom + zone)"
+L["SETTINGS_TAXI_TXT_COLOR"] = "Couleur du texte"
+L["SETTINGS_TAXI_TXT_USE_ACCENT"] = "Utiliser la couleur d'accent"
+L["SETTINGS_TAXI_TXT_USE_ACCENT_TT"] = "Utilise la couleur d'accent (ou les Couleurs Thématiques) au lieu de la couleur du texte."
+L["SETTINGS_TAXI_TXT_START"] = "Départ"
+L["SETTINGS_TAXI_TXT_END"] = "Destination"
+L["SETTINGS_TAXI_TXT_ZONES"] = "Zones de départ et de destination"
+L["SETTINGS_TAXI_TXT_STEPS"] = "Étapes"
+L["SETTINGS_TAXI_TXT_ETA"] = "ETA"
+L["SETTINGS_TAXI_TXT_ELAPSED"] = "Temps écoulé"
 L["TAXIMODE_STOP_HERE"] = "ARRÊT\nICI"
 -- Route de l'apercu : nom, zone, temps de vol (secondes)
 L["TAXIMODE_DEMO"] = {
   { "Cabestan", "Tarides du Nord", 0 },
-  { "La Croisée", "Tarides du Nord", 275 },
-  { "Poste de Bois-Brisé", "Orneval", 302 },
+  { "La Croisée", "Tarides du Nord", 225 },
+  { "Poste de Bois-Brisé", "Orneval", 337 },
   { "Orgrimmar", "Durotar", 449 },
 }
 

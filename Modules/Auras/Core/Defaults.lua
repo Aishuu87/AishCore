@@ -184,6 +184,7 @@ ns.Defaults = {
         enabled = true,
         makeIconClickable = true,
         ignoreBuffsWhileMounted = true,
+        ignoreTravelForms = true,      -- Forever : forme de voyage / Loup fantome
         ignoreWhileResting = false,
         debounceThrottle = 0.25,
         showBuffsInCombat = false,

@@ -151,7 +151,62 @@ function ns.GetStyleInfo(spellID)
     return wl and wl[spellID] or nil
 end
 
+-- VARIANTES HOMONYMES CONNUES A L'AVANCE ---------------------------------------------------------
+-- Le regroupement par nom plus bas ne fusionne que des IDs DEJA presents dans discoveredSpells. Or
+-- certains buffs n'ont jamais d'entree propre : la liste contient le sort du TALENT (Rafale 16256)
+-- alors que l'aura posee sur le joueur porte un autre ID (16257). AddAuraGroup ne matche que par
+-- spellID, et le nom d'une aura est secret en combat : impossible de comparer les noms au proc.
+-- Les IDs homonymes sont donc fournis A L'AVANCE par Data/SpellHomonyms.lua (meme nom, aura, meme
+-- famille de classe), injectes dans le repli linkedSpellIDs de BuildWhitelist (destinations + style
+-- de l'ancre).
+--
+-- En complement, le CDM lie lui-meme une case a son aura reelle (CDMHooks.lua, SetAuraInstanceInfo)
+-- : ns.LinkAuraVariant persiste ce lien quand le spellID de l'aura differe de celui de la case.
+local function IsClean(v)
+    return v ~= nil and not (issecretvalue and issecretvalue(v))
+end
+
+-- Ajoute auraID aux linkedSpellIDs de l'entree anchorID (profil + registre compte).
+function ns.LinkAuraVariant(anchorID, auraID)
+    if not (IsClean(anchorID) and IsClean(auraID)) or type(auraID) ~= "number" or anchorID == auraID then return false end
+    local spells = ns.GetSpecSpells and ns.GetSpecSpells()
+    local anchor = spells and spells[anchorID]
+    if not anchor or spells[auraID] then return false end
+    local split = ns.SPLIT_LINKED_SPELLS or {}
+    if split[auraID] or split[anchorID] then return false end
+    local lids = anchor.linkedSpellIDs
+    if type(lids) == "table" then
+        for _, l in ipairs(lids) do if l == auraID then return false end end
+        -- Copie : linkedSpellIDs peut etre la table brute du CDM, partagee.
+        local copy = {}
+        for i, l in ipairs(lids) do copy[i] = l end
+        copy[#copy + 1] = auraID
+        anchor.linkedSpellIDs = copy
+    else
+        anchor.linkedSpellIDs = { anchorID, auraID }
+    end
+    -- Registre compte (cf. Profiles.lua) : PullDiscovery y relit linkedSpellIDs a chaque activation
+    -- de profil, ce qui effacerait le lien avant la prochaine deconnexion.
+    local key = ns.GetSpecKey and ns.GetSpecKey()
+    local reg = key and AishUIAuraDB and type(AishUIAuraDB.discovery) == "table" and AishUIAuraDB.discovery[key]
+    if type(reg) == "table" and type(reg[anchorID]) == "table" then
+        reg[anchorID].linkedSpellIDs = ns.DeepCopy(anchor.linkedSpellIDs)
+    end
+    ns._auraVariantsDirty = true
+    return true
+end
+
+-- Rebuild apres un nouveau lien, hors combat seulement (AddAuraGroup protege). En combat, le flag
+-- _auraVariantsDirty attend le PLAYER_REGEN_ENABLED, qui reconstruit de toute facon.
+function ns.FlushAuraVariants()
+    if not ns._auraVariantsDirty or InCombatLockdown() then return end
+    ns._auraVariantsDirty = nil
+    pcall(ns.BuildWhitelist)
+    if ns.ScanAuras then pcall(ns.ScanAuras) end
+end
+
 function ns.BuildWhitelist()
+    ns._auraVariantsDirty = nil
     -- Auto-configure le sort du cercle central avant chaque rebuild
     if ns.AutoConfigCenterArc then pcall(ns.AutoConfigCenterArc) end
     if ns.AutoConfigSecResDurBar then pcall(ns.AutoConfigSecResDurBar) end
@@ -267,17 +322,27 @@ function ns.BuildWhitelist()
     -- profondeur, aucun des deux ne depend de l'autre).
     -- Auras a scinder (buff et debuff lies par Blizzard, cf. CDMHooks.lua) : jamais d'heritage par ce lien
     local split = ns.SPLIT_LINKED_SPELLS or {}
+    -- Homonymes connus a l'avance (Data/SpellHomonyms.lua, cf. bloc VARIANTES HOMONYMES plus haut) :
+    -- meme traitement que linkedSpellIDs.
+    local homonyms = _addon.SpellHomonyms or {}
+    local function LinkTo(id, info, linkedID)
+        if linkedID ~= id and not split[linkedID] and not split[id] then
+            local ld = linkedDest[linkedID]
+            if not ld then ld = {}; linkedDest[linkedID] = ld end
+            for dest, active in pairs(info.destinations) do
+                if active then ld[dest] = true end
+            end
+            if not spells[linkedID] then linkedFallbackInfo[linkedID] = info end
+        end
+    end
     for id, info in pairs(spells) do
-        if info.enabled and not info._invalid and type(info.linkedSpellIDs) == "table" and info.destinations then
-            for _, linkedID in ipairs(info.linkedSpellIDs) do
-                if linkedID ~= id and not split[linkedID] and not split[id] then
-                    local ld = linkedDest[linkedID]
-                    if not ld then ld = {}; linkedDest[linkedID] = ld end
-                    for dest, active in pairs(info.destinations) do
-                        if active then ld[dest] = true end
-                    end
-                    if not spells[linkedID] then linkedFallbackInfo[linkedID] = info end
-                end
+        if info.enabled and not info._invalid and info.destinations then
+            if type(info.linkedSpellIDs) == "table" then
+                for _, linkedID in ipairs(info.linkedSpellIDs) do LinkTo(id, info, linkedID) end
+            end
+            local hom = homonyms[id]
+            if hom then
+                for _, linkedID in ipairs(hom) do LinkTo(id, info, linkedID) end
             end
         end
     end

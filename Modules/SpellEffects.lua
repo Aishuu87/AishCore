@@ -80,6 +80,14 @@ local LIGHT_PARAMS = {
 -- Defaut selon le client : Retail rend correctement, on n'y touche pas.
 local DEFAULT_LIGHT_MODE = ns.IsForever and "off" or "none"
 
+-- Forever en instance : SetLight(false) laisse le modele sous l'eclairage sombre du donjon
+-- (animations quasi noires). On y impose une lumiere propre, et on retire le brouillard.
+local function ForeverInInstance()
+  if not ns.IsForever or not IsInInstance then return false end
+  local inInst = IsInInstance()
+  return inInst and true or false
+end
+
 -- La signature en table n'existe que si CreateVector3D/CreateColor sont exposes. Sans eux,
 -- pcall reussirait sur une table incomplete SANS que l'eclairage demande soit applique :
 -- on teste donc la disponibilite plutot que de se fier au pcall.
@@ -94,6 +102,7 @@ local function CurrentLightMode()
   for _, m in ipairs(LIGHT_MODES) do
     if m == mode then return mode end
   end
+  if ForeverInInstance() then return "soft" end
   return DEFAULT_LIGHT_MODE
 end
 
@@ -172,6 +181,7 @@ local function CurrentFogMode()
   for _, m in ipairs(FOG_MODES) do
     if m == mode then return mode end
   end
+  if ForeverInInstance() then return "clear" end
   return DEFAULT_FOG_MODE
 end
 
@@ -188,6 +198,16 @@ local function ApplyModelFog(f, mode)
     if f.SetFogColor then f:SetFogColor(0, 0, 0) end
     if f.SetFogNear then f:SetFogNear(0) end
     if f.SetFogFar then f:SetFogFar(0) end
+  end)
+end
+
+-- Entree / sortie d'instance avec une deco en boucle : on reapplique lumiere et brouillard.
+if ns.IsForever then
+  local zoneEvt = CreateFrame("Frame")
+  zoneEvt:RegisterEvent("PLAYER_ENTERING_WORLD")
+  zoneEvt:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+  zoneEvt:SetScript("OnEvent", function()
+    for f in pairs(litFrames) do ApplyModelLighting(f); ApplyModelFog(f) end
   end)
 end
 

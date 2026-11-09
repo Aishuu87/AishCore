@@ -14013,11 +14013,11 @@ function Build.TaxiMode(container)
   BindSlider(slWidth, "taxiMode", "width")
   ctx:AddRow(8, slTop, slBottom, slWidth)
 
-  local ddFont = SW.CreateDropdown(container, L["SETTINGS_TAXI_FONT"], ns.GetFontList(), W2)
-  BindDropdown(ddFont, "taxiMode", "font")
-  local slSize = SW.CreateSlider(container, L["SETTINGS_TAXI_FONT_SIZE"], 10, 32, 1, W2)
-  BindSlider(slSize, "taxiMode", "fontSize")
-  ctx:AddRow(8, ddFont, slSize)
+  local slTrackX = SW.CreateSlider(container, L["SETTINGS_TAXI_ROUTE_X"], -800, 800, 1, W2)
+  BindSlider(slTrackX, "taxiMode", "trackX")
+  local slTrackY = SW.CreateSlider(container, L["SETTINGS_TAXI_ROUTE_Y"], -100, 100, 1, W2)
+  BindSlider(slTrackY, "taxiMode", "trackY")
+  ctx:AddRow(8, slTrackX, slTrackY)
 
   local colBg = ctx:Add(SW.CreateColorButton(container, L["SETTINGS_TAXI_BAND_COLOR"], W))
   BindColorButton(colBg, "taxiMode", "panelBgColor")
@@ -14026,6 +14026,44 @@ function Build.TaxiMode(container)
   local cbTheme = SW.CreateCheckbox(container, L["SETTINGS_AFK_USE_THEME_COLORS"], L["SETTINGS_AFK_USE_THEME_COLORS_TT"], W2)
   BindCheckbox(cbTheme, "taxiMode", "useThemeColors")
   ctx:AddRow(8, colAccent, cbTheme)
+  local texItems = { { value = "fly", text = L["SETTINGS_TAXI_DONE_TEX_DEFAULT"] } }
+  for _, e in ipairs(ns.GetBarTextureList()) do texItems[#texItems + 1] = e end
+  local ddDoneTex = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_TAXI_DONE_TEXTURE"], texItems, W2))
+  BindDropdown(ddDoneTex, "taxiMode", "doneTexture")
+
+  -- Textes : police, taille, alignement, couleur (ou couleur d'accent) ; groupes depart / destination decalables
+  local function TextBlock(prefix, title, offX, offY)
+    ctx:Spacer(6)
+    ctx:Add(SW.CreateSectionHeader(container, title, W))
+    local ddFont = SW.CreateDropdown(container, L["SETTINGS_TAXI_FONT"], ns.GetFontList(), W3)
+    BindDropdown(ddFont, "taxiMode", prefix .. "Font")
+    local slSize = SW.CreateSlider(container, L["SETTINGS_TAXI_FONT_SIZE"], 6, 40, 1, W3)
+    BindSlider(slSize, "taxiMode", prefix .. "Size")
+    local align = SW.CreateAlignRow(container, L["UNITBARS_JUSTIFY"], W3, nil, true)
+    align:SetValue(DBGet("taxiMode", prefix .. "Align") or "CENTER")
+    align.onChanged = function(val) DBSet("taxiMode", prefix .. "Align", val); LiveApply("taxiMode") end
+    align._dbKey, align._subKey = "taxiMode", prefix .. "Align"
+    ctx:AddRow(8, ddFont, slSize, align)
+    local col = SW.CreateColorButton(container, L["SETTINGS_TAXI_TXT_COLOR"], W2)
+    BindColorButton(col, "taxiMode", prefix .. "Color")
+    local cbAcc = SW.CreateCheckbox(container, L["SETTINGS_TAXI_TXT_USE_ACCENT"], L["SETTINGS_TAXI_TXT_USE_ACCENT_TT"], W2)
+    BindCheckbox(cbAcc, "taxiMode", prefix .. "Accent")
+    ctx:AddRow(8, col, cbAcc)
+    ctx:Depends(cbAcc, { col }, true)
+    if offX then
+      local slX = SW.CreateSlider(container, L["SETTINGS_TAXI_GROUP_X"], -400, 400, 1, W2)
+      BindSlider(slX, "taxiMode", offX)
+      local slY = SW.CreateSlider(container, L["SETTINGS_TAXI_GROUP_Y"], -100, 100, 1, W2)
+      BindSlider(slY, "taxiMode", offY)
+      ctx:AddRow(8, slX, slY)
+    end
+  end
+  TextBlock("startName", L["SETTINGS_TAXI_TXT_START"], "startX", "startY")
+  TextBlock("endName",   L["SETTINGS_TAXI_TXT_END"], "endX", "endY")
+  TextBlock("zone",      L["SETTINGS_TAXI_TXT_ZONES"])
+  TextBlock("step",      L["SETTINGS_TAXI_TXT_STEPS"])
+  TextBlock("eta",       L["SETTINGS_TAXI_TXT_ETA"])
+  TextBlock("elapsed",   L["SETTINGS_TAXI_TXT_ELAPSED"])
 
   ctx:Finalize()
   return ctx.widgets

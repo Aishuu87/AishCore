@@ -431,6 +431,18 @@ function ns.SettingsPanel.BuildMissingBuffsMenu(p, cw)
     end
     y = y - 26
 
+    -- Forever seulement : forme de voyage (Druide) et Loup fantome (Chaman)
+    if _addon.IsForever then
+        local cbTravel = SW.CreateCheckbox(p, L["MISSINGBUFFS_IGNORE_TRAVEL_FORMS"], 3 * col + 2 * GAP)
+        cbTravel:SetPoint("TOPLEFT", 15, y)
+        cbTravel:SetChecked(cfg.ignoreTravelForms ~= false)
+        cbTravel.onChanged = function(v)
+            Cfg().ignoreTravelForms = v
+            if ns.MissingBuffs then ns.MissingBuffs.RequestCheck() end
+        end
+        y = y - 26
+    end
+
     local cbResting = SW.CreateCheckbox(p, L["MISSINGBUFFS_IGNORE_RESTING"] or "Ignorer en zone de repos", 3 * col + 2 * GAP)
     cbResting:SetPoint("TOPLEFT", 15, y)
     cbResting:SetChecked(cfg.ignoreWhileResting and true or false)

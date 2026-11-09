@@ -89,22 +89,54 @@ end
 
 -- Appelee sur PLAYER_TOTEM_UPDATE(slot), qui se declenche pour la pose ET le retrait/expiration ;
 -- un test de presence pure (startTime truthy) filtre les retraits pour ne lier que les poses reelles.
+local function IsSecret(v) return issecretvalue and issecretvalue(v) end
+
 local function OnTotemSlotChanged(slot)
     if not (slot and GetTotemInfo) then return end
     local okInfo, have, name, startTime = pcall(GetTotemInfo, slot)
-    if not (okInfo and startTime) then return end -- retrait/expiration, pas une pose : rien a lier
+    if not okInfo then return end
+    -- Retrait/expiration, pas une pose : rien a lier. Slot vide = haveTotem false ET startTime 0 --
+    -- or 0 est VRAI en Lua : tester startTime seul liait le dernier sort lance (Attaque, Boisson,
+    -- potion...) a chaque disparition de totem.
+    if have ~= nil and not IsSecret(have) and not have then return end
+    if not startTime then return end
+    if not IsSecret(startTime) and type(startTime) == "number" and startTime <= 0 then return end
 
     local spells = ns.GetSpecSpells and ns.GetSpecSpells()
     if not spells then return end
 
-    -- Purge les candidats perimes en tete de file (plus vieux que la
-    -- fenetre), puis consomme le PLUS ANCIEN candidat restant (FIFO).
+    -- Purge les candidats perimes en tete de file (plus vieux que la fenetre).
     local now = GetTime()
     while pendingCastQueue[1] and (now - pendingCastQueue[1].time) > PENDING_WINDOW do
         table.remove(pendingCastQueue, 1)
     end
     if not pendingCastQueue[1] then return end
-    local spellID = table.remove(pendingCastQueue, 1).spellID
+
+    -- Nom du totem lisible : on prend le candidat dont le nom correspond (le totem porte le nom du
+    -- sort, parfois suivi d'un rang). Sans correspondance, aucun lien -- sinon un Eclair lance juste
+    -- avant le totem etait classe "totem". Nom secret : repli FIFO (plus ancien candidat).
+    local pick
+    if type(name) == "string" and not IsSecret(name) and name ~= "" then
+        local lname = name:lower()
+        for i, c in ipairs(pendingCastQueue) do
+            local sn = SafeSpellName(c.spellID)
+            local lsn = sn and sn:lower()
+            if lsn and lsn ~= "" and (lname:find(lsn, 1, true) or lsn:find(lname, 1, true)) then
+                pick = i; break
+            end
+        end
+        if not pick then return end
+    else
+        -- Nom secret (Retail, en combat) : rien ne distingue le totem d'un Choc / Vague de soins lance juste
+        -- avant. On ne lie alors qu'un sort DEJA classe totem (decouvert hors combat, nom lisible) et on
+        -- n'en decouvre aucun nouveau.
+        for i, c in ipairs(pendingCastQueue) do
+            local known = spells[c.spellID]
+            if known and known.source == "totem" then pick = i; break end
+        end
+        if not pick then return end
+    end
+    local spellID = table.remove(pendingCastQueue, pick).spellID
     slotSpellID[slot] = spellID
     local info = spells[spellID]
     if info then
@@ -616,6 +648,49 @@ totemEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     end
     RescanActiveTotems()
     pcall(ns.RefreshTotemsGrid)
+end)
+
+-- NETTOYAGE UNIQUE : l'ancienne liaison (slot vide pris pour une pose, candidat le plus ancien) a
+-- classe "totem" des sorts et objets sans rapport (Attaque, Boisson, Eclair, potions...). On retire du
+-- registre compte et de tous les profils les entrees "totem" cochees nulle part : les vrais totems
+-- reviennent seuls a la prochaine pose, avec la liaison corrigee. V2 : repasse apres le correctif du nom
+-- secret (combat), qui liait encore le premier sort lance (Choc, Vague de soins...).
+local function PurgeBogusTotems()
+    local raw = AishUIAuraDB
+    if type(raw) ~= "table" or raw.totemPurgeV2 or type(raw.discovery) ~= "table" then return end
+    raw.totemPurgeV2 = true
+    local profiles = type(raw.profiles) == "table" and raw.profiles or {}
+    local removed = 0
+    for specKey, reg in pairs(raw.discovery) do
+        if type(reg) == "table" then
+            for sid, d in pairs(reg) do
+                if type(d) == "table" and d.source == "totem" then
+                    local keep = false
+                    for _, p in pairs(profiles) do
+                        local list = type(p) == "table" and type(p.discoveredSpells) == "table" and p.discoveredSpells[specKey]
+                        local info = type(list) == "table" and list[sid]
+                        if type(info) == "table" and info.enabled then keep = true; break end
+                    end
+                    if not keep then
+                        reg[sid] = nil
+                        for _, p in pairs(profiles) do
+                            local list = type(p) == "table" and type(p.discoveredSpells) == "table" and p.discoveredSpells[specKey]
+                            if type(list) == "table" then list[sid] = nil end
+                        end
+                        removed = removed + 1
+                    end
+                end
+            end
+        end
+    end
+    if removed > 0 and ns._whitelistBuilt and ns.BuildWhitelist then pcall(ns.BuildWhitelist) end
+end
+
+local purgeFrame = CreateFrame("Frame")
+purgeFrame:RegisterEvent("PLAYER_LOGIN")
+purgeFrame:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_LOGIN")
+    pcall(PurgeBogusTotems)
 end)
 
 -- /aishdebug totem : dump de l'etat totems (sorts traques, slots, activeTotems, widgets).

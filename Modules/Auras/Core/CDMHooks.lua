@@ -588,7 +588,17 @@ local function AutoDiscoverSpell(spellID, name, unit, frame, linkedSpellIDs)
     if spells[spellID] then
         -- Sort deja dans la liste : on rafraichit juste linkedSpellIDs si on
         -- vient d'en apprendre (peut ne pas etre dispo au tout premier scan).
-        if hasLinks then spells[spellID].linkedSpellIDs = linkedSpellIDs end
+        if hasLinks then
+            -- Conserve les variantes liees par ns.LinkAuraVariant absentes de la liste CDM.
+            local old, merged, seen = spells[spellID].linkedSpellIDs, {}, {}
+            for _, l in ipairs(linkedSpellIDs) do merged[#merged + 1] = l; seen[l] = true end
+            if type(old) == "table" then
+                for _, l in ipairs(old) do
+                    if not seen[l] then merged[#merged + 1] = l; seen[l] = true end
+                end
+            end
+            spells[spellID].linkedSpellIDs = merged
+        end
         return
     end
     -- Skip War Gear
@@ -787,6 +797,13 @@ local function HookCDMFrame(frame, canMask, source, alwaysMask)
 
         -- Auto-decouverte : tous les viewers CDM, filtree par SetAuraInstanceInfo (vraie aura uniquement).
         if name then pcall(AutoDiscoverSpell, spellID, name, unit, self, self.cooldownInfo and self.cooldownInfo.linkedSpellIDs) end
+
+        -- Aura reelle d'un autre ID que la case CDM (talent Rafale 16256 -> buff 16257) : lien direct,
+        -- le CDM fait foi. Champ secret en combat -> pcall, rattrape alors par le nom (Whitelist.lua).
+        if cdmAura and ns.LinkAuraVariant then
+            local okA, linked = pcall(ns.LinkAuraVariant, spellID, cdmAura.spellId)
+            if okA and linked then ns.FlushAuraVariants() end
+        end
 
         -- Auto-correction : InitCDMHooks etiquette tout sort Essentiel/Utilitaire comme "debuff", faux pour
         -- les sorts qui s'octroient un buff a eux-memes (Rapidite de la nature...). Ce hook ne se declenche

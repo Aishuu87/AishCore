@@ -253,6 +253,18 @@ local function HasUseSpell(itemID)
   return ok and spellName ~= nil
 end
 
+-- Coffre encore verrouille (crochetage requis) : ligne "Verrouille(e)" (LOCKED) dans l'infobulle de l'objet du sac.
+-- Elle disparait une fois le coffre crochete.
+local function IsLockedBox(bag, slot)
+  if not (LOCKED and C_TooltipInfo and C_TooltipInfo.GetBagItem) then return false end
+  local ok, data = pcall(C_TooltipInfo.GetBagItem, bag, slot)
+  if not (ok and data and data.lines) then return false end
+  for _, line in ipairs(data.lines) do
+    if line.leftText == LOCKED then return true end
+  end
+  return false
+end
+
 -- Tags d'un objet du sac (bag, slot) : table [tag] = true
 local function ItemTags(itemID, bag, slot)
   local tags = {}
@@ -353,6 +365,9 @@ local function Collect(bc)
   for bag = 0, (NUM_TOTAL_EQUIPPED_BAG_SLOTS or 5) do
     for slot = 1, C_Container.GetContainerNumSlots(bag) do
       local itemID = C_Container.GetContainerItemID(bag, slot)
+      -- Coffre verrouille : ecarte sans marquer l'objet, un exemplaire deja crochete plus loin reste pris
+      local info = itemID and not seen[itemID] and C_Container.GetContainerItemInfo(bag, slot)
+      if info and info.hasLoot and IsLockedBox(bag, slot) then itemID = nil end
       if itemID and not seen[itemID] and not blacklist[itemID] then
         seen[itemID] = true
         local tags = ItemTags(itemID, bag, slot)

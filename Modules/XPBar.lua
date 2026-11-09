@@ -1249,6 +1249,7 @@ local function HideXPBar()
   if not container:IsVisible() then return end
   if isHovered or petMode then return end
   if IsAlwaysVisible() then return end
+  if O.lifted then return end   -- dialogue PNJ (DialogueUI) en cours : barre gardee affichee
   if showAnim and showAnim:IsPlaying() then showAnim:Stop() end
   if hideAnim and not hideAnim:IsPlaying() then
     hideAnim:Play()
@@ -1964,9 +1965,23 @@ end
 function NL.RestoreXPBar(user)
   nlRaiseUsers[user] = nil
   if next(nlRaiseUsers) or not nlRaised then return end
-  for _, e in ipairs(nlRaised) do e.fr:SetFrameStrata(e.strata) end
+  -- Strates de creation, pas celles notees a la montee : la sortie d'un dialogue PNJ (reparentage) pouvait
+  -- laisser une strate deja montee dans nlRaised, et le texte du niveau restait au-dessus du chat.
+  -- Ordre parent -> enfant (SetFrameStrata se propage) : badge BACKGROUND puis son holder de texte MEDIUM.
   nlRaised = nil
+  local holder = levelText and levelText:GetParent()
+  if container then container:SetFrameStrata("MEDIUM") end
+  if levelBg then levelBg:SetFrameStrata("BACKGROUND") end
+  if holder then
+    holder:SetFrameStrata("MEDIUM")
+    holder:SetFrameLevel(levelBg:GetFrameLevel() + 1)
+  end
+  if tooltipFrame then tooltipFrame:SetFrameStrata("MEDIUM") end
+  local ch = centerXPText and centerXPText:GetParent()
+  if ch then ch:SetFrameStrata("DIALOG") end
 end
+O.RaiseXPBar, O.RestoreXPBar = NL.RaiseXPBar, NL.RestoreXPBar   -- dialogue PNJ (O.SetupDialogueLift)
+O.NL = NL
 
 -- cellule = prix | icone | nom ; w = largeur de la cellule, L = bord gauche (repere du mockup, 680 px de large)
 NL.TRAIN_LAYOUT = {
@@ -2750,8 +2765,8 @@ end
 -- ═══ Quetes pretes a rendre (ALT enfonce au survol) ═══════════════════════════════════════════════
 -- Au-dessus du texte d'xp central : chaque quete terminee avec l'xp qu'elle donnerait, en % de la barre du niveau,
 -- puis le total si on rendait tout.
--- 3e/4e retours : quetes EN COURS (pas encore pretes) avec l'xp qu'elles donneraient, et leur total (Retail seulement,
--- affichees avec Maj a la place des competences a entrainer de Forever).
+-- 3e/4e retours : quetes EN COURS (pas encore pretes) avec l'xp qu'elles donneraient, et leur total (affichees avec Maj ;
+-- sur Forever, en plus des competences a entrainer du panneau du prochain niveau).
 local function GetTurnInQuests()
   local out, totalXP = {}, 0
   local prog, progXP = {}, 0
@@ -2773,7 +2788,6 @@ local function GetTurnInQuests()
         ready = (isComplete == 1) or (isComplete == true)
       end
       if not title or isHeader or hidden then return end
-      if not ready and ns.IsForever then return end
       local xp
       if GetQuestLogRewardXP and questID then xp = GetQuestLogRewardXP(questID) end
       if (not xp or xp == 0) and GetRewardXP and SelectQuestLogEntry then
@@ -2897,11 +2911,11 @@ HideQuestPanel = function()
   NL.HidePot()
 end
 
--- ALT : quetes pretes a rendre. Maj (Retail, sans entraineur de classe) : quetes en cours, meme presentation.
+-- ALT : quetes pretes a rendre. Maj : quetes en cours, meme presentation.
 ShowQuestPanel = function()
   -- "Toujours montrer les quetes a rendre" : affichees des le survol, sans Alt
   local qcfg = ns.GetCfg("xpBar")
-  local kind = (IsAltKeyDown() and "ready") or ((not HAS_CLASS_TRAINERS and IsShiftKeyDown()) and "progress")
+  local kind = (IsAltKeyDown() and "ready") or (IsShiftKeyDown() and "progress")
                or ((qcfg and qcfg.questsAlwaysShown) and "ready") or nil
   if not kind or IsMaxLevel() then HideQuestPanel(); return end
   -- deja affiche avec le meme contenu (Alt enfonce alors que les quetes sont deja la) : pas de nouvelle animation
@@ -3014,10 +3028,11 @@ nlModEvt:SetScript("OnEvent", function(_, _, key)
       nlMode = mode
       if nlPanel and nlPanel:IsShown() then ShowNextLevelPanel(true) end
     end
+    ShowQuestPanel()   -- Forever : quetes en cours avec Maj, en plus des competences a entrainer
   elseif key == "LALT" or key == "RALT" then
     NLSetAlt(IsAltKeyDown())
     ShowQuestPanel()
-  elseif not HAS_CLASS_TRAINERS and (key == "LSHIFT" or key == "RSHIFT") then
+  elseif key == "LSHIFT" or key == "RSHIFT" then
     ShowQuestPanel()
   end
 end)
@@ -3624,6 +3639,117 @@ local function CreateXPBar_Finalize()
 
   XPBar.UpdateVisibility()
   XPBar.Update()
+  O.SetupDialogueLift()
+
+  -- Mode Taxi (UIParent transparente en vol) : survoler la zone revele aussi la barre et ses panneaux
+  if ns.TaxiLinkHover then
+    ns.TaxiLinkHover(hoverFrame, function()
+      return { container, levelBg, tooltipFrame, O.centerHolder, fxModel, nlPanel, qPanel, O.NL.hint }
+    end)
+  end
+end
+
+-- DialogueUI : pendant un dialogue PNJ, il masque / fond UIParent. On sort alors nos frames
+-- de la barre d'XP vers un cadre sans parent (meme echelle) pour qu'elles restent visibles,
+-- au-dessus de sa propre barre (strate BACKGROUND). Retour sur UIParent une fois l'UI revenue.
+function O.SetupDialogueLift()
+  if O.liftHooked then return end
+  local hosts = { _G.DUIQuestFrame, _G.DUIBookFrame }
+  if not hosts[1] then
+    if not O.liftWait then
+      O.liftWait = CreateFrame("Frame")
+      O.liftWait:RegisterEvent("ADDON_LOADED")
+      O.liftWait:SetScript("OnEvent", function(self, _, name)
+        if name == "DialogueUI" then
+          self:UnregisterAllEvents()
+          C_Timer.After(0, O.SetupDialogueLift)
+        end
+      end)
+    end
+    return
+  end
+  O.liftHooked = true
+
+  local lift = CreateFrame("Frame", "AishCoreXPBarLift")
+  lift:SetAllPoints(UIParent)
+  lift:SetFrameStrata("MEDIUM")
+  lift:Hide()
+
+  local function Frames()
+    return { container, levelBg, tooltipFrame, O.centerHolder, hoverFrame, fxModel }
+  end
+
+  -- SetParent / SetFrameStrata se propagent aux enfants (ex. holder MEDIUM du texte de niveau, enfant du
+  -- badge BACKGROUND) : on note strate + niveau de tout l'arbre, puis on les remet, parent d'abord.
+  local function Capture(f, out)
+    out[#out + 1] = { f, f:GetFrameStrata(), f:GetFrameLevel() }
+    for _, c in ipairs({ f:GetChildren() }) do Capture(c, out) end
+  end
+
+  local function Reparent(parent)
+    for _, f in ipairs(Frames()) do
+      if f then
+        local saved = {}
+        Capture(f, saved)
+        f:SetParent(parent)
+        for _, e in ipairs(saved) do
+          e[1]:SetFrameStrata(e[2])
+          e[1]:SetFrameLevel(e[3])
+        end
+      end
+    end
+  end
+
+  local function AnyHostShown()
+    for _, h in ipairs(hosts) do
+      if h and h:IsShown() then return true end
+    end
+    return false
+  end
+
+  local restoreTicker
+  -- Surveillance lancee des l'ouverture : DialogueUI refait SetScript("OnHide") a chaque affichage
+  -- (GhostCatcher), ce qui efface tout HookScript("OnHide") -- la fermeture ne peut pas etre ecoutee.
+  -- Attend la fermeture, puis que l'UI soit revenue (reaffichage + fondu entrant, ~0.25 s). Pas plus d'1 s
+  -- pour l'opacite : un autre module (Mode Taxi au decollage) peut garder UIParent transparente.
+  local function Drop()
+    if not O.lifted or restoreTicker then return end
+    local since = GetTime()
+    restoreTicker = C_Timer.NewTicker(0.4, function()
+      if AnyHostShown() then since = GetTime(); return end
+      if not UIParent:IsShown() then return end
+      if UIParent:GetAlpha() < 0.99 and GetTime() - since < 1 then return end
+      restoreTicker:Cancel(); restoreTicker = nil
+      -- Reparentage AVANT de rendre les strates : SetFrameStrata se propage aux enfants, et Reparent la
+      -- reapplique au badge, ce qui ferait retomber le texte du niveau (holder MEDIUM) en BACKGROUND.
+      Reparent(UIParent)
+      O.RestoreXPBar("dialogue")
+      lift:Hide()
+      O.lifted = false
+      -- Fin du dialogue : la barre se replie, sauf souris reellement dessus. Le survol a pu rester
+      -- "colle" (OnLeave perdu pendant le reparentage), et un showTimer de gain d'xp n'a plus lieu d'etre.
+      if isHovered and not (hoverFrame and hoverFrame:IsMouseOver()) then isHovered = false end
+      if showTimer then showTimer:Cancel(); showTimer = nil end
+      if not isHovered then HideXPBar() end
+    end)
+  end
+
+  local function Lift()
+    if not O.lifted then
+      O.lifted = true
+      lift:SetScale(UIParent:GetEffectiveScale())
+      lift:Show()
+      Reparent(lift)
+      O.RaiseXPBar("dialogue")   -- devant la barre d'xp de DialogueUI, comme au survol
+      ShowXPBar()   -- affichee pendant tout le dialogue, meme sans survol
+    end
+    Drop()
+  end
+
+  for _, h in ipairs(hosts) do
+    if h then h:HookScript("OnShow", Lift) end
+  end
+  if AnyHostShown() then Lift() end
 end
 
 -- Create

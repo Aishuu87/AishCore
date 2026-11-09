@@ -319,6 +319,7 @@ ef:SetScript("OnEvent", function(_, event, arg1)
         -- change après l'affichage initial → SetTimerDuration relancé avec interpolation
         -- Smooth → délai visuel parasite après le tab (c'est exactement le délai perçu).
         -- On skip l'incrément pour arg1 == "target" dans cette fenêtre.
+
         if info then
             -- TRACE : voir chaque aura qui arrive
 

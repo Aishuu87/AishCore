@@ -1079,10 +1079,25 @@ ns.Defaults = {
     panelBottomHeight = 90,
     panelBgColor      = { 0, 0, 0, 0.92 },
     width             = 0.5,     -- largeur de la route (part de l'ecran)
-    font              = ns.FONT_FALLBACK,
-    fontSize          = 18,      -- noms du depart / de la destination ; le reste en proportion
+    trackX = 0, trackY = 0,      -- decalage de la route dans la bande du bas
+    startX = 0, startY = 0,      -- decalage du groupe de depart (nom + zone) par rapport a son cercle
+    endX   = 0, endY   = 0,      -- idem, groupe de destination
+    -- Textes : <prefixe>Font / Size / Align / Color / Accent (Accent : couleur d'accent au lieu de Color)
+    startNameFont = ns.FONT_FALLBACK, startNameSize = 18, startNameAlign = "RIGHT",
+    startNameColor = { 1, 0.76, 0.25, 1 }, startNameAccent = true,
+    endNameFont = ns.FONT_FALLBACK, endNameSize = 18, endNameAlign = "LEFT",
+    endNameColor = { 1, 0.76, 0.25, 1 }, endNameAccent = true,
+    zoneFont = ns.FONT_FALLBACK, zoneSize = 12, zoneAlign = "CENTER",
+    zoneColor = { 0.72, 0.72, 0.72, 1 }, zoneAccent = false,
+    stepFont = ns.FONT_FALLBACK, stepSize = 11, stepAlign = "CENTER",
+    stepColor = { 0.72, 0.72, 0.72, 1 }, stepAccent = false,
+    etaFont = ns.FONT_FALLBACK, etaSize = 10, etaAlign = "CENTER",
+    etaColor = { 0.55, 0.55, 0.55, 1 }, etaAccent = false,
+    elapsedFont = ns.FONT_FALLBACK, elapsedSize = 14, elapsedAlign = "RIGHT",
+    elapsedColor = { 1, 0.76, 0.25, 1 }, elapsedAccent = true,
     accentColor       = { 1, 0.76, 0.25, 1 },
     useThemeColors    = false,
+    doneTexture       = "fly",   -- partie parcourue : "fly" (texture du mode taxi) ou cle de ns.GetBarTextureList()
   },
 
   -- Mode furtif, cf. Modules/StealthMode.lua : vignettage qui assombrit l'ecran en furtivite

@@ -487,7 +487,7 @@ local function Apply()
   local r1 = Try(SetupEllesmere, done, freshChar)
   local r2 = Try(SetupPlatynator, done)
   local r3 = Try(SetupElvUIPrivate, done)
-  if r1 or r2 or r3 then ShowReloadPopup() end
+  if r1 or r2 or r3 then ShowReloadPopup(); return true end
 end
 
 local function SafeRun(fn, ...)
@@ -500,7 +500,7 @@ local function ApplyEditMode()
   if not (AishaddonDB and ns.HasHeroicFeatures and ns.HasHeroicFeatures()) then return end
   CaptureEditMode()
   AishUISetupCharDB = AishUISetupCharDB or {}
-  if SetupEditMode(AishUISetupCharDB) then ShowReloadPopup() end
+  if SetupEditMode(AishUISetupCharDB) then ShowReloadPopup(); return true end
 end
 
 -- PLAYER_LOGIN : BNGetInfo est renseigné, les SV des autres addons sont chargées, et on passe
@@ -879,7 +879,17 @@ SlashCmdList["AISHSETUP"] = function()
   AishUISetupCharDB.platynator = nil
   AishUISetupCharDB.elvuiPrivate = nil
   AishUISetupCharDB.editMode = nil
+  if not (ns.HasHeroicFeatures and ns.HasHeroicFeatures()) then
+    print("|cff00ccff[AishCore]|r " .. L["SETUP_NOT_AISHUI"])
+    return
+  end
   print("|cff00ccff[AishCore]|r Setup relancé.")
-  SafeRun(Apply)
-  SafeRun(ApplyEditMode)
+  -- Aucune etape n'a rien change (pas de popup de reload) : on le dit, sinon la commande semble muette
+  local ok1, changed1 = pcall(Apply)
+  local ok2, changed2 = pcall(ApplyEditMode)
+  if not ok1 then print("|cffff4444[AishCore]|r AishUISetup : " .. tostring(changed1)) end
+  if not ok2 then print("|cffff4444[AishCore]|r AishUISetup : " .. tostring(changed2)) end
+  if ok1 and ok2 and not changed1 and not changed2 then
+    print("|cff00ccff[AishCore]|r " .. L["SETUP_NOTHING_TO_DO"])
+  end
 end

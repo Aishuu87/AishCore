@@ -20,9 +20,13 @@ ns.Modules.TaxiMode = TaxiMode
 
 local GetTime, floor, max, min, sqrt, format = GetTime, math.floor, math.max, math.min, math.sqrt, string.format
 
-local CIRCLE_TEX = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
 local GLOW_TEX   = "Interface\\AddOns\\AishCore\\Media\\UI\\SpotGlow.tga"
 local WHITE      = "Interface\\Buttons\\WHITE8x8"
+local FLY        = "Interface\\AddOns\\AishCore\\Media\\UI\\Fly\\"
+local NODE_TEX   = { todo = FLY .. "node_etape.png", done = FLY .. "node_etape_checked.png", stop = FLY .. "node_etape_stop.png" }
+local NODE_END   = 22     -- depart / arrivee
+local NODE_STEP  = 16     -- etapes intermediaires
+local NODE_HOVER = 1.2    -- etape survolee (arret possible) : legerement plus grande
 
 local DEFAULT_SPEED = 24     -- verges/s a vol d'oiseau (trajet reel plus long que la ligne droite)
 local DEFAULT_HOP   = 60     -- secondes, troncon sans position connue
@@ -176,8 +180,8 @@ local function NewFlight(route, start)
 end
 
 -- ═══ Affichage ═══════════════════════════════════════════════════════════════════════════════════
-local root, topBand, bottomBand, track, lineDone, lineGlow, lineTodo, diamond, elapsedText
-local startDot, endDot, startName, startZone, endName, endZone, endEta
+local root, topBand, bottomBand, track, lineDone, lineShine, lineGlow, lineTodo, diamond, elapsedText
+local startDot, endDot, startName, startZone, endName, endZone, endEta, startGroup, endGroup
 local checkpoints = {}
 local animP, animTarget = 0, 0
 
@@ -191,10 +195,19 @@ local function Accent()
   return cfg.accentColor or { 1, 0.76, 0.25, 1 }
 end
 
-local function FontPath()
-  local f = Cfg().font
+local function FontPath(f)
   return (ns.SafeFontPath and ns.SafeFontPath(f or ns.FONT_FALLBACK)) or f or ns.FONT_FALLBACK
 end
+
+-- Reglages d'un texte (prefixe : startName, endName, zone, step, eta, elapsed) : police, taille, couleur, alignement
+local function TextCfg(prefix)
+  local cfg = Cfg()
+  local c = cfg[prefix .. "Accent"] and Accent() or cfg[prefix .. "Color"] or { 1, 1, 1, 1 }
+  return cfg[prefix .. "Font"], cfg[prefix .. "Size"] or 12, c, cfg[prefix .. "Align"] or "CENTER"
+end
+
+-- "LEFT" / "RIGHT" -> suffixe de point d'ancrage ; "CENTER" -> "" (TOP / BOTTOM)
+local function J(align) return (align == "LEFT" or align == "RIGHT") and align or "" end
 
 local function NewText(parent, layer)
   local fs = parent:CreateFontString(nil, layer or "OVERLAY")
@@ -204,55 +217,37 @@ local function NewText(parent, layer)
   return fs
 end
 
-local function StyleText(fs, size, c)
-  if not fs:SetFont(FontPath(), max(6, floor(size + 0.5)), "") then fs:SetFont(ns.FONT_FALLBACK, max(6, floor(size + 0.5)), "") end
+local function StyleText(fs, size, c, font)
+  if not fs:SetFont(FontPath(font), max(6, floor(size + 0.5)), "") then fs:SetFont(ns.FONT_FALLBACK, max(6, floor(size + 0.5)), "") end
   if c then fs:SetTextColor(c[1], c[2], c[3], c[4] or 1) end
 end
 
--- Cercle : halo, bague, remplissage, reflet
+-- Style complet d'un texte d'apres ses reglages ; renvoie son alignement
+local function ApplyText(fs, prefix)
+  local font, size, c, align = TextCfg(prefix)
+  StyleText(fs, size, c, font)
+  fs:SetJustifyH(align)
+  return align
+end
+
+-- Noeud (depart, arrivee, etape) : texture Media/UI/Fly selon l'etat, non colorisee
 local function NewDot(parent, size)
   local b = CreateFrame("Button", nil, parent)
   b:SetSize(size, size)
-  b.glow = b:CreateTexture(nil, "BACKGROUND")
-  b.glow:SetTexture(GLOW_TEX)
-  b.glow:SetPoint("CENTER")
-  b.glow:SetSize(size * 2.6, size * 2.6)
-  b.glow:SetBlendMode("ADD")
-  b.ring = b:CreateTexture(nil, "ARTWORK", nil, 1)
-  b.ring:SetTexture(CIRCLE_TEX)
-  b.ring:SetAllPoints()
-  b.fill = b:CreateTexture(nil, "ARTWORK", nil, 2)
-  b.fill:SetTexture(CIRCLE_TEX)
-  b.fill:SetPoint("TOPLEFT", 2, -2)
-  b.fill:SetPoint("BOTTOMRIGHT", -2, 2)
-  b.shine = b:CreateTexture(nil, "ARTWORK", nil, 3)
-  b.shine:SetTexture(CIRCLE_TEX)
-  b.shine:SetSize(size * 0.42, size * 0.42)
-  b.shine:SetPoint("CENTER", -size * 0.12, size * 0.14)
-  b.shine:SetVertexColor(1, 1, 1, 0.35)
+  b.baseSize = size
+  b.tex = b:CreateTexture(nil, "ARTWORK")
+  b.tex:SetAllPoints()
+  b.tex:SetTexture(NODE_TEX.todo)
   return b
 end
 
-local function Tint(t, c, a) t:SetVertexColor(c[1], c[2], c[3], a or c[4] or 1) end
-
-local RED      = { 0.9, 0.12, 0.1, 1 }
-local RED_DARK = { 0.4, 0.04, 0.03, 1 }
-local DIM_RING = { 0.42, 0.36, 0.28, 1 }
-local DIM_FILL = { 0.2, 0.17, 0.13, 1 }
-local GREY     = { 0.72, 0.72, 0.72, 1 }
-local GREY_DIM = { 0.55, 0.55, 0.55, 1 }
+local RED = { 0.9, 0.12, 0.1, 1 }
 
 -- state : "done" (passee), "todo", "stop" (survol / arret choisi)
 local function PaintDot(b, state)
-  local a = Accent()
-  if state == "stop" then
-    Tint(b.ring, RED_DARK); Tint(b.fill, RED); Tint(b.glow, RED, 0.55); b.glow:Show()
-  elseif state == "done" then
-    b.ring:SetVertexColor(a[1] * 0.55, a[2] * 0.55, a[3] * 0.55, 1); Tint(b.fill, a, 1)
-    Tint(b.glow, a, 0.35); b.glow:Show()
-  else
-    Tint(b.ring, DIM_RING); Tint(b.fill, DIM_FILL); b.glow:Hide()
-  end
+  if b.state == state then return end
+  b.state = state
+  b.tex:SetTexture(NODE_TEX[state] or NODE_TEX.todo)
 end
 
 local function FormatTime(s)
@@ -299,19 +294,64 @@ local function CheckpointStoppable(cp)
   return f and CAN_STOP and cp.index > f.reached and not f.requested
 end
 
+-- Survol d'une etape : le cadre garde sa taille (nom / ETA ancres dessus restent fixes) ; seuls l'icone
+-- (agrandie), la lueur rouge et "ARRET ICI" (glisse depuis la gauche) s'animent.
+local STOP_ANIM  = 0.18   -- duree des transitions
+local STOP_SLIDE = 12     -- distance de glissement du texte
+
+local function CheckpointAnim(cp, elapsed)
+  local step = elapsed / STOP_ANIM
+  local function Toward(cur, target)
+    if cur < target then return min(target, cur + step) end
+    return max(target, cur - step)
+  end
+  cp.sP = Toward(cp.sP, cp.sT)
+  cp.tP = Toward(cp.tP, cp.tT)
+  local s, t = Ease(cp.sP), Ease(cp.tP)
+  local sz = cp.baseSize * (1 + (NODE_HOVER - 1) * s)
+  cp.tex:SetSize(sz, sz)
+  cp.glow:SetAlpha(0.75 * t)
+  local x = 6 - STOP_SLIDE * (1 - t)
+  cp.stopText:SetPoint("BOTTOMLEFT", cp, "RIGHT", x, 1)
+  cp.stopText2:SetPoint("TOPLEFT", cp, "RIGHT", x, -1)
+  cp.stopText:SetAlpha(t); cp.stopText2:SetAlpha(t)
+  cp.stopText:SetShown(t > 0); cp.stopText2:SetShown(t > 0)
+  if cp.sP == cp.sT and cp.tP == cp.tT then cp:SetScript("OnUpdate", nil) end
+end
+
+local function SetCheckpointTargets(cp, big, red)
+  local sT, tT = big and 1 or 0, red and 1 or 0
+  if cp.sT == sT and cp.tT == tT then return end
+  cp.sT, cp.tT = sT, tT
+  cp:SetScript("OnUpdate", CheckpointAnim)
+end
+
 local function NewCheckpoint()
-  local cp = NewDot(track, 15)
+  local cp = NewDot(track, NODE_STEP)
   cp:SetFrameLevel(track:GetFrameLevel() + 3)
   cp:SetHitRectInsets(-8, -8, -18, -14)
+  cp.tex:ClearAllPoints()
+  cp.tex:SetPoint("CENTER")
+  cp.tex:SetSize(NODE_STEP, NODE_STEP)
+  cp.glow = cp:CreateTexture(nil, "BACKGROUND")
+  cp.glow:SetTexture(GLOW_TEX)
+  cp.glow:SetBlendMode("ADD")
+  cp.glow:SetSize(NODE_STEP * 5, NODE_STEP * 5)
+  cp.glow:SetPoint("CENTER")
+  cp.glow:SetVertexColor(RED[1], RED[2], RED[3], 1)
+  cp.glow:SetAlpha(0)
+  cp.sP, cp.tP, cp.sT, cp.tT = 0, 0, 0, 0
   cp.name = NewText(cp)
-  cp.name:SetPoint("BOTTOM", cp, "TOP", 0, 5)
   cp.eta = NewText(cp)
-  cp.eta:SetPoint("TOP", cp, "BOTTOM", 0, -4)
+  -- "ARRET ICI" de part et d'autre de la ligne : 1re ligne au-dessus, le reste en dessous, a droite du noeud
+  local w1, w2 = (L["TAXIMODE_STOP_HERE"] or ""):match("^([^\n]*)\n?(.*)$")
   cp.stopText = NewText(cp)
-  cp.stopText:SetPoint("LEFT", cp, "RIGHT", 4, 0)
   cp.stopText:SetJustifyH("LEFT")
-  cp.stopText:SetText(L["TAXIMODE_STOP_HERE"])
-  cp.stopText:Hide()
+  cp.stopText:SetText(w1)
+  cp.stopText2 = NewText(cp)
+  cp.stopText2:SetJustifyH("LEFT")
+  cp.stopText2:SetText(w2)
+  CheckpointAnim(cp, 0)
   cp:SetScript("OnEnter", function(self) self.hover = true; Refresh(true) end)
   cp:SetScript("OnLeave", function(self) self.hover = false; Refresh(true) end)
   cp:SetScript("OnClick", OnCheckpointClick)
@@ -337,38 +377,45 @@ local function Build()
   track:SetFixedFrameStrata(true)   -- ne suit pas la strate de root (BACKGROUND en vol)
   track:SetHeight(1)
 
+  -- Timeline : texture Media/UI/Fly ; partie parcourue = meme texture teintee, recadree (pas etiree)
   lineTodo = track:CreateTexture(nil, "ARTWORK", nil, 0)
-  lineTodo:SetTexture(WHITE)
-  lineTodo:SetHeight(1)
+  lineTodo:SetTexture(FLY .. "timeline_off.png")
+  lineTodo:SetHeight(6)
   lineTodo:SetPoint("LEFT"); lineTodo:SetPoint("RIGHT")
-  lineTodo:SetVertexColor(0.6, 0.6, 0.6, 0.45)
   lineGlow = track:CreateTexture(nil, "ARTWORK", nil, 1)
   lineGlow:SetTexture(GLOW_TEX)
   lineGlow:SetBlendMode("ADD")
   lineGlow:SetHeight(16)
+  -- Partie parcourue : barre pleine en relief (timeline_on, niveaux de gris teintes) + reflet additif au centre
+  -- (timeline_on_shine, quasi blanc) ; la barre utile occupe ~14/32 de la hauteur de la texture
   lineDone = track:CreateTexture(nil, "ARTWORK", nil, 2)
-  lineDone:SetTexture(WHITE)
-  lineDone:SetHeight(3)
+  lineDone:SetTexture(FLY .. "timeline_on.png")
+  lineDone:SetHeight(15)
+  lineShine = track:CreateTexture(nil, "ARTWORK", nil, 3)
+  lineShine:SetTexture(FLY .. "timeline_on_shine.png")
+  lineShine:SetBlendMode("ADD")
+  lineShine:SetAllPoints(lineDone)
 
-  startDot = NewDot(track, 19)
+  startDot = NewDot(track, NODE_END)
   startDot:EnableMouse(false)
   startDot:SetPoint("CENTER", track, "LEFT", 0, 0)
-  endDot = NewDot(track, 19)
+  endDot = NewDot(track, NODE_END)
   endDot:EnableMouse(false)
   endDot:SetPoint("CENTER", track, "RIGHT", 0, 0)
   startDot:SetFrameLevel(track:GetFrameLevel() + 3)
   endDot:SetFrameLevel(track:GetFrameLevel() + 3)
 
-  startName = NewText(startDot)
-  startName:SetPoint("BOTTOMRIGHT", startDot, "LEFT", -12, -1)
-  startZone = NewText(startDot)
-  startZone:SetPoint("TOPLEFT", startName, "BOTTOMLEFT", 0, -2)
-  endName = NewText(endDot)
-  endName:SetPoint("BOTTOMLEFT", endDot, "RIGHT", 12, -1)
-  endZone = NewText(endDot)
-  endZone:SetPoint("TOPRIGHT", endName, "BOTTOMRIGHT", 0, -2)
+  -- Groupes nom + zone : cadre d'un pixel de haut sur la ligne de base (nom au-dessus, zone en dessous), aussi large
+  -- que le plus long des deux textes ; place a cote de son cercle (cf. Layout)
+  startGroup = CreateFrame("Frame", nil, track)
+  startGroup:SetFrameLevel(track:GetFrameLevel() + 3)
+  endGroup = CreateFrame("Frame", nil, track)
+  endGroup:SetFrameLevel(track:GetFrameLevel() + 3)
+  startName = NewText(startGroup)
+  startZone = NewText(startGroup)
+  endName = NewText(endGroup)
+  endZone = NewText(endGroup)
   endEta = NewText(endDot)
-  endEta:SetPoint("TOP", endDot, "BOTTOM", 0, -4)
 
   -- Filets sous les noms (degrade vers l'exterieur)
   local function Rule(anchorFs, left)
@@ -388,36 +435,53 @@ local function Build()
   startDot.rule = Rule(startName, true)
   endDot.rule = Rule(endName, false)
 
-  -- Losange : bordure doree, coeur bleu-vert, reflet
+  -- Losange (position du joueur) : cadre fixe (diamond) + coeur (diamond_center), seul colorise, en couleurs
+  -- thematiques ; sinon le coeur d'origine du losange reste visible
   diamond = CreateFrame("Frame", nil, track)
-  diamond:SetSize(20, 20)
+  diamond:SetSize(26, 27)   -- 41 x 43 a l'origine
   diamond:SetFrameLevel(track:GetFrameLevel() + 6)
-  local function Square(size, layer, sub)
-    local t = diamond:CreateTexture(nil, layer, nil, sub)
-    t:SetColorTexture(1, 1, 1, 1)   -- couleur unie : SetRotation tourne le carre lui-meme (cf. Campfire.lua)
-    t:SetSize(size, size)
-    t:SetPoint("CENTER")
-    t:SetRotation(math.pi / 4)
-    return t
-  end
   diamond.glow = diamond:CreateTexture(nil, "BACKGROUND")
   diamond.glow:SetTexture(GLOW_TEX)
   diamond.glow:SetBlendMode("ADD")
   diamond.glow:SetSize(52, 52)
   diamond.glow:SetPoint("CENTER")
   diamond.glow:SetVertexColor(0.2, 0.75, 0.9, 0.5)
-  diamond.border = Square(15, "ARTWORK", 1)
-  diamond.dark   = Square(12, "ARTWORK", 2)
-  diamond.dark:SetVertexColor(0.04, 0.16, 0.2, 1)
-  diamond.core   = Square(10, "ARTWORK", 3)
-  diamond.core:SetVertexColor(0.13, 0.58, 0.68, 1)
-  diamond.shine  = Square(4, "ARTWORK", 4)
-  diamond.shine:ClearAllPoints()
-  diamond.shine:SetPoint("CENTER", 0, 2.5)
-  diamond.shine:SetVertexColor(0.75, 1, 1, 0.8)
+  diamond.frame = diamond:CreateTexture(nil, "ARTWORK", nil, 1)
+  diamond.frame:SetTexture(FLY .. "diamond.png")
+  diamond.frame:SetAllPoints()
+  diamond.core = diamond:CreateTexture(nil, "ARTWORK", nil, 2)
+  diamond.core:SetTexture(FLY .. "diamond_center.png")
+  diamond.core:SetAllPoints()
 
   elapsedText = NewText(diamond)
-  elapsedText:SetPoint("TOPRIGHT", diamond, "BOTTOMLEFT", 6, 1)
+end
+
+-- Route : centre de la bande du bas + decalage
+local function PlaceTrack()
+  local cfg = Cfg()
+  track:ClearAllPoints()
+  track:SetPoint("CENTER", bottomBand, "CENTER", cfg.trackX or 0, cfg.trackY or 0)
+end
+
+-- Texte au-dessus (above) ou en dessous d'un cercle, selon son alignement
+local function PlaceAround(fs, dot, align, above, gap)
+  local j = J(align)
+  fs:ClearAllPoints()
+  if above then fs:SetPoint("BOTTOM" .. j, dot, "TOP" .. j, 0, gap)
+  else fs:SetPoint("TOP" .. j, dot, "BOTTOM" .. j, 0, -gap) end
+end
+
+-- Groupe nom + zone : a gauche du cercle de depart (left) ou a droite de celui de destination
+local function PlaceGroup(g, name, zone, dot, left, nameAlign, zoneAlign, ox, oy)
+  g:SetSize(max(1, name:GetStringWidth() or 0, zone:GetStringWidth() or 0), 1)
+  g:ClearAllPoints()
+  if left then g:SetPoint("RIGHT", dot, "LEFT", -12 + ox, -1 + oy)
+  else g:SetPoint("LEFT", dot, "RIGHT", 12 + ox, -1 + oy) end
+  local jn, jz = J(nameAlign), J(zoneAlign)
+  name:ClearAllPoints()
+  name:SetPoint("BOTTOM" .. jn, g, "TOP" .. jn, 0, 0)
+  zone:ClearAllPoints()
+  zone:SetPoint("TOP" .. jz, g, "BOTTOM" .. jz, 0, -2)
 end
 
 -- Mise en page (taille ecran, bandes, police, etapes)
@@ -436,15 +500,22 @@ local function Layout()
   local tw = W * min(0.9, max(0.2, cfg.width or 0.5))
   track:SetWidth(tw)
 
-  local S = cfg.fontSize or 18
+  PlaceTrack()
   local a = Accent()
   local n = f.nodes
-  StyleText(startName, S, a); startName:SetText(Upper(n[1].name))
-  StyleText(endName, S, a);   endName:SetText(Upper(n[#n].name))
-  StyleText(startZone, S * 0.66, GREY); startZone:SetText(n[1].zone or "")
-  StyleText(endZone, S * 0.66, GREY);   endZone:SetText(n[#n].zone or "")
-  StyleText(endEta, S * 0.56, GREY_DIM)
-  StyleText(elapsedText, S * 0.78, a)
+  local alStart = ApplyText(startName, "startName"); startName:SetText(Upper(n[1].name))
+  local alEnd   = ApplyText(endName, "endName");     endName:SetText(Upper(n[#n].name))
+  local alZone  = ApplyText(startZone, "zone");      startZone:SetText(n[1].zone or "")
+  ApplyText(endZone, "zone");                        endZone:SetText(n[#n].zone or "")
+  PlaceGroup(startGroup, startName, startZone, startDot, true, alStart, alZone, cfg.startX or 0, cfg.startY or 0)
+  PlaceGroup(endGroup, endName, endZone, endDot, false, alEnd, alZone, cfg.endX or 0, cfg.endY or 0)
+  local alEta = ApplyText(endEta, "eta")
+  PlaceAround(endEta, endDot, alEta, false, 4)
+  local alElapsed = ApplyText(elapsedText, "elapsed")
+  elapsedText:ClearAllPoints()
+  if alElapsed == "LEFT" then elapsedText:SetPoint("TOPLEFT", diamond, "BOTTOMRIGHT", -6, 1)
+  elseif alElapsed == "RIGHT" then elapsedText:SetPoint("TOPRIGHT", diamond, "BOTTOMLEFT", 6, 1)
+  else elapsedText:SetPoint("TOP", diamond, "BOTTOM", 0, 1) end
   for _, d in ipairs({ startDot, endDot }) do
     local r = d.rule
     if r.SetGradient and CreateColor then
@@ -454,9 +525,30 @@ local function Layout()
       r:SetVertexColor(a[1], a[2], a[3], 0.25)
     end
   end
+  -- Texture de la partie parcourue : "fly" = barre en relief + reflet du mode taxi ; sinon texture de barre
+  -- de la liste commune (pleine hauteur, donc barre plus basse, sans reflet)
+  local texKey = cfg.doneTexture or "fly"
+  if texKey == "fly" or not ns.ResolveBarTexFromKey then
+    lineDone:SetTexture(FLY .. "timeline_on.png")
+    lineDone:SetHeight(15)
+    lineShine:Show()
+  else
+    lineDone:SetTexture(ns.ResolveBarTexFromKey(texKey))
+    lineDone:SetHeight(6)
+    lineShine:Hide()
+  end
   lineDone:SetVertexColor(a[1], a[2], a[3], 1)
+  -- Reflet : couleur d'accent eclaircie (coeur "chauffe a blanc" du modele)
+  lineShine:SetVertexColor(a[1] + (1 - a[1]) * 0.55, a[2] + (1 - a[2]) * 0.55, a[3] + (1 - a[3]) * 0.55, 0.8)
   lineGlow:SetVertexColor(a[1], a[2], a[3], 0.55)
-  diamond.border:SetVertexColor(a[1], a[2], a[3], 1)
+  local themed = cfg.useThemeColors and true or false
+  diamond.core:SetShown(themed)
+  if themed then
+    diamond.core:SetVertexColor(a[1], a[2], a[3], 1)
+    diamond.glow:SetVertexColor(a[1], a[2], a[3], 0.5)
+  else
+    diamond.glow:SetVertexColor(0.2, 0.75, 0.9, 0.5)
+  end
 
   -- Etapes intermediaires, placees au prorata des temps estimes
   local total = f.axis[#n]
@@ -466,9 +558,12 @@ local function Layout()
     cp.index = i
     cp:ClearAllPoints()
     cp:SetPoint("CENTER", track, "LEFT", total > 0 and tw * f.axis[i] / total or tw * (i - 1) / (#n - 1), 0)
-    StyleText(cp.name, S * 0.62, GREY); cp.name:SetText(n[i].name or "")
-    StyleText(cp.eta, S * 0.56, GREY_DIM)
-    StyleText(cp.stopText, S * 0.48, RED)
+    local alStep = ApplyText(cp.name, "step"); cp.name:SetText(n[i].name or "")
+    PlaceAround(cp.name, cp, alStep, true, 5)
+    PlaceAround(cp.eta, cp, ApplyText(cp.eta, "eta"), false, 4)
+    local sFont, sSize = TextCfg("step")
+    StyleText(cp.stopText, sSize, RED, sFont)
+    StyleText(cp.stopText2, sSize, RED, sFont)
     cp:Show()
   end
   for j = #n - 1, #checkpoints do checkpoints[j]:Hide() end
@@ -498,6 +593,8 @@ function Refresh(force)
   lineDone:ClearAllPoints()
   lineDone:SetPoint("LEFT", track, "LEFT", 0, 0)
   lineDone:SetWidth(max(0.001, x))
+  lineDone:SetTexCoord(0, tw > 0 and min(1, max(0, x / tw)) or 0, 0, 1)
+  lineShine:SetTexCoord(0, tw > 0 and min(1, max(0, x / tw)) or 0, 0, 1)
   lineGlow:ClearAllPoints()
   lineGlow:SetPoint("LEFT", track, "LEFT", -6, 0)
   lineGlow:SetWidth(max(0.001, x + 6))
@@ -509,7 +606,7 @@ function Refresh(force)
   PaintDot(startDot, "done")
   local stopIdx = f.stop
   PaintDot(endDot, (f.reached >= #n) and "done" or "todo")
-  endEta:SetText(FormatTime(eta[#n]))
+  endEta:SetText(f.reached >= #n and "" or FormatTime(eta[#n]))   -- etape atteinte : plus d'ETA
   local beyond = stopIdx and #n > stopIdx
   endDot:SetAlpha(beyond and 0.35 or 1)
   endName:SetAlpha(beyond and 0.5 or 1)
@@ -519,8 +616,8 @@ function Refresh(force)
       local selected = (stopIdx == i)
       local hot = selected or (cp.hover and CheckpointStoppable(cp))
       PaintDot(cp, hot and "stop" or (i <= f.reached and "done" or "todo"))
-      cp.stopText:SetShown(hot and CAN_STOP)
-      cp.eta:SetText(FormatTime(eta[i]))
+      SetCheckpointTargets(cp, cp.hover and hot, hot and CAN_STOP)
+      cp.eta:SetText(i <= f.reached and "" or FormatTime(eta[i]))
       cp:SetAlpha((stopIdx and i > stopIdx) and 0.35 or 1)
     end
   end
@@ -674,10 +771,12 @@ local function SyncMinimap()
   end
 end
 
--- Nouvelle ligne dans une fenetre de chat affichee : montree CHAT_REVEAL secondes
+-- Nouvelle ligne dans une fenetre de chat affichee : montree CHAT_REVEAL secondes. Pas pendant le fondu du
+-- decollage (lignes systeme du depart) : le chat disparait avec le reste au lieu de remonter d'un coup.
 local chatHooked
+local function ChatReveal() return uiHidden and uiAlpha <= 0 end
 local function OnChatLine(cf)
-  if uiHidden and cf:IsShown() then pcall(Hover, cf, GetTime(), CHAT_REVEAL) end
+  if ChatReveal() and cf:IsShown() then pcall(Hover, cf, GetTime(), CHAT_REVEAL) end
 end
 local function HookChat()
   if chatHooked then return end
@@ -691,11 +790,18 @@ local function HookChat()
   local API = Chattynator and Chattynator.API
   if API and API.AddModifier and API.GetHyperlinkHandler then
     pcall(API.AddModifier, function()
-      if not uiHidden then return end
+      if not ChatReveal() then return end
       local h = API.GetHyperlinkHandler()
       if h then pcall(Hover, h, GetTime(), CHAT_REVEAL) end
     end)
   end
+end
+
+-- Survol relaye : un cadre survole revele aussi ses cadres associes (barre d'xp : la zone de survol, invisible,
+-- revele la barre, le badge et les panneaux). getFrames renvoie la liste des cadres a reveler.
+local hoverLinks = {}
+function ns.TaxiLinkHover(owner, getFrames)
+  if owner then hoverLinks[owner] = getFrames end
 end
 
 local revealClock = 0
@@ -711,6 +817,14 @@ local function UpdateReveal(el)
     local kb = GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()   -- saisie dans le chat
     if kb then pcall(Hover, kb, now) end
     if mmHidden and CursorOver(Minimap) then pcall(Hover, Minimap, now) end   -- minimap masquee : plus de souris
+    for owner, get in pairs(hoverLinks) do
+      if hoverUntil[owner] then
+        local ok, list = pcall(get)
+        for _, f in pairs(ok and list or {}) do
+          if f.IsShown and f:IsShown() then pcall(Hover, f, now) end
+        end
+      end
+    end
   end
   ScanPanels()
   for fr, t in pairs(hoverUntil) do
@@ -799,14 +913,17 @@ local function OnUpdate(_, el)
     topBand:SetPoint("TOP", root, "TOP", 0, (1 - e) * (cfg.panelTopHeight or 60))
     bottomBand:ClearAllPoints()
     bottomBand:SetPoint("BOTTOM", root, "BOTTOM", 0, -(1 - e) * (cfg.panelBottomHeight or 90))
-    track:ClearAllPoints()
-    track:SetPoint("CENTER", bottomBand, "CENTER", 0, 0)
+    PlaceTrack()
     track:SetAlpha(e)
     if animP == 0 and animTarget == 0 then
       root:Hide()
     end
   end
   if uiHidden or uiAlpha < uiSavedAlpha then
+    -- Interface cachee puis reaffichee (Alt+Z) : le client remet UIParent a 1. On repart de l'alpha reel
+    -- pour refaire le fondu, sinon uiAlpha (deja a 0) ne serait jamais reapplique.
+    local real = UIParent:GetAlpha()
+    if UIParent:IsShown() and math.abs(real - uiAlpha) > 0.01 then uiAlpha = min(real, uiSavedAlpha) end
     local want = uiHidden and 0 or uiSavedAlpha
     if uiAlpha ~= want then
       local step = el / UI_FADE * uiSavedAlpha

@@ -1,5 +1,26 @@
 # AishCore
 
+## [v4.6.14](https://github.com/Aishuu87/AishCore/tree/v4.6.14) (2026-11-10)
+
+### Taxi Mode
+- Shows the flight duration
+- Shows the departure name and its zone, the intermediate stops, and the destination and its zone
+- Under each stop, the estimated arrival time
+- Each stop can be clicked to land there (also works with later stops, not only the next one)
+
+### XP Bar
+- Holding SHIFT, the XP Bar now shows the total XP granted by all the quests in your quest log
+- The AishCore XP Bar now stays shown while talking to an NPC
+
+### Missing buffs
+- New option to hide buff reminders in Travel Form or Ghost Wolf (Ignore in Travel Form / Ghost Wolf)
+
+### Fixes
+- FIX: Locked chests no longer show in the Dynamic Bars as Openable items
+- ♾️FIX: 3D animations appeared very dark in instances
+- ♾️FIX: Many auras were not tracked in combat
+- FIX: The aura list could contain unrelated spells in the Totems section
+
 ## [v4.6.13](https://github.com/Aishuu87/AishCore/tree/v4.6.13) (2026-11-08)
 
 ### Taxi Mode

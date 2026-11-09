@@ -3054,9 +3054,17 @@ function MissingBuffs.CheckForMissings()
         if crusader then MissingBuffs.ShowAlertChoices(crusader, ns.MISSING_TEXT.USE_AURA); return end
     end
     -- Forme de voyage Druide (783) : IsMounted() renvoie false dessus alors qu'elle sert au meme
-    -- usage (deplacement rapide) -- traitee comme une monture pour ce toggle.
-    if cfg.ignoreBuffsWhileMounted and ((IsMounted and IsMounted()) or GetSelfAura(783)) then
+    -- usage (deplacement rapide) -- traitee comme une monture pour ce toggle (Retail). Forever : toggle a part,
+    -- qui couvre aussi Loup fantome (Chaman).
+    if cfg.ignoreBuffsWhileMounted and ((IsMounted and IsMounted()) or (not _addon.IsForever and GetSelfAura(783))) then
         MissingBuffs.HideAlert(); return
+    end
+    if _addon.IsForever and cfg.ignoreTravelForms ~= false then
+        -- Formes 3 (voyage) et 16 (loup fantome) ; auras en secours
+        local form = GetShapeshiftFormID and GetShapeshiftFormID()
+        if form == 3 or form == 16 or GetSelfAura(783) or GetSelfAura(2645) then
+            MissingBuffs.HideAlert(); return
+        end
     end
     if cfg.ignoreWhileResting and _addon.IsRestArea() then
         -- Exception : une cible attaquable selectionnee en zone de repos reste un signal utile

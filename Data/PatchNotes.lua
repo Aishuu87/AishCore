@@ -8,6 +8,26 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.14", date = "2026-11-10",
+    lines = {
+      { k = "h", link = { page = "taxiMode" }, t = "Taxi Mode", fr = "Mode Taxi" },
+      { k = "li", lvl = 1, link = { page = "taxiMode" }, t = "Shows the flight duration", fr = "Affiche la durée du trajet" },
+      { k = "li", lvl = 1, link = { page = "taxiMode" }, t = "Shows the departure name and its zone, the intermediate stops, and the destination and its zone", fr = "Affiche le nom du départ, sa zone, les étapes intermédiaires, et l'arrivée et sa zone" },
+      { k = "li", lvl = 1, link = { page = "taxiMode" }, t = "Under each stop, the estimated arrival time", fr = "Sous chaque étape, le temps d'arrivée estimé" },
+      { k = "li", lvl = 1, link = { page = "taxiMode" }, t = "Each stop can be clicked to land there (also works with later stops, not only the next one)", fr = "Chaque étape peut être cliquée afin de descendre à son arrêt (fonctionne également avec les futurs arrêts, pas seulement le prochain)" },
+      { k = "h", link = { page = "xpBar" }, t = "XP Bar", fr = "Barre d'XP" },
+      { k = "li", lvl = 1, link = { page = "xpBar" }, t = "Holding SHIFT, the XP Bar now shows the total XP granted by all the quests in your quest log", fr = "En appuyant sur MAJ, la barre d'XP affichera maintenant le total d'XP octroyé par l'ensemble des quêtes du journal" },
+      { k = "li", lvl = 1, link = { page = "xpBar" }, t = "The AishCore XP Bar now stays shown while talking to an NPC", fr = "La barre d'XP d'AishCore s'affichera même pendant le dialogue avec un PNJ" },
+      { k = "h", link = { page = "aurasMissingBuffs" }, t = "Missing buffs", fr = "Buffs manquants" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "New option to hide buff reminders in Travel Form or Ghost Wolf (Ignore in Travel Form / Ghost Wolf)", fr = "Ajout d'une nouvelle option pour cacher les rappels de buffs en Forme de Voyage ou Loup Fantôme" },
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = { page = "extraBars" }, t = "FIX: Locked chests no longer show in the Dynamic Bars as Openable items", fr = "FIX : Les coffres verrouillés ne s'afficheront plus dans les barres Dynamiques en tant qu'Objet ouvrable" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] FIX: 3D animations appeared very dark in instances", fr = "[Forever] FIX : Les animations 3D apparaissaient très sombres en instance" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] FIX: Many auras were not tracked in combat", fr = "[Forever] FIX : Grand nombre des auras n'avaient pas leurs trackings fonctionnels en combat" },
+      { k = "li", lvl = 1, link = { page = "aurasTracked" }, t = "FIX: The aura list could contain unrelated spells in the Totems section", fr = "FIX : La liste des auras pouvait contenir des sorts parasites dans la section Totems" },
+    },
+  },
+  {
     version = "4.6.13", date = "2026-11-08",
     lines = {
       { k = "h", link = { page = "taxiMode" }, t = "Taxi Mode", fr = "Mode Taxi" },

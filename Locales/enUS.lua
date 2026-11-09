@@ -1008,6 +1008,8 @@ L["UISWITCH_COMBAT"] = "Not available in combat."
 L["BARS_TITLE"] = "Profile switched"
 L["BARS_RELOAD"] = "This profile changes the font, skins or style.\nA reload is needed to apply them."
 L["BARS_NO_UI"] = "Neither ElvUI nor EllesmereUI is loaded."
+L["SETUP_NOTHING_TO_DO"] = "Everything is already set up on this character: nothing to change."
+L["SETUP_NOT_AISHUI"] = "The auto-setup is only available with the full AishUI version."
 L["BARS_ALREADY"] = "Already on %s."
 L["BARS_NOMATCH"] = "Current profile (%s) has no Show Bars / Hide Bars variant."
 L["BARS_MISSING"] = "Profile %s not found."
@@ -1254,6 +1256,7 @@ L["MISSINGBUFFS_ENABLE"] = "Enable"
 L["MISSINGBUFFS_CLICKABLE"] = "Clickable icon (casts the missing spell)"
 L["MISSINGBUFFS_IGNORE_MOUNTED"] = "Ignore while mounted"
 L["MISSINGBUFFS_IGNORE_RESTING"] = "Ignore in rested areas"
+L["MISSINGBUFFS_IGNORE_TRAVEL_FORMS"] = "Ignore in Travel Form / Ghost Wolf"
 L["MISSINGBUFFS_HIDE_TEXT"] = "Hide the text under the icon"
 L["MISSINGBUFFS_LOCK"] = "Lock position"
 L["MISSINGBUFFS_THROTTLE"] = "Delay between checks (s)"
@@ -2006,12 +2009,27 @@ L["SETTINGS_TAXI_BAND_COLOR"] = "Band color"
 L["SETTINGS_TAXI_FONT"] = "Font"
 L["SETTINGS_TAXI_FONT_SIZE"] = "Text size"
 L["SETTINGS_TAXI_ACCENT"] = "Accent color"
+L["SETTINGS_TAXI_DONE_TEXTURE"] = "Completed route texture"
+L["SETTINGS_TAXI_DONE_TEX_DEFAULT"] = "Taxi Mode (default)"
+L["SETTINGS_TAXI_ROUTE_X"] = "Route X offset"
+L["SETTINGS_TAXI_ROUTE_Y"] = "Route Y offset"
+L["SETTINGS_TAXI_GROUP_X"] = "Group X offset (name + zone)"
+L["SETTINGS_TAXI_GROUP_Y"] = "Group Y offset (name + zone)"
+L["SETTINGS_TAXI_TXT_COLOR"] = "Text color"
+L["SETTINGS_TAXI_TXT_USE_ACCENT"] = "Use the accent color"
+L["SETTINGS_TAXI_TXT_USE_ACCENT_TT"] = "Uses the accent color (or the Themed Colors) instead of the text color."
+L["SETTINGS_TAXI_TXT_START"] = "Departure"
+L["SETTINGS_TAXI_TXT_END"] = "Destination"
+L["SETTINGS_TAXI_TXT_ZONES"] = "Departure and destination zones"
+L["SETTINGS_TAXI_TXT_STEPS"] = "Stops"
+L["SETTINGS_TAXI_TXT_ETA"] = "ETA"
+L["SETTINGS_TAXI_TXT_ELAPSED"] = "Elapsed time"
 L["TAXIMODE_STOP_HERE"] = "STOP\nHERE"
 -- Preview route: name, zone, flight time (seconds)
 L["TAXIMODE_DEMO"] = {
   { "Ratchet", "Northern Barrens", 0 },
-  { "Crossroads", "Northern Barrens", 275 },
-  { "Splintertree Post", "Ashenvale", 302 },
+  { "Crossroads", "Northern Barrens", 225 },
+  { "Splintertree Post", "Ashenvale", 337 },
   { "Orgrimmar", "Durotar", 449 },
 }
 

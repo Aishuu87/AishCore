@@ -8,6 +8,7 @@ generate_class_spell_levels.py
 generate_level_gains.py
 generate_map_overlays.py
 generate_town_areas.py
+generate_spell_homonyms.py
 locale_sheet.py
 
 # Feuilles de traduction exportees (echangees avec les traducteurs, hors depot)
