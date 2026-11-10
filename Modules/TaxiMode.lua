@@ -472,7 +472,7 @@ local function PlaceAround(fs, dot, align, above, gap)
 end
 
 -- Groupe nom + zone : a gauche du cercle de depart (left) ou a droite de celui de destination
-local function PlaceGroup(g, name, zone, dot, left, nameAlign, zoneAlign, ox, oy)
+local function PlaceGroup(g, name, zone, dot, left, nameAlign, zoneAlign, ox, oy, zx, zy)
   g:SetSize(max(1, name:GetStringWidth() or 0, zone:GetStringWidth() or 0), 1)
   g:ClearAllPoints()
   if left then g:SetPoint("RIGHT", dot, "LEFT", -12 + ox, -1 + oy)
@@ -481,7 +481,7 @@ local function PlaceGroup(g, name, zone, dot, left, nameAlign, zoneAlign, ox, oy
   name:ClearAllPoints()
   name:SetPoint("BOTTOM" .. jn, g, "TOP" .. jn, 0, 0)
   zone:ClearAllPoints()
-  zone:SetPoint("TOP" .. jz, g, "BOTTOM" .. jz, 0, -2)
+  zone:SetPoint("TOP" .. jz, g, "BOTTOM" .. jz, zx or 0, -2 + (zy or 0))   -- decalage propre de la zone
 end
 
 -- Mise en page (taille ecran, bandes, police, etapes)
@@ -507,15 +507,18 @@ local function Layout()
   local alEnd   = ApplyText(endName, "endName");     endName:SetText(Upper(n[#n].name))
   local alZone  = ApplyText(startZone, "zone");      startZone:SetText(n[1].zone or "")
   ApplyText(endZone, "zone");                        endZone:SetText(n[#n].zone or "")
-  PlaceGroup(startGroup, startName, startZone, startDot, true, alStart, alZone, cfg.startX or 0, cfg.startY or 0)
-  PlaceGroup(endGroup, endName, endZone, endDot, false, alEnd, alZone, cfg.endX or 0, cfg.endY or 0)
+  PlaceGroup(startGroup, startName, startZone, startDot, true, alStart, alZone, cfg.startX or 0, cfg.startY or 0,
+    cfg.startZoneX, cfg.startZoneY)
+  PlaceGroup(endGroup, endName, endZone, endDot, false, alEnd, alZone, cfg.endX or 0, cfg.endY or 0,
+    cfg.endZoneX, cfg.endZoneY)
   local alEta = ApplyText(endEta, "eta")
   PlaceAround(endEta, endDot, alEta, false, 4)
   local alElapsed = ApplyText(elapsedText, "elapsed")
   elapsedText:ClearAllPoints()
-  if alElapsed == "LEFT" then elapsedText:SetPoint("TOPLEFT", diamond, "BOTTOMRIGHT", -6, 1)
-  elseif alElapsed == "RIGHT" then elapsedText:SetPoint("TOPRIGHT", diamond, "BOTTOMLEFT", 6, 1)
-  else elapsedText:SetPoint("TOP", diamond, "BOTTOM", 0, 1) end
+  local ex, ey = cfg.elapsedX or 0, cfg.elapsedY or 0
+  if alElapsed == "LEFT" then elapsedText:SetPoint("TOPLEFT", diamond, "BOTTOMRIGHT", -6 + ex, 1 + ey)
+  elseif alElapsed == "RIGHT" then elapsedText:SetPoint("TOPRIGHT", diamond, "BOTTOMLEFT", 6 + ex, 1 + ey)
+  else elapsedText:SetPoint("TOP", diamond, "BOTTOM", ex, 1 + ey) end
   for _, d in ipairs({ startDot, endDot }) do
     local r = d.rule
     if r.SetGradient and CreateColor then
@@ -585,7 +588,9 @@ function Refresh(force)
   local k = min(f.reached, #n - 1)
   local t0, t1 = f.times[k] or 0, eta[k + 1] or el
   local frac = (t1 > t0) and (el - t0) / (t1 - t0) or 1
-  frac = min(0.97, max(0, frac))
+  -- Jusqu'au noeud suivant (plafond 0.97 retire : le losange se figeait juste avant l'arrivee en fin de vol,
+  -- l'etape n'etant validee qu'a l'atterrissage) ; il y attend la validation si le vol est en retard
+  frac = min(1, max(0, frac))
   if f.reached >= #n then frac = 1 end
   local x = X(k) + (X(k + 1) - X(k)) * frac
   diamond:ClearAllPoints()

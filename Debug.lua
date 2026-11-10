@@ -287,6 +287,18 @@ SlashCmdList["AISHDEBUG"] = function(msg)
             auras.DebugDumpIconsFlow(tonumber(msg:match("(%d+)$")))
         end
 
+    elseif msg == "baricon" then
+        if AishUIAuraDB then
+            AishUIAuraDB._dbgBarTargetIcon = not AishUIAuraDB._dbgBarTargetIcon or nil
+            AishUIAuraDB._dbgNoTargetDurBar = nil
+            print("|cff00ccffAishCore Debug|r Barres cible construites en icone : "
+                .. (AishUIAuraDB._dbgBarTargetIcon and "|cffff4444ACTIF (test)|r" or "|cff00ff88desactive|r") .. " -- /reload pour appliquer")
+        end
+
+    elseif msg == "bartarget" then
+        local auras = ns.Auras
+        if auras and auras.DebugDumpBarsTarget then auras.DebugDumpBarsTarget() end
+
     elseif msg == "circlebarsflow" then
         local auras = ns.Auras
         if not (auras and auras.DebugDumpCircleBarsFlow) then
@@ -481,6 +493,8 @@ SlashCmdList["AISHDEBUG"] = function(msg)
         print("  /aishdebug |cffffff00testpet <spellID> [unite]|r — [TEST] AuraContainer lie au FAMILIER (SetUnit(\"pet\")) — verifie si l'API native peut afficher une aura qui vit sur le pet (Sombre transformation)")
         print("  /aishdebug |cffffff00testpercolor <spellID1> <spellID2>|r — [TEST] UN AddAuraGroup DEDIE par sort (maxFrameCount=1) -- verifie si la couleur/glow PAR SORT est possible avec le systeme natif")
         print("  /aishdebug |cffffff00iconsflow [spellID]|r — [DEBUG] dump de l'etat du rendu natif 'icons' (conteneur/groupe/boutons/layout) ; spellID = ne garder que ce sort")
+        print("  /aishdebug |cffffff00baricon|r — [TEST] boutons CIBLE de Circle Bars / Free Bars construits comme une icone, /reload ensuite")
+        print("  /aishdebug |cffffff00bartarget|r — [DEBUG] grilles CIBLE de Circle Bars / Free Bars (sorts routes, groupes, boutons, debuffs sur la cible)")
         print("  /aishdebug |cffffff00circlebarsflow|r — [DEBUG] dump complet de l'etat du rendu natif 'Circle Bars' (Buffs.lua/freebars)")
         print("  /aishdebug |cffffff00circlebarswatch|r — [DEBUG] force UpdateAllAuras toutes les 0.5s + log les changements (bascule on/off)")
         print("  /aishdebug |cffffff00groups|r — [CHECKUP MEMOIRE] compte les AddAuraGroup dedies crees (jamais liberables) sur les 4 destinations + memoire Lua totale de l'addon")

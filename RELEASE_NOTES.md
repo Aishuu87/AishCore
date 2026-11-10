@@ -1,5 +1,11 @@
 # AishCore
 
+## [v4.6.15](https://github.com/Aishuu87/AishCore/tree/v4.6.15) (2026-11-10)
+
+### Fixes
+- ♾️FIX: Debuffs could no longer be tracked correctly (especially those from spells without a cooldown, such as Immolate or Corruption)
+- ♾️FIX: Debuff tracking could sometimes fail to show on pull in the Circle Bars and Free Bars
+
 ## [v4.6.14](https://github.com/Aishuu87/AishCore/tree/v4.6.14) (2026-11-10)
 
 ### Taxi Mode

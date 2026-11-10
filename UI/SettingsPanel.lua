@@ -14032,7 +14032,7 @@ function Build.TaxiMode(container)
   BindDropdown(ddDoneTex, "taxiMode", "doneTexture")
 
   -- Textes : police, taille, alignement, couleur (ou couleur d'accent) ; groupes depart / destination decalables
-  local function TextBlock(prefix, title, offX, offY)
+  local function TextBlock(prefix, title, offX, offY, labX, labY)
     ctx:Spacer(6)
     ctx:Add(SW.CreateSectionHeader(container, title, W))
     local ddFont = SW.CreateDropdown(container, L["SETTINGS_TAXI_FONT"], ns.GetFontList(), W3)
@@ -14051,9 +14051,9 @@ function Build.TaxiMode(container)
     ctx:AddRow(8, col, cbAcc)
     ctx:Depends(cbAcc, { col }, true)
     if offX then
-      local slX = SW.CreateSlider(container, L["SETTINGS_TAXI_GROUP_X"], -400, 400, 1, W2)
+      local slX = SW.CreateSlider(container, labX or L["SETTINGS_TAXI_GROUP_X"], -400, 400, 1, W2)
       BindSlider(slX, "taxiMode", offX)
-      local slY = SW.CreateSlider(container, L["SETTINGS_TAXI_GROUP_Y"], -100, 100, 1, W2)
+      local slY = SW.CreateSlider(container, labY or L["SETTINGS_TAXI_GROUP_Y"], -100, 100, 1, W2)
       BindSlider(slY, "taxiMode", offY)
       ctx:AddRow(8, slX, slY)
     end
@@ -14061,9 +14061,19 @@ function Build.TaxiMode(container)
   TextBlock("startName", L["SETTINGS_TAXI_TXT_START"], "startX", "startY")
   TextBlock("endName",   L["SETTINGS_TAXI_TXT_END"], "endX", "endY")
   TextBlock("zone",      L["SETTINGS_TAXI_TXT_ZONES"])
+  -- Zones decalables chacune de leur cote (en plus du decalage de leur groupe nom + zone)
+  for _, z in ipairs({ { "startZone", L["SETTINGS_TAXI_START_ZONE_X"], L["SETTINGS_TAXI_START_ZONE_Y"] },
+                       { "endZone",   L["SETTINGS_TAXI_END_ZONE_X"],   L["SETTINGS_TAXI_END_ZONE_Y"] } }) do
+    local slX = SW.CreateSlider(container, z[2], -400, 400, 1, W2)
+    BindSlider(slX, "taxiMode", z[1] .. "X")
+    local slY = SW.CreateSlider(container, z[3], -100, 100, 1, W2)
+    BindSlider(slY, "taxiMode", z[1] .. "Y")
+    ctx:AddRow(8, slX, slY)
+  end
   TextBlock("step",      L["SETTINGS_TAXI_TXT_STEPS"])
   TextBlock("eta",       L["SETTINGS_TAXI_TXT_ETA"])
-  TextBlock("elapsed",   L["SETTINGS_TAXI_TXT_ELAPSED"])
+  TextBlock("elapsed",   L["SETTINGS_TAXI_TXT_ELAPSED"], "elapsedX", "elapsedY",
+    L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"])
 
   ctx:Finalize()
   return ctx.widgets

@@ -420,7 +420,7 @@ ef:SetScript("OnEvent", function(_, event, arg1)
         if ns.FlushPendingAuraTextOverlays then ns.FlushPendingAuraTextOverlays() end
 
     elseif event == "PLAYER_REGEN_DISABLED" then
-        ns._inCombat = true; ns.UpdateAllFades()
+        ns._inCombat = true; ns._combatStartAt = GetTime(); ns.UpdateAllFades()
         -- Entrée combat : annule le wipe idle programmé (on va avoir besoin des caches).
         CancelIdleWipe()
         for _, d in ipairs({0.3, 0.8}) do C_Timer.After(d, _ScanAurasSafe) end

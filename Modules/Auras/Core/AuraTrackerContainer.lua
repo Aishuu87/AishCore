@@ -997,10 +997,70 @@ local function DBG(s) print("|cff33aaff[IconsFlow]|r " .. tostring(s)) end
 local function DestHasPlayerBuffs(dest)
     local wl = ns.whitelistByDest and ns.whitelistByDest[dest]
     if not wl then return false end
+    -- Seuls les sorts COCHES pour cette destination comptent : une variante liee (rang Forever via
+    -- SpellHomonyms, linkedSpellIDs) suit son ancre, mais peut avoir sa propre entree classee "buff" ou
+    -- "enhancement" (decouverte auto) et faisait croire a un buff suivi -> debuffs descendus d'un cran.
+    local spells = ns.GetSpecSpells and ns.GetSpecSpells()
     for id, info in pairs(wl) do
-        if info.source ~= "debuff" and not (ns.GetPetAuraUnit and ns.GetPetAuraUnit(id)) then return true end
+        local own = spells and spells[id]
+        if own and own.enabled and own.destinations and own.destinations[dest]
+           and own.source ~= "debuff" and not (ns.GetPetAuraUnit and ns.GetPetAuraUnit(id)) then
+            return true
+        end
     end
     return false
+end
+
+-- Info d'un spellID pour le routage joueur / cible. Un ID lie (rang Forever via SpellHomonyms, variante
+-- linkedSpellIDs) n'a pas d'entree propre dans la liste : il porte celle de son ancre dans activeWhitelist.
+-- Sans ce repli, Corruption rang 4 n'etait jamais route vers les grilles cible (debuff invisible).
+local function RouteInfo(spells, spellID)
+    return (spells and spells[spellID]) or (ns.activeWhitelist and ns.activeWhitelist[spellID])
+end
+
+-- Longueur de ligne du flow des grilles CIBLE a barres : sur le nombre de sorts de la liste (comme
+-- Icons), pas sur maxBars : avec les rangs Forever (un groupe par rang), il y a plus de groupes que
+-- maxBars. Piste pour le debuff pose hors combat qui disparait au passage en combat (Forever).
+local function LineCount(order, maxBars)
+    return math.max(order and #order or 0, maxBars or 1, 1)
+end
+
+-- Test /aishdebug baricon : boutons CIBLE de Circle Bars / Free Bars construits comme une icone de la
+-- grille Icons (icone + cooldown, rien d'autre). Separe "contenu du bouton" de "conteneur / groupe" pour
+-- le debuff pose hors combat qui disparait au passage en combat (Forever). Lu a la creation : /reload.
+local function TestBarTargetAsIcon(auraButton, spellID)
+    if not (AishUIAuraDB and AishUIAuraDB._dbgBarTargetIcon) then return false end
+    pcall(function()
+        auraButton._aishSpellID = spellID
+        auraButton:SetSize(26, 26)
+        local icon = auraButton:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(auraButton)
+        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        auraButton:SetIcon(icon)
+        local cd = CreateFrame("Cooldown", nil, auraButton, "CooldownFrameTemplate")
+        cd:SetAllPoints(auraButton)
+        cd:SetReverse(true)
+        auraButton:SetDurationCooldown(cd)
+    end)
+    return true
+end
+
+-- Suite du test baricon : groupe et conteneur clones de la grille Icons (cases 26x26, conteneur 8x8,
+-- strata MEDIUM, flow HORIZONTAL vers la gauche). L'axe vertical des barres est la seule config de flow
+-- jamais utilisee par Icons.
+local function TestIconLayout(layout)
+    if not (AishUIAuraDB and AishUIAuraDB._dbgBarTargetIcon) then return layout end
+    return { elementSpacing = 2, lineSpacing = 2, elementWidth = 26, elementHeight = 26, layoutIndex = 1 }
+end
+
+local function TestIconContainer(c, order)
+    if not (c and AishUIAuraDB and AishUIAuraDB._dbgBarTargetIcon) then return end
+    pcall(c.SetSize, c, 8, 8)
+    pcall(c.SetFrameStrata, c, "MEDIUM")
+    pcall(c.SetFlowLayoutAnchorPoint, c, "TOPRIGHT")
+    pcall(c.SetFlowLayoutAxis, c, 0)
+    pcall(c.SetFlowLayoutGrowthDirection, c, -1, -1)
+    pcall(c.SetFlowLayoutMaximumLineSize, c, 28 * math.max(order and #order or 0, 1) + 2)
 end
 
 -- Conteneur natif "icons" (peut etre nil). Utilise par Animation.lua (ns.UpdateRenderFade) pour
@@ -1799,7 +1859,7 @@ function ns.EnsureIconsNativeGridTarget()
 
     local currentSet = {}
     for _, spellID in ipairs(order) do
-        local info = spells and spells[spellID]
+        local info = RouteInfo(spells, spellID)
         if info and info.source == "debuff" then
             currentSet[spellID] = true
             if not iconsPerSpellGroupsTarget[spellID] then
@@ -2921,7 +2981,7 @@ function ns.RepositionCircleBarsNativeGridTarget()
     local okA, errA = pcall(c.SetFlowLayoutAnchorPoint, c, "TOP")
     local okX, errX = pcall(c.SetFlowLayoutAxis, c, 1)
     local okG, errG = pcall(c.SetFlowLayoutGrowthDirection, c, 1, -1)
-    local okM, errM = pcall(c.SetFlowLayoutMaximumLineSize, c, maxBars * (bh + rg) + rg)
+    local okM, errM = pcall(c.SetFlowLayoutMaximumLineSize, c, LineCount(ns.slotOrderByDest and ns.slotOrderByDest.freebars, maxBars) * (bh + rg) + rg)
     if not (okA and okX and okG and okM) then
         CBDBG(string.format("|cffff4444RepositionCircleBarsNativeGridTarget: SetFlowLayout* a echoue -- anchor=%s axis=%s growth=%s maxline=%s|r",
             okA and "ok" or tostring(errA), okX and "ok" or tostring(errX), okG and "ok" or tostring(errG), okM and "ok" or tostring(errM)))
@@ -2934,6 +2994,7 @@ function ns.RepositionCircleBarsNativeGridTarget()
         c:SetAlpha(0)
     end
     pcall(ns.RefreshCircleBarsNativeGridStyleTarget)
+    TestIconContainer(c, ns.slotOrderByDest and ns.slotOrderByDest.freebars)
 end
 
 -- Cree (une seule fois par sort) un AddAuraGroup dedie par debuff cible de "Circle Bars",
@@ -2956,7 +3017,7 @@ function ns.EnsureCircleBarsNativeGridTarget()
     local seenInfo, capState = {}, { count = 0 }
     local currentSet = {}
     for _, spellID in ipairs(order) do
-        local info = spells and spells[spellID]
+        local info = RouteInfo(spells, spellID)
         if info and info.source == "debuff" then
             if not AllowNextCapSlot(wl, spellID, maxBars, seenInfo, capState) then break end
             currentSet[spellID] = true
@@ -2966,18 +3027,19 @@ function ns.EnsureCircleBarsNativeGridTarget()
                     c:AddAuraGroup(groupKey, "HARMFUL|PLAYER", {
                         maxFrameCount = 1,
                         candidateFilters = { includeSpellIDs = { [spellID] = true } },
-                        layout = {
+                        layout = TestIconLayout({
                             elementSpacing = rowStep,
                             lineSpacing = rowStep,
                             elementWidth = bw * 2 + gp * 2,
                             elementHeight = bh,
                             layoutIndex = 1,
-                        },
+                        }),
                         initializeFrame = function(auraButton)
                             local okCheck, canAccess = pcall(function()
                                 return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
                             end)
                             if not (okCheck and canAccess) then return end
+                            if TestBarTargetAsIcon(auraButton, spellID) then return end
                             local okBuild, errBuild = pcall(function()
                                 local liveCfg = ns.db and ns.db.freebars or ns.Defaults.freebars
                                 local lbw, lbh, lgp = liveCfg.barW or 45, liveCfg.barH or 3, liveCfg.gap or 50
@@ -3066,6 +3128,8 @@ function ns.EnsureCircleBarsNativeGridTarget()
         if not currentSet[spellID] then
             local groupKey = "aishCircleBarsFlowTarget_" .. tostring(spellID)
             pcall(c.SetAuraGroupCandidateFilters, c, groupKey, { includeSpellIDs = { [0] = true } })
+            ns._barTargetCut = ns._barTargetCut or {}
+            ns._barTargetCut["cb" .. spellID] = GetTime()   -- diagnostic /aishdebug bartarget
         end
     end
 end
@@ -4006,7 +4070,7 @@ function ns.RepositionFreeBarsNativeGridTarget()
     local okX, errX = pcall(c.SetFlowLayoutAxis, c, isHFlow and 0 or 1)
     local okG, errG = pcall(c.SetFlowLayoutGrowthDirection, c, hDir, vDir)
     local itemSize = isH and rowW or rowH
-    local okM, errM = pcall(c.SetFlowLayoutMaximumLineSize, c, (itemSize + rg) * maxBars + rg)
+    local okM, errM = pcall(c.SetFlowLayoutMaximumLineSize, c, (itemSize + rg) * LineCount(ns.slotOrderByDest and ns.slotOrderByDest.circlebars, maxBars) + rg)
     if not (okA and okX and okG and okM) then
         FBDBG(string.format("|cffff4444RepositionFreeBarsNativeGridTarget: SetFlowLayout* a echoue -- anchor=%s axis=%s growth=%s maxline=%s|r",
             okA and "ok" or tostring(errA), okX and "ok" or tostring(errX), okG and "ok" or tostring(errG), okM and "ok" or tostring(errM)))
@@ -4019,6 +4083,7 @@ function ns.RepositionFreeBarsNativeGridTarget()
         c:SetAlpha(0)
     end
     pcall(ns.RefreshFreeBarsNativeGridStyleTarget)
+    TestIconContainer(c, ns.slotOrderByDest and ns.slotOrderByDest.circlebars)
 end
 
 -- Cree (une seule fois par sort) un AddAuraGroup dedie par debuff cible de "Free Bars",
@@ -4047,7 +4112,7 @@ function ns.EnsureFreeBarsNativeGridTarget()
     local seenInfo, capState = {}, { count = 0 }
     local currentSet = {}
     for _, spellID in ipairs(order) do
-        local info = spells and spells[spellID]
+        local info = RouteInfo(spells, spellID)
         if info and info.source == "debuff" then
             if not AllowNextCapSlot(wl, spellID, maxBars, seenInfo, capState) then break end
             currentSet[spellID] = true
@@ -4058,12 +4123,13 @@ function ns.EnsureFreeBarsNativeGridTarget()
                     c:AddAuraGroup(groupKey, "HARMFUL|PLAYER", {
                         maxFrameCount = 1,
                         candidateFilters = { includeSpellIDs = { [spellID] = true } },
-                        layout = { elementSpacing = rg, lineSpacing = rg, elementWidth = rowW, elementHeight = rowH, layoutIndex = 1 },
+                        layout = TestIconLayout({ elementSpacing = rg, lineSpacing = rg, elementWidth = rowW, elementHeight = rowH, layoutIndex = 1 }),
                         initializeFrame = function(auraButton)
                             local okCheck, canAccess = pcall(function()
                                 return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
                             end)
                             if not (okCheck and canAccess) then return end
+                            if TestBarTargetAsIcon(auraButton, spellID) then return end
                             local okBuild, errBuild = pcall(function()
                                 local liveCfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
                                 local liveSpells = ns.GetSpecSpells()
@@ -4244,6 +4310,8 @@ function ns.EnsureFreeBarsNativeGridTarget()
         if not currentSet[spellID] then
             local groupKey = "aishFreeBarsFlowTarget_" .. tostring(spellID)
             pcall(c.SetAuraGroupCandidateFilters, c, groupKey, { includeSpellIDs = { [0] = true } })
+            ns._barTargetCut = ns._barTargetCut or {}
+            ns._barTargetCut["fb" .. spellID] = GetTime()   -- diagnostic /aishdebug bartarget
         end
     end
 end
@@ -5189,7 +5257,7 @@ function ns.EnsureIconListNativeGrid()
     -- l'alternance gauche / droite de "Double icone".
     local spells = ns.GetSpecSpells()
     local function acceptBuff(spellID)
-        local info = spells and spells[spellID]
+        local info = RouteInfo(spells, spellID)
         if info and info.source == "debuff" then return false end
         return not (ns.GetPetAuraUnit and ns.GetPetAuraUnit(spellID))
     end
@@ -5391,7 +5459,7 @@ function ns.EnsureIconListNativeGridTarget()
     -- "HARMFUL|PLAYER" (pas juste "HARMFUL") : restreint aux auras dont le joueur est la source (cf. TargetAuras.lua
     -- "onlyPlayer"). Sans ca, un debuff ennemi etranger pouvait se lier au slot ("debuff parasite").
     local function acceptDebuff(spellID)
-        local info = spells and spells[spellID]
+        local info = RouteInfo(spells, spellID)
         return info ~= nil and info.source == "debuff"
     end
     local dual = (ns.db and ns.db.iconlist or ns.Defaults.iconlist).layout == "center_dual"
@@ -6177,3 +6245,99 @@ function ns.DebugDumpSpellTracking(...)
         end
     end
 end
+
+-- /aishdebug bartarget -- grilles CIBLE de Circle Bars et Free Bars : conteneur, sorts routes vers la
+-- cible (et pourquoi), groupes crees, boutons, et debuffs du joueur reellement presents sur la cible.
+function ns.DebugDumpBarsTarget()
+    local P = function(s) print("|cffff8800[BarTarget]|r " .. tostring(s)) end
+    local function clean(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
+    P(string.format("InCombatLockdown=%s  cible=%s", tostring(InCombatLockdown()), tostring(UnitExists("target"))))
+    local now = GetTime()
+    P(string.format("entree en combat il y a %s | dernier rebuild de la liste il y a %s (en combat=%s)",
+        ns._combatStartAt and string.format("%.1fs", now - ns._combatStartAt) or "?",
+        ns._lastWLBuild and string.format("%.1fs", now - ns._lastWLBuild) or "?", tostring(ns._lastWLBuildCombat)))
+    if ns._barRebind then
+        for k, v in pairs(ns._barRebind) do P("rebind " .. k .. " : " .. v) end
+    end
+    local spells = ns.GetSpecSpells()
+    for _, d in ipairs({
+        { label = "Circle Bars", key = "cb", c = circleBarsFlowContainerTarget, dest = "freebars",   groups = circleBarsPerSpellGroupsTarget, pool = circleBarsFlowButtonsTarget },
+        { label = "Free Bars",   key = "fb", c = freeBarsFlowContainerTarget,   dest = "circlebars", groups = freeBarsPerSpellGroupsTarget,   pool = freeBarsFlowButtonsTarget },
+    }) do
+        P("=== " .. d.label .. " (cible) ===")
+        local c = d.c
+        if not c then P("  |cffff4444conteneur cible inexistant|r") else
+            local okP, p1, rel, p3, x, y = pcall(c.GetPoint, c, 1)
+            P(string.format("  shown=%s visible=%s alpha=%.2f effAlpha=%.2f size=%.0fx%.0f point=%s->%s:%s (%s,%s)",
+                tostring(c:IsShown()), tostring(c:IsVisible()), c:GetAlpha(), c:GetEffectiveAlpha(),
+                c:GetWidth() or 0, c:GetHeight() or 0,
+                okP and tostring(p1) or "?", okP and rel and (rel.GetName and rel:GetName() or tostring(rel)) or "?",
+                okP and tostring(p3) or "?", okP and tostring(x) or "?", okP and tostring(y) or "?"))
+        end
+        -- Ordre : seulement les debuffs (routes vers la cible), compacte. id* = entree propre dans la liste,
+        -- G = groupe cree, X = groupe coupe (filtre vide). Les autres sources sont juste comptees.
+        local order = ns.slotOrderByDest and ns.slotOrderByDest[d.dest] or {}
+        local line, nOther = {}, 0
+        local function flush() if #line > 0 then P("  " .. table.concat(line, "  ")); wipe(line) end end
+        for _, sid in ipairs(order) do
+            local info = RouteInfo(spells, sid)
+            if info and info.source == "debuff" then
+                local cut = ns._barTargetCut and ns._barTargetCut[d.key .. sid]
+                line[#line + 1] = string.format("%d%s[%s%s]", sid, (spells and spells[sid]) and "*" or "",
+                    d.groups[sid] and "G" or "-", cut and "X" or "")
+                if #line >= 8 then flush() end
+            else
+                nOther = nOther + 1
+            end
+        end
+        flush()
+        P(string.format("  %d sort(s) dans l'ordre, dont %d non-debuff", #order, nOther))
+        -- Boutons : resume par sort (affiches / total), jamais une ligne par bouton.
+        local total, shownBy, countBy = #d.pool, {}, {}
+        for _, btn in ipairs(d.pool) do
+            local sid = btn._aishSpellID or 0
+            countBy[sid] = (countBy[sid] or 0) + 1
+            local okS, sh = pcall(function() return btn:IsShown() and true or false end)
+            if okS and sh then shownBy[sid] = (shownBy[sid] or 0) + 1 end
+        end
+        local parts = {}
+        for sid, n in pairs(countBy) do parts[#parts + 1] = string.format("%d:%d/%d", sid, shownBy[sid] or 0, n) end
+        P(string.format("  boutons %d (sort:affiches/total) %s", total, table.concat(parts, " ")))
+    end
+    -- Debuffs sur la cible : lisibles seulement hors combat (secrets en combat), une seule ligne.
+    if not InCombatLockdown() and C_UnitAuras and C_UnitAuras.GetAuraDataByIndex and UnitExists("target") then
+        local ids = {}
+        for i = 1, 40 do
+            local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "target", i, "HARMFUL|PLAYER")
+            if not ok or not a then break end
+            if clean(a.spellId) then ids[#ids + 1] = tostring(a.spellId) end
+        end
+        P("debuffs joueur sur la cible : " .. (#ids > 0 and table.concat(ids, " ") or "aucun"))
+    end
+end
+
+-- Forever : un debuff pose hors combat disparait des grilles CIBLE a barres (Circle Bars / Free Bars) au
+-- passage en combat, alors qu'Icons le garde et qu'un debuff pose en combat s'affiche. UpdateAllAuras ne
+-- suffit pas : on relie le conteneur a la cible (SetEnabled + SetUnit) juste apres l'entree en combat.
+-- Resultat de chaque appel garde dans ns._barRebind pour /aishdebug bartarget (bloque en combat ?).
+local function RebindBarTargetContainers()
+    ns._barRebind = {}
+    for _, d in ipairs({ { "cb", circleBarsFlowContainerTarget }, { "fb", freeBarsFlowContainerTarget } }) do
+        local c = d[2]
+        if c then
+            local okE1, eE1 = pcall(c.SetEnabled, c, false)
+            local okE2, eE2 = pcall(c.SetEnabled, c, true)
+            local okU,  eU  = pcall(c.SetUnit, c, "target")
+            local okA,  eA  = pcall(c.UpdateAllAuras, c)
+            ns._barRebind[d[1]] = string.format("disable=%s enable=%s unit=%s update=%s",
+                okE1 and "ok" or tostring(eE1), okE2 and "ok" or tostring(eE2),
+                okU and "ok" or tostring(eU), okA and "ok" or tostring(eA))
+        end
+    end
+end
+
+local barRebindFrame = CreateFrame("Frame")
+barRebindFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+barRebindFrame:SetScript("OnEvent", function()
+    C_Timer.After(0.1, RebindBarTargetContainers)
+end)

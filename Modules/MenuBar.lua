@@ -291,7 +291,12 @@ MenuBar.ACTIONS = {
       return { ["shift-1"] = Use(1), ["ctrl-1"] = Use(2), ["alt-1"] = Use(3), ["alt-ctrl-1"] = Use(4) }
     end },
   { id = "reload", icon = "INV_Misc_Gear_08", macro = function() return "/reload" end },
-  { id = "hearthstone", icon = "INV_Misc_Rune_01", macro = function() return "/use item:6948" end },
+  -- Maj+clic (chaman) : Rappel astral. /cast par nom localise (pas d'ID accepte par /cast)
+  { id = "hearthstone", icon = "INV_Misc_Rune_01", macro = function() return "/use item:6948" end,
+    mods = function()
+      local name = MenuBar.AstralRecallName()
+      return { ["shift-1"] = name and ("/cast " .. name) or nil }
+    end },
   { id = "screenshot", icon = "INV_Misc_Spyglass_03", macro = function() return "/run Screenshot()" end },
   -- Clic : coupe / remet tout le son ; Maj+clic : musique ; Ctrl+clic : effets sonores (sans la musique) ;
   -- molette sur le raccourci : volume general
@@ -641,6 +646,15 @@ local function StopGhost()
   end
 end
 
+-- Rappel astral (chaman) : nom localise du sort, nil pour les autres classes
+local ASTRAL_RECALL = 556
+function MenuBar.AstralRecallName()
+  if select(2, UnitClass("player")) ~= "SHAMAN" then return nil end
+  local GetName = (_G.C_Spell and _G.C_Spell.GetSpellName) or _G.GetSpellInfo
+  local name = GetName and GetName(ASTRAL_RECALL)
+  return (type(name) == "string" and name ~= "") and name or nil
+end
+
 -- Recharge de la pierre de foyer sur le swipe du bouton
 local HEARTH_ITEM = 6948
 function MenuBar.UpdateCooldown(b)
@@ -719,6 +733,8 @@ function Strip:NewSlot()
       -- Destination de la pierre de foyer
       local bind = _G.GetBindLocation and _G.GetBindLocation()
       if bind and bind ~= "" then GameTooltip:AddLine(bind, 1, 0.82, 0.2, true) end
+      local recall = MenuBar.AstralRecallName()
+      if recall then AddLines(string.format(Loc("MENUBAR_TALENTS_SPEC"), Loc("MENUBAR_MOD_SHIFT"), recall)) end
     elseif self2.actionId == "talents" then
       AddLines(Loc("MENUBAR_TALENTS_TT"))
       local mods = ns.IsForever and {} or { "MENUBAR_MOD_SHIFT", "MENUBAR_MOD_CTRL", "MENUBAR_MOD_ALT", "MENUBAR_MOD_CTRLALT" }

@@ -1082,6 +1082,8 @@ ns.Defaults = {
     trackX = 0, trackY = 0,      -- decalage de la route dans la bande du bas
     startX = 0, startY = 0,      -- decalage du groupe de depart (nom + zone) par rapport a son cercle
     endX   = 0, endY   = 0,      -- idem, groupe de destination
+    startZoneX = 0, startZoneY = 0,  -- zone de depart, en plus du decalage de son groupe
+    endZoneX   = 0, endZoneY   = 0,  -- idem, zone de destination
     -- Textes : <prefixe>Font / Size / Align / Color / Accent (Accent : couleur d'accent au lieu de Color)
     startNameFont = ns.FONT_FALLBACK, startNameSize = 18, startNameAlign = "RIGHT",
     startNameColor = { 1, 0.76, 0.25, 1 }, startNameAccent = true,
@@ -1095,6 +1097,7 @@ ns.Defaults = {
     etaColor = { 0.55, 0.55, 0.55, 1 }, etaAccent = false,
     elapsedFont = ns.FONT_FALLBACK, elapsedSize = 14, elapsedAlign = "RIGHT",
     elapsedColor = { 1, 0.76, 0.25, 1 }, elapsedAccent = true,
+    elapsedX = 0, elapsedY = 0,  -- decalage du temps ecoule (sous le losange)
     accentColor       = { 1, 0.76, 0.25, 1 },
     useThemeColors    = false,
     doneTexture       = "fly",   -- partie parcourue : "fly" (texture du mode taxi) ou cle de ns.GetBarTextureList()

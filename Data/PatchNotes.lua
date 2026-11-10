@@ -8,6 +8,14 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.6.15", date = "2026-11-10",
+    lines = {
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] FIX: Debuffs could no longer be tracked correctly (especially those from spells without a cooldown, such as Immolate or Corruption)", fr = "[Forever] FIX : Les debuffs ne pouvaient plus être suivis correctement (notamment ceux provenant de sorts sans cooldown, comme Immolation ou Corruption)" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] FIX: Debuff tracking could sometimes fail to show on pull in the Circle Bars and Free Bars", fr = "[Forever] FIX : Les suivis de debuffs pouvaient parfois ne pas s'afficher au pull dans les barres de cercles et barres libres" },
+    },
+  },
+  {
     version = "4.6.14", date = "2026-11-10",
     lines = {
       { k = "h", link = { page = "taxiMode" }, t = "Taxi Mode", fr = "Mode Taxi" },

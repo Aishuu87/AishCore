@@ -207,6 +207,7 @@ end
 
 function ns.BuildWhitelist()
     ns._auraVariantsDirty = nil
+    ns._lastWLBuild, ns._lastWLBuildCombat = GetTime(), InCombatLockdown()   -- diagnostic /aishdebug bartarget
     -- Auto-configure le sort du cercle central avant chaque rebuild
     if ns.AutoConfigCenterArc then pcall(ns.AutoConfigCenterArc) end
     if ns.AutoConfigSecResDurBar then pcall(ns.AutoConfigSecResDurBar) end
