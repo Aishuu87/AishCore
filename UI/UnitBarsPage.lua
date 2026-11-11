@@ -824,7 +824,6 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
     local player = key == "player"
     local nameOn = BV("showName") or (player and BV("nameAlways"))
     for _, w in ipairs(nameWidgets) do Gray(w, not nameOn, off) end
-    if player and nameOn then Gray(cbLevel, true, off) end
     -- "Toujours afficher le nom" : barre du joueur seulement, invisible (et inerte) ailleurs
     Gray(cbNameAlways, not player, true)
     cbNameAlways:SetAlpha(player and (off and GRAY or 1) or 0)

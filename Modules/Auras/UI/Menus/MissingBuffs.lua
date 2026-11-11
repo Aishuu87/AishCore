@@ -139,17 +139,25 @@ end
 local function GeneralRows()
     local rows = {
         { dbKey = "ignoreBagsFull",       displayName = L["MISSINGBUFFS_BAGS_FULL"],      icon = I .. "INV_Misc_Bag_08" },
-        { dbKey = "ignoreWellFedFood",    displayName = L["MISSINGBUFFS_WELLFED_FOOD"],   icon = I .. "INV_Misc_Food_15" },
-        { dbKey = "ignoreFlasks",         displayName = L["MISSINGBUFFS_FLASKS"],         icon = I .. "INV_Potion_62" },
-        { dbKey = "ignoreElixirs",        displayName = L["MISSINGBUFFS_ELIXIRS"],        icon = I .. "INV_Potion_32" },
-        { dbKey = "ignoreWeaponStones",   displayName = L["MISSINGBUFFS_WEAPON_STONES"],  icon = I .. "INV_Stone_SharpeningStone_05" },
         { dbKey = "ignoreGatherTracking", displayName = L["MISSINGBUFFS_GATHER_TRACKING"], icon = I .. "INV_Misc_Flower_02" },
         { dbKey = "ignoreTalentPoints",   displayName = L["MISSINGBUFFS_TALENT_POINTS"],  icon = I .. "Ability_Marksmanship" },
     }
     if _addon.IsForever then
         rows[#rows + 1] = { dbKey = "ignoreLegacyPoints", displayName = L["MISSINGBUFFS_LEGACY_POINTS"], icon = I .. "INV_Misc_Book_11" }
+        rows[#rows + 1] = { dbKey = "ignoreWellRested", displayName = L["MISSINGBUFFS_WELL_RESTED"],
+            icon = (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(211527)) or I .. "INV_Misc_Bag_08" }
     end
     return rows
+end
+
+-- Colonne "Consommables" : nourriture, flacons / fioles, elixirs, pierres a aiguiser / huiles
+local function ConsumableRows()
+    return {
+        { dbKey = "ignoreWellFedFood",    displayName = L["MISSINGBUFFS_WELLFED_FOOD"],   icon = I .. "INV_Misc_Food_15" },
+        { dbKey = "ignoreFlasks",         displayName = L["MISSINGBUFFS_FLASKS"],         icon = I .. "INV_Potion_62" },
+        { dbKey = "ignoreElixirs",        displayName = L["MISSINGBUFFS_ELIXIRS"],        icon = I .. "INV_Potion_32" },
+        { dbKey = "ignoreWeaponStones",   displayName = L["MISSINGBUFFS_WEAPON_STONES"],  icon = I .. "INV_Stone_SharpeningStone_05" },
+    }
 end
 
 -- Ruee ardente (Retail) : alerte "presence" inverse, resynchronise SpellEffects tout de suite
@@ -318,6 +326,15 @@ local function CreateMiniToggle(parent, y, W, t)
         Refresh()
         if ns.MissingBuffs then ns.MissingBuffs.RequestCheck() end
     end)
+    if t.tt then
+        f:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(t[2], 1, 1, 1)
+            GameTooltip:AddLine(t.tt, 0.8, 0.8, 0.8, true)
+            GameTooltip:Show()
+        end)
+        f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
     return f
 end
 
@@ -346,7 +363,13 @@ local function CreateColumnHeader(parent, x, y, W, text, color)
 end
 
 local function BuildAlertsSection(c, w)
-    local columns = { { label = L["MISSINGBUFFS_COL_GENERAL"] or "Général", color = GENERAL_COLOR, rows = GeneralRows() } }
+    local columns = {
+        { label = L["MISSINGBUFFS_COL_GENERAL"] or "Général", color = GENERAL_COLOR, rows = GeneralRows() },
+        -- Consommables : interrupteur "Seulement en instance" sous le titre
+        { label = L["MISSINGBUFFS_COL_CONSUMABLES"], color = GENERAL_COLOR, rows = ConsumableRows(),
+          topToggle = { "consumablesInstanceOnly", L["MISSINGBUFFS_CONSUMABLES_INSTANCE_ONLY"],
+                        tt = L["MISSINGBUFFS_CONSUMABLES_INSTANCE_ONLY_TT"] } },
+    }
     for _, cc in ipairs(CLASS_COLUMNS) do
         if not (_addon.IsForever and cc.class == "EVOKER") then   -- Forever : pas d'evocateur
             local rows = cc.rows()
@@ -367,6 +390,10 @@ local function BuildAlertsSection(c, w)
         local holder = CreateFrame("Frame", nil, c)
         holder:SetPoint("TOPLEFT", x, -(y + HEAD_H))
         local cy = 0
+        if col.topToggle then
+            CreateMiniToggle(holder, cy, colW, col.topToggle)
+            cy = cy + MINI_H
+        end
         for _, entry in ipairs(col.rows) do
             CreateBuffRow(holder, entry, cy, colW)
             cy = cy + ROW_H

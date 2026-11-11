@@ -41,6 +41,7 @@ ns.ProfileTree = {
   { id = "hud", label = "SETTINGS_GROUP_WORLD", panel = "world", children = {
     { id = "healthCircle", label = "SETTINGS_MOD_HEALTH_CIRCLE", core = { "healthCircle" }, apply = { "HealthCircle" } },
     { id = "outOfCombatResourceCircle", label = "SETTINGS_SEC_OCRC", core = { "outOfCombatResourceCircle" }, apply = { "OutOfCombatResourceCircle" } },
+    { id = "petHealthCircle", label = "SETTINGS_MOD_PET_HEALTH_CIRCLE", core = { "petHealthCircle" }, apply = { "PetHealthCircle" } },
     { id = "wellFedCircle", label = "SETTINGS_SEC_WELLFED", core = { "wellFedCircle" }, apply = { "WellFedCircle" } },
     { id = "xpBar", label = "SETTINGS_CAT_XP_BAR", core = { "xpBar" }, apply = { "XPBar" } },
     { id = "skyriding", label = "SETTINGS_CAT_SKYRIDING", core = { "skyriding" }, apply = { "Skyriding" } },

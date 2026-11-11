@@ -88,6 +88,39 @@ ns.Defaults = {
     swingColor = { 1, 0.82, 0.2, 1 },
     swingUseSpecColor = false,
     swingSpecColorKey = "powercircle",
+    -- Regen de mana (Forever uniquement) : regle des 5 secondes puis ticks de regen (2 s)
+    manaRegenEnabled = false,
+    manaRegenBarMode = false,
+    manaRegenDots = false,              -- dots decoratifs : seul le 3 reste pendant les 5 s, les autres reviennent un a un
+    manaRegenDotsMode = "four",         -- "four" (2, 3, 4, 5 s) | "two" (2,5 et 5 s)
+    -- Voyant (rond + halo) et lueur derriere le fond de texte : allumes pendant la regen, couleur des ticks
+    manaRegenLamp = false,
+    manaRegenLampSize = 6,
+    manaRegenLampX = 0, manaRegenLampY = -14,   -- sous le texte de la ressource principale
+    manaRegenLampColor = { 0.6, 0.85, 1, 1 },   -- voyant
+    manaRegenLampGlowSize = 24,                 -- lueur derriere le point du voyant
+    manaRegenTbGlowColor = { 0.6, 0.85, 1, 1 }, -- lueur du fond de texte
+    manaRegenTbGlowThemed = false,              -- Couleurs Thematiques : element "Lueur"
+    manaRegenPulse = false,                     -- les lueurs (voyant, fond de texte) respirent
+    -- Couleurs Thematiques au lieu des couleurs propres (5 s : cercle de puissance, voyant : decoration A + lueur, lueur du texte : lueur)
+    manaRegenThemed = false,
+    manaRegenLampThemed = false,
+    manaRegenTbGlow = false,
+    manaRegenTbGlowSize = 70,
+    manaRegenTbGlowX = 0, manaRegenTbGlowY = 0,
+    manaRegenColor = { 0.25, 0.55, 1, 1 },      -- regle des 5 s
+    -- Arc : memes reglages que l'arc principal (rayon x 1.1 x taille, epaisseur, angles, type de remplissage)
+    manaRegenSizeRatio = 1.2,
+    manaRegenArcThickness = 0.1,
+    manaRegenArcStart = 0, manaRegenArcEnd = 0,   -- fin = depart : cercle complet
+    manaRegenArcFill = "cw",                      -- "cw" | "ccw" | "mirror_out" | "mirror_in" | "vertical"
+    manaRegenFillUp = false,
+    manaRegenBarX = 0, manaRegenBarY = -70,
+    manaRegenBarLength = 120,
+    manaRegenBarThickness = 4,
+    manaRegenBarDirection = "ltr",
+    manaRegenBarFillUp = false,
+    manaRegenBarBgColor = { 0, 0, 0, 0.45 },
     size = 80,
     -- Cache sombre sous le texte central, en pixels (cf. bar.textBackdrop).
     textBackdropSize = 35,
@@ -189,6 +222,7 @@ ns.Defaults = {
     secResAbsorbAbbreviate = false,
     -- Druide en forme de felin / d'ours : mana en texte secondaire (nil = active)
     druidFormMana = true,
+    shamanShieldStacks = true,   -- Forever : charges du Bouclier de foudre / d'eau en texte secondaire
     -- Globes de Puissance Sacrée en spé Protection / Vindicte
     holyPowerAllSpecs = false,
     -- Globes d'Essence en spé Dévastation / Augmentation
@@ -291,6 +325,30 @@ ns.Defaults = {
     glowEnabled = true,
     glowSize    = 0.7,   -- plus petit que le RC principal (taille relative a bgLarge)
     glowOpacity = 0.7,
+  },
+
+  -- Cercle de vie du familier (hors combat, quand le familier est blesse) : cf. Modules/PetHealthCircle.lua
+  petHealthCircle = {
+    locked = false,
+    enabled = true,
+    size = 34,
+    fontSize = 9,
+    font = ns.FONT_FALLBACK,
+    -- Par defaut : a gauche du cercle de vie, symetrique du cercle de ressource du profil de reference
+    anchorPctX = 0.296,
+    anchorPctY = 0.291,
+    x = 0,
+    y = 0,
+    barColor = { 0.2, 0.9, 0.2, 1 },   -- repli si les Couleurs Thematiques sont absentes
+    arcSizeRatio = 1.0,
+    arcStartAngle = 220,
+    arcEndAngle   = 140,
+    arcFillMode = "vertical",   -- "vertical" | "cw" | "ccw" | "mirror_out" | "mirror_in"
+    arcFillInverted = false,
+    arcThickness = 0.25,
+    hideDelay = 2.5,            -- repli si la vie est illisible : secondes sans changement avant de la considerer pleine
+    -- Mode de visibilite : "always" | "important" (default)
+    visibilityMode = "important",
   },
 
   -- Barre d'experience (visible lors d'un gain XP ou au survol du coin bas-gauche)
@@ -481,6 +539,10 @@ ns.Defaults = {
     itemGap = 4, itemBorder = 1, itemBorderColor = { 0, 0, 0, 0.9 },   -- ecart entre les cases, contour (px, couleur)
     itemCountPoint = "BOTTOMRIGHT", itemCountX = -1, itemCountY = 2,   -- position du nombre d'objets dans la case
     itemCountFont = "Fonts\\2002.TTF", itemCountSize = 10, itemCountOutline = "OUTLINE", itemCountColor = { 1, 1, 1, 1 },   -- stacks
+    -- Recharge des objets : minuteur (compte a rebours) et icone desaturee
+    itemCdTimer = false, itemCdDesat = false,
+    itemCdFont = ns.FONT_FALLBACK, itemCdSize = 12, itemCdOutline = "OUTLINE", itemCdColor = { 1, 1, 1, 1 },
+    itemCdX = 0, itemCdY = 0,
     -- Barre de la minute assise (contour du losange)
     barSize = 100, barColor = { 1, 0.55, 0.15, 1 }, barSpark = "default", barTexture = "flat",
     barSparkSize = 100, barSparkColor = { 1, 1, 1, 1 }, barSparkAnim = true,   -- etincelle : animation "braise"
@@ -1075,6 +1137,7 @@ ns.Defaults = {
     enabled           = false,   -- beta : desactive par defaut
     hideUI            = true,    -- interface transparente pendant le vol
     revealOnHover     = true,    -- l'element survole (chat, minimap...) reapparait
+    arrivalSound      = true,    -- son de l'hotel des ventes a l'atterrissage
     panelTopHeight    = 60,
     panelBottomHeight = 90,
     panelBgColor      = { 0, 0, 0, 0.92 },
@@ -1162,6 +1225,8 @@ ns.Defaults = {
     mapReveal      = false,   -- carte du monde : zones non decouvertes affichees (Modules/MapReveal.lua)
     mapRevealColored = false, -- ... teintees de mapRevealColor
     mapRevealColor = { 0.35, 0.6, 0.95, 1 },
+    mapQuestsTurnIn = false,  -- carte du monde : quetes a rendre sur toutes les cartes (Modules/MapQuests.lua)
+    mapQuestsProgress = false, -- ... et quetes en cours
     spellIDModifier = "NONE", -- touche requise : NONE / ALT / SHIFT / CTRL
     hideTotemBar   = false,   -- barre de totems Blizzard masquee
     totemBarHoverOnly = false, -- ... ou affichee seulement au survol

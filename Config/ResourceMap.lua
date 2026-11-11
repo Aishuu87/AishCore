@@ -433,8 +433,15 @@ if ns.IsForever then
   local shards = { itemID = 6265, useItemCount = true, color = { 0.60, 0.35, 0.85, 1 } }
   -- Chasseur (3 specs) : nombre de fleches / balles de l'emplacement de munitions equipe
   local ammo = { useAmmo = true, color = { 0.78, 0.62, 0.30, 1 } }
+  -- Chaman (3 specs) : charges du Bouclier de foudre / d'eau, reconnus par NOM (tous rangs ; IDs = repli de
+  -- traduction) -- option shamanShieldStacks, cochee par defaut
+  local shield = { useShieldStacks = true, color = { 0.45, 0.70, 1.00, 1 },
+                   -- tous rangs connus : en combat (noms secrets) l'aura n'est retrouvee que par son spellID
+                   shieldNames = { 324, 325, 905, 945, 8134, 10431, 10432, 25469, 25472, 49280, 49281, "Lightning Shield",
+                                   24398, 33736, 52127, 52129, 52131, 52134, 52136, 52138, 57960, 408510, "Water Shield" } }
   ns.SecondaryResourceDefs = {
     [265] = shards, [266] = shards, [267] = shards,
     [253] = ammo, [254] = ammo, [255] = ammo,
+    [262] = shield, [263] = shield, [264] = shield,
   }
 end

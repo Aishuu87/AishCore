@@ -1035,9 +1035,11 @@ end
 -- FEATURES, ou dont le sort d'utilisation en pose un. Les feux de camp eux-memes sont ecartes (un feu est deja la).
 -- Une entree par objet. diag : liste des objets retenus ou ecartes, pour /aishcamp.
 local placeSpell
--- Objets de camp connus par leur ID (reconnus meme si leur infobulle n'est pas encore chargee)
+-- Objets de camp connus par leur ID (reconnus meme si leur infobulle n'est pas encore chargee).
+-- "right" : range en fin de liste, toujours du cote droit avec les jouets de camp.
 local CAMP_ITEMS = {
-  [279962] = true,   -- Bougie d'encens
+  [279962] = true,      -- Bougie d'encens
+  [211527] = "right",   -- Sac de couchage douillet (Forever)
 }
 -- Jouets de camp (coffre a jouets, hors sacs) : ajoutes apres les objets des sacs s'ils sont connus
 local CAMP_TOYS = {
@@ -1088,7 +1090,8 @@ local function CampItems(diag)
         if ItemSpell and not sid and not Plain(sname) and not CAMP_ITEMS[id] then id = nil end
       end
       if id and not done[id] then
-        local fi = (sid and placeSpell[sid]) or (CAMP_ITEMS[id] and #FEATURES + 1)
+        local right = CAMP_ITEMS[id] == "right"
+        local fi = (right and #FEATURES + 2) or (sid and placeSpell[sid]) or (CAMP_ITEMS[id] and #FEATURES + 1)
         if not fi and Plain(sname) then
           local low = sname:lower()
           for spell, i in pairs(placeSpell) do
@@ -1106,7 +1109,7 @@ local function CampItems(diag)
         end
         if fi and not isFire then
           done[id] = true
-          list[#list + 1] = { id = id, bag = bag, slot = slot, fi = fi,
+          list[#list + 1] = { id = id, bag = bag, slot = slot, fi = fi, right = right or nil,
             count = Count and Count(id) or 1, icon = Icon and Icon(id) }
         end
       end
@@ -1116,7 +1119,7 @@ local function CampItems(diag)
   if PlayerHasToy then
     for _, id in ipairs(CAMP_TOYS) do
       if PlayerHasToy(id) then
-        list[#list + 1] = { id = id, toy = id, icon = Icon and Icon(id) }
+        list[#list + 1] = { id = id, toy = id, icon = Icon and Icon(id), right = true }
         if diag then diag[#diag + 1] = "jouet " .. id .. " : connu" end
       end
     end
@@ -1196,10 +1199,23 @@ local function CreatePanels()
     s.icon = s:CreateTexture(nil, "BORDER")   -- sous l'anneau SLUG des stacks (ARTWORK), lui-meme sous le nombre (OVERLAY)
     s.icon:SetAllPoints()
     s.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    s.count = s:CreateFontString(nil, "OVERLAY")
+    -- Recharge de l'objet : swipe sur l'icone ; le nombre d'objets passe au-dessus (cadre superieur)
+    s.cd = CreateFrame("Cooldown", nil, s, "CooldownFrameTemplate")
+    s.cd:SetAllPoints(s.icon)
+    s.cd:SetDrawEdge(false)
+    s.cd:SetHideCountdownNumbers(true)
+    -- Fin de recharge : icone en couleur ; apercu : recharge fictive relancee
+    s.cd:SetScript("OnCooldownDone", function()
+      s.icon:SetDesaturated(false)
+      if s._ph then C_Timer.After(0, Campfire.UpdateItemCooldowns) end
+    end)
+    s.top = CreateFrame("Frame", nil, s)
+    s.top:SetAllPoints()
+    s.top:SetFrameLevel(s.cd:GetFrameLevel() + 2)
+    s.count = s.top:CreateFontString(nil, "OVERLAY")
     s.count:SetFont(LABEL_FONT, 10, "OUTLINE")
     s.count:SetPoint("BOTTOMRIGHT", -1, 2)
-    s.countRing = ns.CreateSlugRing and ns.CreateSlugRing(s, s.count, "ARTWORK")
+    s.countRing = ns.CreateSlugRing and ns.CreateSlugRing(s.top, s.count, "ARTWORK")
     Outline(s.count, s.countRing, LABEL_FONT, 10, "OUTLINE")
     s.glow = GlowTex(s, GLOW_SQUARE, "OVERLAY", 0.9)
     s:SetScript("OnEnter", function(self)
@@ -1216,6 +1232,32 @@ local function CreatePanels()
     end)
     s:Hide()
     slots[k] = s
+  end
+end
+
+-- Swipe de recharge des cases d'objets (objet des sacs ou jouet) ; le GCD seul est ignore
+function Campfire.UpdateItemCooldowns()
+  local BagCD = (C_Container and C_Container.GetContainerItemCooldown) or GetContainerItemCooldown
+  local ItemCD = (C_Container and C_Container.GetItemCooldown) or GetItemCooldown
+  local desat = Cfg().itemCdDesat and true or false
+  for k, s in ipairs(slots) do
+    if s.cd then
+      local st, dur, en
+      if s._bag and BagCD then st, dur, en = BagCD(s._bag, s._slot)
+      elseif s._toy and ItemCD then st, dur, en = ItemCD(s._toy)
+      elseif s._ph and k <= 2 then
+        -- Apercu du GUI : recharge fictive de 20 s en boucle sur les 2 premieres cases
+        local now = GetTime()
+        st, dur, en = now - (now % 20), 20, 1
+      end
+      if st and dur and dur > 1.5 and st > 0 and (en == 1 or en == true) then
+        s.cd:SetCooldown(st, dur)
+        s.icon:SetDesaturated(desat)
+      else
+        s.cd:Clear()
+        s.icon:SetDesaturated(false)
+      end
+    end
   end
 end
 
@@ -1303,7 +1345,10 @@ local function SetupItems()
   local cp = c.itemCountPoint or "BOTTOMRIGHT"
   local cx, cy = c.itemCountX or -1, c.itemCountY or 2
   local x0 = R + C + 6                                 -- bord interieur d'une barre
-  local nL = math.ceil(n / 2)
+  -- Moitie gauche, sauf les objets "droite" (jouets, sac de couchage), ranges en fin de liste : toujours a droite
+  local nRight = 0
+  for k = 1, n do if items[k].right then nRight = nRight + 1 end end
+  local nL = math.min(math.ceil(n / 2), n - nRight)
   for k, s in ipairs(slots) do
     local it = k <= n and items[k]
     if it then
@@ -1323,6 +1368,16 @@ local function SetupItems()
       Outline(s.count, s.countRing, c.itemCountFont or LABEL_FONT, c.itemCountSize or 10, c.itemCountOutline or "OUTLINE")
       local cc = c.itemCountColor or SPARK_RGB
       s.count:SetTextColor(cc[1], cc[2], cc[3], cc[4] or 1)
+      -- Minuteur de recharge (compte a rebours du cadre Cooldown) : affichage, police, taille, couleur, contour, position
+      s.cd:SetHideCountdownNumbers(not c.itemCdTimer)
+      local cfs = s.cd.GetCountdownFontString and s.cd:GetCountdownFontString()
+      if cfs then
+        Outline(cfs, nil, c.itemCdFont or ns.FONT_FALLBACK, c.itemCdSize or 12, c.itemCdOutline or "OUTLINE")
+        local tc = c.itemCdColor or { 1, 1, 1, 1 }
+        cfs:SetTextColor(tc[1], tc[2], tc[3], tc[4] or 1)
+        cfs:ClearAllPoints()
+        cfs:SetPoint("CENTER", s, "CENTER", c.itemCdX or 0, c.itemCdY or 0)
+      end
       s.glow:SetSize(SW * 1.75, SH * 1.75)
       s.icon:SetTexture(it.icon or 134400)
       s.count:SetText((it.count or 1) > 1 and it.count or "")
@@ -1339,6 +1394,7 @@ local function SetupItems()
       s:Hide()
     end
   end
+  Campfire.UpdateItemCooldowns()
   for _, side in ipairs({ -1, 1 }) do
     local b = Bar(side)
     local m = side < 0 and nL or (n - nL)
@@ -2036,6 +2092,7 @@ ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("BAG_UPDATE_DELAYED")
+ev:RegisterEvent("BAG_UPDATE_COOLDOWN")
 ev:RegisterEvent("PLAYER_DEAD")
 ev:RegisterEvent("PLAYER_ALIVE")
 ev:RegisterEvent("PLAYER_UNGHOST")
@@ -2058,6 +2115,11 @@ ev:SetScript("OnEvent", function(_, event, _, _, spellID)
     if TooltipDataProcessor and Enum.TooltipDataType and Enum.TooltipDataType.Object then
       TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Object, OnObjectTooltip)
     end
+    return
+  end
+  -- Recharge d'un objet : swipe des cases (cadres non securises, permis en combat)
+  if event == "BAG_UPDATE_COOLDOWN" then
+    if slots[1] then Campfire.UpdateItemCooldowns() end
     return
   end
   -- Objet pose ou recu : barres d'objets a jour tant que les panneaux sont deplies

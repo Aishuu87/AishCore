@@ -20,6 +20,8 @@ local STATIC_ENTRIES = {
     onGo = function() ns._oocSelected = "health" end, getFrame = function() return G("AishCoreHealthRing") end },
   { category = "outOfCombat", mod = "outOfCombatResourceCircle", name = "SETTINGS_SEC_OCRC",
     onGo = function() ns._oocSelected = "resource" end, getFrame = function() return G("AishCoreOCResourceRing") end },
+  { category = "outOfCombat", mod = "petHealthCircle", name = "SETTINGS_MOD_PET_HEALTH_CIRCLE",
+    onGo = function() ns._oocSelected = "pet" end, getFrame = function() return G("AishCorePetHealthRing") end },
   { category = "wellFed",        mod = "wellFedCircle", getFrame = function() return G("AishCoreWellFedRing") end },
   -- Barres de cast : une page pour les trois, onGo y selectionne la barre survolee
   { category = "castBars", mod = "castBar",       name = "SETTINGS_SEC_CAST_BAR",

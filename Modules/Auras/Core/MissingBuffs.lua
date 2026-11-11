@@ -2040,6 +2040,9 @@ function MissingBuffs.SetPreview(on, spellId)
             [ns.MISSING_TRACKING_HERBS_KEY] = { "Interface\\Icons\\INV_Misc_Flower_02", "TRACKING_OFF" },
             [ns.MISSING_TRACKING_ORE_KEY]   = { "Interface\\Icons\\Spell_Nature_Earthquake", "TRACKING_OFF" },
         }
+        if _addon.IsForever and MissingBuffs.WellRestedIcon then
+            PREVIEW_PSEUDO[ns.MISSING_WELL_RESTED_KEY] = { MissingBuffs.WellRestedIcon(), "MISSING" }
+        end
         local pp = resolvedId and PREVIEW_PSEUDO[resolvedId]
         if pp then
             MissingBuffs.ShowAlertChoices({ { key = resolvedId, icon = pp[1] } }, ns.MISSING_TEXT[pp[2]])
@@ -2853,6 +2856,31 @@ local function ElixirChoices()
     return out
 end
 
+-- Forever : buff Bien repose (objet ns.MISSING_WELL_RESTED_ITEM). Contrairement aux consommables, rappele aussi
+-- AVANT expiration, avec le seuil et l'interrupteur des buffs de classe. Rien sans l'objet dans les sacs, ni au
+-- niveau max (bonus d'experience). Renvoie choix + texte, ou nil.
+local WELL_RESTED_ENTRY = { spellId = ns.MISSING_WELL_RESTED_SPELL }
+local function WellRestedIcon()
+    local id = ns.MISSING_WELL_RESTED_ITEM
+    return (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(id)) or ns.MISSING_WELL_RESTED_ICON
+end
+MissingBuffs.WellRestedIcon = WellRestedIcon
+local function WellRestedChoices(cfg)
+    local id = ns.MISSING_WELL_RESTED_ITEM
+    local Count = (C_Item and C_Item.GetItemCount) or GetItemCount
+    if not Count or (Count(id) or 0) <= 0 then return nil end
+    if IsPlayerAtEffectiveMaxLevel and IsPlayerAtEffectiveMaxLevel() then return nil end
+    local text
+    if not SelfHasBuff(WELL_RESTED_ENTRY) then
+        text = ns.MISSING_TEXT.MISSING
+    else
+        local thr = cfg.expiringSoonEnabled and cfg.expiringSoonThreshold and (cfg.expiringSoonThreshold * 60)
+        if not (thr and GetSelfBuffExpiringSoon(WELL_RESTED_ENTRY, thr)) then return nil end
+        text = ns.MISSING_TEXT.EXPIRING_SOON
+    end
+    return { { key = ns.MISSING_WELL_RESTED_KEY, icon = WellRestedIcon(), item = id, macro = "/use item:" .. id } }, text
+end
+
 -- Points de talents a depenser : arbre de traits (Retail et Forever), sinon API des anciens clients
 local function UnspentTalentPoints()
     -- HasUnspentTalentPoints ne couvre que classe / spe : les points de talents de heros passent par
@@ -3023,6 +3051,23 @@ function MissingBuffs.ProbeRun(runs)
     return probeAcc
 end
 
+-- Points de talents / d'Heritage a depenser : true si l'alerte est affichee. Appele a son rang normal, et aussi en
+-- forme de voyage / Loup fantome (Forever, option ignoreTravelForms), qui masque tout le reste.
+function MissingBuffs.ShowPointsAlert(cfg)
+    if not cfg.ignoreTalentPoints and not TalentFrameOpen() and UnspentTalentPoints() then
+        MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_TALENTS_KEY, icon = "Interface\\Icons\\Ability_Marksmanship",
+            macro = TalentsMacro() } }, ns.MISSING_TEXT.SPEND_TALENTS)
+        return true
+    end
+    if not cfg.ignoreLegacyPoints and not TalentFrameOpen() and UnspentLegacyPoints() then
+        MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_LEGACY_KEY, icon = "Interface\\Icons\\INV_Misc_Book_11",
+            macro = "/run if LegacySystemFrame then ShowUIPanel(LegacySystemFrame) elseif ToggleLegacySystemUI then ToggleLegacySystemUI() end" } },
+            ns.MISSING_TEXT.SPEND_LEGACY)
+        return true
+    end
+    return false
+end
+
 function MissingBuffs.CheckForMissings()
     -- Gardefou dur : rien n'est evalue ni affiche en combat, passe avant meme previewMode -- un
     -- apercu laisse a tort actif (previewMode coince a true) bloquerait toute reevaluation, y
@@ -3063,7 +3108,9 @@ function MissingBuffs.CheckForMissings()
         -- Formes 3 (voyage) et 16 (loup fantome) ; auras en secours
         local form = GetShapeshiftFormID and GetShapeshiftFormID()
         if form == 3 or form == 16 or GetSelfAura(783) or GetSelfAura(2645) then
-            MissingBuffs.HideAlert(); return
+            -- Seuls les points de talents / d'Heritage restent rappeles
+            if not MissingBuffs.ShowPointsAlert(cfg) then MissingBuffs.HideAlert() end
+            return
         end
     end
     if cfg.ignoreWhileResting and _addon.IsRestArea() then
@@ -3255,21 +3302,17 @@ function MissingBuffs.CheckForMissings()
         end
     end
 
+    Probe("4b")
+    -- 4b) Forever : Bien repose (objet), manquant ou bientot expire, juste apres les buffs de classe
+    if _addon.IsForever and not cfg.ignoreWellRested then
+        local choices, text = WellRestedChoices(cfg)
+        if choices then MissingBuffs.ShowAlertChoices(choices, text); return end
+    end
+
     Probe("5")
     -- 5) Points de talents a depenser
-    if not cfg.ignoreTalentPoints and not TalentFrameOpen() and UnspentTalentPoints() then
-        MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_TALENTS_KEY, icon = "Interface\\Icons\\Ability_Marksmanship",
-            macro = TalentsMacro() } }, ns.MISSING_TEXT.SPEND_TALENTS)
-        return
-    end
-    Probe("5b")
-    -- 5b) Forever : points d'Heritage a depenser
-    if not cfg.ignoreLegacyPoints and not TalentFrameOpen() and UnspentLegacyPoints() then
-        MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_LEGACY_KEY, icon = "Interface\\Icons\\INV_Misc_Book_11",
-            macro = "/run if LegacySystemFrame then ShowUIPanel(LegacySystemFrame) elseif ToggleLegacySystemUI then ToggleLegacySystemUI() end" } },
-            ns.MISSING_TEXT.SPEND_LEGACY)
-        return
-    end
+    -- 5b) Forever : points d'Heritage a depenser (meme helper)
+    if MissingBuffs.ShowPointsAlert(cfg) then return end
 
     Probe("5d")
     -- 5d) Pistage des herbes / minerais coupe alors que le metier le permet. Retail : hors instance (rien a
@@ -3279,23 +3322,30 @@ function MissingBuffs.CheckForMissings()
         if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.TRACKING_OFF); return end
     end
 
+    -- Consommables (6 a 8) : option "Seulement en instance" = donjon, raid, champ de bataille, scenario
+    local consumablesOK = true
+    if cfg.consumablesInstanceOnly then
+        local inInst, instType = IsInInstance()
+        consumablesOK = inInst and (instType == "party" or instType == "raid" or instType == "pvp" or instType == "scenario")
+    end
+
     Probe("6")
     -- 6) Consommables : pierre a aiguiser / huile a appliquer sur l'arme
-    if not cfg.ignoreWeaponStones and not WeaponEnchantByClass(class) and not ConsumablesBlocked(true) then
+    if consumablesOK and not cfg.ignoreWeaponStones and not WeaponEnchantByClass(class) and not ConsumablesBlocked(true) then
         local choices = WeaponStoneChoices()
         if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.APPLY_WEAPON_STONE); return end
     end
 
     Probe("7")
     -- 7) Consommables : flacon / fiole
-    if not cfg.ignoreFlasks and not ConsumablesBlocked(true) then
+    if consumablesOK and not cfg.ignoreFlasks and not ConsumablesBlocked(true) then
         local choices = FlaskChoices()
         if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_FLASK); return end
     end
 
     Probe("7b")
     -- 7b) Consommables : elixir (sans flacon actif)
-    if not cfg.ignoreElixirs and not ConsumablesBlocked(true) then
+    if consumablesOK and not cfg.ignoreElixirs and not ConsumablesBlocked(true) then
         local choices = ElixirChoices()
         if choices and #choices > 0 and not (cfg.elixirSingle and choices.anyActive) then
             MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_ELIXIR); return
@@ -3304,7 +3354,7 @@ function MissingBuffs.CheckForMissings()
 
     Probe("8")
     -- 8) Consommables : nourriture qui donne "Bien nourri"
-    if not cfg.ignoreWellFedFood and not ConsumablesBlocked(false) then
+    if consumablesOK and not cfg.ignoreWellFedFood and not ConsumablesBlocked(false) then
         local choices = WellFedFoodChoices()
         if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.EAT_FOOD); return end
     end
@@ -3725,6 +3775,7 @@ function MissingBuffs.GetTriggerSpells()
     add(ns.MISSING_FLASK_KEY)
     add(ns.MISSING_ELIXIR_KEY)
     add(ns.MISSING_FOOD_KEY)
+    if _addon.IsForever then add(ns.MISSING_WELL_RESTED_KEY) end   -- Bien repose (sac de couchage)
 
     return out
 end

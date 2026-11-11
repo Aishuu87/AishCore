@@ -156,10 +156,8 @@ ns.MISSING_CLASS_BUFFS = {
         { spellId = 196099, spellbookId = 108503, settingsId = 35, onlySelf = true, ignoreDuration = true,
           specIds = { 265, 267 }, text = "MISSING" },
     },
-    WARRIOR = {
-        { spellId = 6673, settingsId = 24, learned = true, whitelist = true, ignoreRangeCheck = true,
-          showRaidCount = true, text = "MISSING" },
-    },
+    -- Cri de guerre retire des alertes (demande d'Aishuu, 2026-11-11) : seules les postures restent rappelees
+    WARRIOR = {},
     -- ROGUE : poisons geres a part (ns.MISSING_POISONS), pas un buff de groupe.
 }
 
@@ -223,6 +221,11 @@ ns.MISSING_TRACKING_ORE_KEY   = 9000037  -- Decouverte des mineraux desactivee
 ns.MISSING_ELIXIR_KEY         = 9000038
 ns.MISSING_POISON_APPLY_KEY   = 9000039  -- Forever : poison des sacs a appliquer sur l'arme
 ns.MISSING_POISON_STOCK_KEY   = 9000040  -- Forever : stock de poisons sous le seuil (a fabriquer)
+-- Forever : buff Bien repose, donne par un objet (sac de couchage). Rappele aussi avant expiration, comme un buff de sort
+ns.MISSING_WELL_RESTED_KEY    = 9000041
+ns.MISSING_WELL_RESTED_SPELL  = 429959
+ns.MISSING_WELL_RESTED_ITEM   = 211527
+ns.MISSING_WELL_RESTED_ICON   = "Interface\\Icons\\INV_Misc_Bag_08"   -- repli si l'icone de l'objet est illisible
 -- Sorts de pistage de recolte (cf. GatherTrackingChoices dans MissingBuffs.lua) ; une ligne de combo chacun
 ns.MISSING_GATHER_FINDERS = {
     { spellId = 2383, key = ns.MISSING_TRACKING_HERBS_KEY, icon = "Interface\\Icons\\INV_Misc_Flower_02" },     -- Denicher les herbes
@@ -301,9 +304,6 @@ if _addon.IsForever then
               showRaidCount = true, text = "MISSING" },
             { settingsId = 101, onlySelf = true, names = { 467, "Thorns" }, casts = { 467, "Thorns" },
               displayName = "Thorns", icon = I .. "Spell_Nature_Thorns", text = "MISSING" },
-            { settingsId = 102, onlySelf = true, names = { 16864, "Omen of Clarity" },
-              casts = { 16864, "Omen of Clarity" },
-              displayName = "Omen of Clarity", icon = I .. "Spell_Nature_CrystalBall", text = "MISSING" },
         },
         EVOKER = {},
         MAGE = {
@@ -398,12 +398,9 @@ if _addon.IsForever then
             { settingsId = 118, kind = "petHappiness", text = "PET_UNHAPPY", pseudoKey = 9000013,
               displayName = "Pet unhappy", icon = I .. "Ability_Hunter_BeastTraining" },
         },
-        WARRIOR = {
-            -- shoutReminder : rappel aussi a <= 20 s et en combat ; hors combat, seulement avec la rage pour le lancer
-            { settingsId = 24, names = { 6673, "Battle Shout", 469, "Commanding Shout" }, casts = { 6673, "Battle Shout" },
-              displayName = "Battle Shout", icon = I .. "Ability_Warrior_BattleShout",
-              ignoreRangeCheck = true, showRaidCount = true, shoutReminder = true, text = "MISSING" },
-        },
+        -- Cri de guerre retire des alertes (demande d'Aishuu, 2026-11-11) ; le code shoutReminder de MissingBuffs.lua
+        -- reste en place, inactif sans entree
+        WARRIOR = {},
     }
 
     -- Forme (soi) : seule Ombre est commune aux deux listes.

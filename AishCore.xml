@@ -1,4 +1,22 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/">
   <Frame name="AishCoreFrame" hidden="true">
   </Frame>
+  <!-- Modules/MapQuests.lua : pin de quete propre a l'addon. N'herite PAS de QuestPinTemplate / POIButton : leurs
+       methodes ecrivent dans des caches partages (QuestCache, EventRegistry) que le pin du jeu relit ensuite (taint). Pas d'heritage de
+       MapCanvasPinTemplate (Blizzard_MapCanvas, charge a la demande) : MapCanvasPinMixin est copie en Lua. -->
+  <Frame name="AishCore_QuestPinTemplate" mixin="AishCore_QuestPinMixin" enableMouse="true" virtual="true">
+    <Size x="20" y="20"/>
+    <Layers>
+      <Layer level="BACKGROUND">
+        <Texture parentKey="Bg">
+          <Anchors><Anchor point="CENTER"/></Anchors>
+        </Texture>
+      </Layer>
+      <Layer level="ARTWORK">
+        <Texture parentKey="Icon">
+          <Anchors><Anchor point="CENTER"/></Anchors>
+        </Texture>
+      </Layer>
+    </Layers>
+  </Frame>
 </Ui>

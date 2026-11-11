@@ -10,6 +10,7 @@ frame:SetPoint("CENTER")
 local RC   = ns.Modules.ResourceCircle
 local HC   = ns.Modules.HealthCircle
 local OCRC = ns.Modules.OutOfCombatResourceCircle
+local PHC  = ns.Modules.PetHealthCircle
 local SE   = ns.Modules.SpellEffects
 local RH   = ns.Modules.RotationHelper
 local PB   = ns.Modules.PriorityBar
@@ -457,6 +458,7 @@ local function StartVisibilityTicker()
     HC.Update()
     OCRC.Update()
     OCRC.UpdateVisibility()
+    if PHC then PHC.UpdateVisibility(); PHC.Update() end
     -- Watchdog : rattrape la race condition si InCombatLockdown() était déjà true
     if UB then UB.UpdateAllVisibility() end
     if PB then PB.UpdateVisibility()   end
@@ -470,6 +472,7 @@ ns.CallbackRegistry:Register("SKYRIDING_CHANGED", function(active)
   if RC   then RC.ResetVisibility();   RC.UpdateVisibility()   end
   if HC   then HC.ResetVisibility();   HC.UpdateVisibility()   end
   if OCRC then OCRC.ResetVisibility(); OCRC.UpdateVisibility() end
+  if PHC  then PHC.ResetVisibility();  PHC.UpdateVisibility()  end
   -- UnitBars et PriorityBar : StateDriver géré manuellement
   if UB then UB.SetSkyridingActive(active and srCfg.hideUnitBars     ~= false) end
   if PB then PB.SetSkyridingActive(active and srCfg.hidePriorityBar  ~= false) end
@@ -539,6 +542,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     SafeCall("ResourceCircle",            "Create", UIParent)
     SafeCall("HealthCircle",              "Create", UIParent)
     SafeCall("OutOfCombatResourceCircle", "Create", UIParent)
+    SafeCall("PetHealthCircle",           "Create", UIParent)
     SafeCall("WellFedCircle",             "Create", UIParent)
     SafeCall("MovementBuffs",             "Create", UIParent)
     SafeCall("SpellEffects",              "Init")
@@ -561,6 +565,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     SafeCall("ResourceCircle",            "ApplySettings")
     SafeCall("HealthCircle",              "ApplySettings")
     SafeCall("OutOfCombatResourceCircle", "ApplySettings")
+    SafeCall("PetHealthCircle",           "ApplySettings")
     SafeCall("RotationHelper",            "ApplySettings")
     SafeCall("PriorityBar",               "ApplySettings")
     SafeCall("XPBar",                     "ApplySettings")
@@ -606,6 +611,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     SafeCall("ResourceCircle",            "UpdateVisibility")
     SafeCall("HealthCircle",              "UpdateVisibility")
     SafeCall("OutOfCombatResourceCircle", "UpdateVisibility")
+    SafeCall("PetHealthCircle",           "UpdateVisibility")
 
     StartVisibilityTicker()
 
@@ -679,6 +685,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     if RC   then RC.UpdateVisibility()   end
     if HC   then HC.UpdateVisibility()   end
     if OCRC then OCRC.UpdateVisibility() end
+    if PHC  then PHC.UpdateVisibility()  end
     if PB   then PB.UpdateVisibility()   end
 
   elseif event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE"
@@ -687,6 +694,7 @@ frame:SetScript("OnEvent", function(self, event, arg1, ...)
     if RC   then RC.UpdateVisibility()   end
     if HC   then HC.UpdateVisibility()   end
     if OCRC then OCRC.UpdateVisibility() end
+    if PHC  then PHC.UpdateVisibility()  end
     if PB   then PB.UpdateVisibility()   end
     if RH   then RH.Reset()              end  -- cacher les icones de rotation
 

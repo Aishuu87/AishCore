@@ -808,10 +808,18 @@ local function HookCDMFrame(frame, canMask, source, alwaysMask)
         -- Auto-correction : InitCDMHooks etiquette tout sort Essentiel/Utilitaire comme "debuff", faux pour
         -- les sorts qui s'octroient un buff a eux-memes (Rapidite de la nature...). Ce hook ne se declenche
         -- que sur une vraie instance d'aura : si unit=="player" pour un sort marque "debuff", on corrige.
+        -- Forever : le CDM rapporte aussi des DoT poses sur la cible (Immolation rang 3, 1094) avec
+        -- unit=="player" -> on ne corrige que si l'aura est lisiblement benefique (isHarmful == false).
         if unit == "player" then
             local spells = ns.GetSpecSpells()
             local info = spells and spells[spellID]
-            if info and info.source == "debuff" and not SPLIT_LINKED[spellID] then
+            local okH, harmful = pcall(function()
+                local h = cdmAura and cdmAura.isHarmful
+                if h == nil or (issecretvalue and issecretvalue(h)) then return nil end
+                return h and true or false
+            end)
+            if info and info.source == "debuff" and not SPLIT_LINKED[spellID]
+               and okH and harmful == false then
                 info.source = "buff"
             end
         end

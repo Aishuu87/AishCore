@@ -103,6 +103,27 @@ function ns.GetAdminOverrides(create)
     return raw.adminOverrides
 end
 
+-- Forever : un override "source" vaut pour tous les rangs du sort (homonymes, Data/SpellHomonyms.lua). Sans
+-- ca, seul le rang classe en mode admin etait corrige : Immolation rang 3 (1094), rebascule en "buff" par
+-- le CDM, perdait sa grille cible. Table construite une fois ; un rang garde son propre override s'il en a un.
+local _foreverExpanded
+local function ForeverOverrides()
+    local base = ns.SpellClassificationOverridesForever
+    if not base then return nil end
+    if _foreverExpanded then return _foreverExpanded end
+    local t, hom = {}, _addon.SpellHomonyms or {}
+    for id, o in pairs(base) do
+        if o.source then
+            for _, rank in ipairs(hom[id] or {}) do
+                if not base[rank] and not t[rank] then t[rank] = { source = o.source } end
+            end
+        end
+    end
+    for id, o in pairs(base) do t[id] = o end
+    _foreverExpanded = t
+    return t
+end
+
 function ns.ApplyAdminOverrides(spells)
     if not spells then return end
     -- Baseline codée en dur (SpellClassificationOverrides.lua) pour tous, puis override
@@ -111,7 +132,7 @@ function ns.ApplyAdminOverrides(spells)
     -- Sans table construite a chaque appel (chemin chaud, cf. GetSpecSpells)
     for pass = 1, 2 do
         local hardcoded = (pass == 1) and ns.SpellClassificationOverrides
-                          or (_addon.IsForever and ns.SpellClassificationOverridesForever)
+                          or (_addon.IsForever and ForeverOverrides())
         if hardcoded then
             for spellID, o in pairs(hardcoded) do
                 local info = spells[spellID]

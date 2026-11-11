@@ -767,9 +767,9 @@ local function DrawSwingArcDual(pM, pO)
   Side(swingArcCCW, pO, -1)
 end
 
-local function DrawSwingArc(p, pO)
-  local o = swingOpt
-  if o.dual then return DrawSwingArcDual(p, pO) end
+-- Progression simple (un seul delai) sur deux CircularProgress : partagee par le delai d'attaque auto et la regen de
+-- mana. o = { rot, angle, dir, fillUp }.
+local function DrawArcProgress(o, cpCW, cpCCW, p)
   local S, A = o.rot, o.angle
   if o.dir == "mirror_out" or o.dir == "mirror_in" then
     local h = A / 2
@@ -777,24 +777,30 @@ local function DrawSwingArc(p, pO)
     local fromStart = not o.fillUp            -- partie visible ancree en S, ou a l'oppose
     local v = growing and p or (1 - p)
     if fromStart then
-      SwingWedge(swingArcCW,  S, S + v * h)
-      SwingWedge(swingArcCCW, S - v * h, S)
+      SwingWedge(cpCW,  S, S + v * h)
+      SwingWedge(cpCCW, S - v * h, S)
     else
-      SwingWedge(swingArcCW,  S + (1 - v) * h, S + h)
-      SwingWedge(swingArcCCW, S - h, S - (1 - v) * h)
+      SwingWedge(cpCW,  S + (1 - v) * h, S + h)
+      SwingWedge(cpCCW, S - h, S - (1 - v) * h)
     end
     return
   end
   local v = o.fillUp and p or (1 - p)
   if o.dir == "ccw" then
-    swingArcCW:Hide()
-    if o.fillUp then SwingWedge(swingArcCCW, S - v * A, S)
-    else SwingWedge(swingArcCCW, S - A, S - (1 - v) * A) end
+    cpCW:Hide()
+    if o.fillUp then SwingWedge(cpCCW, S - v * A, S)
+    else SwingWedge(cpCCW, S - A, S - (1 - v) * A) end
   else
-    swingArcCCW:Hide()
-    if o.fillUp then SwingWedge(swingArcCW, S, S + v * A)
-    else SwingWedge(swingArcCW, S + (1 - v) * A, S + A) end
+    cpCCW:Hide()
+    if o.fillUp then SwingWedge(cpCW, S, S + v * A)
+    else SwingWedge(cpCW, S + (1 - v) * A, S + A) end
   end
+end
+
+local function DrawSwingArc(p, pO)
+  local o = swingOpt
+  if o.dual then return DrawSwingArcDual(p, pO) end
+  DrawArcProgress(o, swingArcCW, swingArcCCW, p)
 end
 
 -- Ambidextrie : gauche/droite -> une 2e barre (main gauche) sous la premiere ; miroirs -> moitie gauche = main gauche,
@@ -815,11 +821,9 @@ local function DrawSwingBarDual(pM, pO)
   end
 end
 
--- p = fraction ecoulee du delai (0..1) ; pO = celle de la main gauche (ambidextrie)
-local function DrawSwingBar(p, pO)
-  local o = swingOpt
-  swingBar2:SetShown(o.dual and not (o.barDir == "in" or o.barDir == "out"))
-  if o.dual then return DrawSwingBarDual(p, pO) end
+-- Progression simple sur une barre pleine + deux moities : partagee par le delai d'attaque auto et la regen de mana.
+-- o = { barDir, fillUp } ; p = fraction ecoulee (0..1).
+local function DrawBarProgress(o, full, half1, half2, p)
   if o.barDir == "in" or o.barDir == "out" then
     -- Deux moities en miroir, positions de 0 (gauche) a 100 (droite), centre = 50.
     --   "out"            : un bord va de 50 vers 0, l'autre de 50 vers 100 -> la barre GRANDIT depuis le centre
@@ -829,17 +833,25 @@ local function DrawSwingBar(p, pO)
     local growing    = (o.barDir == "out") ~= o.fillUp
     local fromCenter = not o.fillUp          -- ancrage de la partie visible : centre, ou extremites
     local v = growing and p or (1 - p)
-    swingBarFull:Hide(); swingBarL:Show(); swingBarR:Show()
-    swingBarL:SetReverseFill(fromCenter); swingBarR:SetReverseFill(not fromCenter)
-    swingBarL:SetValue(v); swingBarR:SetValue(v)
+    full:Hide(); half1:Show(); half2:Show()
+    half1:SetReverseFill(fromCenter); half2:SetReverseFill(not fromCenter)
+    half1:SetValue(v); half2:SetValue(v)
   else
     local v = o.fillUp and p or (1 - p)
-    swingBarL:Hide(); swingBarR:Hide(); swingBarFull:Show()
+    half1:Hide(); half2:Hide(); full:Show()
     -- ltr : plein a gauche au remplissage, vide a gauche au vidage (reste ancre a droite) ; rtl : l'inverse
     local anchoredLeft = (o.barDir ~= "rtl") == o.fillUp
-    swingBarFull:SetReverseFill(not anchoredLeft)
-    swingBarFull:SetValue(v)
+    full:SetReverseFill(not anchoredLeft)
+    full:SetValue(v)
   end
+end
+
+-- p = fraction ecoulee du delai (0..1) ; pO = celle de la main gauche (ambidextrie)
+local function DrawSwingBar(p, pO)
+  local o = swingOpt
+  swingBar2:SetShown(o.dual and not (o.barDir == "in" or o.barDir == "out"))
+  if o.dual then return DrawSwingBarDual(p, pO) end
+  DrawBarProgress(o, swingBarFull, swingBarL, swingBarR, p)
 end
 
 -- Barre animee par le MOTEUR : SetTimerDuration avance le remplissage a chaque frame, avec une precision
@@ -1098,6 +1110,17 @@ SlashCmdList["AISHSWINGDBG"] = function(msg)
   print(P .. string.format("delai : debut=%s duree=%s maintenant=%.2f", tostring(swingStart), tostring(swingDur), GetTime()))
 end
 
+-- Plan : niveau de frame. bg = derriere le fond de l'anneau central ; mid = niveau des arcs de ressource
+-- secondaire ; front = au-dessus de tout sauf du texte.
+local function CircleLevelFor(mode)
+  if mode == "bg" then
+    return math.max(0, bar:GetFrameLevel() - 1)
+  elseif mode == "front" then
+    return (bar.textFrame and bar.textFrame:GetFrameLevel() or (bar:GetFrameLevel() + 200)) - 1
+  end
+  return bar.durationArcFrame and bar.durationArcFrame:GetFrameLevel() or (bar:GetFrameLevel() + 2)
+end
+
 function ResourceCircle.ApplySwingSettings()
   if not ns.IsForever or not bar then return end
   if not (C_SwingTimer and Enum.PlayerSwingType) then return end  -- minuteur natif absent : rien a afficher
@@ -1123,18 +1146,8 @@ function ResourceCircle.ApplySwingSettings()
   swingOpt.barDir  = cfg.swingBarDirection or "ltr"
   swingOpt.barX, swingOpt.barY = cfg.swingBarX or 0, cfg.swingBarY or -58
 
-  -- Plan : niveau de frame. bg = derriere le fond de l'anneau central ; mid = niveau des arcs de ressource
-  -- secondaire ; front = au-dessus de tout sauf du texte.
-  local function LevelFor(mode)
-    if mode == "bg" then
-      return math.max(0, bar:GetFrameLevel() - 1)
-    elseif mode == "front" then
-      return (bar.textFrame and bar.textFrame:GetFrameLevel() or (bar:GetFrameLevel() + 200)) - 1
-    end
-    return bar.durationArcFrame and bar.durationArcFrame:GetFrameLevel() or (bar:GetFrameLevel() + 2)
-  end
-  local lvlArc = LevelFor(cfg.swingStrata or "mid")
-  local lvlBar = LevelFor("front")   -- la barre n'a pas de reglage de plan : toujours devant
+  local lvlArc = CircleLevelFor(cfg.swingStrata or "mid")
+  local lvlBar = CircleLevelFor("front")   -- la barre n'a pas de reglage de plan : toujours devant
   local r, g, b, a = SwingColor(cfg, "swing")
   local br, bg_, bb, ba = SwingColor(cfg, "swingBar")
 
@@ -1191,6 +1204,545 @@ function ResourceCircle.ApplySwingSettings()
   end
   RefreshSwingPreview()
 end
+
+-- ═══ Regen de mana (Forever) : regle des 5 secondes + ticks ═════════════════════════════════════
+-- Apres une depense de mana, l'Esprit ne regenere plus pendant 5 s : l'arc (ou la barre) decompte ces 5 s.
+-- Ensuite, option cochee, il suit le tick de regen (toutes les 2 s), dans sa propre couleur, jusqu'a la mana pleine.
+-- Le tick est cale sur les gains de mana observes : un gain a ~2 s (ou un multiple) du precedent, ou proche du tick
+-- attendu, recale la phase ; les autres (potion, Innervation...) sont ignores.
+-- Une "vue" = arc + barre + voyant + lueur du fond de texte + dots, posee sur le vrai cercle ou sur la copie d'apercu du
+-- GUI (ResourceCircle.NewGhost). En apercu, une horloge continue propre a chaque vue enchaine 5 s de regle puis 3 ticks : un
+-- changement de reglage ne la relance pas ; ResourceCircle.ManaRegenFocus() la place directement en regen.
+-- Bloc do ... end et etat regroupe dans la table MR : le fichier est a la limite des 200 locales.
+local MRRefreshPreview
+do
+local MR = {
+  FSR = 5, TICK = 2, CYCLE = 11, HOLD = 6, DOT_SLIDE = 0.35, LAMP_FADE = 0.25, PULSE = 1.8,
+  MANA = (Enum and Enum.PowerType and Enum.PowerType.Mana) or 0,
+  FSR_COLOR = { 0.25, 0.55, 1, 1 }, LAMP_COLOR = { 0.6, 0.85, 1, 1 },
+  GLOW_TEX = "Interface\\AddOns\\AishCore\\Media\\Wheel\\Circle_Smooth2.tga",
+  HOLE_TEX = "Interface\\AddOns\\AishCore\\Media\\UI\\CircleHoleMask.tga",
+  STEPS = {                                                  -- { dot, arrivee en s }
+    four = { { 2, 2 }, { 4, 3 }, { 1, 4 }, { 5, 5 } },
+    two  = { { 2, 2.5 }, { 4, 2.5 }, { 1, 5 }, { 5, 5 } },
+  },
+  opt = {},
+  ghostViews = setmetatable({}, { __mode = "k" }),   -- vues des copies d'apercu du GUI (horloge propre)
+}
+
+-- Couleur propre ou Couleurs Thematiques (element `key` du module Couleurs)
+function MR.Color(cfg, themedKey, ownKey, def, key)
+  if cfg[themedKey] then
+    local CLR = ns.Modules and ns.Modules.Colors
+    local c = CLR and CLR.Get and CLR.Get(key)
+    if c then return c end
+  end
+  return cfg[ownKey] or def
+end
+
+function MR.ReadOpt(cfg)
+  local o = MR.opt
+  o.showArc  = cfg.manaRegenEnabled and true or false
+  o.dots     = cfg.manaRegenDots and true or false
+  o.lamp     = cfg.manaRegenLamp and true or false
+  o.tbGlow   = cfg.manaRegenTbGlow and true or false
+  o.any      = (o.showArc or o.dots or o.lamp or o.tbGlow) and ResourceCircle.UsesMana()
+  o.dotsMode = cfg.manaRegenDotsMode or "four"
+  -- Arc et barre independants ; sans choix enregistre, l'ancien "Afficher en simple barre" fait foi
+  local barMode = cfg.manaRegenBarMode == true
+  if cfg.manaRegenArc ~= nil then o.arcOn = cfg.manaRegenArc and true or false else o.arcOn = not barMode end
+  if cfg.manaRegenBar ~= nil then o.barOn = cfg.manaRegenBar and true or false else o.barOn = barMode end
+  -- Options de dessin propres a chaque visualisation (DrawArcProgress / DrawBarProgress)
+  -- Arc : memes reglages que l'arc principal (type de remplissage, angles de depart / fin) + remplissage inverse
+  o.arcFill  = cfg.manaRegenArcFill or "cw"
+  o.arcStart = tonumber(cfg.manaRegenArcStart) or 0
+  o.arcEnd   = tonumber(cfg.manaRegenArcEnd) or 0
+  o.arcFillUp = cfg.manaRegenFillUp and true or false
+  o.barO = o.barO or {}
+  o.barO.fillUp = cfg.manaRegenBarFillUp and true or false
+  o.barO.barDir = cfg.manaRegenBarDirection or "ltr"
+  o.barX, o.barY = cfg.manaRegenBarX or 0, cfg.manaRegenBarY or -70
+  o.size     = cfg.size or 80
+  o.fsrColor  = MR.Color(cfg, "manaRegenThemed", "manaRegenColor", MR.FSR_COLOR, "powercircle")
+  -- Voyant et lueur du fond de texte : couleurs independantes ; Couleurs Thematiques = element "Lueur" (glow)
+  -- Voyant en Couleurs Thematiques : point = "Decoration A" (powerdotsa), sa lueur = "Lueur" (glow)
+  o.lampColor     = MR.Color(cfg, "manaRegenLampThemed", "manaRegenLampColor", MR.LAMP_COLOR, "powerdotsa")
+  o.lampGlowColor = MR.Color(cfg, "manaRegenLampThemed", "manaRegenLampColor", MR.LAMP_COLOR, "glow")
+  o.tbColor   = MR.Color(cfg, "manaRegenTbGlowThemed", "manaRegenTbGlowColor", cfg.manaRegenLampColor or MR.LAMP_COLOR, "glow")
+  o.pulse     = cfg.manaRegenPulse and true or false
+end
+
+function MR.ManaMissing()
+  local cur, max = UnitPower("player", MR.MANA), UnitPowerMax("player", MR.MANA)
+  if Plain(cur) and Plain(max) then return max > 0 and cur < max end
+  -- Mana secrete (combat) : mana manquante tant que des gains arrivent (tick attendu + petite marge), ou juste
+  -- apres une depense
+  local now = GetTime()
+  return (MR.lastGain and now - MR.lastGain < MR.TICK + 0.35)
+      or (MR.fsrStart and now - MR.fsrStart < MR.FSR + MR.TICK + 0.35) or false
+end
+
+function MR.ManaFull()
+  local cur, max = UnitPower("player", MR.MANA), UnitPowerMax("player", MR.MANA)
+  return Plain(cur) and Plain(max) and max > 0 and cur >= max
+end
+
+-- Etat a l'instant `now` : progression de la regle des 5 s (0..1, nil hors regle), phase du tick (0..1 ou nil),
+-- regen en cours, secondes ecoulees dans la regle (nil hors regle)
+-- `clock` : horloge d'apercu de la vue ({ start, hold, mode }, propre a chaque vue), nil = etat reel du joueur
+function MR.State(now, clock)
+  if clock then
+    if not clock.start then clock.start = now end
+    local t = now - clock.start
+    if clock.hold and now < clock.hold then
+      if clock.mode == "fsr" then
+        t = t % MR.FSR                                      -- maintien de l'arc / la barre apres un de leurs reglages
+      else
+        t = MR.FSR + ((t - MR.FSR) % (MR.CYCLE - MR.FSR))   -- maintien en regen apres un reglage de voyant / lueur
+      end
+    else
+      t = t % MR.CYCLE
+    end
+    if t < MR.FSR then return t / MR.FSR, nil, false, t end
+    return nil, ((t - MR.FSR) % MR.TICK) / MR.TICK, true, nil
+  end
+  if MR.fsrStart and now < MR.fsrStart + MR.FSR then
+    local t = now - MR.fsrStart
+    return t / MR.FSR, nil, false, t
+  end
+  local missing = MR.ManaMissing()
+  local tp = (missing and MR.tickStart) and (((now - MR.tickStart) % MR.TICK) / MR.TICK) or nil
+  return nil, tp, missing, nil
+end
+
+-- Centre (relatif au BAS du cercle) et taille d'un dot, d'apres sa position de repos
+function MR.DotGeom(i, scale)
+  local d = ns.Defaults.resourceCircle
+  local s = d.dotSizes[i] * scale
+  return d.dotPositions[i][1] * scale, d.dotPositions[i][2] * scale + s / 2, s
+end
+
+-- Dots : pendant la regle, seul le dot 3 reste ; les 2, 4, 1, 5 reviennent un a un en glissant depuis lui (arrivee =
+-- temps ecoule). Les dots de la vue sont seulement masques (v.ShowDots) ; des copies glissent a leur place.
+function MR.Dots(v, fsrT)
+  -- Copie d'apercu : les copies restent dessinees en permanence (au repos hors regle), sans jamais rebasculer sur
+  -- les vrais points -- la bascule y produisait un clignotement
+  if v.alwaysCopies and MR.opt.dots and v.dotG and not fsrT then fsrT = MR.FSR end
+  if not (MR.opt.dots and fsrT and v.dotG) then
+    if v.dotsHidden then
+      v.dotsHidden = false
+      v.ShowDots(true)
+      for _, g in pairs(v.dotG) do g:Hide() end
+    end
+    return
+  end
+  v.dotsHidden = true
+  v.ShowDots(false)
+  local scale = MR.opt.size / ns.Defaults.resourceCircle.size
+  local x3, y3 = MR.DotGeom(3, scale)
+  for _, step in ipairs(MR.STEPS[MR.opt.dotsMode] or MR.STEPS.four) do
+    local i, arrive = step[1], step[2]
+    local g = v.dotG[i]
+    if g then
+      local k = (fsrT - (arrive - MR.DOT_SLIDE)) / MR.DOT_SLIDE
+      if k <= 0 then
+        g:Hide()
+      else
+        k = math.min(1, k)
+        local e = 1 - (1 - k) * (1 - k) * (1 - k)
+        local x, y, s = MR.DotGeom(i, scale)
+        g:SetSize(s, s)
+        g:ClearAllPoints()
+        g:SetPoint("CENTER", v.root, "BOTTOM", x3 + (x - x3) * e, y3 + (y - y3) * e)
+        local r, gg, b = v.DotColor(i)
+        g:SetVertexColor(r or 1, gg or 1, b or 1, 1)
+        g:SetAlpha(e)
+        g:Show()
+      end
+    end
+  end
+end
+
+-- Dessine une vue ; renvoie true tant qu'il reste quelque chose a animer
+function MR.Render(v, el, now)
+  local o = MR.opt
+  local fsrP, _, regen, fsrT = MR.State(now, v.Clock())
+  -- Mana pleine (lisible, hors apercu et hors regle des 5 s) : ticks, voyant et lueur coupes net, sans fondu
+  if not v.Clock() and not fsrP and MR.ManaFull() then v.a, v.la = 0, 0 end
+  -- Arc / barre
+  local phase, p
+  if o.showArc and (o.arcOn or o.barOn) then
+    if fsrP then phase, p = "fsr", fsrP end      -- arc / barre : regle des 5 s seulement
+  end
+  if phase then
+    v.a = math.min(1, v.a + el / SWING_FADE_IN)
+    if v.phase ~= phase then
+      v.phase = phase
+      local c = o.fsrColor
+      for _, sb in ipairs({ v.arcA, v.arcB, v.arcV, v.full, v.l, v.r }) do sb:SetStatusBarColor(c[1], c[2], c[3], c[4] or 1) end
+    end
+    if o.arcOn then
+      -- Comme l'arc principal : 0-100 sur l'etendue ; vidage pendant la regle (remplissage inverse : il se remplit)
+      local val = (o.arcFillUp and p or (1 - p)) * 100
+      for _, sb in ipairs({ v.arcA, v.arcB, v.arcV }) do sb:SetValue(val) end
+    end
+    if o.barOn then DrawBarProgress(o.barO, v.full, v.l, v.r, p) end
+  else
+    v.a = math.max(0, v.a - el / SWING_FADE_OUT)
+  end
+  -- Fondu + leger glissement, arc et barre ensemble
+  local e = 1 - (1 - v.a) * (1 - v.a) * (1 - v.a)
+  local off = (1 - e) * SWING_SLIDE
+  v.arc:SetShown(o.arcOn and v.a > 0)
+  v.arc:SetAlpha(e)
+  v.arc:ClearAllPoints()
+  v.arc:SetPoint("CENTER", v.root, "CENTER", 0, -off)
+  v.bar:SetShown(o.barOn and v.a > 0)
+  v.bar:SetAlpha(e)
+  v.bar:ClearAllPoints()
+  v.bar:SetPoint("CENTER", v.root, "CENTER", o.barX, o.barY - off)
+  -- Voyant et lueur du fond de texte : allumes pendant la regen, avec un fondu
+  local target = ((o.lamp or o.tbGlow) and regen) and 1 or 0
+  local step = el / MR.LAMP_FADE
+  if v.la < target then v.la = math.min(target, v.la + step) else v.la = math.max(target, v.la - step) end
+  -- Animation pulse : les deux lueurs "respirent" (le point du voyant reste plein)
+  local breath = 1
+  if o.pulse then breath = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(now * 2 * math.pi / MR.PULSE)) end
+  v.lamp:SetAlpha(v.la)
+  v.lamp:SetShown(o.lamp and v.la > 0)
+  v.lampGlow:SetAlpha(breath)
+  v.tbGlow:SetAlpha(v.la * breath)
+  v.tbGlow:SetShown(o.tbGlow and v.la > 0)
+  -- Dots
+  MR.Dots(v, fsrT)
+  -- regen : le driver reste actif pour voir la fin de regen estimee en combat (mana secrete, aucun evenement)
+  return phase ~= nil or v.a > 0 or v.la ~= target or fsrT ~= nil or regen
+end
+
+function MR.HideView(v)
+  v.driver:SetScript("OnUpdate", nil)
+  v.a, v.la, v.phase = 0, 0, nil
+  v.arc:Hide(); v.bar:Hide(); v.lamp:Hide(); v.tbGlow:Hide()
+  MR.Dots(v, nil)
+end
+
+-- Cadres d'une vue sur `root` (cercle ou copie) ; `textParent` porte le fond de texte
+function MR.NewView(root, textParent)
+  local v = { root = root, a = 0, la = 0 }
+  v.driver = CreateFrame("Frame", nil, root)
+  -- Arc : meme montage que l'arc principal (barres radiales natives sur un disque plein, arcB = 2e moitie des
+  -- miroirs, arcV = remplissage vertical). Hors du cercle, le trou ne peut pas etre un disque de fond : c'est un
+  -- masque inverse (transparent au centre, blanc au-dela de ses bords) qui creuse l'anneau.
+  v.arc = CreateFrame("Frame", nil, root)
+  v.arc:SetPoint("CENTER", root, "CENTER", 0, 0)
+  v.hole = v.arc:CreateMaskTexture()
+  v.hole:SetTexture(MR.HOLE_TEX, "CLAMPTOWHITE", "CLAMPTOWHITE")
+  v.hole:SetPoint("CENTER", v.arc, "CENTER")
+  local function Radial()
+    local sb = CreateFrame("StatusBar", nil, v.arc)
+    sb:SetAllPoints(v.arc)
+    SetupRadialArc(sb)
+    sb:SetMinMaxValues(0, 100)
+    sb:SetValue(0)
+    sb:GetStatusBarTexture():AddMaskTexture(v.hole)
+    return sb
+  end
+  v.arcA, v.arcB = Radial(), Radial()
+  v.arcV = CreateFrame("StatusBar", nil, v.arc)
+  ns.SetSmoothStatusBarTexture(v.arcV, "Interface\\AddOns\\AishCore\\Media\\circle_piecrop.tga")
+  v.arcV:SetOrientation("VERTICAL")
+  v.arcV:SetMinMaxValues(0, 100)
+  v.arcV:SetValue(0)
+  v.arcV:GetStatusBarTexture():AddMaskTexture(v.hole)
+  v.arc:Hide()
+  v.bar = CreateFrame("Frame", nil, root)
+  v.barBg = v.bar:CreateTexture(nil, "BACKGROUND")
+  v.barBg:SetAllPoints()
+  local function MakeBar()
+    local b = CreateFrame("StatusBar", nil, v.bar)
+    ns.SetSmoothStatusBarTexture(b, SWING_BAR_TEX)
+    local bt = b:GetStatusBarTexture()
+    if bt then bt:SetSnapToPixelGrid(false); bt:SetTexelSnappingBias(0) end
+    b:SetMinMaxValues(0, 1)
+    b:SetValue(0)
+    return b
+  end
+  v.full, v.l, v.r = MakeBar(), MakeBar(), MakeBar()
+  v.full:SetAllPoints(v.bar)
+  v.l:SetPoint("TOPLEFT", v.bar, "TOPLEFT"); v.l:SetPoint("BOTTOMRIGHT", v.bar, "BOTTOM")
+  v.r:SetPoint("TOPRIGHT", v.bar, "TOPRIGHT"); v.r:SetPoint("BOTTOMLEFT", v.bar, "BOTTOM")
+  v.bar:Hide()
+  -- Voyant : halo additif derriere un petit rond
+  v.lamp = CreateFrame("Frame", nil, root)
+  v.lampGlow = v.lamp:CreateTexture(nil, "BACKGROUND")
+  ns.SetSmoothTexture(v.lampGlow, MR.GLOW_TEX)
+  v.lampGlow:SetBlendMode("ADD")
+  v.lampGlow:SetPoint("CENTER")
+  v.lampDot = v.lamp:CreateTexture(nil, "ARTWORK")
+  ns.SetSmoothTexture(v.lampDot, ns.Media.circle)
+  v.lampDot:SetAllPoints()
+  v.lamp:Hide()
+  -- Lueur du fond de texte : sous le cache (BACKGROUND 0) et sous son halo de reperage (-1)
+  v.tbGlow = textParent:CreateTexture(nil, "BACKGROUND", nil, -2)
+  ns.SetSmoothTexture(v.tbGlow, MR.GLOW_TEX)
+  v.tbGlow:SetBlendMode("ADD")
+  v.tbGlow:Hide()
+  return v
+end
+
+-- Copies glissantes des dots 1, 2, 4, 5, sur `parent`
+function MR.MakeDotGhosts(v, parent)
+  v.dotG = {}
+  for _, i in ipairs({ 1, 2, 4, 5 }) do
+    local g = parent:CreateTexture(nil, "OVERLAY")
+    g:SetTexture(ns.Media.circle)
+    g:Hide()
+    v.dotG[i] = g
+  end
+end
+
+-- Reglages d'une vue. lvMid / lvFront : niveaux de l'arc (plan) et de la barre ; lvLamp : voyant, au-dessus du texte
+function MR.ApplyView(v, cfg, lvMid, lvFront, lvLamp)
+  local o = MR.opt
+  v.phase = nil                                   -- couleur de phase reposee au prochain dessin
+  -- Arc : diametre = taille globale x 1.1 x ratio (comme ArcPx), trou = 1 - epaisseur (comme OverlayPx)
+  local d = o.size * 1.1 * (cfg.manaRegenSizeRatio or 1.2)
+  v.arc:SetSize(d, d)
+  v.arc:SetFrameLevel(lvMid)
+  for _, sb in ipairs({ v.arcA, v.arcB, v.arcV }) do sb:SetFrameLevel(lvMid + 1) end
+  local hole = d * math.max(0, math.min(1 - (cfg.manaRegenArcThickness or 0.1), 0.995))
+  v.hole:SetSize(math.max(hole, 0.01), math.max(hole, 0.01))
+  v.arcV:ClearAllPoints()
+  v.arcV:SetPoint("TOP", v.arc, "CENTER", 0, d / 2)
+  v.arcV:SetSize(d, d * VERTICAL_CROP_H)
+  -- Remplissage (cf. ApplyArcAngles) : miroirs = depart commun, l'angle de fin donne l'etendue de chaque moitie
+  local mode = o.arcFill
+  local mirror = (mode == "mirror_out" or mode == "mirror_in")
+  local vertical = (mode == "vertical")
+  v.arcB:SetShown(mirror)
+  v.arcV:SetShown(vertical)
+  local tex = v.arcA:GetStatusBarTexture()
+  if tex then tex:SetAlpha(vertical and 0 or 1) end
+  if mirror then
+    local half = math.max(1, math.min(o.arcEnd, 180))
+    local out = (mode == "mirror_out")
+    SetArcAngle(v.arcA, o.arcStart, o.arcStart + half, not out)
+    SetArcAngle(v.arcB, o.arcStart - half, o.arcStart, out)
+  else
+    SetArcAngle(v.arcA, o.arcStart, o.arcEnd, mode == "ccw")
+  end
+  v.bar:SetSize(cfg.manaRegenBarLength or 120, cfg.manaRegenBarThickness or 4)
+  v.bar:SetFrameLevel(lvFront)
+  for _, sb in ipairs({ v.full, v.l, v.r }) do sb:SetFrameLevel(lvFront + 1) end
+  local bgc = cfg.manaRegenBarBgColor or { 0, 0, 0, 0.45 }
+  v.barBg:SetColorTexture(bgc[1], bgc[2], bgc[3], bgc[4] or 1)
+  local lc = o.lampColor
+  local ls = cfg.manaRegenLampSize or 6
+  v.lamp:SetSize(ls, ls)
+  v.lamp:ClearAllPoints()
+  v.lamp:SetPoint("CENTER", v.root, "CENTER", cfg.manaRegenLampX or 0, cfg.manaRegenLampY or -14)
+  v.lamp:SetFrameLevel(lvLamp)
+  v.lampDot:SetVertexColor(lc[1], lc[2], lc[3], 1)
+  local lgs = cfg.manaRegenLampGlowSize or (ls * 4)    -- lueur derriere le point
+  v.lampGlow:SetSize(lgs, lgs)
+  local lg = o.lampGlowColor
+  v.lampGlow:SetVertexColor(lg[1], lg[2], lg[3], 0.9)
+  local gs = cfg.manaRegenTbGlowSize or 70
+  v.tbGlow:SetSize(gs, gs)
+  v.tbGlow:ClearAllPoints()
+  v.tbGlow:SetPoint("CENTER", v.root, "CENTER", cfg.manaRegenTbGlowX or 0, cfg.manaRegenTbGlowY or 0)
+  local tc = o.tbColor
+  v.tbGlow:SetVertexColor(tc[1], tc[2], tc[3], 0.8)
+end
+
+-- Vue du vrai cercle : son OnUpdate ne tourne qu'en phase active (ou en apercu)
+function MR.RealUpdate(_, el)
+  local v = MR.real
+  if not v then return end
+  local busy = MR.Render(v, el or 0, GetTime())
+  if not busy and not previewMode then v.driver:SetScript("OnUpdate", nil) end
+end
+
+function MR.Wake()
+  local v = MR.real
+  if not (v and MR.opt.any) then return end
+  v.driver:SetScript("OnUpdate", MR.RealUpdate)
+  MR.RealUpdate(nil, 0)
+end
+
+-- Vrais dots 1, 2, 4, 5 : reparentes sur un cadre dont l'alpha les masque, sans toucher a leurs animations
+function MR.EnsureRealDots(v)
+  if v.dotG or not bar.dot3 then return end
+  local parent = bar.dot3:GetParent()
+  local holder = CreateFrame("Frame", nil, parent)
+  holder:SetAllPoints(parent)
+  holder:SetFrameLevel(parent:GetFrameLevel())
+  for _, i in ipairs({ 1, 2, 4, 5 }) do
+    if bar["dot" .. i] then bar["dot" .. i]:SetParent(holder) end
+  end
+  v.ShowDots = function(show) holder:SetAlpha(show and 1 or 0) end
+  MR.MakeDotGhosts(v, parent)
+end
+
+-- Sort lance qui coute de la mana (cout lisible, jamais secret) : la regle des 5 s repart, meme en combat
+function MR.SpellCostsMana(spellID)
+  if not (spellID and Plain(spellID) and C_Spell and C_Spell.GetSpellPowerCost) then return false end
+  local ok, costs = pcall(C_Spell.GetSpellPowerCost, spellID)
+  if not ok or type(costs) ~= "table" then return false end
+  for _, c in ipairs(costs) do
+    local t, n = c.type, c.cost or c.minCost
+    if Plain(t) and Plain(n) and (t == MR.MANA or c.name == "MANA") and (tonumber(n) or 0) > 0 then return true end
+  end
+  return false
+end
+
+-- Gain de mana : recale la phase du tick (gain a ~2 s, ou un multiple, du precedent ; ou proche du tick attendu)
+function MR.Gain(now)
+  local gap = MR.lastGain and (now - MR.lastGain)
+  local onCadence = gap and gap > 1.5 and gap < 10.5
+    and math.abs(gap - MR.TICK * math.floor(gap / MR.TICK + 0.5)) < 0.2
+  local ph = MR.tickStart and ((now - MR.tickStart) % MR.TICK)
+  if not ph or onCadence or ph < 0.3 or ph > MR.TICK - 0.3 then MR.tickStart = now end
+  MR.lastGain = now
+end
+
+-- Mana lisible (hors combat) : variation comparee a la valeur precedente. Mana secrete (combat) : la depense vient
+-- du sort lance (UNIT_SPELLCAST_SUCCEEDED / CHANNEL_START), toute autre variation est un gain.
+function MR.OnEvent(_, event, unit, a1, a2)
+  local now = GetTime()
+  if event == "UNIT_SPELLCAST_SUCCEEDED" or event == "UNIT_SPELLCAST_CHANNEL_START" then
+    if MR.SpellCostsMana(a2) then
+      MR.fsrStart, MR.lastCast = now, now
+      MR.Wake()
+    end
+    return
+  end
+  if event ~= "PLAYER_ENTERING_WORLD" and a1 ~= "MANA" then return end
+  local cur = UnitPower("player", MR.MANA)
+  if not Plain(cur) then
+    MR.lastMana = nil
+    if event ~= "PLAYER_ENTERING_WORLD" and not (MR.lastCast and now - MR.lastCast < 0.4) then MR.Gain(now) end
+    MR.Wake()
+    return
+  end
+  local last = MR.lastMana
+  MR.lastMana = cur
+  if event ~= "PLAYER_ENTERING_WORLD" and last then
+    if cur < last then
+      MR.fsrStart = now                     -- depense : la regle des 5 s repart
+    elseif cur > last then
+      MR.Gain(now)
+    end
+  end
+  MR.Wake()
+end
+
+-- Apercu du vrai cercle (panneau ouvert) : l'horloge continue, sans redemarrer a chaque reglage
+function MRRefreshPreview()
+  if previewMode and MR.opt.any then
+    MR.rclock = MR.rclock or {}
+  else
+    MR.rclock = nil
+  end
+  MR.Wake()
+end
+
+--- Apercu force le temps d'un reglage : mode "regen" (defaut, 5 s de regle sautees : voyant / lueur / couleur des
+--- ticks) ou "fsr" (regle des 5 s en boucle : arc et barre affiches).
+function ResourceCircle.ManaRegenFocus(mode)
+  local now = GetTime()
+  local function Focus(c)
+    if not c then return end
+    if mode == "fsr" then
+      -- deja en maintien "arc / barre" : la boucle continue sans repartir de zero
+      local keep = c.mode == "fsr" and c.hold and now < c.hold and c.start
+      c.start = keep and (now - ((now - c.start) % MR.FSR)) or now
+    else
+      c.start = now - MR.FSR
+    end
+    c.mode, c.hold = mode or "regen", now + MR.HOLD
+  end
+  Focus(MR.rclock)
+  Focus(MR.gclock)
+  MR.Wake()
+end
+
+--- Copie d'apercu du GUI (ResourceCircle.NewGhost) : meme rendu, horloge d'apercu, reglages relus avec g.Apply.
+function ResourceCircle.AttachManaRegenGhost(g)
+  if not ns.IsForever or not g or g._mr then return end
+  local v = MR.NewView(g, g.txt)
+  g._mr = v
+  -- Une seule horloge pour toutes les copies (une ancienne copie restee sous la nouvelle apres une reconstruction
+  -- de page ne peut plus etre dephasee) ; les anciennes copies sont coupees
+  MR.gclock = MR.gclock or {}
+  v.clock = MR.gclock
+  v.Clock = function() return MR.gclock end
+  v.alwaysCopies = true
+  for old in pairs(MR.ghostViews) do
+    MR.HideView(old)
+    MR.ghostViews[old] = nil
+  end
+  MR.ghostViews[v] = true
+  v.ShowDots = function(show)
+    for _, i in ipairs({ 1, 2, 4, 5 }) do if g.dots[i] then g.dots[i]:SetAlpha(show and 1 or 0) end end
+  end
+  v.DotColor = function(i) if g.dots[i] then return g.dots[i]:GetVertexColor() end end
+  MR.MakeDotGhosts(v, g.txt)
+  local apply = g.Apply
+  g.Apply = function(opts)
+    apply(opts)
+    -- Copie remplacee par une plus recente (page reconstruite) : elle ne dessine plus rien
+    if not MR.ghostViews[v] then MR.HideView(v); return end
+    local cfg = ns.GetCfg("resourceCircle") or {}
+    MR.ReadOpt(cfg)
+    if not MR.opt.any then MR.HideView(v); return end
+    -- Arc toujours au plan intermediaire (niveau des arcs secondaires)
+    MR.ApplyView(v, cfg, g.secArcF:GetFrameLevel(), g.txt:GetFrameLevel() - 1, g.txt:GetFrameLevel() + 5)
+    v.driver:SetScript("OnUpdate", function(_, el) MR.Render(v, el or 0, GetTime()) end)
+  end
+end
+
+--- Classe qui utilise la mana (le druide en garde une meme en forme) : sinon, pas de regen de mana du tout.
+function ResourceCircle.UsesMana()
+  local _, class = UnitClass("player")
+  return not (class == "WARRIOR" or class == "ROGUE" or class == "DEATHKNIGHT" or class == "DEMONHUNTER")
+end
+
+function ResourceCircle.ApplyManaRegenSettings()
+  if not ns.IsForever or not bar then return end
+  local cfg = ns.GetCfg("resourceCircle") or {}
+  MR.ReadOpt(cfg)
+  if not MR.opt.any then
+    if MR.evt then MR.evt:UnregisterAllEvents() end
+    if MR.real then MR.HideView(MR.real) end
+    MR.rclock = nil
+    return
+  end
+  local v = MR.real
+  if not v then
+    v = MR.NewView(bar, bar.textFrame or bar)
+    v.Clock = function() return previewMode and MR.rclock or nil end
+    v.ShowDots = function() end
+    v.DotColor = function(i) local d = bar["dot" .. i]; if d then return d:GetVertexColor() end end
+    MR.real = v
+  end
+  if MR.opt.dots then MR.EnsureRealDots(v) end
+  local textLvl = bar.textFrame and bar.textFrame:GetFrameLevel() or (bar:GetFrameLevel() + 200)
+  MR.ApplyView(v, cfg, CircleLevelFor("mid"), CircleLevelFor("front"), textLvl + 5)
+
+  if not MR.evt then
+    MR.evt = CreateFrame("Frame")
+    MR.evt:SetScript("OnEvent", MR.OnEvent)
+  end
+  MR.evt:RegisterEvent("PLAYER_ENTERING_WORLD")
+  for _, e in ipairs({ "UNIT_POWER_FREQUENT", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_CHANNEL_START" }) do
+    pcall(MR.evt.RegisterUnitEvent, MR.evt, e, "player")
+  end
+  local cur = UnitPower("player", MR.MANA)
+  if Plain(cur) then MR.lastMana = cur end
+  MRRefreshPreview()
+end
+end -- bloc Regen de mana
 
 -- Applique les settings en live (taille, police, etc.)
 function ResourceCircle.ApplySettings()
@@ -1318,6 +1870,8 @@ function ResourceCircle.ApplySettings()
 
   -- Delai Attaque auto (Forever)
   ResourceCircle.ApplySwingSettings()
+  -- Regen de mana (Forever)
+  ResourceCircle.ApplyManaRegenSettings()
 
   -- Forcer la visibilite apres changement de settings
   if previewMode then
@@ -2293,7 +2847,7 @@ end
 function ResourceCircle.SetPreview(on)
   previewMode = on
   if not bar then return end
-  if ns.IsForever then C_Timer.After(0, RefreshSwingPreview) end
+  if ns.IsForever then C_Timer.After(0, function() RefreshSwingPreview(); MRRefreshPreview() end) end
   -- Sortie du panneau : le halo n'a plus lieu d'etre.
   if not on and bar.textBackdropGlow then ns.HideTextBackdropGlow(bar.textBackdropGlow) end
 
@@ -3456,6 +4010,365 @@ function ResourceCircle.ApplyFormManaText(fs)
   return false
 end
 
+-- Forever, chaman : charges du bouclier actif (Foudre / Eau), aura reconnue par son NOM localise (deduit des
+-- spellIDs de def.shieldNames, chaines = repli anglais). Noms resolus une seule fois. nil si aucun bouclier.
+function ResourceCircle.ShieldCharges(def)
+  if not def._names then
+    local set = {}
+    for _, v in ipairs(def.shieldNames or {}) do
+      if type(v) == "number" then
+        local n = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(v)) or (GetSpellInfo and GetSpellInfo(v))
+        if n then set[n] = true end
+      else
+        set[v] = true
+      end
+    end
+    def._names = set
+  end
+  def._ids = def._ids or {}
+  if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return nil end
+  -- Hors combat : recherche par nom ; les spellIDs rencontres sont retenus pour le combat
+  for i = 1, 40 do
+    local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
+    if not ok or not a then break end
+    local n = a.name
+    if not (issecretvalue and issecretvalue(n)) and def._names[n] then
+      local sid = a.spellId
+      if sid and Plain(sid) then def._ids[sid] = true end
+      -- Identifiant d'instance (jamais secret) : seule lecture des charges possible en combat
+      if a.auraInstanceID and Plain(a.auraInstanceID) then def._instID = a.auraInstanceID end
+      local c = a.applications
+      if issecretvalue and issecretvalue(c) then return nil, c end
+      return tonumber(c) or 0
+    end
+  end
+  -- Combat : 0) Gestionnaire de recharges (CDM) -- seule source encore lisible une fois l'addon "taint" en
+  -- combat ; ne marche que si le bouclier y est suivi (buffs suivis). Presence + derniere valeur de charges vue.
+  local A = ns.Auras
+  if A and (A.IsCDMAuraSwipePresent or A.IsCDMAuraBarPresent) then
+    for sid in pairs(def._ids) do
+      if (A.IsCDMAuraSwipePresent and A.IsCDMAuraSwipePresent(sid)) or (A.IsCDMAuraBarPresent and A.IsCDMAuraBarPresent(sid)) then
+        local app = A.GetCDMLastApplications and A.GetCDMLastApplications(sid)
+        return nil, (app ~= nil) and app or 1
+      end
+    end
+  end
+  -- 1) instance retenue hors combat (ou captee a la relance du bouclier, cf.
+  -- ResourceCircle.ShieldAuraEvent) ; son compte d'affichage est toujours utilisable par SetText
+  if def._instID and C_UnitAuras.GetAuraApplicationDisplayCount then
+    local ok, disp = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, "player", def._instID, 1, 999)   -- Forever : unite requise
+    if ok and disp ~= nil then
+      if Plain(disp) then
+        local n = tonumber(disp)
+        if n then return n end
+        if disp ~= "" then return nil, disp end
+      else
+        return nil, disp
+      end
+    end
+    -- l'aura existe-t-elle encore (charges a 1 : le compte d'affichage peut etre vide) ?
+    local okD, d = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", def._instID)
+    if okD and d then return nil, (Plain(d.applications) and d.applications ~= 0) and d.applications or 1 end
+    def._instID = nil
+  end
+  -- 2) aura retrouvee par spellID (rangs deja vus + IDs connus) ; charges eventuellement secretes, renvoyees
+  -- telles quelles pour un SetText direct
+  if C_UnitAuras.GetPlayerAuraBySpellID then
+    local function Try(sid)
+      local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
+      if ok and a then
+        local c = a.applications
+        if Plain(c) then return tonumber(c) or 0 end
+        return nil, c
+      end
+    end
+    for sid in pairs(def._ids) do
+      local n, raw = Try(sid)
+      if n or raw ~= nil then return n, raw end
+    end
+    for _, sid in ipairs(def.shieldNames or {}) do
+      if type(sid) == "number" and not def._ids[sid] then
+        local n, raw = Try(sid)
+        if n or raw ~= nil then return n, raw end
+      end
+    end
+  end
+  return nil
+end
+
+-- Forever, chaman : bouclier relance en combat. Le sort lance (spellID / nom lisibles) arme la capture ; la
+-- 1re aura ajoutee juste apres sur le joueur donne la nouvelle instance (identifiant jamais secret).
+function ResourceCircle.ShieldAuraEvent(_, event, unit, a1, a2)
+  local def = secResDef
+  if not (def and def.useShieldStacks and def._names) then return end
+  if event == "UNIT_SPELLCAST_SUCCEEDED" then
+    local sid = a2
+    if not (sid and Plain(sid)) then return end
+    local n = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)) or (GetSpellInfo and GetSpellInfo(sid))
+    if def._ids and def._ids[sid] or (n and Plain(n) and def._names[n]) then
+      def._pendingAt, def._present = GetTime(), true   -- bouclier (re)lance : affiche, compte ecrit par le bouton natif
+    end
+  elseif event == "UNIT_AURA" and def._pendingAt and GetTime() - def._pendingAt < 1 then
+    local added = type(a1) == "table" and a1.addedAuras
+    if added then
+      for _, aura in ipairs(added) do
+        local id = aura.auraInstanceID
+        if id and Plain(id) and aura.isHelpful ~= false then
+          def._instID, def._pendingAt = id, nil
+          return
+        end
+      end
+    end
+  end
+end
+
+-- Charges du bouclier en combat : meme recette que les modes d'auras (AuraTrackerContainer.lua). Un AuraContainer
+-- natif, invisible, avec un slot filtre sur les spellIDs du bouclier : Blizzard ecrit lui-meme le nombre de charges
+-- dans bar.secResText (SetApplicationCount), sans qu'aucune valeur secrete ne passe par Lua. A creer hors combat ;
+-- tout se branche une seule fois dans initializeFrame (le bouton devient inaccessible des que l'aura est secrete).
+function ResourceCircle.EnsureShieldNative(def)
+  if InCombatLockdown() or not (bar and bar.secResText) then return end
+  -- Filtre limite aux rangs reellement vus sur ce client (un spellID inconnu fait echouer le filtre entier)
+  local ids, sig = {}, {}
+  for v in pairs(def._ids or {}) do ids[v] = true; sig[#sig + 1] = v end
+  -- Secours seulement tant qu'aucune aura n'a ete lue : rangs appris (sort = aura pour les boucliers), pour qu'un
+  -- /reload suivi d'un pull cree quand meme le bouton. Des qu'un rang est lu sur l'aura, le filtre ne garde que lui
+  -- (filtre multi-rangs : compteur vide en combat).
+  for _, v in ipairs((#sig == 0) and def.shieldNames or {}) do
+    if type(v) == "number" and not ids[v] then
+      local known = (IsPlayerSpell and IsPlayerSpell(v)) or (IsSpellKnown and IsSpellKnown(v))
+      if known then ids[v] = true; sig[#sig + 1] = v end
+    end
+  end
+  if #sig == 0 then return end
+  table.sort(sig)
+  sig = table.concat(sig, ",")
+  if def._nativeSig == sig then return end
+  def._nativeSig = sig
+  local c = def._native
+  if c then
+    local okF, errF = pcall(c.SetAuraGroupCandidateFilters, c, "aishShieldCharges", { includeSpellIDs = ids })
+    if not okF then def._nativeErr = "filtre: " .. tostring(errF) end
+    if c.UpdateAllAuras then pcall(c.UpdateAllAuras, c) end
+    return
+  end
+  -- Meme recette que la grille native des icones (AuraTrackerContainer.lua, EnsureIconsNativeGrid) : conteneur
+  -- visible, AddAuraGroup a 1 bouton place par le flow natif, texte des stacks cree SUR le bouton (police posee
+  -- avant SetApplicationCount). Le conteneur, jamais "forbidden", est cale sur notre texte secondaire.
+  -- Enfant du cadre du texte secondaire : en herite visibilite, opacite (pops) et plan
+  local parent = bar.secResFrame or UIParent
+  local ok, res = pcall(CreateFrame, "AuraContainer", nil, parent, "CustomAuraContainerTemplate")
+  if not ok or not res then def._nativeErr = "CreateFrame: " .. tostring(res); return end
+  c = res
+  def._native = c
+  ResourceCircle._shieldContainer = c
+  local W, H = 60, 24
+  c:SetSize(W, H)
+  -- Au-dessus du cadre du texte secondaire (secResFrame, enfant d'UIParent, au-dessus des disques du cercle)
+  local ref = bar.secResFrame or bar.textFrame or bar
+  c:SetFrameStrata(ref:GetFrameStrata())
+  c:SetFrameLevel(ref:GetFrameLevel() + 5)
+  c:ClearAllPoints()
+  c:SetPoint("CENTER", bar.secResText, "CENTER", 0, 0)
+  c:EnableMouse(false)
+  pcall(c.SetEnabled, c, true)
+  pcall(c.SetUnit, c, "player")
+  c:Show()
+  pcall(c.SetFlowLayoutAnchorPoint, c, "TOPLEFT")
+  pcall(c.SetFlowLayoutAxis, c, 0)
+  pcall(c.SetFlowLayoutGrowthDirection, c, 1, -1)
+  pcall(c.SetFlowLayoutMaximumLineSize, c, W + 2)
+  local src = bar.secResText
+  local okA, errA = pcall(function()
+    c:AddAuraGroup("aishShieldCharges", "HELPFUL", {
+      maxFrameCount = 1,
+      candidateFilters = { includeSpellIDs = ids },
+      initializeFrame = function(btn)
+        local okC, can = pcall(function() return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext() end)
+        if not (okC and can) then def._nativeErr = "bouton inaccessible"; return end
+        local okB, errB = pcall(function()
+          local icon = btn:CreateTexture(nil, "ARTWORK")
+          icon:SetAllPoints(btn)
+          btn:SetIcon(icon)
+          icon:SetAlpha(0)                       -- seul le nombre de charges est montre
+          btn:SetSize(W, H)
+          local fs = btn:CreateFontString(nil, "OVERLAY", nil, 7)
+          local font, size, flags = src:GetFont()
+          fs:SetFont(font or ns.FONT_FALLBACK, size or 11, flags or "")
+          fs:SetJustifyH("CENTER")
+          local r, g, b = src:GetTextColor()
+          fs:SetTextColor(r or 1, g or 1, b or 1, 1)
+          fs:SetPoint("CENTER", btn, "CENTER", 0, 0)
+          -- Par defaut le moteur n'affiche que les comptes au-dessus de 1 (derniere charge vide). Un formateur
+          -- numerique "%d" des 0 fait tout afficher (meme methode qu'EllesmereUI_WarriorCharges). Formateur
+          -- indisponible : appel d'origine.
+          local fmt
+          if C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum.NumericRuleFormatRounding then
+            local nf = C_StringUtil.CreateNumericRuleFormatter()
+            if pcall(nf.SetBreakpoints, nf, {
+              { threshold = 0, format = "%d", step = 1, rounding = Enum.NumericRuleFormatRounding.Down },
+            }) then fmt = nf end
+          end
+          if not (fmt and pcall(btn.SetApplicationCount, btn, fs, { formatter = fmt })) then
+            btn:SetApplicationCount(fs, {})
+          end
+          def._nativeFS, def._nativeBtn = fs, btn
+          -- Tirets de deco sur le bouton aussi : Blizzard les montre / masque avec lui (bouclier tombe en combat)
+          def._nativeDL = btn:CreateFontString(nil, "OVERLAY", nil, 7)
+          def._nativeDR = btn:CreateFontString(nil, "OVERLAY", nil, 7)
+          ResourceCircle.StyleShieldNativeDeco(def)
+        end)
+        if okB then def._nativeBound = true else def._nativeErr = "init: " .. tostring(errB) end
+      end,
+      layout = { elementSpacing = 0, lineSpacing = 0, elementWidth = W, elementHeight = H, layoutIndex = 1 },
+    })
+  end)
+  if not okA then def._nativeErr = "AddAuraGroup: " .. tostring(errA) end
+  if c.UpdateAllAuras then pcall(c.UpdateAllAuras, c) end
+end
+
+-- Tirets natifs : texte, police, couleur et ecart recopies des tirets du cercle (hors combat uniquement)
+function ResourceCircle.StyleShieldNativeDeco(def)
+  local fs, dl, dr = def._nativeFS, def._nativeDL, def._nativeDR
+  if not (fs and dl and dr and bar.secResDashL and bar.secResDashR) then return end
+  pcall(function()
+    for _, pair in ipairs({ { dl, bar.secResDashL }, { dr, bar.secResDashR } }) do
+      local n, o = pair[1], pair[2]
+      local fo, sz, fl = o:GetFont()
+      if fo then n:SetFont(fo, sz, fl) end
+      local r, g, b = o:GetTextColor()
+      n:SetTextColor(r or 1, g or 1, b or 1, 1)
+      n:SetText(o:GetText() or "")
+    end
+    local _, _, _, lx = bar.secResDashL:GetPoint(1)
+    local _, _, _, rx = bar.secResDashR:GetPoint(1)
+    dl:ClearAllPoints(); dl:SetPoint("RIGHT", fs, "LEFT", lx or -4, 0)
+    dr:ClearAllPoints(); dr:SetPoint("LEFT", fs, "RIGHT", rx or 4, 0)
+  end)
+end
+
+-- Le conteneur suit la visibilite et l'opacite du texte secondaire (apparitions / pops compris)
+function ResourceCircle.SyncShieldNative(def, applied)
+  local c = def._native
+  if not c then return end
+  local f = bar.secResFrame
+  if f and (c:GetFrameStrata() ~= f:GetFrameStrata() or c:GetFrameLevel() <= f:GetFrameLevel()) then
+    c:SetFrameStrata(f:GetFrameStrata())
+    c:SetFrameLevel(f:GetFrameLevel() + 5)
+  end
+  -- Visibilite / opacite heritees du cadre parent (secResFrame) ; seul l'etat "bouclier attendu" est pilote ici
+  local vis = applied and bar:IsVisible() and bar.secResText:IsShown()
+  c:SetShown(vis and true or false)
+  -- Police / couleur recopiees hors combat, SEULEMENT quand elles changent : un widget deja lie ne doit pas etre
+  -- retouche en continu (cf. AuraTrackerContainer.lua)
+  if def._nativeFS and not InCombatLockdown() then
+    -- Lectures possiblement secretes (notre texte a pu recevoir un compte secret) : tout dans un pcall, et une cle
+    -- secrete fait sauter le restylage de ce tour (jamais comparee)
+    local okK, fo, sz, fl, r, g, b, key = pcall(function()
+      local fo_, sz_, fl_ = bar.secResText:GetFont()
+      local r_, g_, b_ = bar.secResText:GetTextColor()
+      local k = string.format("%s|%s|%s|%.3f|%.3f|%.3f", tostring(fo_), tostring(sz_), tostring(fl_), r_ or 1, g_ or 1, b_ or 1)
+      if bar.secResDashL then
+        local dfo, dsz = bar.secResDashL:GetFont()
+        local dr_, dg_, db_ = bar.secResDashL:GetTextColor()
+        local _, _, _, lx = bar.secResDashL:GetPoint(1)
+        k = k .. string.format("|%s|%s|%s|%s|%.3f|%.3f|%.3f|%s", tostring(bar.secResDashL:GetText()),
+          tostring(bar.secResDashR and bar.secResDashR:GetText()), tostring(dfo), tostring(dsz), dr_ or 1, dg_ or 1, db_ or 1, tostring(lx))
+      end
+      return fo_, sz_, fl_, r_, g_, b_, k
+    end)
+    if not okK or (issecretvalue and issecretvalue(key)) then return end
+    if issecretvalue and issecretvalue(def._nativeStyle) then def._nativeStyle = nil end
+    if def._nativeStyle ~= key then
+      def._nativeStyle = key
+      pcall(function()
+        def._nativeFS:SetFont(fo, sz, fl)
+        def._nativeFS:SetTextColor(r or 1, g or 1, b or 1, 1)
+      end)
+      ResourceCircle.StyleShieldNativeDeco(def)
+    end
+  end
+end
+
+-- /aishshield : diagnostic des charges du bouclier (a lancer en combat ET hors combat)
+SLASH_AISHSHIELD1 = "/aishshield"
+SlashCmdList["AISHSHIELD"] = function(msg)
+  local P = "|cff33aaff[Shield]|r "
+  local def = secResDef
+  -- /aishshield probe : carre rouge sur le bouton natif + texte natif en jaune (hors combat)
+  if msg == "probe" and def and def._nativeBtn and not InCombatLockdown() then
+    local ok, err = pcall(function()
+      local b = def._nativeBtn
+      if not b._aishProbe then
+        b._aishProbe = b:CreateTexture(nil, "OVERLAY", nil, 6)
+        b._aishProbe:SetColorTexture(1, 0, 0, 0.6)
+        b._aishProbe:SetAllPoints(b)
+      end
+      b._aishProbe:Show()
+      if def._nativeFS then def._nativeFS:SetTextColor(1, 1, 0, 1) end
+    end)
+    print(P .. "sonde : " .. (ok and "carre rouge pose sur le bouton, texte natif en jaune" or ("echec " .. tostring(err))))
+  end
+  local function S(v)
+    if v == nil then return "nil" end
+    if issecretvalue and issecretvalue(v) then return "SECRET" end
+    return tostring(v)
+  end
+  print(P .. "combat=" .. tostring(InCombatLockdown()) .. " def=" .. tostring(def and def.useShieldStacks)
+    .. " instID=" .. S(def and def._instID) .. " natif=" .. tostring(def and def._native ~= nil and def._native ~= false)
+    .. " lie=" .. tostring(def and def._nativeBound) .. " present=" .. tostring(def and def._present)
+    .. " err=" .. tostring(def and def._nativeErr))
+  if not (def and def.useShieldStacks) then return end
+  -- Affichage natif : conteneur, bouton et texte (lectures protegees, le bouton peut etre interdit en combat)
+  local c, b, fs = def._native, def._nativeBtn, def._nativeFS
+  if c then
+    local okB, bShown = pcall(function() return b and b:IsShown() end)
+    local okT, txt = pcall(function() return fs and fs:GetText() end)
+    local okV, fVis = pcall(function() return fs and fs:IsVisible() end)
+    print(P .. string.format("  natif : conteneur shown=%s visible=%s alpha=%.2f | bouton shown=%s | texte=%s visible=%s",
+      tostring(c:IsShown()), tostring(c:IsVisible()), c:GetEffectiveAlpha() or -1,
+      okB and tostring(bShown) or "INTERDIT", okT and S(txt) or "INTERDIT", okV and tostring(fVis) or "INTERDIT"))
+    local function Pos(obj)
+      local ok, x, y = pcall(function() return obj:GetCenter() end)
+      if not ok then return "INTERDIT" end
+      if x == nil then return "nil" end
+      local ok2, str = pcall(string.format, "%.0f,%.0f", x, y)
+      return ok2 and str or "SECRET"
+    end
+    local okF, fo, sz = pcall(function() return fs:GetFont() end)
+    local okA, a = pcall(function() return fs:GetEffectiveAlpha() end)
+    local okS, w = pcall(function() return fs:GetStringWidth() end)
+    print(P .. string.format("  positions : texte secondaire=%s conteneur=%s bouton=%s texte natif=%s | police=%s taille=%s alpha=%s largeur=%s strata=%s/%d",
+      Pos(bar.secResText), Pos(c), b and Pos(b) or "-", fs and Pos(fs) or "-",
+      okF and tostring(fo) or "INTERDIT", okF and S(sz) or "INTERDIT", okA and S(a) or "INTERDIT", okS and S(w) or "INTERDIT",
+      c:GetFrameStrata(), c:GetFrameLevel()))
+  end
+  local ids = {}
+  for sid in pairs(def._ids or {}) do ids[#ids + 1] = sid end
+  print(P .. "IDs vus hors combat : " .. (#ids > 0 and table.concat(ids, ", ") or "aucun"))
+  local A = ns.Auras
+  for _, sid in ipairs(ids) do
+    print(P .. string.format("  %d : CDM swipe=%s bar=%s lastApp=%s", sid,
+      tostring(A and A.IsCDMAuraSwipePresent and A.IsCDMAuraSwipePresent(sid)),
+      tostring(A and A.IsCDMAuraBarPresent and A.IsCDMAuraBarPresent(sid)),
+      S(A and A.GetCDMLastApplications and A.GetCDMLastApplications(sid))))
+    local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
+    print(P .. string.format("  %d : GetPlayerAuraBySpellID ok=%s aura=%s app=%s", sid, tostring(ok), tostring(a ~= nil),
+      S(ok and a and a.applications)))
+  end
+  if def._instID then
+    local ok1, d1 = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, def._instID, 1, 999)
+    local ok2, d2 = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, "player", def._instID, 1, 999)
+    local ok3, d3 = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", def._instID)
+    print(P .. string.format("  instance : DisplayCount(id) ok=%s v=%s | DisplayCount(player,id) ok=%s v=%s | Data ok=%s aura=%s",
+      tostring(ok1), S(ok1 and d1), tostring(ok2), S(ok2 and d2), tostring(ok3), tostring(ok3 and d3 ~= nil)))
+  end
+  local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "player", 1, "HELPFUL")
+  print(P .. string.format("  GetAuraDataByIndex(1) ok=%s aura=%s nom=%s", tostring(ok), tostring(ok and a ~= nil), S(ok and a and a.name)))
+  local n, raw = ResourceCircle.ShieldCharges(def)
+  print(P .. "  resultat : n=" .. S(n) .. " brut=" .. S(raw))
+end
+
 -- Détecte la ressource secondaire selon la spec active et démarre le ticker
 function ResourceCircle.DetectSecondaryResource()
   if not bar then return end
@@ -3463,6 +4376,11 @@ function ResourceCircle.DetectSecondaryResource()
   -- Arrêter l'ancien ticker
   if secResUpdateTicker then secResUpdateTicker:Cancel(); secResUpdateTicker = nil end
   secResDef = nil
+  -- Texte rendu transparent par les charges du bouclier (texte natif) : opacite normale pour la ressource suivante
+  if bar.secResText then bar.secResText:SetAlpha(1) end
+  if bar.secResDashL then bar.secResDashL:SetAlpha(1) end
+  if bar.secResDashR then bar.secResDashR:SetAlpha(1) end
+  if ResourceCircle._shieldContainer then ResourceCircle._shieldContainer:Hide() end
 
   -- Désabonner l'ancien canal clone-stack avant d'en choisir un nouveau, sinon un vieux spellID resterait abonné indéfiniment.
   if _secResStackSubIDs and ns.Auras and ns.Auras.UnsubscribeCDMAuraStack then
@@ -3485,6 +4403,15 @@ function ResourceCircle.DetectSecondaryResource()
   -- Druide en forme de felin / d'ours : mana en texte secondaire (option druidFormMana, activee par defaut),
   -- sauf si la spe a deja sa propre ressource secondaire (Gardien Retail : Fer-poil)
   if not def and ResourceCircle.DruidFormManaActive() then def = ResourceCircle.DRUID_FORM_MANA_DEF end
+  -- Chaman (Forever) : charges du bouclier, desactivables (option shamanShieldStacks)
+  if def and def.useShieldStacks and (ns.GetCfg("resourceCircle") or {}).shamanShieldStacks == false then def = nil end
+  if def and def.useShieldStacks and not ResourceCircle._shieldEvt then
+    local f = CreateFrame("Frame")
+    f:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+    f:RegisterUnitEvent("UNIT_AURA", "player")
+    f:SetScript("OnEvent", ResourceCircle.ShieldAuraEvent)
+    ResourceCircle._shieldEvt = f
+  end
   if not def then return end
 
   secResDef = def
@@ -3814,6 +4741,7 @@ function ResourceCircle.UpdateSecondaryResource()
   if previewMode then return end  -- ne pas écraser la valeur factice affichée par SetPreview
   -- Le texte secondaire doit partager la visibilité du cercle central : secResFrame est parenté à UIParent (pas à bar, pour ses animations de pop indépendantes), donc ne suit pas bar:Hide() automatiquement.
   if not bar:IsShown() then
+    if ResourceCircle._shieldContainer then ResourceCircle._shieldContainer:Hide() end
     if _secResWasApplied or bar.secResText:IsShown() then
       SetSecResShown(false)
       if bar.secResFrame then bar.secResFrame:Hide() end
@@ -3886,6 +4814,52 @@ function ResourceCircle.UpdateSecondaryResource()
     elseif not _secResPopTicker then
       SetSecResShown(false)
     end
+    return
+  elseif secResDef.useShieldStacks then
+    -- Forever, chaman : charges du Bouclier de foudre / d'eau (aura reconnue par nom, tous rangs)
+    ResourceCircle.EnsureShieldNative(secResDef)
+    -- Bouton natif relie : c'est son texte qui affiche les charges ; le notre reste en place, transparent
+    bar.secResText:SetAlpha(secResDef._nativeBound and 0 or 1)
+    -- Tirets du cercle aussi : ceux du bouton natif les remplacent (masques avec lui quand le bouclier tombe)
+    local dashA = (secResDef._nativeBound and secResDef._nativeDL) and 0 or 1
+    if bar.secResDashL then bar.secResDashL:SetAlpha(dashA) end
+    if bar.secResDashR then bar.secResDashR:SetAlpha(dashA) end
+    local applied
+    if InCombatLockdown() then
+      -- Combat : on n'ecrit plus rien (Blizzard ecrit le nombre de charges si le bouton natif est lie, sinon le
+      -- dernier nombre lu reste affiche) ; texte garde tant que le bouclier etait la a l'entree en combat ou a
+      -- ete relance depuis. Repli : lecture directe si le bouclier n'etait pas connu.
+      if secResDef._present then
+        applied = true
+      else
+        local count, raw = ResourceCircle.ShieldCharges(secResDef)
+        if count then applied = count > 0; if applied then bar.secResText:SetText(count) end
+        else applied = raw ~= nil and pcall(bar.secResText.SetText, bar.secResText, raw) or false end
+      end
+    else
+      local count, raw = ResourceCircle.ShieldCharges(secResDef)
+      if count then
+        applied = count > 0
+        if applied then bar.secResText:SetText(count) end
+        secResDef._present = applied
+      else
+        -- Nombre de charges secret, pose tel quel (jamais compare)
+        applied = raw ~= nil and pcall(bar.secResText.SetText, bar.secResText, raw) or false
+        secResDef._present = applied
+      end
+    end
+    if applied and not _secResWasApplied then
+      StartSecResPop()
+    elseif not applied and _secResWasApplied then
+      StartSecResPopOut()
+    end
+    _secResWasApplied = applied
+    if applied then
+      SetSecResShown(true)
+    elseif not _secResPopTicker then
+      SetSecResShown(false)
+    end
+    ResourceCircle.SyncShieldNative(secResDef, applied or _secResPopTicker ~= nil)
     return
   elseif (secResDef.useItemCount and secResDef.itemID) or secResDef.useAmmo then
     -- Forever : ressource materialisee par un objet des sacs (fragments d'ame, 6265) ou par les munitions
@@ -5088,6 +6062,7 @@ function ResourceCircle.NewGhost(parent)
     g.elite:ClearAllPoints()
     g.elite:SetPoint("CENTER", g, "CENTER", size * t.x * edir, size * t.y)
   end
+  ResourceCircle.AttachManaRegenGhost(g)   -- Forever : regen de mana sur la copie (enveloppe g.Apply)
   g.Apply()
   return g
 end

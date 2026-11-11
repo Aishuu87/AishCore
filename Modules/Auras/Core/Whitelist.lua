@@ -213,7 +213,7 @@ function ns.BuildWhitelist()
     if ns.AutoConfigSecResDurBar then pcall(ns.AutoConfigSecResDurBar) end
     local spells = ns.GetSpecSpells()
     if not spells then
-        ns.activeWhitelist = nil; ns.whitelistByDest = nil; ns.slotOrderByDest = nil
+        ns.activeWhitelist = nil; ns.whitelistByDest = nil; ns.slotOrderByDest = nil; ns.linkAnchorInfo = nil
         ns.anyWhitelist = nil
         return
     end
@@ -326,8 +326,12 @@ function ns.BuildWhitelist()
     -- Homonymes connus a l'avance (Data/SpellHomonyms.lua, cf. bloc VARIANTES HOMONYMES plus haut) :
     -- meme traitement que linkedSpellIDs.
     local homonyms = _addon.SpellHomonyms or {}
+    -- [ID lie] = info de l'ancre cochee : sert au routage joueur / cible (cf. RouteInfo,
+    -- AuraTrackerContainer.lua) quand l'ID a aussi sa propre entree non cochee.
+    local linkAnchor = {}
     local function LinkTo(id, info, linkedID)
         if linkedID ~= id and not split[linkedID] and not split[id] then
+            if not linkAnchor[linkedID] then linkAnchor[linkedID] = info end
             local ld = linkedDest[linkedID]
             if not ld then ld = {}; linkedDest[linkedID] = ld end
             for dest, active in pairs(info.destinations) do
@@ -356,6 +360,7 @@ function ns.BuildWhitelist()
         if not info._adminDeleted then wl[id] = info end
     end
     ns.activeWhitelist = next(wl) and wl or nil
+    ns.linkAnchorInfo = linkAnchor
 
     -- Whitelists par destination
     -- secResDurBar : destination INVISIBLE, comme centerArc. Elle ne rend rien ; elle

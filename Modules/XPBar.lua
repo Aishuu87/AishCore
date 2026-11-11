@@ -3727,10 +3727,19 @@ function O.SetupDialogueLift()
       lift:Hide()
       O.lifted = false
       -- Fin du dialogue : la barre se replie, sauf souris reellement dessus. Le survol a pu rester
-      -- "colle" (OnLeave perdu pendant le reparentage), et un showTimer de gain d'xp n'a plus lieu d'etre.
+      -- "colle" (OnLeave perdu pendant le reparentage).
       if isHovered and not (hoverFrame and hoverFrame:IsMouseOver()) then isHovered = false end
-      if showTimer then showTimer:Cancel(); showTimer = nil end
-      if not isHovered then HideXPBar() end
+      if showTimer then
+        -- Gain en cours (quete rendue en fermant le dialogue) : la barre reste le temps normal, a compter
+        -- du retour de l'UI, pour que l'animation du gain se voie.
+        showTimer:Cancel()
+        showTimer = C_Timer.NewTimer(SHOW_DURATION, function()
+          showTimer = nil
+          if not isHovered then HideXPBar() end
+        end)
+      elseif not isHovered then
+        HideXPBar()
+      end
     end)
   end
 

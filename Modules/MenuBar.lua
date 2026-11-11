@@ -655,14 +655,42 @@ function MenuBar.AstralRecallName()
   return (type(name) == "string" and name ~= "") and name or nil
 end
 
--- Recharge de la pierre de foyer sur le swipe du bouton
+-- Maj enfoncee + chaman ayant appris Rappel astral : le bouton pierre de foyer montre le sort (icone + recharge)
+local function ShowAstralRecall()
+  if not (IsShiftKeyDown() and MenuBar.AstralRecallName()) then return false end
+  local known = _G.IsPlayerSpell or _G.IsSpellKnown
+  return known and known(ASTRAL_RECALL) and true or false
+end
+
+-- Texture du bouton pierre de foyer (nil pour les autres actions)
+function MenuBar.HearthIcon(b)
+  if b.actionId ~= "hearthstone" then return nil end
+  if ShowAstralRecall() then
+    local GetTex = (_G.C_Spell and _G.C_Spell.GetSpellTexture) or _G.GetSpellTexture
+    local tex = GetTex and GetTex(ASTRAL_RECALL)
+    if tex then return tex end
+  end
+  return ICON_DIR .. BY_ID.hearthstone.icon
+end
+
+-- Recharge de la pierre de foyer (ou de Rappel astral, Maj enfoncee) sur le swipe du bouton
 local HEARTH_ITEM = 6948
 function MenuBar.UpdateCooldown(b)
   if not b.cd then return end
   if b.actionId ~= "hearthstone" then b.cd:Clear(); b.cd:Hide(); return end
   local GetCD = (_G.C_Container and _G.C_Container.GetItemCooldown) or _G.GetItemCooldown
   local start, duration = 0, 0
-  if GetCD then start, duration = GetCD(HEARTH_ITEM) end
+  if ShowAstralRecall() then
+    pcall(function()
+      if _G.C_Spell and _G.C_Spell.GetSpellCooldown then
+        local cd = _G.C_Spell.GetSpellCooldown(ASTRAL_RECALL)
+        if cd then start, duration = cd.startTime, cd.duration end
+      elseif _G.GetSpellCooldown then
+        start, duration = _G.GetSpellCooldown(ASTRAL_RECALL)
+      end
+    end)
+  elseif GetCD then start, duration = GetCD(HEARTH_ITEM) end
+  if issecretvalue and (issecretvalue(start) or issecretvalue(duration)) then start, duration = 0, 0 end
   if start and duration and duration > 0 then
     b.cd:SetCooldown(start, duration)
     b.cd:Show()
@@ -893,7 +921,7 @@ function Strip:Layout()
         it.icon:SetAlpha(0.12)
         it.icon:SetShown(self.preview)
       else
-        it.icon:SetTexture(ICON_DIR .. ((a and a.icon) or "INV_Misc_QuestionMark"))
+        it.icon:SetTexture(MenuBar.HearthIcon(it) or (ICON_DIR .. ((a and a.icon) or "INV_Misc_QuestionMark")))
         it.icon:SetTexCoord(unpack(TEX_COORD))
         it.icon:SetDesaturated(cfg.desaturate ~= false)
         it.icon:SetAlpha(MenuBar.ActionAvailable(it.actionId) and 1 or 0.35)
@@ -1127,10 +1155,20 @@ ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("BAG_UPDATE_COOLDOWN")
 pcall(ev.RegisterEvent, ev, "EQUIPMENT_SETS_CHANGED")   -- macros /equipset des raccourcis a refaire
 pcall(ev.RegisterEvent, ev, "INPUT_DEVICE_INTERFACE_TRANSITION")   -- bascule manette / clavier : macros a refaire
+ev:RegisterEvent("MODIFIER_STATE_CHANGED")   -- Maj : pierre de foyer <-> Rappel astral (chaman)
+ev:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 ev:SetScript("OnEvent", function(_, event)
-  if event == "BAG_UPDATE_COOLDOWN" then
+  if event == "BAG_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_COOLDOWN" or event == "MODIFIER_STATE_CHANGED" then
+    if event ~= "BAG_UPDATE_COOLDOWN" and not MenuBar.AstralRecallName() then return end
     for _, S in ipairs(strips) do
-      for _, b in ipairs(S.pool) do if b:IsShown() then MenuBar.UpdateCooldown(b) end end
+      if not S.preview then
+        for _, b in ipairs(S.pool) do
+          if b:IsShown() and b.actionId == "hearthstone" then
+            if event == "MODIFIER_STATE_CHANGED" then b.icon:SetTexture(MenuBar.HearthIcon(b)) end
+            MenuBar.UpdateCooldown(b)
+          end
+        end
+      end
     end
     return
   end

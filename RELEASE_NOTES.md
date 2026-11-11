@@ -1,5 +1,46 @@
 # AishCore
 
+## [v4.6.16](https://github.com/Aishuu87/AishCore/tree/v4.6.16) (2026-11-11)
+
+### QoL
+- Added 2 checkboxes on the map: Quests to turn in and Quests in progress. These options show your quests on every map level, without having to track them, whatever the zoom level. Normally, your quests only show their pin at zoom level 3.
+
+### Taxi Mode
+- The duration text only shows from 8 sec (to avoid overlapping texts)
+- A small sound can be played when arriving at destination (Arrival sound)
+
+### Menu Bar
+- Shaman: Astral Recall shows on hover of the Hearthstone icon while holding SHIFT, and can be cast with a click
+
+### Central Circle
+- Shaman: added the Secondary Resource text for Lightning Shield and Water Shield charges
+- Added a Mana Regen section
+- This section tracks the 5-second rule (shows the 5 seconds needed after a spell before mana regeneration starts), and can also show the regeneration state (active or not)
+- The 5-second rule can be shown with a simple bar, an arc, or with the decorative dots at the bottom of the circle
+- 2 modes are available for the decorative dots: 2 steps or 4 steps
+    - In 2 steps, 2 dots show at 2.5 s, then the 2 others at 5 s
+    - In 4 steps, 1 dot shows every second
+    - In both cases, when all the dots are shown, you are regenerating
+- Active regeneration can be shown with a glow (Text backdrop glow), or with a simple dot (Regen indicator)
+- A Pulse animation can be enabled for the active regeneration glows
+
+### Camping HUD
+- Added the Cozy Sleeping Bag to the camp items
+- Camp items now show a cooldown swipe on their icon while on cooldown
+
+### Missing buffs
+- Added the Well Rested alert. It is suggested for refresh like a regular spell buff (controlled by the threshold)
+- Talent Points and Heritage Points alerts are now suggested even in Ghost Wolf / Travel Form
+- Battle Shout has been removed from the available alerts (not working)
+- Consumables now have their own column (Consumables)
+- Consumable alerts can be limited to instances (raids / dungeons / BGs) (Only in instances)
+
+### Fixes
+- ♾️FIX: Omen of Clarity is no longer part of the Missing buffs alerts
+- FIX: The option to show the level on the health bar was grayed out
+- ♾️Druid: Omen of Clarity has been removed from the Missing buffs alerts
+- ♾️FIX: Potential errors in debuff tracking (not sure, hard to test)
+
 ## [v4.6.15](https://github.com/Aishuu87/AishCore/tree/v4.6.15) (2026-11-10)
 
 ### Fixes

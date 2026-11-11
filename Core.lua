@@ -1583,10 +1583,16 @@ do
         want[fs] = nil
       else
         local ok, cur = pcall(fs.GetFont, fs)
-        if not ok then
+        -- Police secrete (texte lie a une valeur secrete, ex. compteur natif d'aura) : texte oublie, jamais compare
+        if not ok or (issecretvalue and issecretvalue(cur)) then
           want[fs] = nil
-        elseif not cur or norm(cur) ~= norm(r[1]) then
-          pcall(fs.SetFont, fs, r[1], r[2], r[3])
+        else
+          local okN, differs = pcall(function() return not cur or norm(cur) ~= norm(r[1]) end)
+          if not okN then
+            want[fs] = nil
+          elseif differs then
+            pcall(fs.SetFont, fs, r[1], r[2], r[3])
+          end
         end
       end
     end

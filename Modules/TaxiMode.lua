@@ -507,9 +507,12 @@ local function Layout()
   local alEnd   = ApplyText(endName, "endName");     endName:SetText(Upper(n[#n].name))
   local alZone  = ApplyText(startZone, "zone");      startZone:SetText(n[1].zone or "")
   ApplyText(endZone, "zone");                        endZone:SetText(n[#n].zone or "")
+  -- Zones en miroir : LEFT = exterieur (depart a gauche, arrivee a droite), RIGHT = interieur
+  local alEndZone = (alZone == "LEFT" and "RIGHT") or (alZone == "RIGHT" and "LEFT") or alZone
+  endZone:SetJustifyH(alEndZone)
   PlaceGroup(startGroup, startName, startZone, startDot, true, alStart, alZone, cfg.startX or 0, cfg.startY or 0,
     cfg.startZoneX, cfg.startZoneY)
-  PlaceGroup(endGroup, endName, endZone, endDot, false, alEnd, alZone, cfg.endX or 0, cfg.endY or 0,
+  PlaceGroup(endGroup, endName, endZone, endDot, false, alEnd, alEndZone, cfg.endX or 0, cfg.endY or 0,
     cfg.endZoneX, cfg.endZoneY)
   local alEta = ApplyText(endEta, "eta")
   PlaceAround(endEta, endDot, alEta, false, 4)
@@ -603,6 +606,8 @@ function Refresh(force)
   lineGlow:ClearAllPoints()
   lineGlow:SetPoint("LEFT", track, "LEFT", -6, 0)
   lineGlow:SetWidth(max(0.001, x + 6))
+  -- Temps ecoule (suit le losange) : masque les 8 premieres s (chevauche le depart), puis fondu sur 1 s
+  elapsedText:SetAlpha(min(1, max(0, el - 8)))
 
   textClock = textClock + 1
   if not force and textClock % 15 ~= 0 then return end
@@ -987,9 +992,16 @@ local function StartFlight(route, start)
   if cfg.hideUI ~= false then SetUIHidden(true) end
 end
 
+-- Son d'arrivee (celui de l'hotel des ventes) ; aussi joue en apercu quand on coche l'option
+function TaxiMode.PlayArrivalSound()
+  PlaySound((SOUNDKIT and SOUNDKIT.AUCTION_WINDOW_OPEN) or 5274, "Master")
+end
+
 function EndFlight()
   local f = flight
   if f then
+    -- Atterrissage (pas la desactivation du module) : son optionnel
+    if Cfg().enabled and Cfg().arrivalSound then TaxiMode.PlayArrivalSound() end
     -- Dernier troncon : appris si l'on s'est pose sur l'etape attendue (destination ou arret choisi)
     local land = f.stop or #f.nodes
     local p = PlayerYards(f)
@@ -1082,7 +1094,11 @@ ev:SetScript("OnEvent", function(_, event)
   if event == "PLAYER_CONTROL_LOST" then
     if pending then WatchTakeoff() end
   elseif event == "PLAYER_CONTROL_GAINED" then
-    if flight then C_Timer.After(0.1, function() if flight and not UnitOnTaxi("player") then EndFlight() end end) end
+    if flight then C_Timer.After(0.1, function()
+      if flight and not UnitOnTaxi("player") then
+        EndFlight()
+      end
+    end) end
   elseif event == "PLAYER_ENTERING_WORLD" then
     -- /reload en plein vol : on reprend le vol enregistre
     local db = Store()

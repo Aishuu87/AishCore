@@ -1014,8 +1014,19 @@ end
 -- Info d'un spellID pour le routage joueur / cible. Un ID lie (rang Forever via SpellHomonyms, variante
 -- linkedSpellIDs) n'a pas d'entree propre dans la liste : il porte celle de son ancre dans activeWhitelist.
 -- Sans ce repli, Corruption rang 4 n'etait jamais route vers les grilles cible (debuff invisible).
+-- Variante liee AVEC sa propre entree non cochee : on suit aussi l'ancre. Forever : un rang superieur
+-- auto-decouvert (case CDM Essential) arrive classe "buff" ; au rebuild suivant, son groupe cible etait
+-- coupe -> le debuff pose hors combat disparaissait (le rebuild a lieu avant l'entree en combat).
+local function LinkAnchorOf(spells, spellID)
+    local anchor = ns.linkAnchorInfo and ns.linkAnchorInfo[spellID]
+    if not anchor then return nil end
+    local own = spells and spells[spellID]
+    if own and own.enabled then return nil end
+    return anchor
+end
+
 local function RouteInfo(spells, spellID)
-    return (spells and spells[spellID]) or (ns.activeWhitelist and ns.activeWhitelist[spellID])
+    return LinkAnchorOf(spells, spellID) or (spells and spells[spellID]) or (ns.activeWhitelist and ns.activeWhitelist[spellID])
 end
 
 -- Longueur de ligne du flow des grilles CIBLE a barres : sur le nombre de sorts de la liste (comme
@@ -2605,7 +2616,8 @@ end
 -- `wl` = ns.whitelistByDest[dest] ; retourne true si le spellID doit encore etre traite, false si le
 -- cap est atteint.
 local function AllowNextCapSlot(wl, spellID, maxBars, seenInfo, state)
-    local info = wl and wl[spellID]
+    -- Variante a entree propre : comptee avec son ancre, sinon chaque rang Forever decouvert prend une place
+    local info = LinkAnchorOf(ns.GetSpecSpells and ns.GetSpecSpells(), spellID) or (wl and wl[spellID])
     if info and seenInfo[info] then
         return true -- variante d'un buff deja compte : jamais bloquee par le cap
     end

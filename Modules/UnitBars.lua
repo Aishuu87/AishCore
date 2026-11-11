@@ -158,6 +158,8 @@ UnitBars.BAR_KEYS = { "player", "target", "focus", "pet", "targettarget" }
 -- Tables des frames créés
 local bars = {}   -- bars[key] = frame
 local pendingSettingsApply  = false  -- re-appliquer les settings apres combat
+local FadePlayerName   -- forward (nom du joueur au survol)
+local playerNameFadingOut = false   -- fondu de sortie du nom du joueur en cours : texte garde jusqu'a la fin
 local ubFadeTickers         = {}     -- key → ticker de fade par barre
 local ubPosPending          = {}     -- key → frame dont le snap de position finale a ete saute (combat lockdown)
 local ubLastVisState        = {}     -- key → dernier état de visibilité (true/false)
@@ -1376,13 +1378,15 @@ local function UpdateBarName(frame)
     if key == "player" then
         -- Barre du joueur : nom au survol, hors combat (ticker plus bas), ou en permanence (nameAlways)
         local rawName
-        if (playerNameShown or BV("player", "nameAlways")) and UnitExists(unit) then
+        if (playerNameShown or playerNameFadingOut or BV("player", "nameAlways")) and UnitExists(unit) then
             -- Forever : le nom de famille est porte par la partie "royaume" du nom complet (Prenom-Famille)
             local nm, fam = UnitFullName(unit)
             rawName = nm or UnitName(unit)
             if ns.IsForever and rawName and fam and fam ~= "" then rawName = rawName .. " " .. fam end
         end
-        frame.nameTxt:SetText(rawName or "")
+        if not (rawName and BV("player", "showLevel") and SetNameWithLevel(frame, unit, rawName)) then
+            frame.nameTxt:SetText(rawName or "")
+        end
         empty = not rawName
     elseif not BV(key, "showName") then
         frame.nameTxt:SetText("")
@@ -1490,7 +1494,8 @@ function UnitBars.StylePreview(f, key)
     end
     f.hpText:SetText(BV(key, "hpMode") == "value" and "70K" or "70")
     local name = (key == "player") and UnitName("player") or L[PREVIEW_NAMES[key]]
-    if not (key ~= "player" and BV(key, "showLevel") and SetNameWithLevel(f, def.unit, name, true)) then
+    -- Joueur : son vrai niveau (l'unite existe toujours) ; autres barres : niveau fictif
+    if not (BV(key, "showLevel") and SetNameWithLevel(f, def.unit, name, key ~= "player")) then
         f.nameTxt:SetText(name or "")
     end
     f._nameEmpty = false
@@ -1918,6 +1923,7 @@ eventFrame:RegisterUnitEvent("UNIT_HEAL_ABSORB_AMOUNT_CHANGED", "player", "targe
 eventFrame:RegisterUnitEvent("UNIT_TARGET",                  "target")  -- target change de cible => mettre a jour targettarget
 eventFrame:RegisterUnitEvent("UNIT_NAME_UPDATE",              "target", "focus", "pet", "targettarget")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+eventFrame:RegisterEvent("PLAYER_LEVEL_UP")   -- niveau devant le nom du joueur
 eventFrame:RegisterEvent("PLAYER_FOCUS_CHANGED")
 eventFrame:RegisterEvent("UNIT_PET")
 if ns.IsForever then pcall(eventFrame.RegisterUnitEvent, eventFrame, "UNIT_HAPPINESS", "pet") end
@@ -2149,6 +2155,12 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
 
+    -- UnitLevel pas encore a jour a l'evenement : rafraichi juste apres
+    if event == "PLAYER_LEVEL_UP" then
+        C_Timer.After(0.5, function() if bars.player then UpdateBarName(bars.player) end end)
+        return
+    end
+
     -- Nom du pet/cible parfois "Unknown" à l'invocation : rafraîchir quand le nom est chargé
     if event == "UNIT_NAME_UPDATE" then
         local k = UNIT_KEY[arg1]
@@ -2272,6 +2284,40 @@ ns.NewTicker(0.05, function()
 end)
 
 
+-- Nom du joueur au survol : fondu d'entree / de sortie (comme le nom de la cible), texte vide a la fin de la sortie.
+-- Pendant une animation de la barre (reveal), c'est elle qui gere l'opacite du nom ; nom permanent : pas de fondu.
+local nameFadeTicker
+function FadePlayerName(f, show)
+    if nameFadeTicker then nameFadeTicker:Cancel(); nameFadeTicker = nil end
+    playerNameFadingOut = false
+    if BV("player", "nameAlways") then
+        UpdateBarName(f)
+        return
+    end
+    local from = show and 0 or f.nameTxt:GetAlpha()
+    if show then UpdateBarName(f) else playerNameFadingOut = true end
+    -- Animation de la barre (reveal) en cours : elle gere l'opacite du nom, on ne fait que tenir le texte
+    if show and not ubFadeTickers.player then SetNameAlpha(f, 0) end
+    local dur = show and FADE_DURATION or FADE_DURATION_OUT
+    local t0 = GetTime()
+    nameFadeTicker = ns.NewTicker(0.016, function()
+        local p = math.min((GetTime() - t0) / dur, 1)
+        local e = EaseOut(p)
+        if p < 1 then
+            if not ubFadeTickers.player then
+                SetNameAlpha(f, show and (from + (1 - from) * e) or (from * (1 - e)))
+            end
+            return
+        end
+        nameFadeTicker:Cancel(); nameFadeTicker = nil
+        if not show then
+            playerNameFadingOut = false
+            UpdateBarName(f)
+        end
+        if not ubFadeTickers.player then SetNameAlpha(f, 1) end
+    end)
+end
+
 -- Nom du personnage au survol de sa barre de vie (option showName de la barre du joueur), jamais en combat. Meme zone de survol que
 -- la reveal "Au survol" (tolerance comprise).
 ns.NewTicker(0.1, function()
@@ -2284,7 +2330,7 @@ ns.NewTicker(0.1, function()
     end
     if want ~= playerNameShown then
         playerNameShown = want
-        UpdateBarName(f)
+        FadePlayerName(f, want)
     end
 end)
 
