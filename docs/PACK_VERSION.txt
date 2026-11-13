@@ -1,0 +1,12 @@
+# Derniere version publiee de chaque pack AishUI, lue au demarrage par l'installeur
+# (alerte "nouvelle version disponible"). Mis a jour par AishUIPackager : a pousser sur
+# GitHub une fois le pack en ligne. url / discord / notes : liens ouverts par l'alerte, ou
+# <dossier>.url=... pour un lien propre a une version du jeu.
+url=https://ko-fi.com/manage/supportreceived?filter=all&purchaseSource=All&searchKey=
+discord=https://discord.gg/xamhJnSsbp
+notes=https://aishuu.notion.site/AishUI-Retail-4-6-10-Patch-Notes-b31171d6a0464b31a9ff9e3951f9f444
+_classic_era_=2.7.13
+_anniversary_=2.7.13
+_classic_=2.7.13
+_retail_=4.7
+_forever_=4.7
