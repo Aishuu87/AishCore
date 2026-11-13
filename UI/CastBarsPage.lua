@@ -158,6 +158,7 @@ function ns.BuildCastBarsPage(container, W, NewLayout)
       if kind == "number" then nv = tonumber(nv) or nv end
       Set(prop, nv)
     end
+    if kind == "number" then SW.TrackDB(w, function() return Get(prop) end) end
     return w
   end
   local function Gray(w, reason, on) SW.SetGrayReason(w, reason, on) end
@@ -165,8 +166,9 @@ function ns.BuildCastBarsPage(container, W, NewLayout)
     local function Apply()
       local a, b = cbA:GetChecked() and true or false, cbB and cbB:GetChecked() and true or false
       Gray(col, "trio", a or b)
-      Gray(cbA, "trio", b)
-      if cbB then Gray(cbB, "trio", a) end
+      -- Une case cochee reste toujours active : avec les 2 cochees (ancien profil), elles se grisaient l'une l'autre
+      Gray(cbA, "trio", b and not a)
+      if cbB then Gray(cbB, "trio", a and not b) end
     end
     local function Hook(cb, other, otherKey)
       local orig = cb.onChanged

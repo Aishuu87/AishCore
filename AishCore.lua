@@ -429,6 +429,8 @@ local function LoadDatabase()
   -- Delègue au moteur de profils : migration legacy, merge defaults, pointage ns.DB.
   -- Déjà fait si le module Auras (ADDON_LOADED traité avant) en a eu besoin pour lier son profil.
   if not ns._activeProfileName then ns.Profiles.InitDB() end
+  -- Repli : copie de l'installeur pas encore appliquée par le module Auras (cf. Auras/Core/Events.lua)
+  if ns.Profiles.ApplyInstallerPending then ns.Profiles.ApplyInstallerPending(true) end
 end
 
 -- Cache classe/spec joueur (ne jamais écraser par nil, API parfois indispo)

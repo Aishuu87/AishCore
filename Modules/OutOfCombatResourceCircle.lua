@@ -149,7 +149,24 @@ do
   tracker:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
   tracker:SetScript("OnEvent", function(_, _, _, powerToken)
     powerLastChanged[powerToken] = GetTime()
+    if powerToken == "MANA" then OutOfCombatResourceCircle.TrackManaSpend() end
   end)
+end
+
+-- Depense de mana (lecture hors combat) : sur Forever, la regen reste bloquee 5 s (regle des 5 secondes)
+local manaRegenState = { last = nil, spentAt = nil }
+local function _ManaLower(cur, last) return cur < last end
+function OutOfCombatResourceCircle.TrackManaSpend()
+  local mana = Enum and Enum.PowerType and Enum.PowerType.Mana or 0
+  local ok, cur = pcall(UnitPower, "player", mana)
+  if not ok or cur == nil then manaRegenState.last = nil; return end
+  local last = manaRegenState.last
+  if last then
+    local okC, lower = pcall(_ManaLower, cur, last)
+    if not okC then manaRegenState.last = nil; return end
+    if lower then manaRegenState.spentAt = GetTime() end
+  end
+  manaRegenState.last = cur
 end
 
 -- Delai propre a la mana. La regeneration reste bloquee environ cinq secondes apres une
@@ -200,6 +217,16 @@ local function GetSpecID()
   if not idx then return nil end
   local id = ns.GetSpecializationInfo(idx)
   return id
+end
+
+--- Regen de mana en cours : ressource affichee = mana, mana incomplete, et (Forever) hors regle des 5 s.
+function OutOfCombatResourceCircle.IsManaRegenActive()
+  local mana = Enum and Enum.PowerType and Enum.PowerType.Mana or 0
+  if ns.GetPlayerResource() ~= mana then return false end
+  if ns.IsForever and manaRegenState.spentAt and GetTime() - manaRegenState.spentAt < 5 then return false end
+  local full = IsPowerFull(mana)
+  if full ~= nil then return not full end
+  return PowerChangedRecently("MANA")   -- valeur illisible : la mana bouge-t-elle encore ?
 end
 
 -- Visibilite : uniquement HORS combat, avec logique par ressource
@@ -377,6 +404,7 @@ function OutOfCombatResourceCircle.ApplySettings()
   lastVisibilityState = nil
 
   RenderVisual(cfg)
+  OutOfCombatResourceCircle.ApplyRegenPulse()
   -- Re-detecter les secondary dots (option allSpecs, spec change)
   OutOfCombatResourceCircle.DetectSecondaryDots()
   OutOfCombatResourceCircle.LayoutSecDots()
@@ -410,9 +438,40 @@ function OutOfCombatResourceCircle.UpdateResourceColors()
   bar.text:SetTextColor(textC[1], textC[2], textC[3], textC[4] or 1)
   if bar.bgGlow and CLR then
     local glowC = CLR.Get("glow")
-    if glowC then bar.bgGlow:SetVertexColor(glowC[1], glowC[2], glowC[3], 1) end
+    if glowC then
+      bar.glowRGB = glowC
+      -- Alpha de vertex = intensite de la pulsation de regen (cf. RegenPulseUpdate), 1 sinon
+      bar.bgGlow:SetVertexColor(glowC[1], glowC[2], glowC[3], bar.glowMul or 1)
+    end
   end
   lastResourceType = powerType
+  OutOfCombatResourceCircle.LayoutLamp()
+end
+
+-- Voyant de regen : taille, position, couleurs (propre ou Couleurs Thematiques)
+local LAMP_COLOR = { 0.6, 0.85, 1, 1 }
+local function LampColor(cfg, key)
+  if cfg.regenLampThemed then
+    local CLR = ns.Modules and ns.Modules.Colors
+    local c = CLR and CLR.Get and CLR.Get(key)
+    if c then return c end
+  end
+  return cfg.regenLampColor or LAMP_COLOR
+end
+
+function OutOfCombatResourceCircle.LayoutLamp()
+  if not (bar and bar.lamp) then return end
+  local cfg = ns.GetCfg("outOfCombatResourceCircle")
+  local s = cfg.regenLampSize or 5
+  bar.lamp:SetSize(s, s)
+  bar.lamp:ClearAllPoints()
+  bar.lamp:SetPoint("CENTER", bar, "CENTER", cfg.regenLampX or 0, cfg.regenLampY or -9)
+  local gs = cfg.regenLampGlowSize or 20
+  bar.lampGlow:SetSize(gs, gs)
+  local c = LampColor(cfg, "powerdotsa")
+  bar.lampDot:SetVertexColor(c[1], c[2], c[3], 1)
+  local g = LampColor(cfg, "glow")
+  bar.lampGlow:SetVertexColor(g[1], g[2], g[3], 0.9)
 end
 
 -- Appele quand le type de ressource change
@@ -514,6 +573,19 @@ function OutOfCombatResourceCircle.Create(parent)
   bar.text = text
   bar.textFrame = textFrame
 
+  -- Voyant de regen : halo additif derriere un petit rond, au-dessus du texte (cf. RegenPulseUpdate)
+  local lamp = CreateFrame("Frame", nil, bar)
+  lamp:SetFrameLevel(textFrame:GetFrameLevel() + 1)
+  local lampGlow = lamp:CreateTexture(nil, "BACKGROUND")
+  ns.SetSmoothTexture(lampGlow, "Interface\\AddOns\\AishCore\\Media\\Wheel\\Circle_Smooth2.tga")
+  lampGlow:SetBlendMode("ADD")
+  lampGlow:SetPoint("CENTER")
+  local lampDot = lamp:CreateTexture(nil, "ARTWORK")
+  ns.SetSmoothTexture(lampDot, ns.Media.circle)
+  lampDot:SetAllPoints()
+  lamp:Hide()
+  bar.lamp, bar.lampGlow, bar.lampDot = lamp, lampGlow, lampDot
+
   bar:Hide()
   -- Copie d'apercu : globes geres a part (cf. GhostDots), pas de detection sur le vrai cercle
   if ghostBuild then
@@ -526,7 +598,74 @@ function OutOfCombatResourceCircle.Create(parent)
   OutOfCombatResourceCircle.UpdateResourceColors()
   ApplyArcAngles()
 
+  -- Pulsation de la lueur pendant la regen de mana (option glowRegenPulse) : pilote l'alpha de vertex de bgGlow,
+  -- l'animation d'apparition gardant la main sur SetAlpha. Enfant du cercle : ne tourne que s'il est affiche.
+  OutOfCombatResourceCircle.ApplyRegenPulse()
+
   return bar
+end
+
+local REGEN_PULSE_PERIOD = 2.6   -- secondes par respiration (pulsation lente)
+local REGEN_FADE         = 0.4   -- fondu d'allumage / extinction
+local LAMP_PULSE_PERIOD  = 1.8   -- respiration de la lueur du voyant (comme le cercle central)
+
+-- Etat porte par le driver (vrai cercle ou copie d'apercu du GUI) ; la copie pulse en permanence
+local function RegenPulseUpdate(d, el)
+  el = el or 0
+  d.checkT = (d.checkT or 0) - el
+  if d.checkT <= 0 then
+    d.checkT = 0.2
+    -- Apercu (copie du GUI, ou vrai cercle en mode apercu) : pulsation toujours visible
+    d.on = d.ghost or previewMode or OutOfCombatResourceCircle.IsManaRegenActive()
+  end
+  local target = d.on and 1 or 0
+  local fade, step = d.fade or 0, el / REGEN_FADE
+  if fade < target then fade = math.min(target, fade + step) else fade = math.max(target, fade - step) end
+  d.fade = fade
+  local c = d.circle
+  if d.pulse then
+    local breath = 1
+    if fade > 0 then breath = 0.3 + 0.7 * (0.5 + 0.5 * math.sin(GetTime() * 2 * math.pi / REGEN_PULSE_PERIOD)) end
+    c.glowMul = fade * breath
+    local rgb = c.glowRGB
+    if rgb and c.bgGlow then c.bgGlow:SetVertexColor(rgb[1], rgb[2], rgb[3], c.glowMul) end
+  end
+  -- Voyant : fondu commun ; option pulse, le point et sa lueur respirent ensemble
+  if d.lamp and c.lamp then
+    local lb = 1
+    if d.lampPulse then lb = 0.35 + 0.65 * (0.5 + 0.5 * math.sin(GetTime() * 2 * math.pi / LAMP_PULSE_PERIOD)) end
+    c.lamp:SetAlpha(fade * lb)
+    c.lamp:SetShown(fade > 0)
+  end
+end
+
+--- Active / coupe la pulsation et le voyant de regen du cercle `c` (defaut : vrai cercle) ; pulsation coupee, la lueur
+--- reprend son intensite normale.
+function OutOfCombatResourceCircle.ApplyRegenPulse(c)
+  c = c or bar
+  if not c then return end
+  if not c.regenDriver then
+    c.regenDriver = CreateFrame("Frame", nil, c)
+    c.regenDriver.circle = c
+  end
+  local d = c.regenDriver
+  local cfg = ns.GetCfg("outOfCombatResourceCircle")
+  d.pulse = cfg.glowRegenPulse and true or false
+  d.lamp = cfg.regenLamp and true or false
+  d.lampPulse = cfg.regenLampPulse and true or false
+  if d.pulse or d.lamp then
+    d.checkT = 0
+    d:SetScript("OnUpdate", RegenPulseUpdate)
+  else
+    d:SetScript("OnUpdate", nil)
+    d.fade = 0
+  end
+  if not d.pulse then
+    c.glowMul = 1
+    local rgb = c.glowRGB
+    if rgb and c.bgGlow then c.bgGlow:SetVertexColor(rgb[1], rgb[2], rgb[3], 1) end
+  end
+  if not d.lamp and c.lamp then c.lamp:Hide() end
 end
 
 -- Mise a jour des valeurs (copie de ResourceCircle.Update)
@@ -945,9 +1084,15 @@ function OutOfCombatResourceCircle.RenderGhost(g, pct)
     RenderVisual(ns.GetCfg("outOfCombatResourceCircle"))
     ApplyArcValue(pct)
     g.text:SetText(tostring(pct))
+    OutOfCombatResourceCircle.UpdateResourceColors()   -- couleur de la lueur memorisee (glowRGB) pour la pulsation
   end)
   bar, ghostBuild = real, false
   if not ok then geterrorhandler()(err) end
+  if not g.regenDriver then
+    OutOfCombatResourceCircle.ApplyRegenPulse(g)
+    g.regenDriver.ghost = true
+  end
+  OutOfCombatResourceCircle.ApplyRegenPulse(g)
 end
 
 -- Remplissage seul (animation de l'apercu)

@@ -341,6 +341,11 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
             s1.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].x=v end; pcall(ns.RebuildDisplay); IconsRefresh(); CircleBarsRefresh(); FreeBarsRefresh(); IconListRefresh() end
             local s2=SW.CreateSlider(c,L["SETTINGS_POSITION_Y"],-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.y or 0)
             s2.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].y=v end; pcall(ns.RebuildDisplay); IconsRefresh(); CircleBarsRefresh(); FreeBarsRefresh(); IconListRefresh() end; cy=cy+60
+            -- Resynchro apres un deplacement du conteneur a la souris
+            if SW.TrackDB then
+                SW.TrackDB(s1, function() return ns.db and ns.db[rk] and ns.db[rk].x end)
+                SW.TrackDB(s2, function() return ns.db and ns.db[rk] and ns.db[rk].y end)
+            end
             if HasFeature(rk, "growthDirection") then
                 local growOpts={{value="DOWN",text=L["AURASMENU_RENDER_GROWTH_TOP_TO_BOTTOM"]},{value="UP",text=L["AURASMENU_RENDER_GROWTH_BOTTOM_TO_TOP"]},{value="LEFT",text=L["AURASMENU_RENDER_GROWTH_RIGHT_TO_LEFT"]},{value="RIGHT",text=L["AURASMENU_RENDER_GROWTH_LEFT_TO_RIGHT"]}}
                 local gdd=SW.CreateDropdown(c,L["AURASMENU_RENDER_STACK_DIRECTION"],growOpts,slW); gdd:SetPoint("TOPLEFT",ox,-cy)

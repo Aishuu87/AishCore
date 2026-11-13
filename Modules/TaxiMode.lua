@@ -3,8 +3,9 @@
 -- d'arrivee estimee, et un losange qui suit le personnage avec le temps ecoule.
 --
 -- Route : capturee au clic sur la carte des vols (hook de TakeTaxiNode : GetNumRoutes / TaxiGetNodeSlot).
--- Durees : apprises vol apres vol (AishaddonDB.taxiTimes, par troncon, commun au compte), sinon estimees a partir de
--- la distance a vol d'oiseau et d'une vitesse moyenne elle aussi apprise (AishaddonDB.taxiSpeed).
+-- Durees : longueur reelle du trace (Data/TaxiPaths.lua) / vitesse des taxis (apprise : AishaddonDB.taxiPathSpeed,
+-- x1.2 avec le talent Forever "Vols frequents"). Sans trace connu : duree apprise par troncon (taxiTimes), sinon
+-- distance a vol d'oiseau / vitesse moyenne apprise (taxiSpeed).
 -- Passage d'une etape : detecte par la position du joueur sur la carte des vols (repli : au temps estime).
 -- "Arret ici" : TaxiRequestEarlyLanding() pose a l'etape SUIVANTE ; pour une etape plus lointaine, la demande est
 -- differee jusqu'au passage de l'etape qui la precede.
@@ -30,6 +31,7 @@ local NODE_HOVER = 1.2    -- etape survolee (arret possible) : legerement plus g
 
 local DEFAULT_SPEED = 24     -- verges/s a vol d'oiseau (trajet reel plus long que la ligne droite)
 local DEFAULT_HOP   = 60     -- secondes, troncon sans position connue
+local DEFAULT_PATH_SPEED = 30   -- verges/s le long du trace reel (Data/TaxiPaths.lua)
 local ANIM_TIME     = 0.45   -- entree / sortie des bandes et fondu de l'interface
 local REVEAL_GRACE  = 0.6    -- un element survole reste visible ce temps apres le depart de la souris
 local UI_FADE       = 1.6    -- fondu de l'interface au decollage / a l'atterrissage
@@ -62,7 +64,36 @@ local function Dist(a, b)
   return sqrt(dx * dx + dy * dy)
 end
 
+-- Longueur reelle du trace (Data/TaxiPaths.lua), seulement avec les nodeID
+local function PathLength(a, b)
+  if not (a.id and b.id and ns.TaxiPathLength) then return nil end
+  return ns.TaxiPathLength[a.id .. ">" .. b.id]
+end
+
+-- Bonus de vitesse des taxis : talent d'heritage Forever "Vols frequents" (+20 %)
+local FREQUENT_FLIER = 1225490
+local function SpeedMult()
+  return (IsPlayerSpell and IsPlayerSpell(FREQUENT_FLIER)) and 1.2 or 1
+end
+
+-- Vitesse de base le long du trace (sans bonus), apprise par client (SavedVariables separees) ; ~30 verges/s
+-- mesuree sur Forever, plus rapide sur Retail
+local PATH_SPEED_MIN, PATH_SPEED_MAX = 10, 200
+local function PathSpeed()
+  local db = Store()
+  local s = db and tonumber(db.taxiPathSpeed)
+  return (s and s > PATH_SPEED_MIN and s < PATH_SPEED_MAX) and s or DEFAULT_PATH_SPEED
+end
+
 local function HopEstimate(a, b)
+  local len = PathLength(a, b)
+  if len then
+    -- Troncon deja vole : sa duree mesuree (hors bonus de vitesse) ; sinon longueur / vitesse apprise
+    local db = Store()
+    local t = db and db.taxiPathTimes and db.taxiPathTimes[HopKey(a, b)]
+    if t then return max(3, t / SpeedMult()) end
+    return max(3, len / (PathSpeed() * SpeedMult()))
+  end
   local db = Store()
   local t = db and db.taxiTimes[HopKey(a, b)]
   if t then return t end
@@ -75,6 +106,22 @@ end
 local function Learn(a, b, seconds)
   local db = Store()
   if not db or not seconds or seconds < 3 or seconds > 1800 then return end
+  local len = PathLength(a, b)
+  if len then
+    db.taxiPathTimes = db.taxiPathTimes or {}
+    db.taxiPathTimes[HopKey(a, b)] = floor(seconds * SpeedMult() + 0.5)
+    if len > 300 then
+      -- Moyenne des mesures (la 1re remplace la valeur par defaut), puis glissante a 20 %
+      local s = len / seconds / SpeedMult()
+      if s > PATH_SPEED_MIN and s < PATH_SPEED_MAX then
+        local n = tonumber(db.taxiPathSamples) or 0
+        local w = max(0.2, 1 / (n + 1))
+        db.taxiPathSpeed = PathSpeed() * (1 - w) + s * w
+        db.taxiPathSamples = n + 1
+      end
+    end
+    return
+  end
   db.taxiTimes[HopKey(a, b)] = floor(seconds + 0.5)
   local d = Dist(a, b)
   if d and d > 50 then
@@ -98,13 +145,8 @@ local function SplitName(full, mapID, x, y)
   return name, zone
 end
 
-local function CaptureRoute(destSlot)
-  if not (GetNumRoutes and TaxiGetNodeSlot and TaxiNodeName) then return nil end
-  local hops = GetNumRoutes(destSlot)
-  if not hops or hops < 1 then return nil end
-  local slots = { TaxiGetNodeSlot(destSlot, 1, true) }
-  for h = 1, hops do slots[#slots + 1] = TaxiGetNodeSlot(destSlot, h, false) end
-
+-- Donnees communes a toutes les routes de la carte des vols ouverte
+local function MapContext()
   local mapID = GetTaxiMapID and GetTaxiMapID()
   local byslot = {}
   if mapID and C_TaxiMap and C_TaxiMap.GetAllTaxiNodes then
@@ -115,6 +157,18 @@ local function CaptureRoute(destSlot)
   local w, h
   if mapID and C_Map and C_Map.GetMapWorldSize then w, h = C_Map.GetMapWorldSize(mapID) end
   if not (w and h and w > 0 and h > 0) then w, h = nil, nil end
+  return { mapID = mapID, byslot = byslot, w = w, h = h }
+end
+
+local function CaptureRoute(destSlot, ctx)
+  if not (GetNumRoutes and TaxiGetNodeSlot and TaxiNodeName) then return nil end
+  local hops = GetNumRoutes(destSlot)
+  if not hops or hops < 1 then return nil end
+  local slots = { TaxiGetNodeSlot(destSlot, 1, true) }
+  for h = 1, hops do slots[#slots + 1] = TaxiGetNodeSlot(destSlot, h, false) end
+
+  ctx = ctx or MapContext()
+  local mapID, byslot, w, h = ctx.mapID, ctx.byslot, ctx.w, ctx.h
 
   local nodes = {}
   for i, slot in ipairs(slots) do
@@ -185,11 +239,16 @@ local startDot, endDot, startName, startZone, endName, endZone, endEta, startGro
 local checkpoints = {}
 local animP, animTarget = 0, 0
 
+-- Couleur thematique de la spe (element du module Couleurs, "powertext" par defaut) ; nil si indisponible
+local function ThemeColor(key)
+  local CLR = ns.Modules and ns.Modules.Colors
+  return CLR and CLR.Get and CLR.Get(key or "powertext")
+end
+
 local function Accent()
   local cfg = Cfg()
   if cfg.useThemeColors then
-    local CLR = ns.Modules and ns.Modules.Colors
-    local c = CLR and CLR.Get and CLR.Get("powertext")
+    local c = ThemeColor()
     if c then return c end
   end
   return cfg.accentColor or { 1, 0.76, 0.25, 1 }
@@ -199,10 +258,17 @@ local function FontPath(f)
   return (ns.SafeFontPath and ns.SafeFontPath(f or ns.FONT_FALLBACK)) or f or ns.FONT_FALLBACK
 end
 
+-- Textes dont la case couleur est "couleurs thematiques" (au lieu de "couleur d'accent") -> element du
+-- module Couleurs utilise
+local THEME_TEXTS = { startName = "powertext", endName = "powertext", elapsed = "powertext",
+  zone = "powerdotsa", step = "powerdotsb", eta = "powerdotsb" }
+
 -- Reglages d'un texte (prefixe : startName, endName, zone, step, eta, elapsed) : police, taille, couleur, alignement
 local function TextCfg(prefix)
   local cfg = Cfg()
-  local c = cfg[prefix .. "Accent"] and Accent() or cfg[prefix .. "Color"] or { 1, 1, 1, 1 }
+  -- <prefixe>Theme : couleurs thematiques (element THEME_TEXTS), sinon <prefixe>Color
+  local c = (THEME_TEXTS[prefix] and cfg[prefix .. "Theme"] and ThemeColor(THEME_TEXTS[prefix]))
+    or cfg[prefix .. "Color"] or { 1, 1, 1, 1 }
   return cfg[prefix .. "Font"], cfg[prefix .. "Size"] or 12, c, cfg[prefix .. "Align"] or "CENTER"
 end
 
@@ -244,10 +310,15 @@ end
 local RED = { 0.9, 0.12, 0.1, 1 }
 
 -- state : "done" (passee), "todo", "stop" (survol / arret choisi)
+-- b.tint : teinte de la pastille passee (nil = texture d'origine), fixee par Layout
 local function PaintDot(b, state)
   if b.state == state then return end
   b.state = state
   b.tex:SetTexture(NODE_TEX[state] or NODE_TEX.todo)
+  -- Texture deja coloree (or) : desaturee puis teintee
+  local c = state == "done" and b.tint
+  b.tex:SetDesaturated(c and true or false)
+  if c then b.tex:SetVertexColor(c[1], c[2], c[3], 1) else b.tex:SetVertexColor(1, 1, 1, 1) end
 end
 
 local function FormatTime(s)
@@ -533,25 +604,52 @@ local function Layout()
   end
   -- Texture de la partie parcourue : "fly" = barre en relief + reflet du mode taxi ; sinon texture de barre
   -- de la liste commune (pleine hauteur, donc barre plus basse, sans reflet)
+  -- Hauteur : facteur applique a la hauteur de base de la texture (15 / 6)
   local texKey = cfg.doneTexture or "fly"
+  local hScale = cfg.doneHeight or 1
   if texKey == "fly" or not ns.ResolveBarTexFromKey then
     lineDone:SetTexture(FLY .. "timeline_on.png")
-    lineDone:SetHeight(15)
+    lineDone:SetHeight(15 * hScale)
     lineShine:Show()
   else
     lineDone:SetTexture(ns.ResolveBarTexFromKey(texKey))
-    lineDone:SetHeight(6)
+    lineDone:SetHeight(6 * hScale)
     lineShine:Hide()
   end
   lineDone:SetVertexColor(a[1], a[2], a[3], 1)
   -- Reflet : couleur d'accent eclaircie (coeur "chauffe a blanc" du modele)
   lineShine:SetVertexColor(a[1] + (1 - a[1]) * 0.55, a[2] + (1 - a[2]) * 0.55, a[3] + (1 - a[3]) * 0.55, 0.8)
   lineGlow:SetVertexColor(a[1], a[2], a[3], 0.55)
-  local themed = cfg.useThemeColors and true or false
-  diamond.core:SetShown(themed)
+  -- Pastilles passees : couleur choisie / thematique par section (repeintes au prochain Refresh)
+  local function Tint(p)
+    if not cfg[p .. "NodeTint"] then return nil end
+    return cfg[p .. "NodeTheme"] and ThemeColor() or cfg[p .. "NodeColor"] or a
+  end
+  startDot.tint, endDot.tint = Tint("start"), Tint("end")
+  startDot.state, endDot.state = nil, nil
+  local stepTint = Tint("step")
+  for _, cp in ipairs(checkpoints) do cp.tint, cp.state = stepTint, nil end
+  -- Losange : apparence propre (taille, couleur / couleurs thematiques) ou celle de la route
+  local custom = cfg.diamondCustom and true or false
+  local scale = custom and (cfg.diamondSize or 1) or 1
+  diamond:SetSize(26 * scale, 27 * scale)
+  local gs = 52 * scale * (custom and cfg.diamondGlowSize or 1)
+  diamond.glow:SetSize(gs, gs)
+  -- Couleurs thematiques : coeur en "texte de puissance", lueur en "Lueur" (module Couleurs)
+  local dc, gc
+  local themed = (custom and cfg.diamondThemeColors) or (not custom and cfg.useThemeColors)
   if themed then
-    diamond.core:SetVertexColor(a[1], a[2], a[3], 1)
-    diamond.glow:SetVertexColor(a[1], a[2], a[3], 0.5)
+    dc = ThemeColor() or (custom and cfg.diamondColor) or a
+    local CLR = ns.Modules and ns.Modules.Colors
+    gc = CLR and CLR.Get and CLR.Get("glow")
+  elseif custom then
+    dc = cfg.diamondColor or a
+  end
+  gc = gc or dc
+  diamond.core:SetShown(dc ~= nil)
+  if dc then
+    diamond.core:SetVertexColor(dc[1], dc[2], dc[3], 1)
+    diamond.glow:SetVertexColor(gc[1], gc[2], gc[3], 0.5)
   else
     diamond.glow:SetVertexColor(0.2, 0.75, 0.9, 0.5)
   end
@@ -562,6 +660,7 @@ local function Layout()
     local cp = checkpoints[i - 1] or NewCheckpoint()
     checkpoints[i - 1] = cp
     cp.index = i
+    cp.tint = stepTint   -- etapes creees apres la boucle ci-dessus
     cp:ClearAllPoints()
     cp:SetPoint("CENTER", track, "LEFT", total > 0 and tw * f.axis[i] / total or tw * (i - 1) / (#n - 1), 0)
     local alStep = ApplyText(cp.name, "step"); cp.name:SetText(n[i].name or "")
@@ -598,6 +697,13 @@ function Refresh(force)
   local x = X(k) + (X(k + 1) - X(k)) * frac
   diamond:ClearAllPoints()
   diamond:SetPoint("CENTER", track, "LEFT", x, 0)
+  -- Lueur qui respire (meme courbe que la regen de mana)
+  local cfg = Cfg()
+  local breath = 1
+  if cfg.diamondCustom and cfg.diamondGlowPulse then
+    breath = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(GetTime() * 2 * math.pi / 1.8))
+  end
+  diamond.glow:SetAlpha(breath)
   lineDone:ClearAllPoints()
   lineDone:SetPoint("LEFT", track, "LEFT", 0, 0)
   lineDone:SetWidth(max(0.001, x))
@@ -814,6 +920,27 @@ function ns.TaxiLinkHover(owner, getFrames)
   if owner then hoverLinks[owner] = getFrames end
 end
 
+-- Cadres qui ignorent l'alpha d'UIParent mais doivent suivre le fondu (Retail : bouton "Descendre" du taxi, reparente
+-- a UIParent par EllesmereUI / ElvUI) : opacite portee a la main, rendue au survol et a l'atterrissage
+local STUBBORN = { "MainMenuBarVehicleLeaveButton" }
+local stubBase = {}   -- [cadre] = alpha d'origine
+
+local function SyncStubborn(restore)
+  for _, name in ipairs(STUBBORN) do
+    local fr = _G[name]
+    if type(fr) == "table" and fr.IsIgnoringParentAlpha and not fades[fr] then
+      if restore then
+        if stubBase[fr] then fr:SetAlpha(stubBase[fr]); stubBase[fr] = nil end
+      elseif fr:IsShown() and (stubBase[fr] or fr:IsIgnoringParentAlpha()) then
+        stubBase[fr] = stubBase[fr] or fr:GetAlpha()
+        local top = TopLevel(fr)
+        local shown = (top and (hoverUntil[top] or panels[top])) and 1 or (uiSavedAlpha > 0 and uiAlpha / uiSavedAlpha or 0)
+        fr:SetAlpha(stubBase[fr] * shown)
+      end
+    end
+  end
+end
+
 local revealClock = 0
 local function UpdateReveal(el)
   StepFades(el)
@@ -941,6 +1068,8 @@ local function OnUpdate(_, el)
       UIParent:SetAlpha(uiAlpha)
     end
   end
+  if uiHidden or uiAlpha < uiSavedAlpha then SyncStubborn(false)
+  elseif next(stubBase) then SyncStubborn(true) end
   if uiHidden then UpdateReveal(el)
   elseif next(fades) then
     StepFades(el)
@@ -1060,16 +1189,45 @@ function TaxiMode.ApplySettings()
 end
 
 -- ═══ Evenements ═══════════════════════════════════════════════════════════════════════════════════
+-- Routes de toutes les destinations, relevees a l'ouverture de la carte des vols : sur Retail, la carte
+-- est deja refermee (routes videes) quand le hook de TakeTaxiNode s'execute.
+local routeCache
+
+local function CacheRoutes()
+  routeCache = nil
+  if not Cfg().enabled then return end
+  local ctx = MapContext()
+  local slots = {}
+  if NumTaxiNodes then
+    for i = 1, NumTaxiNodes() or 0 do slots[#slots + 1] = i end
+  else
+    for slot in pairs(ctx.byslot) do slots[#slots + 1] = slot end
+  end
+  routeCache = {}
+  for _, slot in ipairs(slots) do
+    local ok, route = pcall(CaptureRoute, slot, ctx)
+    if ok and route then routeCache[slot] = route end
+  end
+end
+
+local WatchTakeoff
+
 if hooksecurefunc and TakeTaxiNode then
   hooksecurefunc("TakeTaxiNode", function(slot)
     if not Cfg().enabled then return end
     local ok, route = pcall(CaptureRoute, slot)
-    if ok and route then pending = { route = route, at = GetTime() } end
+    if not (ok and route) then route = routeCache and routeCache[slot] end
+    routeCache = nil
+    if route then
+      pending = { route = route, at = GetTime() }
+      -- Sans attendre PLAYER_CONTROL_LOST (pas toujours envoye selon le client)
+      C_Timer.After(0.25, WatchTakeoff)
+    end
   end)
 end
 
 -- Decollage : UnitOnTaxi passe a vrai un peu apres la perte de controle
-local function WatchTakeoff()
+function WatchTakeoff()
   local tries = 0
   local function check()
     tries = tries + 1
@@ -1086,12 +1244,15 @@ end
 
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_CONTROL_LOST")
+ev:RegisterEvent("TAXIMAP_OPENED")
 ev:RegisterEvent("PLAYER_CONTROL_GAINED")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("DISPLAY_SIZE_CHANGED")
 ev:RegisterEvent("UI_SCALE_CHANGED")
 ev:SetScript("OnEvent", function(_, event)
-  if event == "PLAYER_CONTROL_LOST" then
+  if event == "TAXIMAP_OPENED" then
+    CacheRoutes()
+  elseif event == "PLAYER_CONTROL_LOST" then
     if pending then WatchTakeoff() end
   elseif event == "PLAYER_CONTROL_GAINED" then
     if flight then C_Timer.After(0.1, function()

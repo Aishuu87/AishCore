@@ -85,6 +85,8 @@ local ef = CreateFrame("Frame")
 ef:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         pcall(function() ns.InitDB() end)
+        -- Copie de modules déposée par l'installeur : les deux bases sont prêtes, les rendus pas encore créés
+        pcall(function() if _addon.Profiles then _addon.Profiles.ApplyInstallerPending() end end)
         pcall(function() ns.InitAllRenders() end)
         pcall(function() if ns.MissingBuffs then ns.MissingBuffs.Init() end end)
 

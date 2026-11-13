@@ -232,6 +232,10 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
             s1.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupX=v end; pcall(function() ns.Providers:Layout() end) end
             local s2=SW.CreateSlider(c,L["SETTINGS_POSITION_Y"],-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(cf.groupY or -188)
             s2.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupY=v end; pcall(function() ns.Providers:Layout() end) end; cy=cy+60
+            if SW.TrackDB then   -- resynchro apres un deplacement du groupe a la souris
+                SW.TrackDB(s1, function() return ns.db and ns.db.equipment and ns.db.equipment.groupX end)
+                SW.TrackDB(s2, function() return ns.db and ns.db.equipment and ns.db.equipment.groupY end)
+            end
             local s3=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_ICON_WIDTH"],10,80,1,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(cf.groupW or 31)
             s3.onChanged=function(v) if ns.db and ns.db.equipment then ns.db.equipment.groupW=v end; pcall(function() ns.Providers:Layout() end) end
             local s4=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_ICON_HEIGHT"],10,80,1,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(cf.groupH or 25)
@@ -269,6 +273,10 @@ function ns.SettingsPanel.BuildEquipmentMenu(p, cw)
                     s1.onChanged=function(v) sd.x=v; pcall(function() ns.Providers:Layout() end) end
                     local s2=SW.CreateSlider(c,L["SETTINGS_POSITION_Y"],-1000,1000,1,slW); s2:SetPoint("TOPLEFT",ox+slW+gap,-cy); s2:SetValue(sd.y or -188)
                     s2.onChanged=function(v) sd.y=v; pcall(function() ns.Providers:Layout() end) end; cy=cy+60
+                    if SW.TrackDB then   -- resynchro apres un deplacement de l'emplacement a la souris
+                        SW.TrackDB(s1, function() return sd.x end)
+                        SW.TrackDB(s2, function() return sd.y end)
+                    end
                     local s3=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_WIDTH"],10,80,1,slW); s3:SetPoint("TOPLEFT",ox,-cy); s3:SetValue(sd.w or 31)
                     s3.onChanged=function(v) sd.w=v; pcall(function() ns.Providers:Layout() end) end
                     local s4=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_HEIGHT"],10,80,1,slW); s4:SetPoint("TOPLEFT",ox+slW+gap,-cy); s4:SetValue(sd.h or 25)

@@ -41,15 +41,24 @@ function P:OnLoad()
   if self.SetScalingLimits then self:SetScalingLimits(1, 1, 1) end
 end
 
--- Pastille du jeu : rond (UI-QuestPoi-QuestNumber) + "?" (a rendre) ou "..." (en cours) au centre
-function P:OnAcquired(questID, complete)
-  self.questID = questID
-  SetIcon(self.Bg, "UI-QuestPoi-QuestNumber", "Interface\\Minimap\\UI-Minimap-Background", 32)
-  if complete then
+-- Pastille du jeu : rond (UI-QuestPoi-QuestNumber) + "?" (a rendre) ou "..." (en cours) au centre.
+-- Quete super-suivie : rond dore (-SuperTracked) et "..." brun, comme le POIButton selectionne du jeu.
+function P:UpdateLook()
+  local qid = self.questID
+  local st = qid and C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID and C_SuperTrack.GetSuperTrackedQuestID() == qid
+  SetIcon(self.Bg, st and "UI-QuestPoi-QuestNumber-SuperTracked" or "UI-QuestPoi-QuestNumber",
+    "Interface\\Minimap\\UI-Minimap-Background", 32)
+  if self.complete then
     SetIcon(self.Icon, "UI-QuestIcon-TurnIn-Normal", "Interface\\GossipFrame\\ActiveQuestIcon", 18)
   else
-    SetIcon(self.Icon, "Quest-In-Progress-Icon-yellow", "Interface\\GossipFrame\\IncompleteQuestIcon", 18)
+    SetIcon(self.Icon, st and "Quest-In-Progress-Icon-Brown" or "Quest-In-Progress-Icon-yellow",
+      "Interface\\GossipFrame\\IncompleteQuestIcon", 18)
   end
+end
+
+function P:OnAcquired(questID, complete)
+  self.questID, self.complete = questID, complete
+  self:UpdateLook()
 end
 
 function P:OnMouseEnter()
@@ -78,6 +87,11 @@ function P:OnMouseClickAction(button)
       C_QuestLog.AddQuestWatch(qid)
     end
     C_SuperTrack.SetSuperTrackedQuestID(qid)
+  end
+  -- Apparence a jour tout de suite (l'ancienne pastille selectionnee aussi), sans attendre le refresh
+  local map = self:GetMap()
+  if map and map.EnumeratePinsByTemplate then
+    for pin in map:EnumeratePinsByTemplate(PIN_TEMPLATE) do pin:UpdateLook() end
   end
   PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end
@@ -109,8 +123,8 @@ local function Collect(mapID, into)
   end
 end
 
--- RefreshAllData de notre fournisseur. Hors des cartes de zone, le jeu n'affiche que la quete super-suivie et
--- celle du point de passage : on les exclut pour ne pas les doubler.
+-- RefreshAllData de notre fournisseur. Hors des cartes de zone, le jeu n'affiche que quelques quetes (super-suivie
+-- et suivie, point de passage) : celles qui ont un pin du jeu sont exclues pour ne pas les doubler.
 local function Refresh(self)
   local map = self:GetMap()
   if not map then return end
@@ -125,11 +139,20 @@ local function Refresh(self)
   local mt = info.mapType
   if mt ~= Enum.UIMapType.Continent and mt ~= Enum.UIMapType.World and mt ~= Enum.UIMapType.Cosmic then return end
 
+  -- Quetes deja affichees par le jeu : ses pins reellement poses (lecture seule). La quete super-suivie n'en a
+  -- pas toujours (non suivie dans le journal) : l'exclure d'office faisait disparaitre la pastille au clic.
   local shown = {}
-  local st = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID and C_SuperTrack.GetSuperTrackedQuestID()
-  if st then shown[st] = true end
-  local focused = QuestMapFrame_GetFocusedQuestID and QuestMapFrame_GetFocusedQuestID()
-  if focused then shown[focused] = true end
+  local ok = map.EnumeratePinsByTemplate and pcall(function()
+    for pin in map:EnumeratePinsByTemplate("QuestPinTemplate") do
+      if pin.questID then shown[pin.questID] = true end
+    end
+  end)
+  if not ok then
+    local st = C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID and C_SuperTrack.GetSuperTrackedQuestID()
+    if st then shown[st] = true end
+    local focused = QuestMapFrame_GetFocusedQuestID and QuestMapFrame_GetFocusedQuestID()
+    if focused then shown[focused] = true end
+  end
 
   -- Positions : carte affichee d'abord, puis zones enfants ramenees dans son repere
   local pos = {}

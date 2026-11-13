@@ -4110,7 +4110,9 @@ function ResourceCircle.ShieldAuraEvent(_, event, unit, a1, a2)
     end
   elseif event == "UNIT_AURA" and def._pendingAt and GetTime() - def._pendingAt < 1 then
     local added = type(a1) == "table" and a1.addedAuras
-    if added then
+    -- En combat la liste des auras ajoutees est secrete : rien a capter (le compteur natif suit seul)
+    if issecretvalue and issecretvalue(added) then return end
+    if type(added) == "table" then
       for _, aura in ipairs(added) do
         local id = aura.auraInstanceID
         if id and Plain(id) and aura.isHelpful ~= false then

@@ -48,6 +48,17 @@ function ns.IsModuleAvailable(id)
   return v
 end
 
+--- Ids des modules indisponibles sur ce client (tries). Ecrits dans AishaddonDB._modulesUnavailable :
+-- l'installeur et le packager AishUI s'en servent pour masquer ces elements de l'arbre de profil.
+function ns.UnavailableModuleIds()
+  local out = {}
+  for key in pairs(MODULE_RULES) do
+    if not ns.IsModuleAvailable(key) then out[#out + 1] = key end
+  end
+  table.sort(out)
+  return out
+end
+
 --- Retire d'une liste les entrees dont le module est indisponible (en place).
 -- Une entree est soit l'id lui-meme, soit une table portant l'id dans `field` (defaut "id").
 function ns.PruneUnavailable(list, field)

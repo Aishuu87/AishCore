@@ -89,6 +89,7 @@ function ns.BuildExtraBarsPage(container, W, NewLayout)
       bc[key] = v
       Changed()
     end
+    if kind == "number" then SW.TrackDB(w, function() local bc = Bar(); return bc and bc[key] end) end
     return w
   end
 

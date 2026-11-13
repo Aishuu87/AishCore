@@ -310,6 +310,7 @@ function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width, 
     end
     return val
   end
+  container._snap = SnapStep   -- SharedWidgets.TrackDB : comparaison a la valeur de la DB
 
   function container:SetValue(val)
     val = SnapStep(val)                                    -- step-snap, no clamping
@@ -375,6 +376,32 @@ function SharedWidgets.CreateSlider(parent, label, minVal, maxVal, step, width, 
   container.valueText = container.editBox
 
   return container
+end
+
+-- Sliders resynchronises sur la DB : un element deplace a la souris (mode deverrouille) ecrit sa
+-- position en DB au OnDragStop, sans passer par le GUI. Au relachement de la souris, chaque slider
+-- suivi et visible relit sa valeur (getter) ; sinon, retoucher le slider "teleporte" l'element.
+local dbSynced = setmetatable({}, { __mode = "k" })
+local function SyncDBSliders()
+  for w in pairs(dbSynced) do
+    if w:IsVisible() and not w.editBox:HasFocus() then
+      local ok, v = pcall(w._dbGet)
+      if ok and type(v) == "number" and w._snap(v) ~= w.currentValue then w:SetValue(v) end
+    end
+  end
+end
+function SharedWidgets.TrackDB(w, getter)
+  if w and w.slider and w._snap and getter then
+    w._dbGet = getter
+    dbSynced[w] = true
+  end
+  return w
+end
+do
+  local f = CreateFrame("Frame")
+  pcall(f.RegisterEvent, f, "GLOBAL_MOUSE_UP")
+  -- Frame suivante : le OnDragStop du module a ecrit la DB
+  f:SetScript("OnEvent", function() if next(dbSynced) then C_Timer.After(0, SyncDBSliders) end end)
 end
 
 -- Section Header — style AishUI (gold dot + texte uppercase + gold hairline).

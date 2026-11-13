@@ -781,7 +781,7 @@ function TopTargetBar.Create()
                     f_target.bar:SetMinMaxValues(0, 1)
                     f_target.bar:SetValue(0.75)
                     if f_target.hpFrame then f_target.hpFrame:Show() end
-                    if f_target.hpTxt   then f_target.hpTxt:SetText("75K") end
+                    if f_target.hpTxt   then f_target.hpTxt:SetText(TopTargetBar.PreviewHPText()) end
                     -- Barre de ressource a 60% pour la preview (sinon vide/a
                     -- 0 tant qu'aucune vraie cible n'existe, cf. _TickTargetPower).
                     if f_target.powerBar then
@@ -845,6 +845,36 @@ local function ShortenHP(value)
     return ""
 end
 
+-- Texte HP selon le mode choisi ("value" = vie actuelle abregee, "pct" = pourcentage).
+-- UnitHealthPercent est C-side : accepte la vie secrete, format('%d') aussi.
+local function GetTargetHPText()
+    local db = ns.GetCfg("topTargetBar")
+    if db and db.hpMode == "pct" then
+        local ok, pct
+        if UnitHealthPercent and CurveConstants then
+            ok, pct = pcall(UnitHealthPercent, "target", false, CurveConstants.ScaleTo100)
+        else
+            -- Client sans vie secrete (Forever) : calcul direct
+            ok, pct = pcall(function()
+                local m = UnitHealthMax("target")
+                return (m and m > 0) and (UnitHealth("target") / m * 100) or 0
+            end)
+        end
+        if ok and pct then
+            local okF, s = pcall(string.format, "%d%%", pct)
+            if okF and s then return s end
+        end
+        return ""
+    end
+    return ShortenHP(UnitHealth("target"))
+end
+
+-- Texte HP de l'apercu GUI (barre figee a 75 %).
+function TopTargetBar.PreviewHPText()
+    local db = ns.GetCfg("topTargetBar")
+    return (db and db.hpMode == "pct") and "75%" or "75K"
+end
+
 -- Ticker barre de vie : UnitHealth() retourne un "secret number" non convertible en string, mais SetMinMaxValues/SetValue l'acceptent via pcall.
 -- Fonctions pré-allouées pour pcall : évite de créer une closure à chaque tick (10/sec)
 local function _TickTargetHP()
@@ -853,7 +883,7 @@ local function _TickTargetHP()
     f_target.bar:SetMinMaxValues(0, max)
     ns.SmoothBarValue(f_target.bar, cur)
     if f_target.hpTxt then
-        local txt = ShortenHP(cur)
+        local txt = GetTargetHPText()
         f_target.hpTxt:SetText(txt)
         if f_target.hpFrame and not f_target.hpFrame:IsShown() then
             f_target.hpFrame:Show()
@@ -1029,14 +1059,15 @@ function TopTargetBar.ApplySettings()
     local _dbE = ns.GetCfg("topTargetBar")
     if f_target and f_target.hpFrame and UnitExists("target")
     and not (_dbE and _dbE.enabled == false) then
-        local cur = UnitHealth("target")
-        local txt = ShortenHP(cur)
+        local txt = GetTargetHPText()
         if f_target.hpTxt then
             f_target.hpTxt:SetText("")
             f_target.hpTxt:SetText(txt)
         end
         f_target.hpFrame:Hide()
         f_target.hpFrame:Show()
+    elseif ttbPreviewMode and f_target and f_target.hpTxt then
+        f_target.hpTxt:SetText(TopTargetBar.PreviewHPText())
     end
 end
 

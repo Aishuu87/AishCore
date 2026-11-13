@@ -130,7 +130,7 @@ local function PlayerBuffs()
             if not ok or not a then break end
             bN = bN + 1
             bSid[bN], bName[bN], bExp[bN], bSrc[bN] = a.spellId, a.name, a.expirationTime, a.sourceUnit
-            if IsSecret(a.spellId) then bAnySecret = true end
+            if IsSecret(a.spellId) or IsSecret(a.name) then bAnySecret = true end
         end
     elseif UnitBuff then
         for i = 1, 60 do
@@ -143,6 +143,16 @@ local function PlayerBuffs()
     return bN
 end
 MissingBuffs.PlayerBuffs = function() local n = PlayerBuffs(); return bSid, bName, n end
+
+-- Champ de bataille / arene : auras du joueur secretes (instance + JcJ) et GetPlayerAuraBySpellID ne repond plus,
+-- un buff actif passait donc pour manquant. Dans ce cas, tout ce qui se lit sur les auras est ignore (cf. cle M+).
+function MissingBuffs.SelfAurasBlind()
+    if AurasAreSecret() then return true end
+    PlayerBuffs()
+    if not bAnySecret then return false end
+    local inInst, instType = IsInInstance()
+    return inInst and (instType == "pvp" or instType == "arena") or false
+end
 
 -- Resultat memorise tant que sacs, equipement, buffs et talents n'ont pas change (30 s de securite) : les
 -- propositions de consommables reparcouraient tous les sacs a chaque evaluation (~2 Ko par type).
@@ -942,7 +952,7 @@ end
 -- autre aura est active, et meme avec "Ignorer si monte". nil = rien a rappeler (pas en monture, connue, active...).
 local function CrusaderMountedChoices()
     local id = ns.MISSING_CRUSADER_AURA
-    if not id or not (IsMounted and IsMounted()) then return nil end
+    if not id or not (IsMounted and IsMounted()) or MissingBuffs.SelfAurasBlind() then return nil end
     for _, opt in ipairs(ns.MISSING_PALADIN_AURAS or {}) do
         local isCrusader = (opt.spellId == id)
         if not isCrusader and opt.names then
@@ -992,6 +1002,7 @@ end
 -- familier contre le buff 196099 --
 local GRIMOIRE_OF_SACRIFICE_BUFF = 196099
 local function HasSacrificedPetForGrimoire()
+    if MissingBuffs.SelfAurasBlind() then return IsPlayerSpell and IsPlayerSpell(108503) or false end
     if ns.MISSING_WARLOCK_SACRIFICE_NAMES then
         return FindAuraByNames("player", ns.MISSING_WARLOCK_SACRIFICE_NAMES) ~= nil
     end
@@ -1038,7 +1049,11 @@ function MissingBuffs.NoteHunterPetState()
     if not UnitExists("pet") then return end
     MissingBuffs._petSeenAt = GetTime()
     local dead = UnitIsDead("pet")
-    if IsSecret(dead) then return end
+    -- Etat secret (champ de bataille) : le familier est la, on leve la memoire plutot que proposer de le ressusciter
+    if IsSecret(dead) then
+        if AishUILearnDB then AishUILearnDB.hunterPetDead = nil end
+        return
+    end
     -- Joueur mort : le familier peut mourir sans etre vu, seul un familier vivant apres la resurrection leve la memoire
     if not dead and UnitIsDeadOrGhost("player") then return end
     AishUILearnDB = AishUILearnDB or { learnedDurations = {}, verbose = false }
@@ -2290,7 +2305,8 @@ local function PaladinCombatAuraChoices()
     local active
     for i = 1, GetNumShapeshiftForms() or 0 do
         local ok, _, isActive, _, sid = pcall(GetShapeshiftFormInfo, i)
-        if ok and not IsSecret(isActive) and isActive then active = sid end
+        if ok and IsSecret(isActive) then return nil end
+        if ok and isActive then active = sid end
     end
     if active and active ~= ns.MISSING_CRUSADER_AURA then return nil end
     local list = {}
@@ -2567,8 +2583,9 @@ do
     end
 end
 
+-- Forever : le voleur sans poison dans les sacs (metier appris ou non) garde les pierres / huiles
 local function WeaponEnchantByClass(class)
-    if class == "ROGUE" then return not _addon.IsForever or Poisons.Access() end
+    if class == "ROGUE" then return not _addon.IsForever or #Poisons.Bag().items > 0 end
     return class == "SHAMAN"
 end
 -- Pierre a aiguiser = arme tranchante seulement, pierre a lester = arme contondante seulement, huile = toute arme.
@@ -2750,6 +2767,8 @@ function Poisons.Check()
             return choices, expiring and "EXPIRING_SOON" or "APPLY_LETHAL"
         end
     end
+    -- Plus aucun poison mais une pierre / huile a appliquer sur une arme nue : elle passe avant le stock bas
+    if #bp.items == 0 and not cfg.ignoreWeaponStones and WeaponStoneChoices() then return nil end
     if not cfg.ignorePoisonStock and bp.total < (cfg.poisonStockThreshold or 5) then
         local prof = ns.MISSING_ROGUE_POISON_PROFESSION
         local name = prof and ForeverResolve(prof) and prof._castName
@@ -2766,6 +2785,9 @@ end
 -- d'utilisation d'un objet des sacs, ou nom qui parle de flacon / d'elixir (objet bu puis epuise dans les sacs).
 -- Un flacon couvre les elixirs et inversement (on boit l'un OU les autres). Une icone par objet (au plus 4).
 local FLASK_SUB, ELIXIR_SUB = 3, 2
+-- Elixirs de respiration aquatique (sort d'utilisation a l'aura WATER_BREATHING, via wago) : proposes seulement
+-- sous l'eau, barre de souffle affichee (MIRROR_TIMER_START / STOP relancent la verification).
+MissingBuffs.WATER_BREATHING = { [7178] = true, [11789] = true, [22807] = true, [44235] = true, [48719] = true, [175844] = true }
 local FLASK_WORDS = { "flacon", "fiole", "flask", "phial", "fläschchen", "phiole", "frasco", "vial", "фляг", "флакон" }
 local ELIXIR_WORDS = { "lixir", "lixier", "elisir", "эликсир", "Эликсир" }
 local function BagConsumables(subClass)
@@ -2818,6 +2840,7 @@ local function FlaskChoices()
     local items, spellIDs = BagConsumables(FLASK_SUB)
     if #items == 0 or ConsumableBuffActive(spellIDs, FLASK_WORDS) then return nil end
     local _, elixirIDs = BagConsumables(ELIXIR_SUB)
+    for sid in pairs(MissingBuffs.WATER_BREATHING) do elixirIDs[sid] = nil end   -- respiration aquatique : pas un elixir de combat
     if ConsumableBuffActive(elixirIDs, ELIXIR_WORDS) then return nil end
     return ConsumableChoices(items, ns.MISSING_FLASK_KEY)
 end
@@ -2825,9 +2848,18 @@ end
 -- Elixirs cumulables : une icone par elixir dont le buff manque encore (sort d'utilisation ou nom du sort parmi
 -- les buffs). Liste vide si tous sont actifs ; champ anyActive = au moins un elixir actif (option "Un seul
 -- elixir suffit", lue hors memo). Le clic masque l'icone tout de suite (stackHide, cf. ShowAlertChoices).
+function MissingBuffs.Underwater()
+    if not GetMirrorTimerInfo then return false end
+    for i = 1, (MIRRORTIMER_NUMTIMERS or 3) do
+        if GetMirrorTimerInfo(i) == "BREATH" then return true end
+    end
+    return false
+end
+
 local function ElixirChoices()
     local items, spellIDs = BagConsumables(ELIXIR_SUB)
     if #items == 0 then return nil end
+    local underwater = MissingBuffs.Underwater()
     local _, flaskIDs = BagConsumables(FLASK_SUB)
     if ConsumableBuffActive(flaskIDs, FLASK_WORDS) then return nil end
     local n = PlayerBuffs()
@@ -2845,7 +2877,9 @@ local function ElixirChoices()
             end
         end
         if active then
-            out.anyActive = true
+            if not (sid and MissingBuffs.WATER_BREATHING[sid]) then out.anyActive = true end
+        elseif okS and sid and MissingBuffs.WATER_BREATHING[sid] and not underwater then
+            -- Hors de l'eau : inutile, ne pas le reproposer
         elseif okS and MissingBuffs.ConsumableBlocked(sid) then
             -- Buff plus puissant deja actif sur la meme caracteristique (parchemin...) : refuse par le serveur
         elseif #out < 4 then
@@ -3021,6 +3055,8 @@ end
 
 -- Ouverture du panneau des talents (meme macro que le raccourci de la barre de menu)
 local function TalentsMacro()
+    -- Mode manette : /click (securise) sinon le /run taint le FrameControlsManager (cf. ns.IsGamepadUI)
+    if _addon.IsGamepadUI() and _G.PlayerSpellsMicroButton then return "/click PlayerSpellsMicroButton" end
     if _G.PlayerSpellsUtil and _G.PlayerSpellsUtil.ToggleClassTalentFrame then
         return "/run PlayerSpellsUtil.ToggleClassTalentFrame()"
     end
@@ -3061,7 +3097,9 @@ function MissingBuffs.ShowPointsAlert(cfg)
     end
     if not cfg.ignoreLegacyPoints and not TalentFrameOpen() and UnspentLegacyPoints() then
         MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_LEGACY_KEY, icon = "Interface\\Icons\\INV_Misc_Book_11",
-            macro = "/run if LegacySystemFrame then ShowUIPanel(LegacySystemFrame) elseif ToggleLegacySystemUI then ToggleLegacySystemUI() end" } },
+            -- Mode manette : pas de clic. Le /run taint le FrameControlsManager (cf. ns.IsGamepadUI) et aucun
+            -- bouton Blizzard n'ouvre ce panneau pour passer par un /click securise
+            macro = (not _addon.IsGamepadUI()) and "/run if LegacySystemFrame then ShowUIPanel(LegacySystemFrame) elseif ToggleLegacySystemUI then ToggleLegacySystemUI() end" or nil } },
             ns.MISSING_TEXT.SPEND_LEGACY)
         return true
     end
@@ -3122,7 +3160,9 @@ function MissingBuffs.CheckForMissings()
             and not UnitIsDeadOrGhost("target")
             and UnitCanAttack and UnitCanAttack("player", "target")
         if not targetingAttackable then
-            MissingBuffs.HideAlert(); return
+            -- Seuls les points de talents / d'Heritage restent rappeles
+            if not MissingBuffs.ShowPointsAlert(cfg) then MissingBuffs.HideAlert() end
+            return
         end
     end
 
@@ -3140,10 +3180,14 @@ function MissingBuffs.CheckForMissings()
         return
     end
 
+    -- Auras illisibles (champ de bataille / arene) : postures, buffs et consommables ignores
+    local blind = MissingBuffs.SelfAurasBlind()
     Probe("1")
     -- 1) Stance / aura / attunement / forme (priorite max, soi uniquement). Toutes les options
     -- apprises sont proposees (une icone chacune).
-    if class == "WARRIOR" and not cfg.ignoreWarriorStances then
+    if blind then
+        -- rien
+    elseif class == "WARRIOR" and not cfg.ignoreWarriorStances then
         local choices = ExclusiveGroupAlert(ns.MISSING_WARRIOR_STANCES)
         if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_STANCE); return end
     elseif class == "PALADIN" then
@@ -3219,7 +3263,7 @@ function MissingBuffs.CheckForMissings()
     -- arme (Retail) donnent une icone par proposition. Sinon, on CHAINE tous les autres buffs
     -- actuellement manquants dans la meme macro : la plupart de ces sorts ne partagent pas le GCD,
     -- un seul clic les applique tous a la suite ; ceux qui le partagent attendront le clic suivant.
-    local list = ns.MISSING_CLASS_BUFFS[class]
+    local list = (not blind) and ns.MISSING_CLASS_BUFFS[class]
     if list then
         local primaryEntry, primaryText, primaryUnit
         local castLines = {}
@@ -3304,7 +3348,7 @@ function MissingBuffs.CheckForMissings()
 
     Probe("4b")
     -- 4b) Forever : Bien repose (objet), manquant ou bientot expire, juste apres les buffs de classe
-    if _addon.IsForever and not cfg.ignoreWellRested then
+    if _addon.IsForever and not cfg.ignoreWellRested and not blind then
         local choices, text = WellRestedChoices(cfg)
         if choices then MissingBuffs.ShowAlertChoices(choices, text); return end
     end
@@ -3323,8 +3367,8 @@ function MissingBuffs.CheckForMissings()
     end
 
     -- Consommables (6 a 8) : option "Seulement en instance" = donjon, raid, champ de bataille, scenario
-    local consumablesOK = true
-    if cfg.consumablesInstanceOnly then
+    local consumablesOK = not blind
+    if consumablesOK and cfg.consumablesInstanceOnly then
         local inInst, instType = IsInInstance()
         consumablesOK = inInst and (instType == "party" or instType == "raid" or instType == "pvp" or instType == "scenario")
     end
@@ -3560,6 +3604,8 @@ local GROUP_EVENTS = {
     "MINIMAP_UPDATE_TRACKING",
     -- Changement de zone : leve le masquage au clic droit (cf. DismissAlert)
     "ZONE_CHANGED_NEW_AREA",
+    -- Barre de souffle (sous l'eau) : elixirs de respiration aquatique, cf. ElixirChoices
+    "MIRROR_TIMER_START", "MIRROR_TIMER_STOP",
 }
 
 eventFrame:SetScript("OnEvent", function(_, event, unit)
@@ -3588,7 +3634,8 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     end
     -- Cache des buffs du joueur (cf. PlayerBuffs) ; sortie de combat : des valeurs lues secretes en combat
     -- ne doivent pas survivre dans le cache
-    if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_REGEN_ENABLED" or (event == "UNIT_AURA" and unit == "player") then
+    if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_REGEN_ENABLED" or (event == "UNIT_AURA" and unit == "player")
+       or event == "MIRROR_TIMER_START" or event == "MIRROR_TIMER_STOP" then
         auraGen = auraGen + 1
     end
     -- Generations des resultats memorises (cf. Memo)

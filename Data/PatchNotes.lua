@@ -795,12 +795,12 @@ ns.NewByVersion = {
   {
     version = "4.6",
     categories = { castBars = true, campfire = true, cdmAppearance = true, addonCompartment = true, taxiMode = true },
-    containers = { unitBars = true, xpBar = true, comfortQoL = true, visibility = true, movementBuffs = true },
+    containers = { unitBars = true, xpBar = true, comfortQoL = true, visibility = true, movementBuffs = true, outOfCombat = true },
     headers = {
       "SETTINGS_CAT_CAST_BARS", "SETTINGS_CAT_CAMPFIRE", "SETTINGS_CAT_TAXI_MODE", "SETTINGS_CAT_CDM_APPEARANCE", "SETTINGS_CAT_ADDON_COMPARTMENT",
       "UNITBARS_SEC_FILL", "UNITBARS_SEC_DOTS", "SETTINGS_SEC_XP_RESTED", "ADDONFONTS_SEC_BAGANATOR",
       "SETTINGS_MVB_SEC_STACKS", "SETTINGS_COMFORT_SEC_TOTEM_BAR", "SETTINGS_SEC_VIS_EUI_BARS",
-      "SETTINGS_SEC_MANA_REGEN",
+      "SETTINGS_SEC_MANA_REGEN", "SETTINGS_COMFORT_SEC_PROFESSIONS",
     },
   },
   {

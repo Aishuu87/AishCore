@@ -2334,6 +2334,13 @@ function NL.CollectTrainable()
         if e.id then
           known = IsKnown(e.id) or (e.f and knownRank[e.f] and (e.r or 0) <= knownRank[e.f]) or false
           name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(e.id)
+          -- Sort sans rang appris sous un autre ID que celui de l'entraineur (Reincarnation : 21169 vendu,
+          -- 20608 dans le livre) : la recherche par nom ne repond que pour un sort connu. Jamais pour un
+          -- sort a rangs, ou un rang appris masquerait les suivants.
+          if not known and name and (e.r or 0) == 0 and C_Spell and C_Spell.GetSpellInfo then
+            local ok, info = pcall(C_Spell.GetSpellInfo, name)
+            known = ok and info ~= nil or false
+          end
           icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(e.id)
           rank = NL.SpellRank(e.id)
         elseif ns.ClassSpellLevelsLocale == GetLocale() then

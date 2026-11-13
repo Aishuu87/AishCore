@@ -325,6 +325,15 @@ ns.Defaults = {
     glowEnabled = true,
     glowSize    = 0.7,   -- plus petit que le RC principal (taille relative a bgLarge)
     glowOpacity = 0.7,
+    glowRegenPulse = false,   -- lueur seulement pendant la regen de mana, en pulsation lente
+    -- Voyant de regen : petit point + lueur, allume pendant la regen de mana
+    regenLamp = false,
+    regenLampSize = 5,
+    regenLampGlowSize = 20,
+    regenLampX = 0, regenLampY = -9,   -- sous le texte
+    regenLampColor = { 0.6, 0.85, 1, 1 },
+    regenLampThemed = false,           -- Couleurs Thematiques : point = "Decoration A", lueur = "Lueur"
+    regenLampPulse = false,            -- la lueur du voyant respire
   },
 
   -- Cercle de vie du familier (hors combat, quand le familier est blesse) : cf. Modules/PetHealthCircle.lua
@@ -1147,20 +1156,28 @@ ns.Defaults = {
     endX   = 0, endY   = 0,      -- idem, groupe de destination
     startZoneX = 0, startZoneY = 0,  -- zone de depart, en plus du decalage de son groupe
     endZoneX   = 0, endZoneY   = 0,  -- idem, zone de destination
-    -- Textes : <prefixe>Font / Size / Align / Color / Accent (Accent : couleur d'accent au lieu de Color)
+    -- Textes : <prefixe>Font / Size / Align / Color / Theme (Theme : couleurs thematiques au lieu de Color)
     startNameFont = ns.FONT_FALLBACK, startNameSize = 18, startNameAlign = "RIGHT",
-    startNameColor = { 1, 0.76, 0.25, 1 }, startNameAccent = true,
+    startNameColor = { 1, 0.76, 0.25, 1 }, startNameTheme = false,   -- Theme : couleurs thematiques
     endNameFont = ns.FONT_FALLBACK, endNameSize = 18, endNameAlign = "LEFT",
-    endNameColor = { 1, 0.76, 0.25, 1 }, endNameAccent = true,
+    endNameColor = { 1, 0.76, 0.25, 1 }, endNameTheme = false,
     zoneFont = ns.FONT_FALLBACK, zoneSize = 12, zoneAlign = "CENTER",
-    zoneColor = { 0.72, 0.72, 0.72, 1 }, zoneAccent = false,
+    zoneColor = { 0.72, 0.72, 0.72, 1 }, zoneTheme = false,
     stepFont = ns.FONT_FALLBACK, stepSize = 11, stepAlign = "CENTER",
-    stepColor = { 0.72, 0.72, 0.72, 1 }, stepAccent = false,
+    stepColor = { 0.72, 0.72, 0.72, 1 }, stepTheme = false,
     etaFont = ns.FONT_FALLBACK, etaSize = 10, etaAlign = "CENTER",
-    etaColor = { 0.55, 0.55, 0.55, 1 }, etaAccent = false,
+    etaColor = { 0.55, 0.55, 0.55, 1 }, etaTheme = false,
     elapsedFont = ns.FONT_FALLBACK, elapsedSize = 14, elapsedAlign = "RIGHT",
-    elapsedColor = { 1, 0.76, 0.25, 1 }, elapsedAccent = true,
+    elapsedColor = { 1, 0.76, 0.25, 1 }, elapsedTheme = false,   -- Theme : couleurs thematiques (pas d'Accent)
     elapsedX = 0, elapsedY = 0,  -- decalage du temps ecoule (sous le losange)
+    doneHeight = 1,              -- hauteur du trajet parcouru (facteur)
+    -- Pastilles passees (start / end / step) : teinte (sinon texture d'origine)
+    startNodeTint = false, startNodeColor = { 1, 0.76, 0.25, 1 }, startNodeTheme = false,
+    endNodeTint   = false, endNodeColor   = { 1, 0.76, 0.25, 1 }, endNodeTheme   = false,
+    stepNodeTint  = false, stepNodeColor  = { 1, 0.76, 0.25, 1 }, stepNodeTheme  = false,
+    -- Losange de position : apparence propre (sinon suit la couleur d'accent de la route)
+    diamondCustom = false, diamondSize = 1, diamondGlowSize = 1, diamondGlowPulse = false,
+    diamondColor = { 1, 0.76, 0.25, 1 }, diamondThemeColors = false,
     accentColor       = { 1, 0.76, 0.25, 1 },
     useThemeColors    = false,
     doneTexture       = "fly",   -- partie parcourue : "fly" (texture du mode taxi) ou cle de ns.GetBarTextureList()
@@ -1232,6 +1249,7 @@ ns.Defaults = {
     totemBarHoverOnly = false, -- ... ou affichee seulement au survol
     totemBarHoverAlpha = 0,   -- opacite hors survol
     spellRanks     = true,    -- grimoire (Forever) : nouveau rang a poser sur les barres (Modules/SpellRanks.lua)
+    craftableReagents = true, -- fenetre de metier : ingredients fabricables marques (Modules/CraftableReagents.lua)
   },
 
   -- Barre de cible détaillée (haut d'écran) + cible de la cible
@@ -1250,7 +1268,7 @@ ns.Defaults = {
     -- Texte nom/niveau (offset relatif au conteneur)
     nameOX = 0,   nameOY = -5,
     -- Texte HP (ancre + offset relatifs à la barre de vie)
-    hpAnchor = "LEFT",  hpOX = 5,  hpOY = -19,  hpFontSize = 10,
+    hpAnchor = "LEFT",  hpOX = 5,  hpOY = -19,  hpFontSize = 10, hpMode = "value",
     nameFont = "Fonts\\2002.TTF",
     hpFont   = "Fonts\\2002.TTF",
     -- Position du conteneur targettarget

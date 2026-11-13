@@ -37,6 +37,7 @@ function ns.BuildAddonCompartmentPage(container, W, NewLayout)
       DB()[key] = v
       Changed()
     end
+    if kind == "number" then SW.TrackDB(w, function() return DB()[key] end) end
     return w
   end
 

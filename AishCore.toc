@@ -2,7 +2,7 @@
 ## Title: AishCore
 ## Notes: Custom UI overlay - resource & health circles, spell effects, auras & procs
 ## Author: Aishuu
-## Version: 4.6.16
+## Version: 4.7.0
 ## IconTexture: Interface\AddOns\AishCore\Media\logo_icon
 ## X-Curse-Project-ID: 1689788
 ## SavedVariables: AishaddonDB AishUIAuraDB
@@ -37,6 +37,7 @@ Data\ClassSpellLevels.lua
 Data\LevelGains.lua
 Data\MapOverlays.lua
 Data\TownAreas.lua
+Data\TaxiPaths.lua
 Data\SpellHomonyms.lua
 
 # Engine
@@ -77,6 +78,7 @@ Modules\TaxiMode.lua
 Modules\BigCursor.lua
 Modules\MapReveal.lua
 Modules\MapQuests.lua
+Modules\CraftableReagents.lua
 Modules\SpellRanks.lua
 Modules\Comfort.lua
 Modules\StealthMode.lua
@@ -135,6 +137,7 @@ Modules\Auras\UI\CategoryDispatcher.lua
 UI\SharedWidgets.lua
 UI\MinimapButton.lua
 UI\SettingsPanel.lua
+UI\SettingsSearch.lua
 Data\GuiLayout.lua
 UI\LayoutEditor.lua
 UI\ProfileModulesUI.lua

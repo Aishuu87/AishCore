@@ -1312,6 +1312,7 @@ local function BindSlider(slider, dbKey, subKey, fallbackSubKey)
   slider.onChanged = function(val) DBSet(dbKey, subKey, val); LiveApply(dbKey) end
   slider._dbKey  = dbKey
   slider._subKey = subKey
+  SW.TrackDB(slider, function() return DBGet(dbKey, subKey) end)
 end
 
 local function BindDropdown(dd, dbKey, subKey, fallbackSubKey)
@@ -3133,11 +3134,41 @@ function Build.OutOfCombat(container)
       L["SETTINGS_GLOW_ENABLE"],
       L["SETTINGS_OCRC_GLOW_ENABLE_TT"], W))
     BindCheckbox(cbOCRCGlow, "outOfCombatResourceCircle", "glowEnabled")
+    local cbOCRCRegenPulse = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_OCRC_GLOW_REGEN_PULSE"],
+      L["SETTINGS_OCRC_GLOW_REGEN_PULSE_TT"], W))
+    BindCheckbox(cbOCRCRegenPulse, "outOfCombatResourceCircle", "glowRegenPulse")
     local slOCRCGlowSize = SW.CreateSlider(container, L["SETTINGS_GLOW_SIZE"], 0.3, 8.0, 0.1, SL_W2)
     BindSlider(slOCRCGlowSize, "outOfCombatResourceCircle", "glowSize")
     local slOCRCGlowOpacity = SW.CreateSlider(container, L["SETTINGS_GLOW_OPACITY"], 0, 1, 0.05, SL_W2)
     BindSlider(slOCRCGlowOpacity, "outOfCombatResourceCircle", "glowOpacity")
     ctx:AddRow(8, slOCRCGlowSize, slOCRCGlowOpacity)
+
+    -- Voyant de regen : point + lueur allumes pendant la regen de mana (comme le cercle central)
+    ctx:Spacer(6)
+    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_MANA_REGEN"], W))
+    local cbOCRCLamp = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_MANA_REGEN_LAMP"], L["SETTINGS_OCRC_REGEN_LAMP_TT"], W))
+    BindCheckbox(cbOCRCLamp, "outOfCombatResourceCircle", "regenLamp")
+    local function OCRCLampSlider(label, lo, hi, key)
+      local sl = SW.CreateSlider(container, label, lo, hi, 1, SL_W2)
+      BindSlider(sl, "outOfCombatResourceCircle", key)
+      return sl
+    end
+    ctx:AddRow(8, OCRCLampSlider(L["SETTINGS_MANA_REGEN_LAMP_DOT_SIZE"], 2, 30, "regenLampSize"),
+      OCRCLampSlider(L["SETTINGS_MANA_REGEN_LAMP_GLOW_SIZE"], 2, 120, "regenLampGlowSize"))
+    ctx:AddRow(8, OCRCLampSlider(L["SETTINGS_OFFSET_X"], -150, 150, "regenLampX"),
+      OCRCLampSlider(L["SETTINGS_OFFSET_Y"], -150, 150, "regenLampY"))
+    local cbOCRCLampThemed = SW.CreateCheckbox(container, L["SETTINGS_RC_THEMED_COLORS"], L["SETTINGS_RC_THEMED_COLORS_TT"], SL_W2)
+    BindCheckbox(cbOCRCLampThemed, "outOfCombatResourceCircle", "regenLampThemed")
+    local colOCRCLamp = SW.CreateColorButton(container, L["SETTINGS_MANA_REGEN_LAMP_COLOR"], SL_W2)
+    colOCRCLamp:SetColor(0.6, 0.85, 1, 1)
+    BindColorButton(colOCRCLamp, "outOfCombatResourceCircle", "regenLampColor")
+    Build.LinkSpecColor(cbOCRCLampThemed, colOCRCLamp)
+    ctx:AddRow(8, cbOCRCLampThemed, colOCRCLamp)
+    local cbOCRCLampPulse = ctx:Add(SW.CreateCheckbox(container,
+      L["SETTINGS_MANA_REGEN_PULSE"], L["SETTINGS_OCRC_REGEN_LAMP_PULSE_TT"], W))
+    BindCheckbox(cbOCRCLampPulse, "outOfCombatResourceCircle", "regenLampPulse")
   end
 
   -- Cercle de Vie du Familier --------------------------------------------------------------------------------------
@@ -8671,6 +8702,7 @@ function Build.LevelUpToastSection(container, ctx, W)
     local s = SW.CreateSlider(container, label, lo, hi, step, third)
     s:SetValue(Get(key))
     s.onChanged = Set(key)
+    SW.TrackDB(s, function() return Get(key) end)
     s._toastSlider = true   -- grise avec la section (cf. SetSectionEnabled)
     return s
   end
@@ -9726,6 +9758,8 @@ function Build.TopTargetBar(container)
     local sB = SW.CreateSlider(container, labelB, minB, maxB, stepB, _ttbSL2)
     sB:SetValue(TTBGet(propB) or 0)
     sB.onChanged = function(val) TTBSet(propB, val) end
+    SW.TrackDB(sA, function() return TTBGet(propA) end)
+    SW.TrackDB(sB, function() return TTBGet(propB) end)
     ctx:AddRow(10, sA, sB)
   end
 
@@ -9846,6 +9880,13 @@ function Build.TopTargetBar(container)
   alignHpAnchor:SetValue(TTBGet("hpAnchor") or "LEFT")
   alignHpAnchor.onChanged = function(val) TTBSet("hpAnchor", val) end
 
+  local rowTTBHpMode = ctx:Add(SW.CreateAlignRow(container, L["UNITBARS_HP_MODE"], W, {
+    { k = "value", l = L["UNITBARS_HP_MODE_VALUE"] },
+    { k = "pct",   l = L["UNITBARS_HP_MODE_PCT"] },
+  }))
+  rowTTBHpMode:SetValue(TTBGet("hpMode") or "value")
+  rowTTBHpMode.onChanged = function(val) TTBSet("hpMode", val) end
+
   local slTTBHpSize = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 28, 1, 200))
   slTTBHpSize:SetValue(TTBGet("hpFontSize") or 10)
   slTTBHpSize.onChanged = function(val) TTBSet("hpFontSize", val) end
@@ -9932,6 +9973,8 @@ function Build.TargetAuras(container)
     local sB = SW.CreateSlider(parent, labelB or L["SETTINGS_OFFSET_Y"], -200, 200, 1, halfW)
     sB:SetValue(getterFn(propB) or 0)
     sB.onChanged = function(v) setterFn(propB, v) end
+    SW.TrackDB(sA, function() return getterFn(propA) end)
+    SW.TrackDB(sB, function() return getterFn(propB) end)
     local row = CreateFrame("Frame", nil, parent)
     row:SetSize(rowWidth, sA:GetHeight())
     sA:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
@@ -10059,6 +10102,8 @@ function Build.TargetAuras(container)
     local slOffY = SW.CreateSlider(detail, L["SETTINGS_OFFSET_Y"], -200, 200, 1, iconRowSL3)
     slOffY:SetValue(gGet("offsetY") or 0)
     slOffY.onChanged = function(val) gSet("offsetY", val) end
+    SW.TrackDB(slOffX, function() return gGet("offsetX") end)
+    SW.TrackDB(slOffY, function() return gGet("offsetY") end)
     dctx:AddRow(8, slSize, slOffX, slOffY)
 
     local gridSL4 = math.floor((dw - 3 * 8) / 4)
@@ -10473,7 +10518,7 @@ function Build.Colors(container)
       local cols = math.max(1, math.floor((CONTENT_W - SPEC_INDENT + GAP_X) / CELL_STRIDE))
 
       -- Grille de couleurs d'une ligne (spe ou condition) : posee dans `parent` a partir de y0, renvoie le y final
-      local function BuildGrid(parent, y0, specID)
+      local function BuildGrid(parent, y0, specID, buttons)
         local gy = y0
         -- Grille de couleurs : rectangles + libellé (2 lignes max) en dessous,
         -- indentée à SPEC_INDENT pour s'aligner avec l'en-tête de spé ci-dessus.
@@ -10490,6 +10535,7 @@ function Build.Colors(container)
           sw:SetSize(SWATCH_W, SWATCH_H)
           sw:SetPoint("TOP", cell, "TOP", 0, 0)
           sw:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+          if buttons then buttons[#buttons + 1] = sw end
 
           local swBg = sw:CreateTexture(nil, "BACKGROUND")
           swBg:SetAllPoints()
@@ -10586,14 +10632,45 @@ function Build.Colors(container)
         return gy
       end
 
+      -- Mode Posture (Guerrier) : toggle en tete ; coche, les lignes de spe sont grisees et celles des postures actives
+      local specBlocks, stanceBlocks, cbStance = {}, {}, nil
+      local function ApplyStanceGray()
+        local on = Colors.IsStanceMode()
+        local function SetBlock(b, active)
+          b.frame:SetAlpha(active and 1 or 0.3)
+          for _, btn in ipairs(b.buttons) do btn:EnableMouse(active) end
+        end
+        for _, b in ipairs(specBlocks) do SetBlock(b, not on) end
+        for _, b in ipairs(stanceBlocks) do SetBlock(b, on) end
+      end
+      if cd.stances then
+        cbStance = SW.CreateCheckbox(cFrame, L["SETTINGS_COLORS_STANCE_MODE"], L["SETTINGS_COLORS_STANCE_MODE_TT"],
+          CONTENT_W - SPEC_INDENT)
+        cbStance:SetPoint("TOPLEFT", cFrame, "TOPLEFT", SPEC_INDENT, -fy)
+        cbStance:SetChecked(Colors.IsStanceMode())
+        cbStance.onChanged = function(val)
+          Colors.SetStanceMode(val)
+          ApplyStanceGray()
+        end
+        fy = fy + cbStance:GetHeight() + 6
+      end
+
       for _, spec in ipairs(cd.specs) do
+        -- Bloc de la ligne (grisable en Mode Posture) : en-tete + grille
+        local blk = CreateFrame("Frame", nil, cFrame)
+        blk:SetWidth(CONTENT_W)
+        blk:SetPoint("TOPLEFT", cFrame, "TOPLEFT", 0, -fy)
+        local blkInfo = { frame = blk, buttons = {} }
+        specBlocks[#specBlocks + 1] = blkInfo
+        local fy0 = fy
+        fy = 0
         -- En-tête de spé -- même habillage point/hairline que l'en-tête de
         -- classe, juste indenté et non pliable (pas de fond plein). Couleur =
         -- élément "Cercle de Puissance" de CETTE spé (pas le fallback classe) :
         -- reprend la teinte réellement utilisée en jeu pour cette spé précise.
         local powerColor = Colors.GetForSpec(cd.key, spec.id, "powercircle") or fc
-        local specHeader = SW.CreateSectionHeader(cFrame, spec.name, CONTENT_W - SPEC_INDENT, powerColor)
-        specHeader:SetPoint("TOPLEFT", cFrame, "TOPLEFT", SPEC_INDENT, -fy)
+        local specHeader = SW.CreateSectionHeader(blk, spec.name, CONTENT_W - SPEC_INDENT, powerColor)
+        specHeader:SetPoint("TOPLEFT", blk, "TOPLEFT", SPEC_INDENT, -fy)
 
         -- Clic droit sur le nom : définir cette spé comme spé par défaut de la classe (utilisée quand
         -- aucune spé n'est déterminée). Une couronne s'affiche à droite du nom de la spé par défaut.
@@ -10610,6 +10687,7 @@ function Build.Colors(container)
         specHit:SetAllPoints(specHeader)
         specHit:SetFrameLevel(specHeader:GetFrameLevel() + 1)
         specHit:RegisterForClicks("RightButtonUp")
+        blkInfo.buttons[#blkInfo.buttons + 1] = specHit
         local specHl = specHit:CreateTexture(nil, "BACKGROUND")
         specHl:SetAllPoints(); specHl:SetColorTexture(1, 1, 1, 0.05); specHl:Hide()
         local function ShowSpecTip(self)
@@ -10629,8 +10707,28 @@ function Build.Colors(container)
 
         fy = fy + specHeader:GetHeight() + 6
 
-        fy = BuildGrid(cFrame, fy, spec.id)
+        fy = BuildGrid(blk, fy, spec.id, blkInfo.buttons)
         fy = fy + SPEC_GAP
+        blk:SetHeight(fy)
+        fy = fy0 + fy
+      end
+
+      -- Lignes des postures (defaut : couleurs de la spe liee, cf. Colors.GetForSpec)
+      if cd.stances then
+        for _, st in ipairs(cd.stances) do
+          local blk = CreateFrame("Frame", nil, cFrame)
+          blk:SetWidth(CONTENT_W)
+          blk:SetPoint("TOPLEFT", cFrame, "TOPLEFT", 0, -fy)
+          local blkInfo = { frame = blk, buttons = {} }
+          stanceBlocks[#stanceBlocks + 1] = blkInfo
+          local hdr = SW.CreateSectionHeader(blk, st.name, CONTENT_W - SPEC_INDENT,
+            Colors.GetForSpec(cd.key, st.id, "powercircle") or fc)
+          hdr:SetPoint("TOPLEFT", blk, "TOPLEFT", SPEC_INDENT, 0)
+          local by = BuildGrid(blk, hdr:GetHeight() + 6, st.id, blkInfo.buttons) + SPEC_GAP
+          blk:SetHeight(by)
+          fy = fy + by
+        end
+        ApplyStanceGray()
       end
 
       -- Conditions (Furtivite...) : une ligne par condition, avec sa case a cocher. Decochee : grisee et repliee
@@ -10820,6 +10918,7 @@ local function AFKBindElemSlider(sl, key, field)
   local v = AFKGetElem(key, field)
   if v then sl:SetValue(v) end
   sl.onChanged = function(val) AFKSetElem(key, field, val) end
+  SW.TrackDB(sl, function() return AFKGetElem(key, field) end)
 end
 local function AFKBindElemColor(btn, key, field)
   btn._leId = "afkElement." .. field
@@ -11253,6 +11352,8 @@ function Build.Skyriding(container)
   local slSRPosY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -200, 200, 1, srHalfW)
   slSRPosY:SetValue(SRGet("y") or 0)
   slSRPosY.onChanged = function(v) SRSet("y", v) end
+  SW.TrackDB(slSRPosX, function() return SRGet("x") end)
+  SW.TrackDB(slSRPosY, function() return SRGet("y") end)
   ctx:AddRow(8, slSRPosX, slSRPosY)
   -- Exposes globalement (remplace les anciens EditBox nommes
   -- AishCoreSRXEditBox/YEditBox) : Modules/Skyriding.lua met ces sliders a
@@ -13477,6 +13578,7 @@ local function BindNestedSlider(slider, group, field)
   local v = DBGetNested(group, field)
   if v then slider:SetValue(v) end
   slider.onChanged = function(val) DBSetNested(group, field, val) end
+  SW.TrackDB(slider, function() return DBGetNested(group, field) end)
 end
 local function BindNestedDropdown(dd, group, field)
   local v = DBGetNested(group, field)
@@ -13952,6 +14054,12 @@ function Build.ComfortQoL(container)
     ctx:Depends(cbTurn, { slTurn, reset })
   end
 
+  -- Fenetre de metier : ingredients fabricables (detrompeur, infobulle, clic droit), cf. Modules/CraftableReagents.lua
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_PROFESSIONS"], W))
+  local cbCraft = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_CRAFTABLE"], L["SETTINGS_COMFORT_CRAFTABLE_TT"], W))
+  BindCheckbox(cbCraft, "comfort", "craftableReagents")
+
   -- Reveler la carte du monde (zones non decouvertes), cf. Modules/MapReveal.lua
   ctx:Spacer(6)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_MAPREVEAL_TITLE"], W))
@@ -14328,11 +14436,27 @@ function Build.TaxiMode(container)
   ctx:AddRow(8, colAccent, cbTheme)
   local texItems = { { value = "fly", text = L["SETTINGS_TAXI_DONE_TEX_DEFAULT"] } }
   for _, e in ipairs(ns.GetBarTextureList()) do texItems[#texItems + 1] = e end
-  local ddDoneTex = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_TAXI_DONE_TEXTURE"], texItems, W2))
+  local ddDoneTex = SW.CreateDropdown(container, L["SETTINGS_TAXI_DONE_TEXTURE"], texItems, W2)
   BindDropdown(ddDoneTex, "taxiMode", "doneTexture")
+  local slDoneH = SW.CreateSlider(container, L["SETTINGS_TAXI_DONE_HEIGHT"], 0.3, 3, 0.05, W2)
+  BindSlider(slDoneH, "taxiMode", "doneHeight")
+  ctx:AddRow(8, ddDoneTex, slDoneH)
+
+  -- Pastille passee d'une section (depart, destination, etapes) : couleur choisie ou thematique
+  local function NodeBlock(p)
+    local cbNode = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_TAXI_NODE_TINT"], L["SETTINGS_TAXI_NODE_TINT_TT"], W))
+    BindCheckbox(cbNode, "taxiMode", p .. "NodeTint")
+    local colNode = SW.CreateColorButton(container, L["SETTINGS_TAXI_NODE_COLOR"], W2)
+    BindColorButton(colNode, "taxiMode", p .. "NodeColor")
+    local cbNodeTheme = SW.CreateCheckbox(container, L["SETTINGS_AFK_USE_THEME_COLORS"], L["SETTINGS_AFK_USE_THEME_COLORS_TT"], W2)
+    BindCheckbox(cbNodeTheme, "taxiMode", p .. "NodeTheme")
+    ctx:AddRow(8, colNode, cbNodeTheme)
+    ctx:Depends(cbNode, { colNode, cbNodeTheme })
+    ctx:Depends(cbNodeTheme, { colNode }, true)
+  end
 
   -- Textes : police, taille, alignement, couleur (ou couleur d'accent) ; groupes depart / destination decalables
-  local function TextBlock(prefix, title, offX, offY, labX, labY)
+  local function TextBlock(prefix, title, offX, offY, labX, labY, node)
     ctx:Spacer(6)
     ctx:Add(SW.CreateSectionHeader(container, title, W))
     local ddFont = SW.CreateDropdown(container, L["SETTINGS_TAXI_FONT"], ns.GetFontList(), W3)
@@ -14352,8 +14476,12 @@ function Build.TaxiMode(container)
     ctx:AddRow(8, ddFont, slSize, align)
     local col = SW.CreateColorButton(container, L["SETTINGS_TAXI_TXT_COLOR"], W2)
     BindColorButton(col, "taxiMode", prefix .. "Color")
-    local cbAcc = SW.CreateCheckbox(container, L["SETTINGS_TAXI_TXT_USE_ACCENT"], L["SETTINGS_TAXI_TXT_USE_ACCENT_TT"], W2)
-    BindCheckbox(cbAcc, "taxiMode", prefix .. "Accent")
+    -- Couleurs thematiques (zones : Decorations A, etapes / ETA : Decorations B, autres : texte de puissance)
+    local tt = (prefix == "zone" and L["SETTINGS_TAXI_TXT_USE_THEME_A_TT"])
+      or ((prefix == "step" or prefix == "eta") and L["SETTINGS_TAXI_TXT_USE_THEME_B_TT"])
+      or L["SETTINGS_TAXI_TXT_USE_THEME_TT"]
+    local cbAcc = SW.CreateCheckbox(container, L["SETTINGS_AFK_USE_THEME_COLORS"], tt, W2)
+    BindCheckbox(cbAcc, "taxiMode", prefix .. "Theme")
     ctx:AddRow(8, col, cbAcc)
     ctx:Depends(cbAcc, { col }, true)
     if offX then
@@ -14363,9 +14491,10 @@ function Build.TaxiMode(container)
       BindSlider(slY, "taxiMode", offY)
       ctx:AddRow(8, slX, slY)
     end
+    if node then NodeBlock(node) end
   end
-  TextBlock("startName", L["SETTINGS_TAXI_TXT_START"], "startX", "startY")
-  TextBlock("endName",   L["SETTINGS_TAXI_TXT_END"], "endX", "endY")
+  TextBlock("startName", L["SETTINGS_TAXI_TXT_START"], "startX", "startY", nil, nil, "start")
+  TextBlock("endName",   L["SETTINGS_TAXI_TXT_END"], "endX", "endY", nil, nil, "end")
   TextBlock("zone",      L["SETTINGS_TAXI_TXT_ZONES"])
   -- Zones decalables chacune de leur cote (en plus du decalage de leur groupe nom + zone)
   for _, z in ipairs({ { "startZone", L["SETTINGS_TAXI_START_ZONE_X"], L["SETTINGS_TAXI_START_ZONE_Y"] },
@@ -14376,10 +14505,30 @@ function Build.TaxiMode(container)
     BindSlider(slY, "taxiMode", z[1] .. "Y")
     ctx:AddRow(8, slX, slY)
   end
-  TextBlock("step",      L["SETTINGS_TAXI_TXT_STEPS"])
+  TextBlock("step",      L["SETTINGS_TAXI_TXT_STEPS"], nil, nil, nil, nil, "step")
   TextBlock("eta",       L["SETTINGS_TAXI_TXT_ETA"])
   TextBlock("elapsed",   L["SETTINGS_TAXI_TXT_ELAPSED"], "elapsedX", "elapsedY",
     L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"])
+
+  -- Losange de position : taille et couleur propres (sinon couleur d'accent de la route)
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_TAXI_DIAMOND"], W))
+  local cbDia = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_TAXI_DIAMOND_CUSTOM"], L["SETTINGS_TAXI_DIAMOND_CUSTOM_TT"], W))
+  BindCheckbox(cbDia, "taxiMode", "diamondCustom")
+  local slDiaSize = SW.CreateSlider(container, L["SETTINGS_TAXI_DIAMOND_SIZE"], 0.5, 2.5, 0.05, W2)
+  BindSlider(slDiaSize, "taxiMode", "diamondSize")
+  local slDiaGlow = SW.CreateSlider(container, L["SETTINGS_TAXI_DIAMOND_GLOW_SIZE"], 0, 3, 0.05, W2)
+  BindSlider(slDiaGlow, "taxiMode", "diamondGlowSize")
+  ctx:AddRow(8, slDiaSize, slDiaGlow)
+  local cbDiaPulse = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_MANA_REGEN_PULSE"], L["SETTINGS_TAXI_DIAMOND_PULSE_TT"], W))
+  BindCheckbox(cbDiaPulse, "taxiMode", "diamondGlowPulse")
+  local colDia = SW.CreateColorButton(container, L["SETTINGS_TAXI_DIAMOND_COLOR"], W2)
+  BindColorButton(colDia, "taxiMode", "diamondColor")
+  local cbDiaTheme = SW.CreateCheckbox(container, L["SETTINGS_AFK_USE_THEME_COLORS"], L["SETTINGS_AFK_USE_THEME_COLORS_TT"], W2)
+  BindCheckbox(cbDiaTheme, "taxiMode", "diamondThemeColors")
+  ctx:AddRow(8, colDia, cbDiaTheme)
+  ctx:Depends(cbDia, { slDiaSize, slDiaGlow, cbDiaPulse, colDia, cbDiaTheme })
+  ctx:Depends(cbDiaTheme, { colDia }, true)
 
   ctx:Finalize()
   return ctx.widgets
@@ -15326,8 +15475,13 @@ local function GetCategorySearchText(catId)
   local keys = ns.SEARCH_INDEX and ns.SEARCH_INDEX[catId]
   if keys then
     local heroic = ns.HasHeroicFeatures and ns.HasHeroicFeatures()
-    for key in keys:gmatch("%S+") do
-      local txt = (heroic or not HEROIC_SEARCH_KEYS[key]) and (ns.IsForever or not FOREVER_SEARCH_KEYS[key]) and rawget(L, key)
+    for raw in keys:gmatch("%S+") do
+      -- "F:CLE" / "R:CLE" : option posee seulement sur Forever / Retail (cf. generate_search_index.py)
+      local cl, key = raw:match("^([FR]):(.+)$")
+      key = key or raw
+      local txt = (not cl or (cl == "F") == (ns.IsForever and true or false))
+        and (heroic or not HEROIC_SEARCH_KEYS[key])
+        and (ns.IsForever or not FOREVER_SEARCH_KEYS[key]) and rawget(L, key)
       if txt then buf[#buf + 1] = txt end
     end
   end
@@ -15602,6 +15756,8 @@ local function BuildSidebar()
     if txt == "" then placeholder:Show() else placeholder:Hide() end
     RefreshSidebar()
   end)
+  -- Suggestions pendant la frappe + saut direct vers l'option (UI/SettingsSearch.lua)
+  if ns.SettingsSearch then ns.SettingsSearch.Attach(searchBox) end
 
   -- ScrollFrame contenant l'accordion
   local sbSF = CreateFrame("ScrollFrame", nil, sidebar)
@@ -17032,6 +17188,11 @@ RegisterWoWSettings()
 
 -- Exporter
 ns.SettingsPanel = MainFrame
+-- Donnees de la recherche avec suggestions (UI/SettingsSearch.lua)
+MainFrame._searchData = {
+  categories = CATEGORIES, containers = categoryContainers, scrollFrame = scrollFrame, content = content,
+  heroicKeys = HEROIC_SEARCH_KEYS, foreverKeys = FOREVER_SEARCH_KEYS,
+}
 -- Invalidation d'une page de reglages (cf. _invalidateCategory plus haut),
 -- exposee pour les fichiers hors SettingsPanel.lua dont la case "Activer"
 -- ne passe pas par les Bind* d'ici (ex: MissingBuffs.lua, dont la config vit

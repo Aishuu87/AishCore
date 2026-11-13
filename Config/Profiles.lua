@@ -293,6 +293,7 @@ function P.InitDB()
   ns.DB                 = root._profiles[activeName]
   ns._activeProfileName = activeName
   ns._charKey           = charKey
+  if ns.UnavailableModuleIds then root._modulesUnavailable = ns.UnavailableModuleIds() end
 end
 
 -- API publique
@@ -771,7 +772,8 @@ end
 --- (pas de fusion champ par champ) ; un élément absent de la charge utile repart des valeurs de
 --- référence (template puis défauts) : c'est aussi la réinitialisation.
 ---   ids : éléments à appliquer (nil = tous ceux de la charge utile)
-function P.ApplyItems(payload, target, ids)
+---   silent : au chargement (copie de l'installeur), modules pas encore initialisés : rien n'est réappliqué
+function P.ApplyItems(payload, target, ids, silent)
   local root = AishaddonDB
   local prof = root._profiles[target]
   if not prof then return false, L["PROFILE_NOT_FOUND"] end
@@ -820,10 +822,47 @@ function P.ApplyItems(payload, target, ids)
   if target == P.GetActive() then
     ns.DB = prof
     if newAuras then AP:SetActive(target) end
-    for m in pairs(applyMods) do SafeApply(ns.Modules[m], m) end
-    ns.CallbackRegistry:Trigger("PROFILE_CHANGED", target)
+    if not silent then
+      for m in pairs(applyMods) do SafeApply(ns.Modules[m], m) end
+      ns.CallbackRegistry:Trigger("PROFILE_CHANGED", target)
+    end
   end
   return true
+end
+
+--- Copie par modules déposée par l'installeur AishUI (mode avancé) dans AishaddonDB._installerPending :
+--- profil du pack (core / auras), éléments cochés, profil cible (absent = profil actif). Appliquée une
+--- seule fois au chargement, comme la copie de modules en jeu, puis supprimée.
+---   force : appliquer même si le module Auras n'a pas encore initialisé sa base (repli d'AishCore.lua)
+function P.ApplyInstallerPending(force)
+  local root = AishaddonDB
+  local pending = root and root._installerPending
+  if type(pending) ~= "table" or not root._profiles then return end
+  local A = ns.Auras
+  if not force and A and A.Profiles and not A.db then return end
+  root._installerPending = nil -- consommée même en cas d'erreur : pas de nouvel essai à chaque chargement
+
+  local ids, items = {}, {}
+  for _, id in ipairs(type(pending.ids) == "table" and pending.ids or {}) do
+    if type(id) == "string" and not items[id] then ids[#ids + 1] = id; items[id] = true end
+  end
+  if #ids == 0 then return end
+  local target = pending.target
+  if type(target) ~= "string" or not root._profiles[target] then target = P.GetActive() end
+
+  local payload = { v = 3, items = items,
+    core = type(pending.core) == "table" and pending.core or {},
+    auras = type(pending.auras) == "table" and pending.auras or {} }
+  -- Comme une copie en jeu (P.BuildItemsPayload) : seuls les sorts personnalisés voyagent
+  if payload.auras.discoveredSpells and A and A.DropUncustomizedSpells then
+    A.DropUncustomizedSpells(payload.auras.discoveredSpells)
+  end
+  local ok, res, err = pcall(P.ApplyItems, payload, target, ids, true)
+  if ok and res then
+    print("|cffd4af37[AishCore]|r " .. string.format(L["PROFILE_MODULES_DONE"], "|cffffd700" .. target .. "|r"))
+  else
+    print(string.format(L["SETTINGS_PROFILE_ERROR_MSG_LABELED"], tostring(ok and err or res)))
+  end
 end
 
 --- Copie des éléments d'un profil vers un autre (sans sérialisation).

@@ -915,6 +915,7 @@ function Comfort.ApplySettings()
   if ns.Modules.MapReveal then ns.Modules.MapReveal.ApplySettings() end
   if ns.Modules.MapQuests then ns.Modules.MapQuests.ApplySettings() end
   if ns.Modules.SpellRanks then ns.Modules.SpellRanks.ApplySettings() end
+  if ns.Modules.CraftableReagents then ns.Modules.CraftableReagents.ApplySettings() end
   ApplyMinimapTracking()
   ApplyCVars()
   ApplySlashes()

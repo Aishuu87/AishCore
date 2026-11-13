@@ -12,6 +12,16 @@ local pcall, tostring, ipairs, pairs, wipe = pcall, tostring, ipairs, pairs, wip
 
 local MAX_TOTEM_SLOTS = 4
 
+-- Pixel perfect, comme Free Bars (Features/Auras/Buffs.lua) : tailles et ancrages alignes sur la grille
+-- pixel, sinon une barre de 2-4 px s'affiche plus ou moins epaisse selon sa position a l'ecran.
+local function PSize(r, w, h)
+    if PixelUtil and PixelUtil.SetSize then PixelUtil.SetSize(r, w, h) else r:SetSize(w, h) end
+end
+local function PPoint(r, point, rel, relPoint, x, y, minX, minY)
+    if PixelUtil and PixelUtil.SetPoint then PixelUtil.SetPoint(r, point, rel, relPoint, x, y, minX, minY)
+    else r:SetPoint(point, rel, relPoint, x, y) end
+end
+
 local function SafeSpellName(spellID)
     local ok, name = pcall(GetSpellName, spellID)
     if ok and name and not (issecretvalue and issecretvalue(name)) then return name end
@@ -363,22 +373,22 @@ end
 local function BuildTotemWidget(spellID, cfg, layout, rowW, rowH, iw, ih, gp, bw, bh)
     local cont = EnsureTotemsContainer()
     local f = CreateFrame("Frame", nil, cont)
-    f:SetSize(rowW, rowH)
+    PSize(f, rowW, rowH)
     f:Hide()
 
     local icon
     if not cfg.hideIcon then
         icon = f:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(iw, ih)
+        PSize(icon, iw, ih)
         if layout == "side_banner" then
-            icon:SetPoint("TOP", f, "TOP", 0, 0)
+            PPoint(icon, "TOP", f, "TOP", 0, 0)
         elseif layout == "side_compact" then
-            icon:SetPoint("CENTER", f, "CENTER", 0, 0)
+            PPoint(icon, "CENTER", f, "CENTER", 0, 0)
         else
             if (cfg.iconPos or "RIGHT") == "RIGHT" then
-                icon:SetPoint("RIGHT", f, "RIGHT", 0, 0)
+                PPoint(icon, "RIGHT", f, "RIGHT", 0, 0)
             else
-                icon:SetPoint("LEFT", f, "LEFT", 0, 0)
+                PPoint(icon, "LEFT", f, "LEFT", 0, 0)
             end
         end
         local okTex, tex = pcall(C_Spell.GetSpellTexture, spellID)
@@ -398,8 +408,9 @@ local function BuildTotemWidget(spellID, cfg, layout, rowW, rowH, iw, ih, gp, bw
             end
         end
         local border = f:CreateTexture(nil, "BACKGROUND")
-        border:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
-        border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
+        -- Bordure d'au moins 1 pixel physique quelle que soit l'echelle de l'UI.
+        PPoint(border, "TOPLEFT", icon, "TOPLEFT", -1, 1, 1, 1)
+        PPoint(border, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1, 1, 1)
         border:SetColorTexture(14/255, 14/255, 14/255, 1)
         f.icon = icon
 
@@ -421,8 +432,8 @@ local function BuildTotemWidget(spellID, cfg, layout, rowW, rowH, iw, ih, gp, bw
 
     local function MakeBar(w, h, point, relTo, relPoint, ox, oy, rev)
         local bar = CreateFrame("StatusBar", nil, f)
-        bar:SetSize(w, h)
-        bar:SetPoint(point, relTo, relPoint, ox, oy)
+        PSize(bar, w, h)
+        PPoint(bar, point, relTo, relPoint, ox, oy)
         bar:SetStatusBarTexture(barTex)
         if rev then bar:SetReverseFill(true) end
         local bg = bar:CreateTexture(nil, "BACKGROUND")
@@ -512,15 +523,15 @@ local function PositionTotemsContainer(cont, cfg)
     local maxBars, _, _, _, _, _, rg, _, rowW, rowH = GetTotemsDims(cfg)
     local growth = cfg.growth or "DOWN"
     local isH = (growth == "LEFT" or growth == "RIGHT")
-    if isH then pcall(cont.SetSize, cont, maxBars * (rowW + rg), rowH)
-    else pcall(cont.SetSize, cont, rowW, maxBars * (rowH + rg)) end
+    if isH then pcall(PSize, cont, maxBars * (rowW + rg), rowH)
+    else pcall(PSize, cont, rowW, maxBars * (rowH + rg)) end
 
     cont:ClearAllPoints()
     local x, y = cfg.x or -502, cfg.y or -120
-    if growth == "UP" then cont:SetPoint("BOTTOM", UIParent, "CENTER", x, y)
-    elseif growth == "LEFT" then cont:SetPoint("RIGHT", UIParent, "CENTER", x, y)
-    elseif growth == "RIGHT" then cont:SetPoint("LEFT", UIParent, "CENTER", x, y)
-    else cont:SetPoint("TOP", UIParent, "CENTER", x, y) end
+    if growth == "UP" then PPoint(cont, "BOTTOM", UIParent, "CENTER", x, y)
+    elseif growth == "LEFT" then PPoint(cont, "RIGHT", UIParent, "CENTER", x, y)
+    elseif growth == "RIGHT" then PPoint(cont, "LEFT", UIParent, "CENTER", x, y)
+    else PPoint(cont, "TOP", UIParent, "CENTER", x, y) end
 end
 
 -- Corps de ns.RefreshTotemsGrid, isole pour l'englober dans un seul pcall avec erreur visible (sinon
@@ -559,10 +570,10 @@ local function RefreshTotemsGridBody()
                 visibleIdx = visibleIdx + 1
                 local offset = (visibleIdx - 1) * step
                 f:ClearAllPoints()
-                if growth == "UP" then f:SetPoint("BOTTOMLEFT", cont, "BOTTOMLEFT", 0, offset)
-                elseif growth == "LEFT" then f:SetPoint("TOPRIGHT", cont, "TOPRIGHT", -offset, 0)
-                elseif growth == "RIGHT" then f:SetPoint("TOPLEFT", cont, "TOPLEFT", offset, 0)
-                else f:SetPoint("TOPLEFT", cont, "TOPLEFT", 0, -offset) end
+                if growth == "UP" then PPoint(f, "BOTTOMLEFT", cont, "BOTTOMLEFT", 0, offset)
+                elseif growth == "LEFT" then PPoint(f, "TOPRIGHT", cont, "TOPRIGHT", -offset, 0)
+                elseif growth == "RIGHT" then PPoint(f, "TOPLEFT", cont, "TOPLEFT", offset, 0)
+                else PPoint(f, "TOPLEFT", cont, "TOPLEFT", 0, -offset) end
 
                 local r, g, b = TotemBarColorRGB(cfg, info)
                 if f.bar then pcall(f.bar.SetStatusBarColor, f.bar, r, g, b) end

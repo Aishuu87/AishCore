@@ -1,5 +1,151 @@
 # AishCore
 
+## [v4.7.0](https://github.com/Aishuu87/AishCore/tree/v4.7.0) (2026-11-13)
+
+### General
+- The /aishsetup command gives a bit more information in the chat
+- ✨The search bar shows several suggestions as you type
+- ✨Clicking a suggestion takes you to the exact section of the settings, and highlights the searched term
+
+### Themed Colors
+- ✨New! A "Stance Mode" option is now available for Warriors. It colors the interface based on your stance, rather than your character's specialization
+
+### QoL
+- ✨New! Added 2 checkboxes on the map: Quests to turn in and Quests in progress. These options show your quests on every map level, without having to track them, whatever the zoom level. Normally, your quests only show their pin at zoom level 3
+- ✨New! Added a new option to show when new spell ranks are available (New spell ranks). Clicking the arrow icon automatically updates the lower rank on your action bars
+- Blizzard no longer allows placing resource icons on the minimap
+- Replacing the old feature that showed the icons on the gold dots, the icons now appear in the tooltips
+- Added an option to hide the Totem Bar or reveal it on hover
+- The Blizzard raid manager panel can now be hidden (still available on hover). (Extras > QoL > Interface)
+- Bars 4, 5 and 9 can now behave like bars 1, 2 and 3 in "Show Bars" profiles. (Extras > Integration > EllesmereUI Action Bars)
+- The pet bar can now behave like bars 1, 2 and 3 in "Show Bars" profiles. (Extras > Integration > EllesmereUI Action Bars)
+- ✨New! When a profession recipe needs a crafted reagent, that reagent now has a small arrow (Craftable reagents). Hover it to see the reagents it needs. Right-click opens its recipe in the profession window
+
+### Taxi Mode ✨New!
+- Shows the flight duration
+- Shows the departure name and its zone, the intermediate stops, and the destination and its zone
+- Under each stop, the estimated arrival time
+- Each stop can be clicked to land there (also works with later stops, not only the next one)
+- The duration text only shows from 8 sec (to avoid overlapping texts)
+- A small sound can be played when arriving at destination
+- Also works on Midnight
+- Added many color settings. Every element can use the Themed Colors
+- Added a glow setting for the current position, with a pulse animation
+- Flight durations have been adjusted and take the Frequent Flyer Heritage talent into account (20% faster flights)
+
+### XP Bar
+- Holding SHIFT, the XP Bar now shows the total XP granted by all the quests in your quest log
+- The AishCore XP Bar now stays shown while talking to an NPC (on top of the DialogueUI skin)
+- ♾️Shaman: Reincarnation no longer shows in the skills to train, even once unlocked
+- ♾️FIX: Not all weapon skills were displayed
+- Adjusted the textures and the level position of the XP Bar when it is aligned to the left or right edge
+- FIX: The XP Bar info text was shown too low on new AishCore profiles
+- FIX: The level in the XP Bar could stop showing in some conditions
+
+### Central Circle
+- The orbs now move so they are no longer covered by the Elite decoration when it is shown
+- Orbs already placed at the bottom of the circle stay there
+- Shaman: added the Secondary Resource text for Lightning Shield and Water Shield charges
+- ✨New! Added a Mana Regen section
+- This section tracks the 5-second rule (shows the 5 seconds needed after a spell before mana regeneration starts), and can also show the regeneration state (active or not)
+- The 5-second rule can be shown with a simple bar, an arc, or with the decorative dots at the bottom of the circle
+- 2 modes are available for the decorative dots: 2 steps or 4 steps
+    - In 2 steps, 2 dots show at 2.5 s, then the 2 others at 5 s
+    - In 4 steps, 1 dot shows every second
+    - In both cases, when all the dots are shown, you are regenerating
+- Active regeneration can be shown with a glow, or with a simple dot
+- A Pulse animation can be enabled for the active regeneration glows
+- ♾️Druid: Rage did not show in Bear Form
+- ♾️Druid: Mana can be shown in the secondary resource circle in Bear or Cat Form
+- ♾️Druid: the Central Circle now follows shapeshifts in combat (caster, cat, bear): rage, energy or mana
+- ♾️Druid: combo points show in Cat Form
+
+### Unit Frames
+- Reaction colors (Hostile, Neutral, Friendly) can now be customized (General tab)
+- Added an option to the Top Target to show health as a percentage rather than a value
+- FIX: The option to show the level on the health bar was grayed out
+
+### Out-of-Combat Circles
+- ✨Added an out-of-combat health circle for the pet (Pet Health Circle), with its own settings
+
+### Camping HUD
+- Added the Cozy Sleeping Bag to the camp items
+- Added the Pouch of Violet Dust to the camp items
+- Camp items now show a cooldown swipe on their icon while on cooldown
+- FIX: Food could wrongly show among the camp items
+- FIX: The Camping HUD no longer shows when you are dead
+
+### Cast Bars
+- New "Hide Blizzard cast bar" option on the player bar, on by default. It hides the original Blizzard cast bar
+
+### Dynamic Bars
+- Dynamic bars hidden in combat now show on mouseover
+- FIX: Locked chests no longer show in the Dynamic Bars as Openable items
+
+### Menu Bar
+- Added the Appearances option
+- Added the Pet Journal option
+- Added the Toy Box option
+- Added the Group Finder option
+- Added shortcuts on the Collections icon:
+    - Shift + click: mounts
+    - Ctrl + click: pets
+    - Alt + click: Toy Box
+    - Ctrl + Alt + click: Appearances
+- Added the Equipment Manager option. Shortcuts let you switch from one set to another
+- FIX: Equipment can now be changed in combat (weapon slots only)
+- Shaman: Astral Recall shows on hover of the Hearthstone icon while holding SHIFT, and can be cast with a click
+- Astral Recall also works on Midnight
+
+### Missing buffs
+- ✨The Elixirs alert now stays shown while other elixirs can still be used. A new option ("One elixir is enough") hides the alert as soon as at least one elixir is applied
+- ✨After 15 sec, the alert reminds you that it can be hidden with a right-click
+- New option to hide buff reminders in Travel Form or Ghost Wolf (Ignore in Travel Form / Ghost Wolf)
+- ✨Added the Well Rested alert. It is suggested for refresh like a regular spell buff (controlled by the threshold)
+- Talent Points and Heritage Points alerts are now suggested even in Ghost Wolf / Travel Form
+- Battle Shout has been removed from the available alerts (not working for now)
+- Consumables now have their own section
+- Consumable alerts have a new option to only enable them in instances (raids / dungeons / BGs)
+- FIX: Water Breathing elixirs are no longer treated as regular elixirs, and are only suggested while underwater
+- ♾️FIX: Sharpening Stones are suggested again for Rogues who have unlocked their poison skills
+- ♾️FIX: Talent Points and Heritage Points alerts now show even in rest areas
+- ♾️Missing buffs alerts no longer show when a stronger buff is already applied (campfire, scroll, etc.)
+- ♾️FIX: The Heritage Points alert could sometimes show for no reason
+- ♾️Druid: Omen of Clarity is no longer part of the Missing buffs alerts
+- FIX: Some Missing buffs alerts stayed shown in Battlegrounds
+
+### Movement Buffs
+- Added a customizable text for buffs with stacks
+
+### Fixes
+- ♾️Reversed fill direction of the pet and player health bars
+- ♾️Addon Compartment settings
+- ♾️Font settings for the level-up gains
+- ♾️Slight offset of the Priority Bar, which was not perfectly aligned (1px, literally unplayable!)
+- The slider values of elements being moved (in Unlock mode) now update during the move
+- Mouse button keybinds shown on the Priority Bar and the Rotation Button Module now read "MX" rather than "Mouse Button X"
+- FIX: The Priority Bar edit mode now closes when entering combat with the spellbook open
+- ♾️The Rotation Button Module is now disabled on Forever
+- ♾️FIX: blocked action error (SpellStopCasting) when opening AishCore from the WoW options
+- ♾️Mulgore: Bloodhoof Village was not considered a safe zone, it now is
+- ♾️FIX: The Platynator integration no longer worked (font change)
+- ♾️Gamepad: fixed the SetPreferredGamepadInteractTarget error that forced gamepad players to reload the UI regularly. In gamepad mode:
+    - the AFK Screen no longer closes windows nor hides the interface the same way
+    - the Menu Bar and the "Bags full" alert open windows through the Blizzard buttons
+- Simplified Chinese: the AishUI setup window and several other texts showed squares. They now use a font that has the Chinese characters
+- FIX: Quest icons on the map no longer disappear when clicked
+- Added an "Unlock" button in the Well Fed Circle preview
+- The Well Fed Circle shows a preview when its settings page is open
+- FIX: The Well Fed Circle can be moved again
+- FIX: The Cooldown Manager notification could stay shown even after a UI reload and/or after clicking "Don't ask for this spec"
+- ♾️FIX: 3D animations appeared very dark in instances
+- FIX: Creating and editing Tags in the Model Library showed the windows in the background
+- ♾️FIX: Many auras were not tracked in combat
+- FIX: The aura list could contain unrelated spells in the Totems section
+- ♾️FIX: Debuffs could no longer be tracked correctly (especially those from spells without a cooldown, such as Immolate or Corruption)
+- ♾️FIX: Debuff tracking could sometimes fail to show on pull in the Circle Bars and Free Bars
+- ♾️FIX: Potential errors in debuff tracking (not sure, hard to test)
+
 ## [v4.6.16](https://github.com/Aishuu87/AishCore/tree/v4.6.16) (2026-11-11)
 
 ### QoL

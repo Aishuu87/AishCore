@@ -158,6 +158,23 @@ for _, c in ipairs(Colors.CLASSES) do
     end
 end
 
+-- Mode Posture (Guerrier) : une ligne par posture, utilisee a la place des spes quand le mode est coche.
+-- Defaut de chaque posture = couleurs de sa spe liee. formID : GetShapeshiftFormID ; spells : Retail puis Forever.
+Colors.STANCES = {
+    { id = "stance_battle",    name = L["COLORSMOD_STANCE_BATTLE"],    spec = 71, formID = 17, spells = { 386164, 2457 } },
+    { id = "stance_berserker", name = L["COLORSMOD_STANCE_BERSERKER"], spec = 72, formID = 19, spells = { 386196, 2458 } },
+    { id = "stance_defensive", name = L["COLORSMOD_STANCE_DEFENSIVE"], spec = 73, formID = 18, spells = { 386208, 71 } },
+}
+Colors._stanceByID, Colors._stanceBySpell, Colors._stanceByForm = {}, {}, {}
+for _, st in ipairs(Colors.STANCES) do
+    Colors._stanceByID[st.id] = st
+    Colors._stanceByForm[st.formID] = st
+    for _, sid in ipairs(st.spells) do Colors._stanceBySpell[sid] = st end
+end
+for _, c in ipairs(Colors.CLASSES) do
+    if c.file == "WARRIOR" then c.stances = Colors.STANCES end
+end
+
 -- Palette violette par defaut de la condition Furtivite (modifiable element par element dans les options)
 Colors.STEALTH_DEFAULTS = {
     powercircle     = { 0.58, 0.42, 0.86, 1 },
@@ -205,6 +222,11 @@ function Colors.Get(element)
     if classKey and Colors.StealthConditionActive(classKey) then
         return Colors.GetForSpec(classKey, Colors.STEALTH_ID, element)
     end
+    -- Mode Posture (Guerrier) : ligne de la posture active ; sans posture, on retombe sur la spe
+    if classKey == "warrior" and Colors.IsStanceMode() then
+        local st = Colors.GetActiveStance()
+        if st then return Colors.GetForSpec(classKey, st.id, element) end
+    end
     local specID = ns._specID
     if not specID then
         local idx = ns.GetSpecialization and ns.GetSpecialization() or nil
@@ -248,6 +270,31 @@ function Colors.StealthConditionActive(classKey)
     if not (cd and cd.conditions) then return false end
     if not Colors.IsConditionEnabled(classKey, Colors.STEALTH_ID) then return false end
     return Colors._stealthed == true
+end
+
+--- Mode Posture du Guerrier (couleurs suivant la posture plutot que la spe). Desactive par defaut.
+function Colors.IsStanceMode()
+    return ns.DB and ns.DB.colors and ns.DB.colors.warriorStanceMode == true or false
+end
+
+function Colors.SetStanceMode(val)
+    if not ns.DB then ns.DB = {} end
+    ns.DB.colors = ns.DB.colors or {}
+    ns.DB.colors.warriorStanceMode = val and true or false
+    Colors.Broadcast()
+end
+
+--- Posture active du joueur (entree de Colors.STANCES) ou nil.
+function Colors.GetActiveStance()
+    local idx = GetShapeshiftForm and GetShapeshiftForm()
+    if not idx or idx == 0 then return nil end
+    if GetShapeshiftFormInfo then
+        local ok, _, _, _, sid = pcall(GetShapeshiftFormInfo, idx)
+        local st = ok and sid and Colors._stanceBySpell[sid]
+        if st then return st end
+    end
+    local formID = GetShapeshiftFormID and GetShapeshiftFormID()
+    return formID and Colors._stanceByForm[formID] or nil
 end
 
 --- Spe par defaut d'une classe (clic droit sur son nom dans les couleurs thematiques), ou nil.
@@ -295,6 +342,9 @@ function Colors.GetForSpec(classKey, specID, element)
         local d = Colors.STEALTH_DEFAULTS[element]
         if d then return d end
     end
+    -- 2b. Posture du Guerrier : couleurs de sa spe liee (overrides compris)
+    local stance = Colors._stanceByID[specID]
+    if stance then return Colors.GetForSpec(classKey, stance.spec, element) end
     -- 2. Défaut de spé (table SPEC_DEFAULTS)
     if classKey and specID then
         local cdef = Colors.SPEC_DEFAULTS[classKey]
@@ -384,6 +434,20 @@ _stealthEvt:SetScript("OnEvent", function()
     if Colors.IsConditionEnabled(cls:lower(), Colors.STEALTH_ID) then
         C_Timer.After(0, Colors.Broadcast)
     end
+end)
+
+-- Suivi de la posture du Guerrier (Mode Posture) : les modules relisent leurs couleurs au changement
+local _stanceEvt = CreateFrame("Frame")
+_stanceEvt:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+_stanceEvt:RegisterEvent("PLAYER_ENTERING_WORLD")
+_stanceEvt:SetScript("OnEvent", function()
+    local cls = ns._playerClass
+    if not cls or cls == "" then cls = select(2, UnitClass("player")) end
+    if cls ~= "WARRIOR" then return end
+    local st = Colors.GetActiveStance()
+    if st == Colors._lastStance then return end
+    Colors._lastStance = st
+    if Colors.IsStanceMode() then C_Timer.After(0, Colors.Broadcast) end
 end)
 
 -- Réagir aux changements de spécialisation

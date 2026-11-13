@@ -111,7 +111,7 @@ ns.GUI_LAYOUT = {
       ["SETTINGS_SEC_OCRC_VISIBILITY"] = { frFR = "VISIBILITÉ", enUS = "Visibility" },
     },
     ["SETTINGS_SEC_BG_GLOW_OOC"] = { cols = 4, rows = {
-      { [1] = "outOfCombatResourceCircle.glowEnabled" },
+      { [1] = "outOfCombatResourceCircle.glowEnabled", [3] = "outOfCombatResourceCircle.glowRegenPulse" },
       { [1] = "outOfCombatResourceCircle.glowSize", [2] = "outOfCombatResourceCircle.glowOpacity" },
     }, labels = {
       ["outOfCombatResourceCircle.glowEnabled"] = { frFR = "Activer la lueur du cercle", enUS = "Enable circle glow" },
@@ -486,11 +486,104 @@ ns.GUI_LAYOUT = {
     } },
     ["SETTINGS_SEC_VISIBILITY_ELVUI_BUFFS"] = { cols = 5, rows = {
       { [1] = "visibility.elvuiBuffsEnabled" },
-      { [2] = "visibility.elvuiBuffsOocAlpha", [3] = "visibility.elvuiBuffsCombatAlpha", [4] = "visibility.elvuiBuffsHoverReveal" },
+      { [1] = "visibility.elvuiBuffsOocAlpha", [2] = "visibility.elvuiBuffsCombatAlpha", [3] = "visibility.elvuiBuffsHoverReveal" },
     } },
-    ["SETTINGS_SEC_VIS_EUI_BARS"] = { cols = 5, rows = {
-      { [1] = "visibility.euiBarsEnabled", [2] = "visibility.euiBars459Enabled", [3] = "visibility.euiPetBarEnabled" },
-      { [1] = "visibility.euiBarsAlpha", [2] = "visibility.euiBars459Alpha", [3] = "visibility.euiPetBarAlpha" },
+    ["SETTINGS_SEC_VIS_EUI_BARS"] = { cols = 3, rows = {
+      { [1] = "visibility.euiBarsEnabled", [2] = "visibility.euiBarsAlpha" },
+      { [1] = "visibility.euiBars459Enabled", [2] = "visibility.euiBars459Alpha" },
+      { [1] = "visibility.euiPetBarEnabled", [2] = "visibility.euiPetBarAlpha" },
+      { [1] = "__div:1" },
+    } },
+  },
+  taxiMode = {
+    __titles = {
+      ["SETTINGS_MVB_SEC_LOOK"] = { frFR = "APPARENCE GLOBALE", enUS = "Global Appearance" },
+      ["SETTINGS_SEC_TAXI_INTERFACE"] = { frFR = "COMPORTEMENT PENDANT LE VOL", enUS = "In-Flight Behavior" },
+    },
+    -- "Apparence" : cle homonyme de SETTINGS_SEC_TAXI_LOOK, premiere par ordre alphabetique (FR comme EN)
+    ["SETTINGS_MVB_SEC_LOOK"] = { cols = 5, rows = {
+      { [1] = "taxiMode.trackX", [2] = "taxiMode.trackY", [3] = "taxiMode.width" },
+      { [1] = "taxiMode.doneHeight", [2] = "taxiMode.doneTexture", [3] = "taxiMode.accentColor", [4] = "taxiMode.useThemeColors" },
+      { [1] = "__div:1" },
+      { [1] = "taxiMode.panelTopHeight", [2] = "taxiMode.panelBottomHeight", [3] = "taxiMode.panelBgColor" },
+    }, labels = {
+      ["taxiMode.useThemeColors"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
+    } },
+    ["SETTINGS_SEC_TAXI_INTERFACE"] = { cols = 5, rows = {
+      { [1] = "taxiMode.hideUI" },
+      { [1] = "taxiMode.revealOnHover" },
+      { [1] = "taxiMode.arrivalSound" },
+    } },
+    ["SETTINGS_TAXI_DIAMOND"] = { cols = 5, rows = {
+      { [1] = "taxiMode.diamondCustom" },
+      { [1] = "taxiMode.diamondSize", [2] = "taxiMode.diamondGlowSize", [3] = "taxiMode.diamondGlowPulse" },
+      { [1] = "taxiMode.diamondColor", [2] = "taxiMode.diamondThemeColors" },
+    }, labels = {
+      ["taxiMode.diamondColor"] = { frFR = "Couleur", enUS = "Color" },
+      ["taxiMode.diamondGlowPulse"] = { frFR = "Animation de lueur pulse", enUS = "Glow pulse animation" },
+      ["taxiMode.diamondThemeColors"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
+    } },
+    ["SETTINGS_TAXI_TXT_ELAPSED"] = { cols = 5, rows = {
+      { [1] = "taxiMode.elapsedSize", [2] = "taxiMode.elapsedFont", [3] = "taxiMode.elapsedAlign" },
+      { [1] = "taxiMode.elapsedX", [2] = "taxiMode.elapsedY" },
+      { [1] = "taxiMode.elapsedColor", [2] = "taxiMode.elapsedTheme" },
+    }, labels = {
+      ["taxiMode.elapsedTheme"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
+    } },
+    ["SETTINGS_TAXI_TXT_END"] = { cols = 5, rows = {
+      { [1] = "taxiMode.endNameSize", [2] = "taxiMode.endNameFont", [3] = "taxiMode.endNameAlign" },
+      { [1] = "taxiMode.endX", [2] = "taxiMode.endY" },
+      { [1] = "taxiMode.endNameColor", [2] = "taxiMode.endNameTheme" },
+      { [1] = "__div:3" },
+      { [1] = "taxiMode.endNodeTint" },
+      { [1] = "taxiMode.endNodeColor", [2] = "taxiMode.endNodeTheme" },
+    }, labels = {
+      ["taxiMode.endNameTheme"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
+      ["taxiMode.endNodeColor"] = { frFR = "Couleur", enUS = "Color" },
+      ["taxiMode.endNodeTheme"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
+      ["taxiMode.endNodeTint"] = { frFR = "Colorer le point d'arrivée", enUS = "Color the arrival node" },
+      ["taxiMode.endX"] = { frFR = "Décalage X", enUS = "X offset" },
+      ["taxiMode.endY"] = { frFR = "Décalage Y", enUS = "Y offset" },
+    } },
+    ["SETTINGS_TAXI_TXT_ETA"] = { cols = 5, rows = {
+      { [1] = "taxiMode.etaSize", [2] = "taxiMode.etaFont", [3] = "taxiMode.etaAlign" },
+      { [1] = "taxiMode.etaColor", [2] = "taxiMode.etaTheme" },
+    }, labels = {
+      ["taxiMode.etaTheme"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
+    } },
+    ["SETTINGS_TAXI_TXT_START"] = { cols = 5, rows = {
+      { [1] = "taxiMode.startNameSize", [2] = "taxiMode.startNameFont", [3] = "taxiMode.startNameAlign" },
+      { [1] = "taxiMode.startX", [2] = "taxiMode.startY" },
+      { [1] = "taxiMode.startNameColor", [2] = "taxiMode.startNameTheme" },
+      { [1] = "__div:2" },
+      { [1] = "taxiMode.startNodeTint" },
+      { [1] = "taxiMode.startNodeColor", [2] = "taxiMode.startNodeTheme" },
+    }, labels = {
+      ["taxiMode.startNameTheme"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
+      ["taxiMode.startNodeColor"] = { frFR = "Couleur", enUS = "Color" },
+      ["taxiMode.startNodeTheme"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
+      ["taxiMode.startNodeTint"] = { frFR = "Colorer le point de départ", enUS = "Color the departure node" },
+      ["taxiMode.startX"] = { frFR = "Décalage X", enUS = "X offset" },
+      ["taxiMode.startY"] = { frFR = "Décalage Y", enUS = "Y offset" },
+    } },
+    ["SETTINGS_TAXI_TXT_STEPS"] = { cols = 5, rows = {
+      { [1] = "taxiMode.stepSize", [2] = "taxiMode.stepFont", [3] = "taxiMode.stepAlign" },
+      { [1] = "taxiMode.stepColor", [2] = "taxiMode.stepTheme" },
+      { [1] = "__div:4" },
+      { [1] = "taxiMode.stepNodeTint" },
+      { [1] = "taxiMode.stepNodeColor", [2] = "taxiMode.stepNodeTheme" },
+    }, labels = {
+      ["taxiMode.stepNodeColor"] = { frFR = "Couleur", enUS = "Color" },
+      ["taxiMode.stepNodeTheme"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
+      ["taxiMode.stepNodeTint"] = { frFR = "Colorer le point d'étape", enUS = "Color the stop node" },
+      ["taxiMode.stepTheme"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
+    } },
+    ["SETTINGS_TAXI_TXT_ZONES"] = { cols = 5, rows = {
+      { [1] = "taxiMode.zoneSize", [2] = "taxiMode.zoneFont", [3] = "taxiMode.zoneAlign" },
+      { [1] = "taxiMode.startZoneX", [2] = "taxiMode.startZoneY", [3] = "taxiMode.endZoneX", [4] = "taxiMode.endZoneY" },
+      { [1] = "taxiMode.zoneColor", [2] = "taxiMode.zoneTheme" },
+    }, labels = {
+      ["taxiMode.zoneTheme"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
     } },
   },
   addonCompartment = {

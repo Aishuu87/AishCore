@@ -291,11 +291,11 @@ MenuBar.ACTIONS = {
       return { ["shift-1"] = Use(1), ["ctrl-1"] = Use(2), ["alt-1"] = Use(3), ["alt-ctrl-1"] = Use(4) }
     end },
   { id = "reload", icon = "INV_Misc_Gear_08", macro = function() return "/reload" end },
-  -- Maj+clic (chaman) : Rappel astral. /cast par nom localise (pas d'ID accepte par /cast)
+  -- Maj+clic (chaman) : Rappel astral, par ID (attribut "spell") : Retail a plusieurs sorts "Rappel astral",
+  -- un /cast par nom peut viser le mauvais
   { id = "hearthstone", icon = "INV_Misc_Rune_01", macro = function() return "/use item:6948" end,
     mods = function()
-      local name = MenuBar.AstralRecallName()
-      return { ["shift-1"] = name and ("/cast " .. name) or nil }
+      return { ["shift-1"] = MenuBar.AstralRecallName() and { spell = 556 } or nil }
     end },
   { id = "screenshot", icon = "INV_Misc_Spyglass_03", macro = function() return "/run Screenshot()" end },
   -- Clic : coupe / remet tout le son ; Maj+clic : musique ; Ctrl+clic : effets sonores (sans la musique) ;
@@ -931,14 +931,17 @@ function Strip:Layout()
         local macro = a and a.macro()
         it:SetAttribute("type", macro and "macro" or nil)
         it:SetAttribute("macrotext", macro)
-        -- Clics avec modificateur / clic droit : attributs "<mod>-type<bouton>" (l'ordre des modificateurs est alt-ctrl-shift)
+        -- Clics avec modificateur / clic droit : attributs "<mod>-type<bouton>" (l'ordre des modificateurs est alt-ctrl-shift).
+        -- Valeur : texte de macro, ou { spell = ID } (sort lance par son ID)
         local mods = a and a.mods and a.mods() or {}
         for _, pre in ipairs({ "", "shift-", "ctrl-", "alt-", "ctrl-shift-", "alt-ctrl-" }) do
           for btn = 1, 2 do
             if not (pre == "" and btn == 1) then
               local m = mods[pre .. btn]
-              it:SetAttribute(pre .. "type" .. btn, m and "macro" or nil)
-              it:SetAttribute(pre .. "macrotext" .. btn, m)
+              local sp = type(m) == "table" and m.spell or nil
+              it:SetAttribute(pre .. "type" .. btn, (sp and "spell") or (m and "macro") or nil)
+              it:SetAttribute(pre .. "macrotext" .. btn, (not sp) and m or nil)
+              it:SetAttribute(pre .. "spell" .. btn, sp)
             end
           end
         end

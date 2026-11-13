@@ -66,7 +66,16 @@ function SW.CreateSlider(parent, label, minVal, maxVal, step, width)
     function c:GetValue() return self.currentValue end
     sl:SetScript("OnValueChanged",function(_,v) if c._p then return end; v=Snap(v); c.currentValue=v; eb:SetText(string.format(fmt,v)); if c.onChanged then c.onChanged(v) end end)
     eb:SetScript("OnEnterPressed",function(s) local v=tonumber(s:GetText()); if v then c:SetValue(v); if c.onChanged then c.onChanged(c.currentValue) end end; s:ClearFocus() end)
-    eb:SetScript("OnEscapePressed",function(s) s:ClearFocus() end); return c
+    eb:SetScript("OnEscapePressed",function(s) s:ClearFocus() end)
+    c._snap=Snap   -- SW.TrackDB : comparaison a la valeur de la DB
+    return c
+end
+
+-- Resynchro sur la DB apres un deplacement a la souris : delegue au registre du GUI principal
+function SW.TrackDB(w, getter)
+    local M = _addon.SharedWidgets
+    if M and M.TrackDB then return M.TrackDB(w, getter) end
+    return w
 end
 
 -- DROPDOWN
@@ -487,6 +496,12 @@ function SW.CreateSectionStack(parent, sections, cw, startY, stackId)
         entry.collapsed = (parent._pageTitle and parent._pageTitle._moduleOff)
                           or (_stackCollapsed[entry.key] ~= false)
         entries[i] = entry
+        -- Recherche du GUI (UI/SettingsSearch.lua) : deplie la section d'une option trouvee
+        sub._searchHeader = hdr
+        sub._searchUnfold = function()
+            if entry.collapsed then SetEntryCollapsed(entry, false); Relayout() end
+        end
+        hdr._searchUnfold = sub._searchUnfold   -- recherche de l'en-tete lui-meme
 
         SW.MakeHeaderCollapsible(hdr, function()
             SetEntryCollapsed(entry, not entry.collapsed)

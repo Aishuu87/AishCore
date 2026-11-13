@@ -232,9 +232,11 @@ ns.SpellClassificationOverrides = {
 ns.SpellClassificationOverridesForever = {
     [99]      = { source = "debuff" }, -- Rugissement demoralisant
     [143]     = { source = "debuff" }, -- Boule de feu
+    [172]     = { source = "debuff" }, -- Corruption
     [205]     = { source = "debuff" }, -- Eclair de givre
     [339]     = { source = "debuff" }, -- Sarments
     [370]     = { deleted = true }, -- Expiation
+    [529]     = { deleted = true }, -- Eclair
     [548]     = { deleted = true }, -- Eclair
     [603]     = { source = "debuff" }, -- Plaie funeste
     [707]     = { source = "debuff" }, -- Immolation
@@ -263,8 +265,10 @@ ns.SpellClassificationOverridesForever = {
     [7402]    = { source = "debuff" }, -- Coup railleur
     [8053]    = { source = "debuff" }, -- Horion de flammes
     [8056]    = { source = "debuff" }, -- Horion de givre
+    [8075]    = { source = "totem" }, -- Totem de Force de la Terre
     [8092]    = { deleted = true }, -- Attaque mentale
     [8179]    = { source = "totem" }, -- Totem de Glebe (passif)
+    [8185]    = { source = "buff" }, -- Resistance au Feu
     [8492]    = { source = "debuff" }, -- Cone de froid
     [8512]    = { source = "totem" }, -- Totem Furie-des-vents
     [8639]    = { source = "debuff" }, -- Rupture
@@ -272,6 +276,7 @@ ns.SpellClassificationOverridesForever = {
     [9005]    = { source = "debuff" }, -- Traquenard
     [9484]    = { deleted = true }, -- Entraves des morts-vivants
     [10428]   = { source = "totem" }, -- Totem de Griffes de pierre
+    [10477]   = { source = "buff" }, -- Resistance au Givre
     [10495]   = { source = "totem" }, -- Totem Fontaine de mana
     [10894]   = { source = "debuff" }, -- Mot de l'ombre : Douleur
     [11198]   = { source = "debuff" }, -- Exposer l'armure
@@ -282,16 +287,19 @@ ns.SpellClassificationOverridesForever = {
     [13553]   = { source = "debuff" }, -- Morsure de serpent
     [13797]   = { source = "debuff" }, -- Piege d'immolation
     [14280]   = { source = "debuff" }, -- Morsure de vipere
+    [15109]   = { source = "buff" }, -- Mur des vents
     [15257]   = { source = "debuff" }, -- Tissage de l'ombre
     [15286]   = { source = "debuff" }, -- Etreinte vampirique
     [15326]   = { source = "debuff" }, -- Aveuglement
     [16387]   = { source = "totem" }, -- Totem Langue de feu
     [16511]   = { source = "debuff" }, -- Hemorragie
     [16922]   = { source = "debuff" }, -- Feu stellaire etourdissant
-    [17364]   = { source = "buff" }, -- Courroux naturel
+    [17364]   = { source = "debuff" }, -- Courroux naturel
     [17928]   = { source = "debuff" }, -- Hurlement de terreur
     [18119]   = { source = "debuff" }, -- Consequences
     [18223]   = { source = "debuff" }, -- Malediction de fatigue
+    [18265]   = { source = "debuff" }, -- Siphon de vie
+    [18871]   = { source = "debuff" }, -- Brulure de l'ombre
     [19185]   = { source = "debuff" }, -- Piege
     [20184]   = { source = "debuff" }, -- Jugement de justice
     [20185]   = { source = "debuff" }, -- Jugement de lumiere
@@ -299,6 +307,7 @@ ns.SpellClassificationOverridesForever = {
     [21183]   = { source = "debuff" }, -- Jugement du Croise
     [21553]   = { source = "debuff" }, -- Frappe mortelle
     [23694]   = { source = "debuff" }, -- Brise-genou ameliore
+    [25360]   = { source = "totem" }, -- Grace aerienne
     [31935]   = { deleted = true }, -- Bouclier du vengeur
     [53600]   = { deleted = true }, -- Bouclier du vertueux
     [156910]  = { deleted = true }, -- Guide de foi
@@ -325,8 +334,10 @@ ns.SpellClassificationOverridesForever = {
     [1324401] = { source = "debuff" }, -- Contresort  Silence
     [1324415] = { source = "debuff" }, -- Entraves des Morts-vivants
     [1324427] = { source = "debuff" }, -- Silence
+    [1324448] = { source = "debuff" }, -- Peur
     [1324459] = { source = "debuff" }, -- Voile mortel
     [1324462] = { source = "debuff" }, -- Bannir
+    [1324468] = { source = "debuff" }, -- Subjugation de demon
     [1324473] = { source = "debuff" }, -- Plaie de tumulte
     [1324474] = { source = "debuff" }, -- Aiguillon perfide
     [1324477] = { source = "debuff" }, -- Cecite

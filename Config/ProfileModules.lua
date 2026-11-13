@@ -92,7 +92,7 @@ ns.ProfileTree = {
   } },
   { id = "extras", label = "SETTINGS_GROUP_COMFORT", panel = "extras", children = {
     -- QoL : la page du même nom (curseur en combat et nœuds de minimap en sont des sections)
-    { id = "qol", label = "SETTINGS_COMFORT_SEC_QOL", core = { "comfort" }, apply = { "Comfort" }, children = {
+    { id = "qol", label = "SETTINGS_COMFORT_SEC_QOL", core = { "comfort", "horizonSuite" }, apply = { "Comfort", "HorizonSuiteTweak" }, children = {
         { id = "bigCursor", label = "SETTINGS_MOD_BIG_CURSOR", core = { "bigCursor" }, apply = { "BigCursor" } },
         { id = "minimapNodes", label = "SETTINGS_MMN_TITLE", core = { "minimapNodes" }, apply = { "MinimapNodes" } },
       } },
