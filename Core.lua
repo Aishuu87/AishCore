@@ -2268,3 +2268,25 @@ do
     end
   end)
 end
+
+-- Souris selon la visibilite reelle : une frame cachee par alpha 0 (pas par Hide) garde la souris active,
+-- capte le clic droit et bloque la camera. ns.MouseFollowsVisibility(frame) : souris active seulement si la
+-- frame est visible ET d'alpha effectif non nul (verifie toutes les 0,25 s). Frames NON securisees uniquement.
+do
+  local tracked = {}
+  local ticker
+  function ns.MouseFollowsVisibility(frame)
+    if not frame or tracked[frame] then return end
+    tracked[frame] = true
+    if ticker then return end
+    ticker = C_Timer.NewTicker(0.25, function()
+      for f in pairs(tracked) do
+        local on = f:IsVisible() and f:GetEffectiveAlpha() > 0.05
+        if f._aishMouseOn ~= on and not (f:IsProtected() and InCombatLockdown()) then
+          f._aishMouseOn = on
+          f:EnableMouse(on)
+        end
+      end
+    end)
+  end
+end

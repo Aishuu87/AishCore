@@ -3131,6 +3131,13 @@ function MissingBuffs.CheckForMissings()
     Probe("gates")
     if not cfg.enabled then MissingBuffs.HideAlert(); return end
     if UnitIsDeadOrGhost("player") then MissingBuffs.HideAlert(); return end
+    -- Forever : Bien repose (objet), manquant ou bientot expire. Priorite absolue et AVANT les filtres
+    -- (zone de repos, monture, forme de voyage) : c'est justement en zone de repos qu'on le rafraichit.
+    Probe("0")
+    if _addon.IsForever and not cfg.ignoreWellRested and not MissingBuffs.SelfAurasBlind() then
+        local choices, text = WellRestedChoices(cfg)
+        if choices then MissingBuffs.ShowAlertChoices(choices, text); return end
+    end
     -- Paladin en monture : Aura du croise rappelee si absente, avant (et malgre) "Ignorer si monte"
     if (_addon._playerClass or select(2, UnitClass("player"))) == "PALADIN" then
         local crusader = CrusaderMountedChoices()
@@ -3344,13 +3351,6 @@ function MissingBuffs.CheckForMissings()
                 return
             end
         end
-    end
-
-    Probe("4b")
-    -- 4b) Forever : Bien repose (objet), manquant ou bientot expire, juste apres les buffs de classe
-    if _addon.IsForever and not cfg.ignoreWellRested and not blind then
-        local choices, text = WellRestedChoices(cfg)
-        if choices then MissingBuffs.ShowAlertChoices(choices, text); return end
     end
 
     Probe("5")

@@ -1,5 +1,29 @@
 # AishCore
 
+## [v4.7.1](https://github.com/Aishuu87/AishCore/tree/v4.7.1) (2026-11-14)
+
+### Unit Frames
+- FIX: The Top Target resource bar was no longer working
+- Added options to show the unit's Resource Bar
+- Target Auras (Top Target) can now be moved by drag and drop (while the settings panel is open)
+- The X and Y position sliders of Target Auras now accept much larger values
+
+### Taxi Mode
+- FIX: Early landings at later stops now work correctly
+- Flight durations have been reworked and should be calculated more accurately. If a flight doesn't have the right duration the first time, the addon should "learn" it for the next trips
+
+### Auras to Track
+- Hovering the icons or bars of tracked auras shows them at 100% opacity
+- Totem bars are now "pixel perfect" (all the same size, and display correctly even when very thin)
+- Added an option to desaturate totems when they are out of range (Desaturate Out of Range). **Warning**, this feature unfortunately cannot work in combat (locked by the game)
+
+### Missing buffs
+- The Cozy Sleeping Bag alert now shows first, and even shows in rested areas when the "Ignore in rested areas" option is enabled
+
+### Fixes
+- FIX: Revenge, Overpower, Riposte, Counterattack and Mongoose Bite showed as available in the Priority Bar even though the spells did not meet their usability conditions
+- FIX: Some disabled modules could block mouse clicks even when hidden
+
 ## [v4.7.0](https://github.com/Aishuu87/AishCore/tree/v4.7.0) (2026-11-13)
 
 ### General

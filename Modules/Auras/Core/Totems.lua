@@ -37,6 +37,10 @@ local activeTotems = {}
 -- Compteur d'instance Lua pur, incremente uniquement quand le durObj d'un slot change.
 local _totemInstCounter = 0
 local _lastDurObjRefBySlot = {}
+local _placedAtBySlot = {} -- GetTime() de la pose (delai de grace de la portee, cf. TotemInRange)
+local UpdateTotemsRange -- defini plus bas (desaturation hors de portee)
+local LearnTotemBuff    -- idem (apprentissage du buff pose par le totem)
+local RANGE_GRACE = 2.5
 
 -- Cle par spellID (pas par slot) : si 2 slots sont lies au meme sort, seul le dernier scanne gagne l'affichage
 -- (distinguer par slot cree plus de faux positifs qu'il n'aide, l'identification par nom/valeur n'est pas fiable).
@@ -53,11 +57,12 @@ local function RescanActiveTotems()
                     _lastDurObjRefBySlot[slot] = ref
                     _totemInstCounter = _totemInstCounter + 1
                 end
-                activeTotems[spellID] = { durObj = durObj, slot = slot, instID = -_totemInstCounter }
+                activeTotems[spellID] = { durObj = durObj, slot = slot, instID = -_totemInstCounter, placedAt = _placedAtBySlot[slot] }
             else
                 -- Plus de duree lisible : le totem est retombe, on libere le lien pour ce slot.
                 slotSpellID[slot] = nil
                 _lastDurObjRefBySlot[slot] = nil
+                _placedAtBySlot[slot] = nil
             end
         end
     end
@@ -148,6 +153,11 @@ local function OnTotemSlotChanged(slot)
     end
     local spellID = table.remove(pendingCastQueue, pick).spellID
     slotSpellID[slot] = spellID
+    -- Date de pose (delai de grace de la portee) : ici seulement, sur une pose confirmee. GetTotemDuration
+    -- renvoie un objet neuf a chaque appel, le dater au rescan relancait la grace a chaque evenement.
+    _placedAtBySlot[slot] = GetTime()
+    C_Timer.After(RANGE_GRACE + 0.1, function() if UpdateTotemsRange then UpdateTotemsRange() end end)
+    if LearnTotemBuff then pcall(LearnTotemBuff, spellID) end
     local info = spells[spellID]
     if info then
         if info.source ~= "totem" then
@@ -355,6 +365,256 @@ local function StyleTotemTimerText(f, cfg)
     pcall(ns._StyleCountdownFS, f.cd, cfg.timerFont or ns.Media.font, cfg.timerSize or 12,
         cfg.timerColorR, cfg.timerColorG, cfg.timerColorB,
         pos, f.icon or f.cd, pos, cfg.timerIconOffX or 0, cfg.timerIconOffY or 0)
+end
+
+-- Hors de portee : un totem qui pose un buff sur le joueur (Data/TotemBuffs.lua) est hors de portee quand
+-- ce buff manque. Sans buff connu, ou auras illisibles (BG/arene), le totem reste en couleur.
+-- Delai de grace apres la pose : le premier pulse du totem n'a pas encore pose le buff.
+local GetPlayerAuraBySpellID = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
+
+local GetAuraDataBySpellName = C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName
+local GetAuraDataByIndex = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
+
+-- APPRENTISSAGE : la table generee (Data/TotemBuffs.lua) ne connait pas tous les buffs. Ex. Forever : Windfury /
+-- Grounding Totem posent un buff SANS spellID (rien dans les donnees, introuvable par ID). A chaque pose hors combat,
+-- les buffs du joueur sont compares avant / apres : un buff apparu qui ressemble au totem (meme icone, ou nom contenu
+-- l'un dans l'autre) lui est associe par son NOM (et son ID s'il en a un), memorise pour le compte :
+-- AishUIAuraDB.totemBuffsLearned[totem] = { names = { [nom] = true }, ids = { [id] = true } }.
+local function LearnedDB()
+    if not AishUIAuraDB then return nil end
+    AishUIAuraDB.totemBuffsLearned = AishUIAuraDB.totemBuffsLearned or {}
+    return AishUIAuraDB.totemBuffsLearned
+end
+
+-- Buffs suivis pour un totem : { ids = {...}, names = {...} } (table generee + appris), memorise
+local _buffsCache = {}
+local function BuffsFor(spellID)
+    local c = _buffsCache[spellID]
+    if c ~= nil then return c or nil end
+    local ids, names, seenId, seenName = {}, {}, {}, {}
+    local function addId(id) if id and not seenId[id] then seenId[id] = true; ids[#ids + 1] = id end end
+    local function addName(n) if type(n) == "string" and n ~= "" and not seenName[n] then seenName[n] = true; names[#names + 1] = n end end
+    local db = LearnedDB()
+    local learned = db and db[spellID]
+    if type(learned) == "table" then
+        for id in pairs(learned.ids or {}) do addId(id) end
+        for n in pairs(learned.names or {}) do addName(n) end
+    end
+    local static = _addon.TotemBuffs and _addon.TotemBuffs[spellID]
+    if static then
+        for _, id in ipairs(static) do addId(id) end
+        addName(SafeSpellName(static[1]))
+    end
+    local res = (#ids > 0 or #names > 0) and { ids = ids, names = names } or false
+    _buffsCache[spellID] = res
+    return res or nil
+end
+
+-- Buffs du joueur : liste de { sid, icon, name }, chaque champ secret remplace par nil (un buff sans spellID
+-- peut avoir un ID secret meme hors combat). nil si AUCUN nom n'est lisible (combat).
+local function SnapshotBuffs()
+    if not GetAuraDataByIndex then return nil end
+    local list, anyName = {}, false
+    for i = 1, 60 do
+        local ok, a = pcall(GetAuraDataByIndex, "player", i, "HELPFUL")
+        if not ok or not a or IsSecret(a) then break end
+        local sid, icon, name = a.spellId, a.icon, a.name
+        if IsSecret(sid) or sid == 0 then sid = nil end
+        if IsSecret(icon) then icon = nil end
+        if IsSecret(name) then name = nil else anyName = true end
+        list[#list + 1] = { sid = sid, icon = icon, name = name }
+    end
+    if #list > 0 and not anyName then return nil end
+    return list
+end
+
+-- /aishdebug totembuffs : buffs du joueur tels que lus ici (champs secrets signales)
+function ns.DebugTotemPlayerBuffs()
+    local P = function(s) print("|cff33aaff[TotemBuffs]|r " .. tostring(s)) end
+    P(string.format("combat=%s secretAuras=%s", tostring(InCombatLockdown()),
+        tostring(C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret())))
+    for i = 1, 60 do
+        local ok, a = pcall(GetAuraDataByIndex, "player", i, "HELPFUL")
+        if not ok then P("#" .. i .. " erreur : " .. tostring(a)); break end
+        if not a then break end
+        if IsSecret(a) then P("#" .. i .. " aura secrete"); break end
+        local function v(x) if IsSecret(x) then return "SECRET" end return tostring(x) end
+        P(string.format("#%d nom=%s id=%s icone=%s source=%s", i, v(a.name), v(a.spellId), v(a.icon), v(a.sourceUnit)))
+    end
+    local db = AishUIAuraDB and AishUIAuraDB.totemBuffsLearned
+    P("appris :")
+    for tid, e in pairs(db or {}) do
+        local names = {}
+        for n in pairs(type(e) == "table" and e.names or {}) do names[#names + 1] = n end
+        P(string.format("  %s (%d) -> %s", SafeSpellName(tid) or "?", tid, table.concat(names, ", ")))
+    end
+end
+
+local function LooksLikeTotem(totemID, buff)
+    local okT, tex = pcall(C_Spell.GetSpellTexture, totemID)
+    if okT and tex and buff.icon and tex == buff.icon then return true end
+    local tn = SafeSpellName(totemID)
+    if not (tn and type(buff.name) == "string" and buff.name ~= "") then return false end
+    local a, b = tn:lower(), buff.name:lower()
+    return a:find(b, 1, true) ~= nil or b:find(a, 1, true) ~= nil
+end
+
+LearnTotemBuff = function(totemID)
+    if InCombatLockdown() then return end
+    -- Pas de comparaison avant / apres : le buff peut etre pose des l'apparition du totem, ou deja la
+    -- (totem repose a portee de l'ancien). La ressemblance (icone / nom) suffit a l'associer.
+    local function Check()
+        local after = SnapshotBuffs()
+        local db = after and LearnedDB()
+        if not db then return end
+        for _, buff in ipairs(after) do
+            local n = buff.name
+            if type(n) == "string" and n ~= "" and LooksLikeTotem(totemID, buff) then
+                local e = db[totemID]
+                if type(e) ~= "table" then e = {}; db[totemID] = e end
+                e.names = e.names or {}; e.ids = e.ids or {}
+                if not e.names[n] or (buff.sid and not e.ids[buff.sid]) then
+                    e.names[n] = true
+                    if buff.sid then e.ids[buff.sid] = true end
+                    _buffsCache[totemID] = nil
+                    if ns._totemRangeTrace then
+                        print(string.format("|cff33aaff[TotemRange]|r appris : %s -> buff \"%s\" (ID %s)",
+                            SafeSpellName(totemID) or tostring(totemID), n, tostring(buff.sid)))
+                    end
+                end
+            end
+        end
+        if UpdateTotemsRange then UpdateTotemsRange() end
+    end
+    C_Timer.After(1.2, Check)
+    C_Timer.After(2.4, Check)
+end
+
+-- Presence du buff, trois recherches : par ID (GetPlayerAuraBySpellID, fiable en combat), par nom de sort
+-- (GetAuraDataBySpellName), puis parcours des buffs par nom (seule voie pour un buff sans spellID, impossible
+-- quand les noms sont secrets en combat). true / false, ou nil = illisible (l'appelant garde l'etat precedent).
+local function TotemBuffPresent(buffs)
+    local idReadable = false
+    for _, id in ipairs(buffs.ids) do
+        local ok, aura = pcall(GetPlayerAuraBySpellID, id)
+        if ok and not IsSecret(aura) then
+            idReadable = true
+            if aura then return true end
+        end
+    end
+    if GetAuraDataBySpellName then
+        for _, n in ipairs(buffs.names) do
+            local ok, aura = pcall(GetAuraDataBySpellName, "player", n, "HELPFUL")
+            if ok and aura and not IsSecret(aura) then return true end
+        end
+    end
+    local list = SnapshotBuffs()
+    if not list then
+        -- Noms secrets (combat) : seule la recherche par ID tranche, et seulement si le buff a un ID connu
+        -- (un buff appris sans spellID n'est alors pas lisible)
+        if idReadable and #buffs.ids > 0 then return false end
+        return nil
+    end
+    local blind = false   -- un buff au nom illisible pourrait etre le bon
+    for _, b in ipairs(list) do
+        if not b.name then blind = true end
+        for _, n in ipairs(buffs.names) do
+            if b.name == n then return true end
+        end
+        if b.sid then
+            for _, id in ipairs(buffs.ids) do if b.sid == id then return true end end
+        end
+    end
+    if blind and not (idReadable and #buffs.ids > 0) then return nil end
+    return false
+end
+
+-- Champ de bataille / arene : auras du joueur secretes, les recherches ci-dessus ne repondent plus
+local function SelfAurasBlind()
+    local inInst, instType = IsInInstance()
+    if not (inInst and (instType == "pvp" or instType == "arena")) then return false end
+    return C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret() or false
+end
+
+-- Le totem reapplique son buff a chaque pulse (~2 s) : en combat le buff parait absent un court instant
+-- a chaque pulse. Hors de portee seulement apres OUT_OF_RANGE_DELAY s d'absence continue.
+local OUT_OF_RANGE_DELAY = 3
+local _lastSeenBySlot = {}
+local _recheckPending = false
+
+local function TotemInRange(spellID, entry, cfg)
+    if cfg and cfg.desatOutOfRange == false then return true end
+    local buffs = BuffsFor(spellID)
+    if not buffs then return true end
+    local now = GetTime()
+    if entry and entry.placedAt and (now - entry.placedAt) < RANGE_GRACE then return true end
+    if SelfAurasBlind() then return true end
+    -- En combat, un buff sans spellID (Windfury, Grounding sur Forever) n'est pas lisible : pas de test, couleur
+    if #buffs.ids == 0 and InCombatLockdown() then return true end
+    local slot = entry and entry.slot
+    local present = TotemBuffPresent(buffs)
+    if present == nil then return true end   -- illisible : couleur
+    local result
+    if present then
+        if slot then _lastSeenBySlot[slot] = now end
+        result = true
+    else
+        local seen = slot and _lastSeenBySlot[slot]
+        if seen and seen >= ((entry and entry.placedAt) or 0) and (now - seen) < OUT_OF_RANGE_DELAY then
+            -- Absence encore trop courte : reevaluer a l'echeance (aucun UNIT_AURA ne viendra forcement)
+            if not _recheckPending then
+                _recheckPending = true
+                C_Timer.After(OUT_OF_RANGE_DELAY - (now - seen) + 0.05, function()
+                    _recheckPending = false
+                    if UpdateTotemsRange then UpdateTotemsRange() end
+                end)
+            end
+            result = true
+        else
+            result = false
+        end
+    end
+    return result
+end
+
+-- /aishdebug totemrange : trace de chaque bascule de portee, avec le detail des recherches de buff
+local function TraceRange(spellID, inRange)
+    if not ns._totemRangeTrace then return end
+    local buffs = BuffsFor(spellID) or { ids = {}, names = {} }
+    local byId = {}
+    for _, id in ipairs(buffs.ids) do
+        local ok, a = pcall(GetPlayerAuraBySpellID, id)
+        if not ok then byId[#byId + 1] = id .. "=err"
+        elseif IsSecret(a) then byId[#byId + 1] = id .. "=secret"
+        elseif a then byId[#byId + 1] = id .. "=OUI" end
+    end
+    local list = SnapshotBuffs()
+    local byScan = list and "non" or "illisible"
+    if list then
+        for _, b in ipairs(list) do
+            for _, n in ipairs(buffs.names) do if b.name == n then byScan = "OUI" end end
+        end
+    end
+    print(string.format("|cff33aaff[TotemRange]|r %.1f %s -> %s | combat=%s secretAuras=%s | parID={%s} noms={%s} parcours=%s",
+        GetTime(), SafeSpellName(spellID) or tostring(spellID), inRange and "|cff00ff00couleur|r" or "|cffff4444gris|r",
+        tostring(InCombatLockdown()),
+        tostring(C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret()),
+        table.concat(byId, ","), table.concat(buffs.names, ","), byScan))
+end
+
+local function ApplyTotemRange(f, inRange)
+    if f._inRange == inRange and f._rgbApplied == f._rgb then return end
+    f._inRange, f._rgbApplied = inRange, f._rgb
+    if f.icon then f.icon:SetDesaturated(not inRange) end
+    local c = f._rgb or { 1, 1, 1 }
+    local r, g, b = c[1], c[2], c[3]
+    if not inRange then
+        local l = (r * 0.3 + g * 0.59 + b * 0.11) * 0.6
+        r, g, b = l, l, l
+    end
+    if f.bar then pcall(f.bar.SetStatusBarColor, f.bar, r, g, b) end
+    if f.barL then pcall(f.barL.SetStatusBarColor, f.barL, r, g, b) end
+    if f.barR then pcall(f.barR.SetStatusBarColor, f.barR, r, g, b) end
 end
 
 -- Glow par sort, type et taille eventuellement remplaces par la section "Glow" du mode (cf. ns.ModeGlow).
@@ -575,10 +835,10 @@ local function RefreshTotemsGridBody()
                 elseif growth == "RIGHT" then PPoint(f, "TOPLEFT", cont, "TOPLEFT", offset, 0)
                 else PPoint(f, "TOPLEFT", cont, "TOPLEFT", 0, -offset) end
 
-                local r, g, b = TotemBarColorRGB(cfg, info)
-                if f.bar then pcall(f.bar.SetStatusBarColor, f.bar, r, g, b) end
-                if f.barL then pcall(f.barL.SetStatusBarColor, f.barL, r, g, b) end
-                if f.barR then pcall(f.barR.SetStatusBarColor, f.barR, r, g, b) end
+                f._rgb = { TotemBarColorRGB(cfg, info) }
+                local inRange = isPreview or TotemInRange(spellID, activeTotems[spellID], cfg)
+                if not isPreview and f._inRange ~= inRange then TraceRange(spellID, inRange) end
+                ApplyTotemRange(f, inRange)
 
                 -- Preview : pas de vrai durObj disponible (aucun totem
                 -- reellement pose) -- EnsurePreviewTicker() prend le relais
@@ -614,6 +874,20 @@ local function RefreshTotemsGridBody()
         pcall(function() if ns.UpdateRenderFade then ns.UpdateRenderFade("totems") end end)
     else
         cont:SetAlpha(0)
+    end
+end
+
+-- Reevalue seulement la portee des totems affiches (UNIT_AURA du joueur, fin du delai de grace).
+UpdateTotemsRange = function()
+    if IsTotemsPreviewActive() then return end
+    local cfg = ns.db and ns.db.totems or ns.Defaults.totems
+    for spellID, entry in pairs(activeTotems) do
+        local f = totemWidgets[spellID]
+        if f and f:IsShown() then
+            local inRange = TotemInRange(spellID, entry, cfg)
+            if f._inRange ~= inRange then TraceRange(spellID, inRange) end
+            ApplyTotemRange(f, inRange)
+        end
     end
 end
 
@@ -659,6 +933,13 @@ totemEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     end
     RescanActiveTotems()
     pcall(ns.RefreshTotemsGrid)
+end)
+
+-- Buffs du joueur : portee des totems (desaturation hors de portee)
+local totemRangeFrame = CreateFrame("Frame")
+totemRangeFrame:RegisterUnitEvent("UNIT_AURA", "player")
+totemRangeFrame:SetScript("OnEvent", function()
+    if next(activeTotems) then pcall(UpdateTotemsRange) end
 end)
 
 -- NETTOYAGE UNIQUE : l'ancienne liaison (slot vide pris pour une pose, candidat le plus ancien) a
@@ -761,6 +1042,17 @@ function ns.DebugDumpTotems()
     for spellID, e in pairs(activeTotems) do
         n2 = n2 + 1
         P(string.format("  spellID=%d slot=%s instID=%s", spellID, tostring(e.slot), tostring(e.instID)))
+        local buffs = BuffsFor(spellID)
+        if buffs then
+            local f = totemWidgets[spellID]
+            P(string.format("    portee : ids={%s} noms={%s} present=%s inRange=%s widget=%s shown=%s desat=%s combat=%s",
+                table.concat(buffs.ids, ","), table.concat(buffs.names, ","), tostring(TotemBuffPresent(buffs)),
+                tostring(TotemInRange(spellID, e, ns.db and ns.db.totems)), tostring(f ~= nil),
+                tostring(f and f:IsShown()), tostring(f and f.icon and f.icon:IsDesaturated()),
+                tostring(InCombatLockdown())))
+        else
+            P("    portee : aucun buff connu pour ce totem (jamais grise)")
+        end
     end
     if n2 == 0 then P("  (aucun totem actif detecte)") end
 

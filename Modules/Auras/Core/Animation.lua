@@ -62,11 +62,61 @@ function ns.FadeTo(frame, targetAlpha, duration, delay)
     activeFadeCount = activeFadeCount + 1
 end
 
+-- ns.renderFrames pointe l'ancien rendu manuel (caché) ; le vrai conteneur natif vient de ns.Get*NativeContainer.
+local function GetRenderContainer(renderKey)
+    local frames = ns.renderFrames and ns.renderFrames[renderKey]
+    local container
+    if renderKey == "icons" and ns.GetIconsNativeContainer then
+        container = ns.GetIconsNativeContainer()
+    elseif renderKey == "freebars" and ns.GetCircleBarsNativeContainer then
+        container = ns.GetCircleBarsNativeContainer()
+    elseif renderKey == "circlebars" and ns.GetFreeBarsNativeContainer then
+        container = ns.GetFreeBarsNativeContainer()
+    elseif renderKey == "iconlist" and ns.GetIconListNativeContainer then
+        container = ns.GetIconListNativeContainer()
+    end
+    return container or (frames and frames.container), frames
+end
+
+-- SURVOL : un mode transparent (alpha hors combat < 1) repasse opaque tant que la souris est dessus.
+-- Souris sur le cadre du conteneur, ou sur un de ses boutons (tooltip natif) remonte via GetMouseFoci.
+local hovered = {}
+local function IsSecretV(v) return HAS_ISSECRET and issecretvalue(v) end
+local function MouseOverContainer(container)
+    local ok, over = pcall(container.IsMouseOver, container)
+    if ok and not IsSecretV(over) and over then return true end
+    local foci = GetMouseFoci and GetMouseFoci()
+    if not foci then return false end
+    for _, f in ipairs(foci) do
+        local p, depth = f, 0
+        while p and depth < 8 do
+            if p == container then return true end
+            local okP, parent = pcall(p.GetParent, p)
+            p = okP and parent or nil
+            depth = depth + 1
+        end
+    end
+    return false
+end
+C_Timer.NewTicker(0.5, function()
+    if not ns.db then return end
+    if ns.IsAuraHidingContext and ns.IsAuraHidingContext() then return end   -- auras masquees (monture, taxi...)
+    for i = 1, #RENDER_KEYS do
+        local key = RENDER_KEYS[i]
+        local container = GetRenderContainer(key)
+        local okV, shown = false, false
+        if container then okV, shown = pcall(container.IsVisible, container) end
+        local over = okV and not IsSecretV(shown) and shown and MouseOverContainer(container) or false
+        if over ~= (hovered[key] or false) then
+            hovered[key] = over or nil
+            pcall(ns.UpdateRenderFade, key)
+        end
+    end
+end)
+
 function ns.UpdateRenderFade(renderKey)
     local cfg = ns.db and ns.db[renderKey]; if not cfg then return end
     local frames = ns.renderFrames[renderKey]
-    -- ns.renderFrames pointe l'ancien rendu manuel (caché) ; le vrai conteneur natif
-    -- vient de ns.Get*NativeContainer.
     local container
     if renderKey == "icons" and ns.GetIconsNativeContainer then
         container = ns.GetIconsNativeContainer()
@@ -92,6 +142,8 @@ function ns.UpdateRenderFade(renderKey)
     local delay = ns._inCombat and (cfg.fadeDelayIC or 0) or (cfg.fadeDelayOOC or 0)
     -- Fade court (0.05s) en combat pour réactivité tab target, complet hors combat
     local duration = ns._inCombat and 0.05 or (cfg.fadeDuration or 0.35)
+    -- Survol : opaque tout de suite (hors "combat uniquement", cache hors combat)
+    if hovered[renderKey] and not (cfg.combatOnly and not ns._inCombat) then target, delay, duration = 1.0, 0, 0.15 end
     ns.FadeTo(container, target, duration, delay)
 
     -- PlayerModel ne suit pas l'alpha parent (quirk Blizzard) : cache-le manuellement.

@@ -368,7 +368,10 @@ local function ApplyHitPad(frame, tol)
     local db = ns.GetCfg("unitBars")
     local def = frame._def   -- nil a la creation : ApplyBarSettings repasse juste apres
     local off = (db and db.enabled == false) or (def and Cfg(def.key).enabled == false)
-    frame:EnableMouse(not off)
+    -- Barre masquee (alpha 0) : souris coupee, sinon elle bloque le clic droit de la camera (cf. SyncBarMouse)
+    local mouse = not off and frame._mouseWanted ~= false
+    frame:EnableMouse(mouse)
+    pad:EnableMouse(mouse)
     pad:ClearAllPoints()
     if off or tol <= 0 then
         UnregisterStateDriver(pad, "visibility")
@@ -755,6 +758,26 @@ local function NewVisual(frame)
     border:SetPoint("BOTTOMRIGHT", frame.bgTex, "BOTTOMRIGHT",  1, -1)
     frame.border = border
 
+    -- Barre de ressource (mana, energie...) : au-dessus du fill HP et de ses segments (soins, absorb), sous les points.
+    -- Fond et filet portes par la StatusBar elle-meme : ils suivent sa taille, sa position et son opacite.
+    local pb = CreateFrame("StatusBar", nil, frame)
+    pb:SetFrameLevel(lvl + 4)
+    pb:SetMinMaxValues(0, 1)
+    pb:SetValue(0)
+    pb:EnableMouse(false)
+    -- Filet en 4 bords de 1 px (et non un aplat derriere le fond : un fond transparent le laisserait voir en entier)
+    pb.edges = {}
+    for i = 1, 4 do pb.edges[i] = pb:CreateTexture(nil, "BACKGROUND", nil, 0) end
+    local e = pb.edges
+    e[1]:SetPoint("BOTTOMLEFT", pb, "TOPLEFT", -1, 0);     e[1]:SetPoint("BOTTOMRIGHT", pb, "TOPRIGHT", 1, 0);     e[1]:SetHeight(1)
+    e[2]:SetPoint("TOPLEFT", pb, "BOTTOMLEFT", -1, 0);     e[2]:SetPoint("TOPRIGHT", pb, "BOTTOMRIGHT", 1, 0);     e[2]:SetHeight(1)
+    e[3]:SetPoint("TOPRIGHT", pb, "TOPLEFT", 0, 0);        e[3]:SetPoint("BOTTOMRIGHT", pb, "BOTTOMLEFT", 0, 0);   e[3]:SetWidth(1)
+    e[4]:SetPoint("TOPLEFT", pb, "TOPRIGHT", 0, 0);        e[4]:SetPoint("BOTTOMLEFT", pb, "BOTTOMRIGHT", 0, 0);   e[4]:SetWidth(1)
+    pb.bg = pb:CreateTexture(nil, "BACKGROUND", nil, 1)
+    pb.bg:SetAllPoints(pb)
+    pb:Hide()
+    frame.powerBar = pb
+
     -- Points decoratifs : crees a la demande (LayoutDots), sur un calque au-dessus de la barre et de ses segments
     -- (soins, absorb) : la forme la plus proche peut recouvrir le bout de la barre, voulu pour le rendu
     frame.dots = {}
@@ -886,6 +909,86 @@ local function LayoutDots(frame, key, g)
     for j = idx + 1, #frame.dots do frame.dots[j]:Hide() end
 end
 
+-- Barre de ressource ------------------------------------------------------------------------------------------------
+local POWER_FALLBACK = { 0.00, 0.45, 1.00 }   -- bleu mana : unite absente (apercu) ou type illisible
+local PREVIEW_DIM = 0.2   -- apercu du GUI : opacite des elements desactives (cf. LayoutBar)
+
+-- Couleur du type de ressource de l'unite (PowerBarColor de Blizzard). Indexation dans le pcall : en Retail, le type
+-- d'une autre unite peut etre une valeur secrete.
+local function PowerTypeColor(unit)
+    local ok, c = pcall(function()
+        local id, token = UnitPowerType(unit)
+        local pc = PowerBarColor and ((token and PowerBarColor[token]) or (id and PowerBarColor[id]))
+        if pc and pc.r then return { pc.r, pc.g, pc.b } end
+    end)
+    return ok and c or nil
+end
+
+local function UpdatePowerColor(frame)
+    local pb = frame.powerBar
+    if not (pb and pb:IsShown()) then return end
+    local key = frame._def.key
+    local c
+    if BV(key, "powerTypeColor") ~= false then
+        c = (UnitExists(frame.unit) and PowerTypeColor(frame.unit)) or POWER_FALLBACK
+    else
+        c = BV(key, "powerColor") or POWER_FALLBACK
+    end
+    pb:SetStatusBarColor(c[1], c[2], c[3], 1)
+    local bg = BV(key, "powerBgColor") or GetBgColor()
+    pb.bg:SetVertexColor(bg[1], bg[2], bg[3], bg[4] or 1)
+    -- Filet : suit l'opacite du fond (fond transparent = pas de cadre)
+    local dark = GetDarkColor()
+    local ea = (dark[4] or 1) * (bg[4] or 1)
+    for _, t in ipairs(pb.edges) do t:SetColorTexture(dark[1], dark[2], dark[3], ea) end
+end
+
+-- Valeur : passee telle quelle a la StatusBar (secret number accepte cote C). Le max n'est compare que s'il est lisible.
+local function UpdatePower(frame)
+    local pb = frame.powerBar
+    if not (pb and pb:IsShown()) then return end
+    local unit = frame.unit
+    if not UnitExists(unit) then return end
+    local max = UnitPowerMax(unit)
+    if not (issecretvalue and issecretvalue(max)) and (not max or max <= 0) then max = 1 end
+    pb:SetMinMaxValues(0, max)
+    ns.SmoothBarValue(pb, UnitPower(unit))
+end
+
+-- Taille et ancrage : a l'interieur (posee sur le bas de la barre de vie) ou a l'exterieur (sous elle, filets
+-- confondus). Largeur en % de la barre de vie, centree, puis decalee de powerOffX / powerOffY.
+local function LayoutPower(frame, key, g, preview)
+    local pb = frame.powerBar
+    if not pb then return end
+    local on = BV(key, "powerShow") and true or false
+    if not (on or preview) then
+        pb:Hide()
+        frame._powerW = nil
+        return
+    end
+    local inside = BV(key, "powerPlacement") == "inside"
+    local w = math.max(1, g.w * (BV(key, "powerWidth") or 100) / 100)
+    local h = math.max(1, BV(key, "powerHeight") or 3)
+    local ox, oy = BV(key, "powerOffX") or 0, BV(key, "powerOffY") or 0
+    pb:SetSize(w, h)
+    pb:ClearAllPoints()
+    if inside then
+        pb:SetPoint("BOTTOM", frame.bgTex, "BOTTOM", ox, oy)
+    else
+        pb:SetPoint("TOP", frame.bgTex, "BOTTOM", ox, oy - 1)
+    end
+    for _, t in ipairs(pb.edges) do t:SetShown(not inside) end
+    local fd = FILL_DIRS[BV(key, "fillDir")] or FILL_DIRS.LTR
+    pb:SetOrientation("HORIZONTAL")
+    pb:SetReverseFill(fd.orient == "HORIZONTAL" and fd.rev or false)
+    pb:SetStatusBarTexture(BarTex(key))
+    pb.bg:SetTexture(BgTexPath(key))
+    local a = BV(key, "powerAlpha") or 1
+    pb:SetAlpha(a * ((preview and not on) and PREVIEW_DIM or 1))
+    frame._powerW = w
+    pb:Show()
+end
+
 -- Met à jour la couleur de la barre (target = classe, autres = config/Colors)
 local function UpdateBarColor(frame)
     local def = frame._def
@@ -953,11 +1056,11 @@ local function UpdateBarColor(frame)
     if frame.glowFrame then
         frame.glowFrame:SetBackdropBorderColor(fc[1], fc[2], fc[3], 0.9)
     end
+    UpdatePowerColor(frame)
 end
 
 -- Mise en page complete d'une barre (tailles, remplissage, points, textes, couleurs), sans toucher a sa position a
 -- l'ecran. `preview` : apercu du GUI, ou les elements desactives restent visibles, estompes, pour rester survolables.
-local PREVIEW_DIM = 0.2
 local function LayoutBar(frame, preview)
     local key = frame._def.key
     local g = Geometry(key, preview)
@@ -986,6 +1089,9 @@ local function LayoutBar(frame, preview)
     -- Points decoratifs
     LayoutDots(frame, key, g)
     frame._dotDim = preview and not BV(key, "showDots") and PREVIEW_DIM or nil   -- applique par UpdateBarColor
+
+    -- Barre de ressource (couleurs posees par UpdateBarColor)
+    LayoutPower(frame, key, g, preview)
 
     -- Texte de vie : cadre ancre a la barre, texte centre dedans
     local hpOn, hpAnchor = BV(key, "hpShow") and true or false, BV(key, "hpAnchor")
@@ -1118,6 +1224,20 @@ local function CreateUnitBar(def)
     end)
     pad:Hide()
     frame._hitPad = pad
+    -- En combat, EnableMouse est interdit sur ces boutons securises depuis Lua : un state driver le fait a
+    -- la place, souris active seulement si l'unite existe (en combat la barre s'affiche des que l'unite
+    -- existe, cf. ShouldShowBar). Hors combat ("ooc"), SyncBarMouse decide selon la visibilite reelle.
+    local mouseHdr = CreateFrame("Frame", nil, UIParent, "SecureHandlerStateTemplate")
+    mouseHdr:SetFrameRef("bar", frame)
+    mouseHdr:SetFrameRef("pad", pad)
+    mouseHdr:SetAttribute("_onstate-mouse", [[
+        if newstate == "ooc" then return end
+        local on = newstate == "on"
+        self:GetFrameRef("bar"):EnableMouse(on)
+        self:GetFrameRef("pad"):EnableMouse(on)
+    ]])
+    RegisterStateDriver(mouseHdr, "mouse", "[nocombat] ooc; [@" .. def.unit .. ",exists] on; off")
+    frame._mouseHdr = mouseHdr
     ApplyHitPad(frame, ConfiguredHoverTol())
     -- Show() une seule fois à la création ; visibilité gérée ensuite via SetAlpha() (jamais protégé en combat)
     frame:Show()
@@ -1461,6 +1581,12 @@ local function ApplyBarSettings(frame)
     UnitBars.UpdateAllVisibility()
     UpdateBarHealth(frame)
     UpdateBarName(frame)
+    if ubPreviewMode and not UnitExists(def.unit) and frame.powerBar then
+        frame.powerBar:SetMinMaxValues(0, 100)
+        frame.powerBar:SetValue(60)
+    else
+        pcall(UpdatePower, frame)
+    end
 end
 
 --- Apercu du GUI : simple cadre portant les memes elements qu'une barre en jeu (cf. UnitBars.StylePreview).
@@ -1491,6 +1617,10 @@ function UnitBars.StylePreview(f, key)
         f.absorbBar:SetMinMaxValues(0, 100)
         f.absorbBar:SetValue(db.showAbsorb ~= false and 10 or 0)
         f.absorbBar:SetStatusBarColor(c[1], c[2], c[3], c[4] or 1)
+    end
+    if f.powerBar then
+        f.powerBar:SetMinMaxValues(0, 100)
+        f.powerBar:SetValue(60)
     end
     f.hpText:SetText(BV(key, "hpMode") == "value" and "70K" or "70")
     local name = (key == "player") and UnitName("player") or L[PREVIEW_NAMES[key]]
@@ -1560,6 +1690,7 @@ local function ApplyBarWidthScale(frame, ratio, dir)
         frame.bgTex:SetWidth(w)
     end
     if frame.bar then frame.bar:SetWidth(w) end
+    if frame.powerBar and frame._powerW then frame.powerBar:SetWidth(math.max(1, frame._powerW * ratio)) end
 end
 
 -- Remet un dot a son etat de repos (taille finale, decalage nul), utilise en fin/debut de cycle d'anim
@@ -1734,10 +1865,21 @@ local function AnimateBar(frame, shouldShow)
     end
 end
 
+-- Souris d'une barre = barre affichee. Une barre masquee reste Shown a alpha 0 (animations, survol par
+-- position du curseur) : avec la souris active, elle captait le clic droit et bloquait la camera.
+-- Hors combat ici ; en combat, c'est le state driver pose dans CreateUnitBar (unite presente) qui decide.
+local function SyncBarMouse(f, show)
+    if InCombatLockdown() then return end
+    if f._mouseWanted == show then return end
+    f._mouseWanted = show
+    ApplyHitPad(f, ConfiguredHoverTol())
+end
+
 function UnitBars.UpdateAllVisibility()
     for _, f in pairs(bars) do
         local key        = f._def.key
         local shouldShow = ShouldShowBar(f)
+        SyncBarMouse(f, shouldShow)
         if shouldShow ~= ubLastVisState[key] then
             ubLastVisState[key] = shouldShow
             AnimateBar(f, shouldShow)
@@ -1890,6 +2032,10 @@ function UnitBars.Create(parent)
                             f.bar:SetMinMaxValues(0, 100)
                             f.bar:SetValue(75)
                         end
+                        if f.powerBar then
+                            f.powerBar:SetMinMaxValues(0, 100)
+                            f.powerBar:SetValue(60)
+                        end
                         if f.hpText then
                             f.hpText:SetText(BV(f._def.key, "hpMode") == "value" and "75K" or "75")
                         end
@@ -1920,6 +2066,7 @@ eventFrame:RegisterUnitEvent("UNIT_MAXHEALTH",               "player", "target",
 eventFrame:RegisterUnitEvent("UNIT_ABSORB_AMOUNT_CHANGED",   "player", "target", "focus", "pet", "targettarget")
 eventFrame:RegisterUnitEvent("UNIT_HEAL_PREDICTION",         "player", "target", "focus", "pet", "targettarget")
 eventFrame:RegisterUnitEvent("UNIT_HEAL_ABSORB_AMOUNT_CHANGED", "player", "target", "focus", "pet", "targettarget")
+eventFrame:RegisterUnitEvent("UNIT_DISPLAYPOWER",            "player", "target", "focus", "pet", "targettarget")  -- type de ressource (formes...)
 eventFrame:RegisterUnitEvent("UNIT_TARGET",                  "target")  -- target change de cible => mettre a jour targettarget
 eventFrame:RegisterUnitEvent("UNIT_NAME_UPDATE",              "target", "focus", "pet", "targettarget")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
@@ -2175,6 +2322,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         return
     end
 
+    if event == "UNIT_DISPLAYPOWER" then
+        local k = UNIT_KEY[arg1]
+        local f = k and bars[k]
+        if f then pcall(UpdatePowerColor, f); pcall(UpdatePower, f) end
+        return
+    end
+
     if event == "UNIT_HEAL_PREDICTION" or event == "UNIT_HEAL_ABSORB_AMOUNT_CHANGED" then
         local k = UNIT_KEY[arg1]
         local f = k and bars[k]
@@ -2223,6 +2377,12 @@ ns.NewTicker(0.1, function()
         if key ~= "targettarget" and f:GetAlpha() >= 0.01 and UnitExists(f._def.unit) then
             pcall(UpdateHealPrediction, f)
             pcall(UpdateAbsorb, f)
+        end
+    end
+    -- Barres de ressource (toutes, cible de la cible comprise) ; l'apercu du GUI garde sa valeur fictive sans unite
+    for _, f in pairs(bars) do
+        if f.powerBar and f.powerBar:IsShown() and f:GetAlpha() >= 0.01 and UnitExists(f._def.unit) then
+            pcall(UpdatePower, f)
         end
     end
 end)

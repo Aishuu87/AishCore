@@ -900,7 +900,9 @@ local function _TickTargetPower()
     if not f_target.powerBar or not f_target.powerBar:IsShown() then return end
     local cur = UnitPower("target")
     local max = UnitPowerMax("target")
-    if max <= 0 then max = 1 end
+    -- Retail : max peut etre un secret number, toute comparaison leve (et le pcall du ticker avalait l'erreur :
+    -- la barre ne bougeait jamais). On ne teste la valeur que si elle est lisible.
+    if not (issecretvalue and issecretvalue(max)) and (not max or max <= 0) then max = 1 end
     f_target.powerBar:SetMinMaxValues(0, max)
     ns.SmoothBarValue(f_target.powerBar, cur)
 end

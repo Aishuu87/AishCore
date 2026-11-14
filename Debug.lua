@@ -307,6 +307,17 @@ SlashCmdList["AISHDEBUG"] = function(msg)
             auras.DebugDumpCircleBarsFlow()
         end
 
+    elseif msg == "totembuffs" then
+        local auras = ns.Auras
+        if auras and auras.DebugTotemPlayerBuffs then auras.DebugTotemPlayerBuffs() end
+
+    elseif msg == "totemrange" then
+        local auras = ns.Auras
+        if auras then
+            auras._totemRangeTrace = not auras._totemRangeTrace
+            print("|cff00ccffAishCore Debug|r trace de portee des totems : " .. (auras._totemRangeTrace and "ON" or "OFF"))
+        end
+
     elseif msg == "totem" then
         local auras = ns.Auras
         if not (auras and auras.DebugDumpTotems) then

@@ -1601,6 +1601,8 @@ local function CreateSlotFrame(index, parent, preview)
 
   -- Tooltip
   frame:EnableMouse(true)
+  -- Barre cachee par alpha 0 : souris coupee, sinon le slot invisible bloque le clic droit de la camera
+  if ns.MouseFollowsVisibility then ns.MouseFollowsVisibility(frame) end
   -- Glisser-deposer (cf. PBEdit) : recoit aussi un sort pris dans le grimoire
   frame:RegisterForDrag("LeftButton")
   frame:SetScript("OnReceiveDrag", function(self) PBEdit.OnReceive(self) end)
@@ -2442,7 +2444,7 @@ local function UpdateSlotExtras(slot)
       -- forme"... qui ne sont pas un manque de ressource et ne doivent pas griser.
       local usable = _usableState[displayedID]
                   or (baseDisplayed ~= displayedID and _usableState[baseDisplayed] or nil)
-      if usable and usable.noPower then
+      if usable and (usable.noPower or usable.procMissing) then
         desat = true
       end
 
@@ -2804,7 +2806,28 @@ end
 -- (ressources manquantes, condition non remplie), `noPower` isole le cas ressource. Lu dans le
 -- ticker ISOLE, comme les autres lectures C_Spell : la meme lecture depuis la stack PollSlots
 -- peut revenir taintee. Le GCD n'influence pas IsSpellUsable, donc aucun filtre a faire ici.
-local function ScanSpellUsable()
+-- Forever : sorts "reactifs", lancables seulement apres un blocage / une esquive / une parade
+-- (Revanche, Fulgurance...). Pour eux, `usable == false` sans manque de ressource = proc absent,
+-- donc grise. Compare par nom : chaque rang a son propre id.
+-- Chunk deja a 200 locales : l'aide vit dans le do, seul ScanSpellUsable en sort.
+local ScanSpellUsable
+do
+  local REACTIVE_SPELL_IDS = { 6572, 7384, 14251, 19306, 1495 } -- Revanche, Fulgurance, Riposte, Contre-attaque, Morsure de la mangouste
+  local reactiveNames
+  local function IsReactiveSpell(sid)
+    if not ns.IsForever then return false end
+    if not reactiveNames then
+      reactiveNames = {}
+      for _, id in ipairs(REACTIVE_SPELL_IDS) do
+        local n = GetSpellName(id)
+        if n then reactiveNames[n] = true end
+      end
+    end
+    local n = GetSpellName(sid)
+    return n and reactiveNames[n] or false
+  end
+
+ScanSpellUsable = function()
   RecycleInto(_usableState)
   wipe(_rangeState)
   if not (C_Spell and C_Spell.IsSpellUsable) then return end
@@ -2819,6 +2842,7 @@ local function ScanSpellUsable()
       if ok and usable ~= nil then
         local e = PooledTable()
         e.usable, e.noPower = usable and true or false, noPower and true or false
+        e.procMissing = (not e.usable) and (not e.noPower) and IsReactiveSpell(sid) or false
         _usableState[sid] = e
       end
       -- nil = le sort ne se preoccupe pas de la portee (buff perso, sort de zone...) : aucune
@@ -2832,6 +2856,7 @@ local function ScanSpellUsable()
       end
     end
   end
+end
 end
 
 -- Scan isolé de l'état CD live par slot (même ticker que ScanCooldownViewer) pour éviter le taint entre lectures C_Spell

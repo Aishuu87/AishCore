@@ -3,8 +3,9 @@
 -- d'arrivee estimee, et un losange qui suit le personnage avec le temps ecoule.
 --
 -- Route : capturee au clic sur la carte des vols (hook de TakeTaxiNode : GetNumRoutes / TaxiGetNodeSlot).
--- Durees : longueur reelle du trace (Data/TaxiPaths.lua) / vitesse des taxis (apprise : AishaddonDB.taxiPathSpeed,
--- x1.2 avec le talent Forever "Vols frequents"). Sans trace connu : duree apprise par troncon (taxiTimes), sinon
+-- Durees : longueur reelle du trace (Data/TaxiPaths.lua) / vitesse des taxis (apprise sur les vols
+-- complets : AishaddonDB.taxiFlightSpeed, x1.2 avec le talent Forever "Vols frequents"). Sans trace connu : duree
+-- apprise par troncon (taxiTimes), sinon
 -- distance a vol d'oiseau / vitesse moyenne apprise (taxiSpeed).
 -- Passage d'une etape : detecte par la position du joueur sur la carte des vols (repli : au temps estime).
 -- "Arret ici" : TaxiRequestEarlyLanding() pose a l'etape SUIVANTE ; pour une etape plus lointaine, la demande est
@@ -31,13 +32,14 @@ local NODE_HOVER = 1.2    -- etape survolee (arret possible) : legerement plus g
 
 local DEFAULT_SPEED = 24     -- verges/s a vol d'oiseau (trajet reel plus long que la ligne droite)
 local DEFAULT_HOP   = 60     -- secondes, troncon sans position connue
-local DEFAULT_PATH_SPEED = 30   -- verges/s le long du trace reel (Data/TaxiPaths.lua)
+local DEFAULT_PATH_SPEED = 30.4 -- verges/s le long du trace reel (Data/TaxiPaths.lua)
 local ANIM_TIME     = 0.45   -- entree / sortie des bandes et fondu de l'interface
 local REVEAL_GRACE  = 0.6    -- un element survole reste visible ce temps apres le depart de la souris
 local UI_FADE       = 1.6    -- fondu de l'interface au decollage / a l'atterrissage
 local FADE_IN       = 0.35   -- un element qui reapparait
 local FADE_OUT      = 1.4    -- un element qui redevient transparent
 local CHAT_REVEAL   = 8      -- une nouvelle ligne de chat le montre ce temps
+local OFF_TAXI_GRACE = 1     -- hors taxi ce temps (continu) : atterrissage
 
 local CAN_STOP = type(TaxiRequestEarlyLanding) == "function"
 
@@ -47,6 +49,8 @@ local function Cfg() return ns.GetCfg("taxiMode") or {} end
 local function Store()
   if type(AishaddonDB) ~= "table" then return nil end
   AishaddonDB.taxiTimes = AishaddonDB.taxiTimes or {}
+  -- Anciennes mesures par troncon (passage d'etape approximatif) : faussaient les estimations
+  AishaddonDB.taxiPathTimes, AishaddonDB.taxiPathSpeed, AishaddonDB.taxiPathSamples = nil, nil, nil
   return AishaddonDB
 end
 
@@ -70,30 +74,33 @@ local function PathLength(a, b)
   return ns.TaxiPathLength[a.id .. ">" .. b.id]
 end
 
--- Bonus de vitesse des taxis : talent d'heritage Forever "Vols frequents" (+20 %)
+-- Bonus de vitesse des taxis : talent d'heritage Forever "Vols frequents" (+20 %), noeud 110300 de l'arbre
+-- d'heritage 1188 (le sort seul n'est pas toujours vu par IsPlayerSpell)
 local FREQUENT_FLIER = 1225490
 local function SpeedMult()
+  if C_Traits and C_Traits.GetConfigIDByTreeID then
+    local ok, rank = pcall(function()
+      local configID = C_Traits.GetConfigIDByTreeID(1188)
+      local node = configID and C_Traits.GetNodeInfo(configID, 110300)
+      return node and node.activeRank or 0
+    end)
+    if ok and rank and rank > 0 then return 1.2 end
+  end
   return (IsPlayerSpell and IsPlayerSpell(FREQUENT_FLIER)) and 1.2 or 1
 end
 
--- Vitesse de base le long du trace (sans bonus), apprise par client (SavedVariables separees) ; ~30 verges/s
--- mesuree sur Forever, plus rapide sur Retail
+-- Vitesse de base le long du trace (sans bonus), apprise par client (SavedVariables separees) sur des vols
+-- complets uniquement (cf. LearnFlight) ; 30.4 verges/s ajuste sur les temps de vol Classic
 local PATH_SPEED_MIN, PATH_SPEED_MAX = 10, 200
 local function PathSpeed()
   local db = Store()
-  local s = db and tonumber(db.taxiPathSpeed)
+  local s = db and tonumber(db.taxiFlightSpeed)
   return (s and s > PATH_SPEED_MIN and s < PATH_SPEED_MAX) and s or DEFAULT_PATH_SPEED
 end
 
 local function HopEstimate(a, b)
   local len = PathLength(a, b)
-  if len then
-    -- Troncon deja vole : sa duree mesuree (hors bonus de vitesse) ; sinon longueur / vitesse apprise
-    local db = Store()
-    local t = db and db.taxiPathTimes and db.taxiPathTimes[HopKey(a, b)]
-    if t then return max(3, t / SpeedMult()) end
-    return max(3, len / (PathSpeed() * SpeedMult()))
-  end
+  if len then return max(3, len / (PathSpeed() * SpeedMult())) end
   local db = Store()
   local t = db and db.taxiTimes[HopKey(a, b)]
   if t then return t end
@@ -102,26 +109,33 @@ local function HopEstimate(a, b)
   return DEFAULT_HOP
 end
 
--- Troncon parcouru : duree retenue, vitesse moyenne ajustee
+-- Vol complet pose a destination (sans arret anticipe), tous les troncons de longueur connue : la vitesse
+-- apprise avance d'un quart vers la mesure. Une mesure a plus d'un tiers de l'estimation = donnee aberrante.
+-- Le passage des etapes (detection approximative) n'apprend plus rien sur les troncons traces.
+local function LearnFlight(nodes, seconds, mult)
+  local db = Store()
+  if not db or not seconds or seconds < 10 or seconds > 3600 then return end
+  local len = 0
+  for i = 1, #nodes - 1 do
+    local l = PathLength(nodes[i], nodes[i + 1])
+    if not l then return end
+    len = len + l
+  end
+  if len < 300 then return end
+  local s, cur = len / seconds / (mult or 1), PathSpeed()
+  if s <= PATH_SPEED_MIN or s >= PATH_SPEED_MAX then return end
+  local n = tonumber(db.taxiFlightSamples) or 0
+  if n == 0 or (s > cur * 0.75 and s < cur * 1.33) then
+    db.taxiFlightSpeed = cur + (s - cur) * (n == 0 and 0.5 or 0.25)
+    db.taxiFlightSamples = n + 1
+  end
+end
+
+-- Troncon sans trace connu : duree retenue, vitesse a vol d'oiseau ajustee
 local function Learn(a, b, seconds)
   local db = Store()
   if not db or not seconds or seconds < 3 or seconds > 1800 then return end
-  local len = PathLength(a, b)
-  if len then
-    db.taxiPathTimes = db.taxiPathTimes or {}
-    db.taxiPathTimes[HopKey(a, b)] = floor(seconds * SpeedMult() + 0.5)
-    if len > 300 then
-      -- Moyenne des mesures (la 1re remplace la valeur par defaut), puis glissante a 20 %
-      local s = len / seconds / SpeedMult()
-      if s > PATH_SPEED_MIN and s < PATH_SPEED_MAX then
-        local n = tonumber(db.taxiPathSamples) or 0
-        local w = max(0.2, 1 / (n + 1))
-        db.taxiPathSpeed = PathSpeed() * (1 - w) + s * w
-        db.taxiPathSamples = n + 1
-      end
-    end
-    return
-  end
+  if PathLength(a, b) then return end
   db.taxiTimes[HopKey(a, b)] = floor(seconds + 0.5)
   local d = Dist(a, b)
   if d and d > 50 then
@@ -203,16 +217,16 @@ local function BuildEstimates(f)
   end
 end
 
--- Heure d'arrivee (temps de vol) de chaque etape : reelle si passee, sinon estimee depuis la derniere passee
+-- Heure d'arrivee (temps de vol) de chaque etape : reelle si passee ; sinon estimee depuis le decollage (le passage
+-- d'une etape n'est detecte qu'approximativement), decalee seulement si le vol est en retard sur la suivante
 local function ETAs(f, el)
   local eta = {}
   for i = 1, f.reached do eta[i] = f.times[i] end
-  local t = f.times[f.reached]
-  for i = f.reached + 1, #f.nodes do
-    t = t + f.hop[i - 1]
-    if i == f.reached + 1 and t < el then t = el end
-    eta[i] = t
-  end
+  local r = f.reached
+  if r >= #f.nodes then return eta end
+  -- Retard : sur l'etape attendue, ou deja constate au passage de la derniere
+  local lag = max(0, el - f.axis[r + 1], (f.times[r] or 0) - f.axis[r])
+  for i = f.reached + 1, #f.nodes do eta[i] = f.axis[i] + lag end
   return eta
 end
 
@@ -228,7 +242,8 @@ local function SaveFlight()
 end
 
 local function NewFlight(route, start)
-  local f = { route = route, nodes = route.nodes, start = start or GetTime(), reached = 1, times = { 0 } }
+  local f = { route = route, nodes = route.nodes, start = start or GetTime(), reached = 1, times = { 0 },
+    mult = SpeedMult() }
   BuildEstimates(f)
   return f
 end
@@ -759,9 +774,20 @@ local function TopLevel(f)
   end
 end
 
+-- Cadre a alpha/visibilite secrets (conteneurs d'auras natifs AuraTrackerContainer) : illisible, donc jamais fondu
+local _issecretvalue = issecretvalue
+local function IsSecretFrame(fr)
+  if not _issecretvalue then return false end
+  local ok, ign, a, shown = pcall(function()
+    return fr.IsIgnoringParentAlpha and fr:IsIgnoringParentAlpha(), fr:GetAlpha(), fr:IsShown()
+  end)
+  if not ok then return true end
+  return _issecretvalue(ign) or _issecretvalue(a) or _issecretvalue(shown)
+end
+
 local function Hover(f, now, dur)
   local top = f and TopLevel(f)
-  if top and top ~= root then hoverUntil[top] = max(hoverUntil[top] or 0, now + (dur or REVEAL_GRACE)) end
+  if top and top ~= root and not IsSecretFrame(top) then hoverUntil[top] = max(hoverUntil[top] or 0, now + (dur or REVEAL_GRACE)) end
 end
 
 -- Fenetres ouvertes : panneaux Blizzard (UIPanelWindows), fenetres fermables par Echap (UISpecialFrames, y compris
@@ -774,7 +800,7 @@ local function AddPanel(name)
   local f = type(name) == "string" and _G[name]
   if type(f) ~= "table" or not f.IsShown or not f:IsShown() then return end
   local top = TopLevel(f)
-  if top and top ~= root then panels[top] = true end
+  if top and top ~= root and not IsSecretFrame(top) then panels[top] = true end
 end
 
 local function ScanPanels()
@@ -791,6 +817,7 @@ local fades = {}   -- [cadre] = { a = 0..1, base = alpha d'origine, want = bool,
 
 local function Want(fr, want, instant)
   local s = fades[fr]
+  if not s and IsSecretFrame(fr) then return end
   if want then
     if not s and instant then
       -- Fenetre ouverte : affichee telle quelle, sans toucher a son alpha (elle peut gerer son propre fondu
@@ -1030,7 +1057,14 @@ local function Track(f, el)
   local d = p and Dist(p, f.nodes[nextI])
   if d then
     f.minD = min(f.minD or d, d)
-    if d < 40 or (f.minD < 120 and d > f.minD + 20) then return Pass(f, el, true) end
+    -- Trace lisse (Retail) : la route coupe le virage et peut passer loin du maitre de vol de l'etape ;
+    -- tolerance proportionnelle a la longueur du troncon
+    local near = max(120, min(600, (Dist(f.nodes[f.reached], f.nodes[nextI]) or 0) * 0.2))
+    if d < 40 or (f.minD < near and d > f.minD + 20) then return Pass(f, el, true) end
+    -- Deja plus pres de l'etape d'apres que l'etape attendue ne l'est elle-meme : franchie
+    local d2 = Dist(p, f.nodes[nextI + 1])
+    local hop2 = Dist(f.nodes[nextI], f.nodes[nextI + 1])
+    if d2 and hop2 and d2 < hop2 - 60 and d > f.minD + 20 then return Pass(f, el, true) end
     if el > f.times[f.reached] + hopT * 1.8 + 30 then return Pass(f, el, false) end   -- filet de securite
   elseif el >= f.times[f.reached] + hopT then
     Pass(f, el, false)
@@ -1078,7 +1112,14 @@ local function OnUpdate(_, el)
   if uiHidden or mmHidden then SyncMinimap() end
 
   if flight then
-    if not UnitOnTaxi("player") then return EndFlight() end
+    -- Hors taxi un court instant au passage d'une etape (changement de troncon) : fin du vol seulement
+    -- apres OFF_TAXI_GRACE s continues hors taxi
+    if not UnitOnTaxi("player") then
+      flight.offSince = flight.offSince or GetTime()
+      if GetTime() - flight.offSince >= OFF_TAXI_GRACE then return EndFlight() end
+    else
+      flight.offSince = nil
+    end
     posClock = posClock + el
     if posClock >= 0.2 then posClock = 0; Track(flight, Elapsed(flight)) end
   elseif demo then
@@ -1131,12 +1172,18 @@ function EndFlight()
   if f then
     -- Atterrissage (pas la desactivation du module) : son optionnel
     if Cfg().enabled and Cfg().arrivalSound then TaxiMode.PlayArrivalSound() end
-    -- Dernier troncon : appris si l'on s'est pose sur l'etape attendue (destination ou arret choisi)
-    local land = f.stop or #f.nodes
+    local n = #f.nodes
     local p = PlayerYards(f)
-    local d = p and Dist(p, f.nodes[f.reached + 1])
-    if land == f.reached + 1 and d and d < 300 then
-      Learn(f.nodes[f.reached], f.nodes[land], Elapsed(f) - f.times[f.reached])
+    if Cfg().enabled and not f.requested and not f.resumed then
+      -- Pose a destination (position connue : a moins de 300 verges ; inconnue : on se fie a l'absence d'arret)
+      local d = p and Dist(p, f.nodes[n])
+      if not p or (d and d < 300) then
+        -- Instant de l'atterrissage : debut de la periode hors taxi (la fin du vol attend OFF_TAXI_GRACE)
+        local el = (f.offSince or GetTime()) - f.start
+        LearnFlight(f.nodes, el, f.mult)
+        -- Dernier troncon sans trace connu : duree retenue
+        if f.reached == n - 1 then Learn(f.nodes[n - 1], f.nodes[n], el - f.times[f.reached]) end
+      end
     end
   end
   flight = nil
@@ -1255,11 +1302,8 @@ ev:SetScript("OnEvent", function(_, event)
   elseif event == "PLAYER_CONTROL_LOST" then
     if pending then WatchTakeoff() end
   elseif event == "PLAYER_CONTROL_GAINED" then
-    if flight then C_Timer.After(0.1, function()
-      if flight and not UnitOnTaxi("player") then
-        EndFlight()
-      end
-    end) end
+    -- Fin du vol geree par OnUpdate (hors taxi pendant OFF_TAXI_GRACE) : un regain de controle a une etape
+    -- intermediaire ne doit pas couper le vol
   elseif event == "PLAYER_ENTERING_WORLD" then
     -- /reload en plein vol : on reprend le vol enregistre
     local db = Store()
@@ -1270,6 +1314,7 @@ ev:SetScript("OnEvent", function(_, event)
       StartFlight(saved.route, saved.start)
       flight.reached, flight.times = saved.reached or 1, saved.times or { 0 }
       flight.stop, flight.requested = saved.stop, saved.requested
+      flight.resumed = true   -- /reload en vol : depart approximatif, rien a apprendre
       SaveFlight()
       Refresh(true)
     else

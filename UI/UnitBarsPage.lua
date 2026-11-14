@@ -644,6 +644,27 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
   local hpWidgets = { cbHpHover, rowHpMode, ddHpFont, slHpSize, ddHpOutline, ddHpAnchor, slHpX, slHpY, cbHpBg }
   local hpBoxWidgets = { slHpW, slHpH, colHpBg, ddHpShape }
 
+  -- Barre de ressource (4 colonnes) : placement, taille, decalage, couleurs -----------------------------------------
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["UNITBARS_SEC_POWER"], W))
+  local cbPower = Bind(CB(L["UNITBARS_SHOW_DOTS"], nil, 4), "powerShow", "bool")
+  local rowPowerPlace = Bind(AR(L["UNITBARS_POWER_PLACEMENT"], {
+    { k = "inside",  l = L["UNITBARS_POWER_INSIDE"] },
+    { k = "outside", l = L["UNITBARS_POWER_OUTSIDE"] },
+  }, 4), "powerPlacement", "string")
+  Row(4, cbPower, rowPowerPlace, false, false)
+  local slPowerW = Bind(SL(L["UNITBARS_POWER_WIDTH"], 10, 200, 1, 4), "powerWidth", "number")
+  local slPowerH = Bind(SL(L["SETTINGS_HEIGHT"], 1, 40, 1, 4), "powerHeight", "number")
+  local slPowerX = Bind(SL(L["SETTINGS_OFFSET_X"], -200, 200, 1, 4), "powerOffX", "number")
+  local slPowerY = Bind(SL(L["SETTINGS_OFFSET_Y"], -200, 200, 1, 4), "powerOffY", "number")
+  Row(4, slPowerW, slPowerH, slPowerX, slPowerY)
+  local cbPowerType = Bind(CB(L["UNITBARS_POWER_TYPE_COLOR"], L["UNITBARS_POWER_TYPE_COLOR_TT"], 4), "powerTypeColor", "bool")
+  local colPower = Bind(COL(L["UNITBARS_COLOR"], 4), "powerColor", "color")
+  local colPowerBg = Bind(COL(L["UNITBARS_BG_COLOR"], 4), "powerBgColor", "color")
+  local slPowerA = Bind(SL(L["SETTINGS_OPACITY"], 0, 1, 0.05, 4), "powerAlpha", "number")
+  Row(4, cbPowerType, colPower, colPowerBg, slPowerA)
+  local powerWidgets = { rowPowerPlace, slPowerW, slPowerH, slPowerX, slPowerY, cbPowerType, colPowerBg, slPowerA }
+
   -- Remplissage (4 colonnes) ---------------------------------------------------------------------------------------
   ctx:Spacer(6)
   ctx:Add(SW.CreateSectionHeader(container, L["UNITBARS_SEC_FILL"], W))
@@ -736,6 +757,11 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
     zName:SetPoint("BOTTOMRIGHT", pf.nameTxt, "BOTTOMRIGHT", 3, -2)
     local zHp = NewZone("SETTINGS_SEC_HP_TEXT", 30)
     zHp:SetAllPoints(pf.textBG)
+    if pf.powerBar then
+      local zPower = NewZone("UNITBARS_SEC_POWER", 25)
+      zPower:SetPoint("TOPLEFT", pf.powerBar, "TOPLEFT", -2, 2)
+      zPower:SetPoint("BOTTOMRIGHT", pf.powerBar, "BOTTOMRIGHT", 2, -2)
+    end
     -- Points : une zone par groupe (deux en "Les deux"), ancrees a chaque rafraichissement
     zDotsL = NewZone("UNITBARS_SEC_DOTS", 30)
     zDotsR = NewZone("UNITBARS_SEC_DOTS", 30)
@@ -838,6 +864,10 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
     for _, w in ipairs(hpBoxWidgets) do Gray(w, not (hpOn and BV("hpBg")), off) end
     -- Formes decoratives desactivees : reglages grises
     for _, w in ipairs(dotWidgets) do Gray(w, not BV("showDots"), off) end
+    -- Barre de ressource desactivee : reglages grises ; couleur unique grisee tant que la couleur du type est cochee
+    local powerOn = BV("powerShow")
+    for _, w in ipairs(powerWidgets) do Gray(w, not powerOn, off) end
+    Gray(colPower, not powerOn or BV("powerTypeColor") ~= false, off)
     Gray(slTank, not GV("useTankHeight"), off)
     Gray(colBar, GV("themedColors") ~= false, off)
     for _, w in ipairs(colReact) do Gray(w, GV("themedColors") == false, off) end

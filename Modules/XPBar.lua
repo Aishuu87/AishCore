@@ -3581,6 +3581,8 @@ local function CreateXPBar_HoverAndModel(lb)
   hoverFrame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", lb.x, math.max(0, lb.y))
   hoverFrame:SetFrameStrata("HIGH")
   hoverFrame:EnableMouse(true)
+  -- Zone de survol seulement : les clics passent au monde (clic droit = camera)
+  if hoverFrame.SetPropagateMouseClicks then pcall(hoverFrame.SetPropagateMouseClicks, hoverFrame, true) end
   hoverFrame:Hide()
   hoverFrame:SetScript("OnEnter", OnHoverEnter)
   hoverFrame:SetScript("OnLeave", OnHoverLeave)

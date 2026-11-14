@@ -54,6 +54,10 @@ local function UnitBarDefaults(o)
     -- Formes décoratives : circle / chevron / diamond / square ou combinées (circle_chevron...), 1 à 5 par côté,
     -- côté LEFT / RIGHT / BOTH de la barre. nameShadow : ombre derrière la barre (section Nom)
     showDots = true, dotShape = "circle", dotCount = 3, dotSize = 9, dotRatio = 0, dotGap = 3, dotSpacing = 3, dotSide = "LEFT",
+    -- Barre de ressource : "inside" (sur le bas de la barre de vie) ou "outside" (dessous) ; largeur en % de la barre
+    -- de vie ; couleur du type de ressource (powerTypeColor) ou couleur unique (powerColor)
+    powerShow = false, powerPlacement = "outside", powerWidth = 100, powerHeight = 3, powerOffX = 0, powerOffY = 0,
+    powerTypeColor = true, powerColor = { 0.00, 0.45, 1.00, 1 }, powerBgColor = { 0.0549, 0.0549, 0.0549, 1 }, powerAlpha = 1,
   }
   for k, v in pairs(o) do t[k] = v end
   return t

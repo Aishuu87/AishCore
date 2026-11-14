@@ -78,7 +78,7 @@ de les modifier.
 
 **Code commun** (lecteur Lua, arbre des modules, contrôle 3 colonnes) : `AishUIInstaller\Shared\`, lié dans les deux projets. L'arbre est lu dans `Config/ProfileModules.lua` / `UI/ProfileModulesUI.lua` / `Locales` : rien à synchroniser à la main. La copie par modules de l'installeur dépose `AishaddonDB._installerPending`, appliquée au chargement par `P.ApplyInstallerPending` (`Config/Profiles.lua`).
 
-**Installeur Mac** : chaque `*.app` de `H:\JEUX\World of Warcraft\AISH UI\MAC Installer` est ajouté à la racine des zips Retail et Forever (`IncludeMacInstaller`), en dernier, puis le packager pose les droits Unix dans le zip (`Contents/MacOS/*` en 755), sinon l'app ne se lance pas sur Mac.
+**Installeur Mac** : archive **séparée** pour Retail et Forever (`IncludeMacInstaller`, `AishUI_MIDNIGHT_MAC_vX.zip` / `AishUI_FOREVER_MAC_vX.zip`) : même contenu que le zip Windows, sans `INSTALLER AishUI.exe`, avec chaque `*.app` de `H:\JEUX\World of Warcraft\AISH UI\MAC Installer` ajouté en dernier, puis le packager pose les droits Unix (`Contents/MacOS/*` en 755), sinon l'app ne se lance pas sur Mac. Séparé du zip Windows pour limiter les faux positifs antivirus.
 
 **`docs/PACK_VERSION.txt`** : dernière version de chaque pack, lue en ligne par l'installeur (alerte « nouvelle version »). Publié par le bouton « Annoncer les versions cochées » de la page de fin du packager (commit de ce seul fichier + push de main, sans tag).
 

@@ -10096,10 +10096,13 @@ function Build.TargetAuras(container)
     local slSize = SW.CreateSlider(detail, L["SETTINGS_TA_ICON_SIZE"], 14, 48, 1, iconRowSL3)
     slSize:SetValue(gGet("iconSize") or 26)
     slSize.onChanged = function(val) gSet("iconSize", val) end
-    local slOffX = SW.CreateSlider(detail, L["SETTINGS_OFFSET_X"], -200, 200, 1, iconRowSL3)
+    -- Plage = tout l'écran (rangées déplaçables à la souris, ancre TOP d'UIParent)
+    local halfScrW = math.ceil(UIParent:GetWidth() / 2)
+    local scrH     = math.ceil(UIParent:GetHeight())
+    local slOffX = SW.CreateSlider(detail, L["SETTINGS_OFFSET_X"], -halfScrW, halfScrW, 1, iconRowSL3)
     slOffX:SetValue(gGet("offsetX") or 0)
     slOffX.onChanged = function(val) gSet("offsetX", val) end
-    local slOffY = SW.CreateSlider(detail, L["SETTINGS_OFFSET_Y"], -200, 200, 1, iconRowSL3)
+    local slOffY = SW.CreateSlider(detail, L["SETTINGS_OFFSET_Y"], -scrH, 0, 1, iconRowSL3)
     slOffY:SetValue(gGet("offsetY") or 0)
     slOffY.onChanged = function(val) gSet("offsetY", val) end
     SW.TrackDB(slOffX, function() return gGet("offsetX") end)

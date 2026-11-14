@@ -746,6 +746,52 @@ local function OnEvent(self, event)
   end
 end
 
+-- Glisser-déposer d'une rangée (panneau ouvert, hors combat) : poignée invisible au-dessus des icônes,
+-- la position est enregistrée en offsetX/offsetY du groupe (ancre TOP d'UIParent, cf. ApplySettings).
+local movers = {}
+
+local function CreateRowMover(row, group)
+  local m = CreateFrame("Frame", nil, row)
+  m:SetAllPoints(row)
+  m:SetFrameLevel(row:GetFrameLevel() + 50)
+  m:EnableMouse(true)
+  m:RegisterForDrag("LeftButton")
+  m:Hide()
+  m:SetScript("OnDragStart", function()
+    if InCombatLockdown() then return end
+    local panel = _G["AishCoreSettingsPanel"]
+    if not panel or not panel:IsShown() then return end
+    row:SetMovable(true)
+    m._dragging = true
+    row:StartMoving()
+  end)
+  m:SetScript("OnDragStop", function()
+    if not m._dragging then return end
+    m._dragging = false
+    row:StopMovingOrSizing()
+    local rx, top = row:GetCenter(), row:GetTop()
+    local ux, utop = UIParent:GetCenter(), UIParent:GetTop()
+    if rx and top and ux and utop then
+      local rs = row:GetEffectiveScale() / UIParent:GetEffectiveScale()
+      local root = ns.DB and ns.DB.targetAuras
+      if root then
+        root[group] = root[group] or {}
+        root[group].offsetX = math.floor(rx * rs - ux + 0.5)
+        root[group].offsetY = math.floor(top * rs - utop + 0.5)
+      end
+    end
+    TargetAuras.ApplySettings() -- sliders Décalage X/Y resynchronisés par SharedWidgets.TrackDB
+  end)
+  movers[group] = m
+  return m
+end
+
+local function UpdateMovers()
+  for _, m in pairs(movers) do
+    if previewMode then m:Show() else m:Hide() end
+  end
+end
+
 -- ShouldShow
 function TargetAuras.ShouldShow()
   if ns.IsInBlockedState and ns.IsInBlockedState() then return false end
@@ -772,6 +818,10 @@ function TargetAuras.Create(parent)
   debuffRow = CreateFrame("Frame", nil, frame)
   debuffRow:SetSize(dGrp.rowWidth or 530, dGrp.iconSize or 26)
   debuffRow:SetPoint("TOP", buffRow, "BOTTOM", dGrp.offsetX or 0, dGrp.offsetY or -2)
+
+  CreateRowMover(buffRow, "buffs")
+  CreateRowMover(debuffRow, "debuffs")
+  UpdateMovers()
 
   eventFrame:SetScript("OnEvent", OnEvent)
   eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
@@ -858,6 +908,7 @@ end
 function TargetAuras.SetPreview(on)
   previewMode = on
   if not frame then return end
+  UpdateMovers()
   if on then
     if Cfg() and Cfg().enabled == false then
       -- Module desactive : pas d'apercu force

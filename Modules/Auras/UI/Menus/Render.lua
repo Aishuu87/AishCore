@@ -312,7 +312,13 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
                 -- Cooldowns.lua).
                 if rk == "circlebars" or rk == "totems" then
                     local cbHide=SW.CreateCheckbox(c,L["AURASMENU_RENDER_HIDE_ICON"],slW); cbHide:SetPoint("TOPLEFT",ox,-cy); cbHide:SetChecked(cf.hideIcon == true)
-                    cbHide.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].hideIcon=v end; pcall(ns.RebuildDisplay); FreeBarsRefresh() end; cy=cy+50
+                    cbHide.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].hideIcon=v end; pcall(ns.RebuildDisplay); FreeBarsRefresh() end
+                    -- Totems : icone/barre grisees quand le buff du totem manque sur le joueur (Data/TotemBuffs.lua)
+                    if rk == "totems" then
+                        local cbRange=SW.CreateCheckbox(c,L["AURASMENU_RENDER_TOTEM_RANGE_DESAT"],slW); cbRange:SetPoint("TOPLEFT",ox+slW+gap,-cy); cbRange:SetChecked(cf.desatOutOfRange ~= false)
+                        cbRange.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].desatOutOfRange=v end; if ns.RefreshTotemsGrid then pcall(ns.RefreshTotemsGrid) end end
+                    end
+                    cy=cy+50
                 end
             end
             local sg=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_SPACING"],0,150,1,slW); sg:SetPoint("TOPLEFT",ox,-cy); sg:SetValue(cf.gap or 4)

@@ -105,7 +105,7 @@ ns.Defaults = {
         fadeIC=1.0, fadeOOC=0.4, fadeDelayIC=0, fadeDelayOOC=0, fadeDuration=0.35,
         iconBorder="square", desatOverride=nil, glowEnabled=true,
         glowOverrideIdx=nil, glowOverrideR=nil, glowOverrideG=nil, glowOverrideB=nil, glowOverrideScale=nil,
-        iconPos="RIGHT", reverse=true, hideIcon=false,
+        iconPos="RIGHT", reverse=true, hideIcon=false, desatOutOfRange=true,
         barBgR=0, barBgG=0, barBgB=0, barBgAlpha=0,
         barColorR=nil, barColorG=nil, barColorB=nil,
         swipeEnabled=false, bannerGrowth="RIGHT",
