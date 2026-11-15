@@ -88,10 +88,13 @@ ticker:SetScript("OnUpdate", function(self, elapsed)
     -- zero sans que ce soit nous est donc a lui : on arrete d'ecrire, sinon le ticker
     -- ferait reapparaitre des buffs qu'il vient d'eteindre. On reprend la main des qu'il
     -- la remonte lui-meme.
+    -- Ecart minimal exige avec notre derniere ecriture : GetAlpha arrondit (0.0018 relu 0), et
+    -- un fondu vers une opacite reglee a 0 etait pris pour un masquage de l'hote (survol et
+    -- changements d'opacite ignores jusqu'au prochain toggle).
     local okA, cur = pcall(f.GetAlpha, f)
-    cur = okA and cur or nil
+    cur = (okA and type(cur) == "number" and not (issecretvalue and issecretvalue(cur))) and cur or nil
     if cur then
-      if cur <= 0.001 and (st.written or 1) > 0.001 then
+      if cur <= 0.001 and (st.written or 1) > 0.02 then
         st.hostOff = true
       elseif st.hostOff and cur > 0.001 then
         st.hostOff = false
@@ -114,6 +117,118 @@ ticker:SetScript("OnUpdate", function(self, elapsed)
   end
 end)
 
+-- ═══ Cadres de groupe et de raid ═══════════════════════════════════════════════════════════════════════
+-- Attenues hors combat a groupFramesOocAlpha, opacite d'origine en combat et (option) au survol d'un membre.
+-- Conteneurs de premier niveau : ElvUI (ElvUF_Party, ElvUF_Raid1..3, ElvUF_Raidpet), EllesmereUI (conteneurs sans
+-- nom, retrouves par le parent de leurs en-tetes ; ses previews d'options y ecrivent aussi l'opacite) et Blizzard.
+-- Une ecriture de l'hote depuis notre dernier passage devient l'opacite d'origine (0 = masque par lui, rendu).
+-- Survol : GetMouseFoci + remontee des parents (les boutons de membre prennent la souris, pas les conteneurs).
+local GROUP_FRAME_NAMES = {
+  "ElvUF_Party", "ElvUF_Raid1", "ElvUF_Raid2", "ElvUF_Raid3", "ElvUF_Raidpet",
+  "ERFPetHeader",
+  "CompactPartyFrame", "CompactRaidFrameContainer", "PartyFrame",
+}
+local GROUP_PARENT_OF = { "ERFPartyHeader", "ERFFlatHeader", "ERFGroupHeader1" }  -- EllesmereUI : parent = conteneur
+
+local groupStates = {}   -- [frame] = { alpha, host, written, hostOff }
+local groupHoverUntil = 0
+local _groupBuf, _groupSeen = {}, {}
+
+local function GetGroupFrames()
+  local frames, seen = wipe(_groupBuf), wipe(_groupSeen)
+  local function add(f)
+    if f and not seen[f] and f.SetAlpha then
+      seen[f] = true
+      frames[#frames + 1] = f
+    end
+  end
+  for _, name in ipairs(GROUP_FRAME_NAMES) do add(_G[name]) end
+  for _, name in ipairs(GROUP_PARENT_OF) do
+    local h = _G[name]
+    local p = h and h.GetParent and h:GetParent()
+    if p and p ~= UIParent then add(p) end
+  end
+  return frames
+end
+
+local function GroupFramesHovered(frames)
+  local foci
+  if GetMouseFoci then
+    local ok, r = pcall(GetMouseFoci)
+    foci = ok and r
+  elseif GetMouseFocus then
+    local ok, r = pcall(GetMouseFocus)
+    foci = ok and r and { r }
+  end
+  if not foci then return false end
+  for _, focus in ipairs(foci) do
+    local f, depth = focus, 0
+    while f and depth < 12 do
+      if _groupSeen[f] then return true end
+      local ok, p = pcall(f.GetParent, f)
+      f = ok and p or nil
+      depth = depth + 1
+    end
+  end
+  return false
+end
+
+local function GroupRelease(f)
+  local st = groupStates[f]
+  if not st then return end
+  if not st.hostOff then pcall(f.SetAlpha, f, st.host or 1) end
+  groupStates[f] = nil
+end
+
+local groupTicker = CreateFrame("Frame")
+local groupAcc = 0
+groupTicker:SetScript("OnUpdate", function(_, elapsed)
+  local cfg = ns.GetCfg("visibility")
+  if not (cfg and cfg.groupFramesEnabled) then return end
+  groupAcc = groupAcc + elapsed
+  if groupAcc < TICK_INTERVAL then return end
+  local dt = groupAcc
+  groupAcc = 0
+
+  local frames = GetGroupFrames()
+  local full = InCombatLockdown() or UnitAffectingCombat("player")
+  if not full and cfg.groupFramesHoverReveal ~= false then
+    local now = GetTime()
+    if GroupFramesHovered(frames) then groupHoverUntil = now + HOVER_GRACE end
+    full = now < groupHoverUntil
+  end
+  local low = cfg.groupFramesOocAlpha or 0.3
+
+  for _, f in ipairs(frames) do
+    local st = groupStates[f]
+    local okA, cur = pcall(f.GetAlpha, f)
+    cur = (okA and type(cur) == "number" and not (issecretvalue and issecretvalue(cur))) and cur or nil
+    if not st then
+      st = { alpha = cur or 1, host = cur or 1 }
+      if st.host <= 0.001 then st.hostOff = true end
+      groupStates[f] = st
+    end
+    -- Ecriture de l'hote depuis notre dernier passage (ecart > arrondi de GetAlpha)
+    if cur then
+      if st.hostOff then
+        if cur > 0.001 then st.hostOff = false; st.host = cur; st.alpha = cur end
+      elseif st.written and math.abs(cur - st.written) > 0.01 then
+        if cur <= 0.001 then st.hostOff = true else st.host = cur; st.alpha = cur end
+      end
+    end
+    if not st.hostOff then
+      local target = full and st.host or math.min(st.host, low)
+      if math.abs(st.alpha - target) > 0.002 then
+        st.alpha = st.alpha + (target - st.alpha) * (1 - math.exp(-FADE_SPEED * dt))
+      else
+        st.alpha = target
+      end
+      pcall(f.SetAlpha, f, st.alpha)
+      st.written = st.alpha
+    end
+  end
+end)
+
 -- Rien à initialiser (le ticker relit ns.GetCfg() à chaque frame) ; si désactivé, on remet alpha=1.
 function Visibility.ApplySettings()
   local cfg = ns.GetCfg("visibility")
@@ -122,6 +237,9 @@ function Visibility.ApplySettings()
       pcall(f.SetAlpha, f, 1)
       frameStates[f] = nil
     end
+  end
+  if not (cfg and cfg.groupFramesEnabled) then
+    for f in pairs(groupStates) do GroupRelease(f) end
   end
   if Visibility.ApplyEuiBars then Visibility.ApplyEuiBars() end
 end

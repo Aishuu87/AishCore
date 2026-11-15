@@ -54,6 +54,15 @@ local function UnitBarDefaults(o)
     -- Formes décoratives : circle / chevron / diamond / square ou combinées (circle_chevron...), 1 à 5 par côté,
     -- côté LEFT / RIGHT / BOTH de la barre. nameShadow : ombre derrière la barre (section Nom)
     showDots = true, dotShape = "circle", dotCount = 3, dotSize = 9, dotRatio = 0, dotGap = 3, dotSpacing = 3, dotSide = "LEFT",
+    -- Mode JcJ : unité JcJ = icône des épées (pvpShow) ; pvpReplace = à la place des points (côté dotSide), sinon
+    -- placée librement (pvpAnchor sur la barre + pvpX / pvpY) ; couleur "themed" (celle des points) ou "custom"
+    -- (pvpColor) ; rotation "0" / "90" / "180" / "270" (degrés)
+    pvpShow = true, pvpAnchor = "LEFT", pvpX = -14, pvpY = 0,
+    pvpReplace = true, pvpSize = 18, pvpGap = 2, pvpOffY = 0, pvpAlpha = 1, pvpRotation = "0",
+    pvpColorMode = "themed", pvpColor = { 1, 1, 1, 1 },
+    -- Distinguer la faction : emblème Alliance / Horde selon l'unité, réglages communs (pvpF...) ; couleur "original" possible
+    pvpFaction = false,
+    pvpFSize = 20, pvpFGap = 2, pvpFOffY = 0, pvpFAlpha = 1, pvpFRotation = "0", pvpFColorMode = "original", pvpFColor = { 1, 1, 1, 1 },
     -- Barre de ressource : "inside" (sur le bas de la barre de vie) ou "outside" (dessous) ; largeur en % de la barre
     -- de vie ; couleur du type de ressource (powerTypeColor) ou couleur unique (powerColor)
     powerShow = false, powerPlacement = "outside", powerWidth = 100, powerHeight = 3, powerOffX = 0, powerOffY = 0,
@@ -840,6 +849,10 @@ ns.Defaults = {
     euiBars459Alpha         = 0.2,
     euiPetBarEnabled        = false, -- barre du familier, meme logique
     euiPetBarAlpha          = 0.2,
+    -- Cadres de groupe et de raid (ElvUI, EllesmereUI, Blizzard) attenues hors combat
+    groupFramesEnabled      = false,
+    groupFramesOocAlpha     = 0.3,
+    groupFramesHoverReveal  = true,  -- survol d'un membre = opacite d'origine
   },
 
   -- Polices forcees sur des textes d'addons tiers (Modules/AddonFonts.lua). Decoche = visuel d'origine.
@@ -1051,7 +1064,7 @@ ns.Defaults = {
       pet = UnitBarDefaults({ width = 143, x = -260, y = -100, fillColor = { 0.71, 0.60, 0.49, 1 }, mirrorOf = "target",
         nameAnchor = "TOPRIGHT", nameJustify = "RIGHT", hpAnchor = "TOPRIGHT", hpOffX = 1 }),
       targettarget = UnitBarDefaults({ width = 80, x = 260, y = -145, fillColor = { 0.41, 0.41, 0.41, 1 }, mirrorOf = "focus",
-        showDots = false, dotSide = "RIGHT" }),
+        showDots = false, dotSide = "RIGHT", pvpShow = false }),
     },
   },
 

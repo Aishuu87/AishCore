@@ -968,6 +968,59 @@ local function SyncStubborn(restore)
   end
 end
 
+-- Cadres de groupe dont des elements ignorent l'alpha de leur parent (EllesmereUI : familiers "a cote du
+-- proprietaire", SetIgnoreParentAlpha pour porter eux-memes la portee) : restaient visibles en vol. Rattaches a
+-- l'alpha de leur parent pendant le vol (ils suivent alors le fondu de l'interface), rendus a l'atterrissage.
+-- Racines : memes cadres que Modules/Visibility.lua (ElvUI, EllesmereUI, Blizzard). Recherche sur DETACH_DEPTH
+-- niveaux, toutes les DETACH_SCAN s (un familier peut apparaitre en vol).
+local GROUP_ROOTS = { "ElvUF_Party", "ElvUF_Raid1", "ElvUF_Raid2", "ElvUF_Raid3", "ElvUF_Raidpet", "ERFPetHeader",
+  "CompactPartyFrame", "CompactRaidFrameContainer", "PartyFrame" }
+local GROUP_ROOT_PARENT_OF = { "ERFPartyHeader", "ERFFlatHeader", "ERFGroupHeader1" }   -- EllesmereUI : parent = conteneur
+local DETACH_DEPTH, DETACH_SCAN = 4, 0.5
+local detached = {}   -- [cadre] = true : SetIgnoreParentAlpha(false) pose par nous
+local detachClock = DETACH_SCAN
+
+local function CanTouch(fr)
+  return not (fr.IsForbidden and fr:IsForbidden()) and not (InCombatLockdown() and fr:IsProtected())
+end
+
+local function ScanDetach(f, depth)
+  for _, c in ipairs({ f:GetChildren() }) do
+    if CanTouch(c) then
+      if not detached[c] and not fades[c] and c.IsIgnoringParentAlpha and not IsSecretFrame(c)
+          and c:IsIgnoringParentAlpha() and pcall(c.SetIgnoreParentAlpha, c, false) then
+        detached[c] = true
+      end
+      if depth < DETACH_DEPTH then ScanDetach(c, depth + 1) end
+    end
+  end
+end
+
+local function SyncGroupDetached(restore, el)
+  if restore then
+    for c in pairs(detached) do
+      if CanTouch(c) and pcall(c.SetIgnoreParentAlpha, c, true) then detached[c] = nil end
+    end
+    return
+  end
+  detachClock = detachClock + (el or 0)
+  if detachClock < DETACH_SCAN then return end
+  detachClock = 0
+  local seen = {}
+  local function Root(f)
+    if type(f) == "table" and f.GetChildren and not seen[f] and CanTouch(f) then
+      seen[f] = true
+      pcall(ScanDetach, f, 1)
+    end
+  end
+  for _, name in ipairs(GROUP_ROOTS) do Root(_G[name]) end
+  for _, name in ipairs(GROUP_ROOT_PARENT_OF) do
+    local h = _G[name]
+    local p = h and h.GetParent and h:GetParent()
+    if p and p ~= UIParent then Root(p) end
+  end
+end
+
 local revealClock = 0
 local function UpdateReveal(el)
   StepFades(el)
@@ -1014,6 +1067,7 @@ local function SetUIHidden(on)
       GameTooltip:SetIgnoreParentAlpha(true); tooltipIgnored = true
     end
     revealClock = 1   -- fenetres deja ouvertes : visibles des la premiere image
+    detachClock = DETACH_SCAN   -- cadres de groupe : premier passage des la premiere image
     HookChat()
   else
     -- Atterrissage : les elements visibles le restent, l'interface remonte autour d'eux ; ils rendent l'alpha
@@ -1104,6 +1158,8 @@ local function OnUpdate(_, el)
   end
   if uiHidden or uiAlpha < uiSavedAlpha then SyncStubborn(false)
   elseif next(stubBase) then SyncStubborn(true) end
+  if uiHidden then SyncGroupDetached(false, el)
+  elseif next(detached) and uiAlpha >= uiSavedAlpha then SyncGroupDetached(true) end
   if uiHidden then UpdateReveal(el)
   elseif next(fades) then
     StepFades(el)
@@ -1132,7 +1188,8 @@ local function OnUpdate(_, el)
   end
   if root and root:IsShown() and (flight or demo) then Refresh(false) end
 
-  if animP == 0 and animTarget == 0 and not uiHidden and uiAlpha >= uiSavedAlpha and not mmHidden and not flight and not demo then
+  if animP == 0 and animTarget == 0 and not uiHidden and uiAlpha >= uiSavedAlpha and not mmHidden and not flight and not demo
+      and not next(detached) then
     driver:SetScript("OnUpdate", nil)
   end
 end

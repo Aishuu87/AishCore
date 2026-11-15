@@ -549,8 +549,8 @@ local function TotemInRange(spellID, entry, cfg)
     local now = GetTime()
     if entry and entry.placedAt and (now - entry.placedAt) < RANGE_GRACE then return true end
     if SelfAurasBlind() then return true end
-    -- En combat, un buff sans spellID (Windfury, Grounding sur Forever) n'est pas lisible : pas de test, couleur
-    if #buffs.ids == 0 and InCombatLockdown() then return true end
+    -- Jamais de test en combat (buffs illisibles ou peu fiables) : couleur
+    if InCombatLockdown() or UnitAffectingCombat("player") then return true end
     local slot = entry and entry.slot
     local present = TotemBuffPresent(buffs)
     if present == nil then return true end   -- illisible : couleur
@@ -938,6 +938,8 @@ end)
 -- Buffs du joueur : portee des totems (desaturation hors de portee)
 local totemRangeFrame = CreateFrame("Frame")
 totemRangeFrame:RegisterUnitEvent("UNIT_AURA", "player")
+totemRangeFrame:RegisterEvent("PLAYER_REGEN_DISABLED")   -- entree en combat : totems rendus en couleur
+totemRangeFrame:RegisterEvent("PLAYER_REGEN_ENABLED")    -- sortie : le test reprend
 totemRangeFrame:SetScript("OnEvent", function()
     if next(activeTotems) then pcall(UpdateTotemsRange) end
 end)

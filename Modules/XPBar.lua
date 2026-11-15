@@ -2306,6 +2306,25 @@ function NL.AddWeapons(out, total, lvl)
   return out, total
 end
 
+-- Entrees sans id des donnees livrees (nom frFR) qui sont des maitrises passives absentes du livre de sorts
+NL.PASSIVE_IDS = {
+  ["Mailles"]           = 8737,
+  ["Armure en plaques"] = 750,
+  ["Parade"]            = 3127,
+  ["Ambidextrie"]       = 674,
+  ["Crochetage"]        = 1804,
+}
+
+-- Ligne de la fenetre Competences (armures, Ambidextrie, Crochetage) : repli si l'id passif ne repond pas
+function NL.HasSkillLine(name)
+  if not (GetNumSkillLines and GetSkillLineInfo) then return false end
+  for i = 1, GetNumSkillLines() do
+    local n, header = GetSkillLineInfo(i)
+    if not header and n == name then return true end
+  end
+  return false
+end
+
 function NL.CollectTrainable()
   local out, total = {}, 0
   local cf = select(2, UnitClass("player"))
@@ -2347,6 +2366,9 @@ function NL.CollectTrainable()
           name, icon = e.name, e.icon
           local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(e.name)
           known = info ~= nil
+          -- Maitrises passives (Mailles, Plaques...) : hors livre de sorts, la recherche par nom echoue
+          local pid = NL.PASSIVE_IDS[e.name]
+          if not known and pid then known = IsKnown(pid) or NL.HasSkillLine(e.name) end
         else
           known = true      -- nom francais inutilisable dans une autre langue : on ne l'affiche pas
         end

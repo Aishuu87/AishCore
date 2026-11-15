@@ -85,6 +85,37 @@ local function IsSecretV(v) return HAS_ISSECRET and issecretvalue(v) end
 local function MouseOverContainer(container)
     local ok, over = pcall(container.IsMouseOver, container)
     if ok and not IsSecretV(over) and over then return true end
+    -- Conteneur natif (Icones, Liste d'icones) : sa taille ne couvre pas les icones qui en debordent, et
+    -- leurs barres (enfants des icones) debordent encore. Rectangle englobant de tout ce qui est affiche
+    -- (enfants + petits-enfants), en pixels ecran, compare au curseur.
+    local minX, minY, maxX, maxY
+    local function Add(f)
+        local okS, shown = pcall(f.IsShown, f)
+        if not okS or IsSecretV(shown) or not shown then return false end
+        local okR, l, b, w, h = pcall(f.GetRect, f)
+        if okR and l and not (IsSecretV(l) or IsSecretV(b) or IsSecretV(w) or IsSecretV(h)) and w > 0 and h > 0 then
+            local s = f:GetEffectiveScale()
+            l, b, w, h = l * s, b * s, w * s, h * s
+            minX = minX and math.min(minX, l) or l
+            minY = minY and math.min(minY, b) or b
+            maxX = maxX and math.max(maxX, l + w) or (l + w)
+            maxY = maxY and math.max(maxY, b + h) or (b + h)
+        end
+        return true
+    end
+    local okC, kids = pcall(function() return { container:GetChildren() } end)
+    if okC and kids then
+        for _, k in ipairs(kids) do
+            if Add(k) then
+                local okG, sub = pcall(function() return { k:GetChildren() } end)
+                if okG and sub then for _, g in ipairs(sub) do Add(g) end end
+            end
+        end
+    end
+    if minX then
+        local cx, cy = GetCursorPosition()
+        if cx >= minX and cx <= maxX and cy >= minY and cy <= maxY then return true end
+    end
     local foci = GetMouseFoci and GetMouseFoci()
     if not foci then return false end
     for _, f in ipairs(foci) do
@@ -98,6 +129,60 @@ local function MouseOverContainer(container)
     end
     return false
 end
+-- Zone de survol calculee depuis les reglages, comme le placement du conteneur natif (Reposition*NativeGrid,
+-- AuraTrackerContainer.lua) : la geometrie d'un AuraContainer peut etre secrete, et les icones sans souris
+-- n'apparaissent pas dans GetMouseFoci. Rectangle en unites d'UIParent, relatif a son centre.
+local function AnchoredRect(point, x, y, w, h)
+    local l, b
+    if point == "TOP" then l, b = x - w / 2, y - h
+    elseif point == "BOTTOM" then l, b = x - w / 2, y
+    elseif point == "LEFT" then l, b = x, y - h / 2
+    elseif point == "RIGHT" then l, b = x - w, y - h / 2
+    else l, b = x - w / 2, y - h / 2 end
+    return l, b, l + w, b + h
+end
+
+local function ConfigZone(key)
+    local cfg = ns.db and ns.db[key] or (ns.Defaults and ns.Defaults[key])
+    if not cfg then return nil end
+    if key == "icons" then
+        local growth = cfg.growth or "LEFT"
+        local iw, ih, rg = cfg.iconW or 26, cfg.iconH or 26, cfg.rowGap or 2
+        local order = ns.slotOrderByDest and ns.slotOrderByDest.icons
+        local n = math.max(order and #order or 0, 1)
+        local x, y = cfg.x or -199, cfg.y or -247
+        if growth == "UP" or growth == "DOWN" then
+            return AnchoredRect(growth == "UP" and "BOTTOM" or "TOP", x, y, iw, n * (ih + rg))
+        end
+        return AnchoredRect(growth == "RIGHT" and "LEFT" or "RIGHT", x, y, n * (iw + rg), ih)
+    elseif key == "iconlist" then
+        local bw, iw, ih = cfg.barW or 80, cfg.iconW or 25, cfg.iconH or 25
+        local gp, pg, rg = cfg.gap or 12, cfg.pairGap or 6, cfg.rowGap or 3
+        local maxBars = cfg.maxBars or 8
+        local growth = cfg.growth or "DOWN"
+        local x, y = cfg.x or 0, cfg.y or -290
+        if (cfg.layout or "center_mirror") == "center_dual" then
+            local half = iw + gp + bw
+            local h = math.ceil(maxBars / 2) * (ih + rg)
+            return AnchoredRect(growth == "UP" and "BOTTOM" or "TOP", x, y, half * 2 + pg, h)
+        end
+        local rowW = bw * 2 + iw + gp * 2
+        if growth == "LEFT" or growth == "RIGHT" then
+            return AnchoredRect(growth == "RIGHT" and "LEFT" or "RIGHT", x, y, maxBars * (rowW + rg), ih)
+        end
+        return AnchoredRect(growth == "UP" and "BOTTOM" or "TOP", x, y, rowW, maxBars * (ih + rg))
+    end
+end
+
+local function MouseInConfigZone(key)
+    local l, b, r, t = ConfigZone(key)
+    if not l then return false end
+    local s = UIParent:GetEffectiveScale()
+    local cx, cy = GetCursorPosition()
+    cx, cy = cx / s - UIParent:GetWidth() / 2, cy / s - UIParent:GetHeight() / 2
+    return cx >= l and cx <= r and cy >= b and cy <= t
+end
+
 C_Timer.NewTicker(0.5, function()
     if not ns.db then return end
     if ns.IsAuraHidingContext and ns.IsAuraHidingContext() then return end   -- auras masquees (monture, taxi...)
@@ -106,7 +191,9 @@ C_Timer.NewTicker(0.5, function()
         local container = GetRenderContainer(key)
         local okV, shown = false, false
         if container then okV, shown = pcall(container.IsVisible, container) end
-        local over = okV and not IsSecretV(shown) and shown and MouseOverContainer(container) or false
+        -- Visibilite secrete (AuraContainer natif) : consideree visible (les masquages durs sont filtres plus haut)
+        local visible = okV and (IsSecretV(shown) or shown)
+        local over = visible and (MouseInConfigZone(key) or MouseOverContainer(container)) or false
         if over ~= (hovered[key] or false) then
             hovered[key] = over or nil
             pcall(ns.UpdateRenderFade, key)

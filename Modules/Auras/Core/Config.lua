@@ -366,7 +366,16 @@ end
 -- hors combat, affichage normal au survol.
 -- GameTooltip:SetUnitAura attend un index de position, pas un auraInstanceID (d'ou un tooltip vide sinon) :
 -- les instanceID ont leurs propres methodes dediees, meme pattern que Modules/TargetAuras.lua.
+-- auraInstanceID reel seulement (0 .. 2^32-1) : totems et fausses barres d'apercu portent un ID negatif. Le pcall de
+-- l'appelant ne suffit pas, l'API passe par securecallfunction qui remonte l'erreur (des centaines de rapports par
+-- combat, d'ou des micro-freezes). Valeur secrete : transmise telle quelle (lue cote C).
+local function ValidInstID(id)
+    if issecretvalue and issecretvalue(id) then return true end
+    return type(id) == "number" and id > 0 and id <= 4294967295
+end
+
 local function _SetUnitAuraTooltip(unit, instID, filter)
+    if not ValidInstID(instID) then return end
     if filter == "HELPFUL" then
         GameTooltip:SetUnitBuffByAuraInstanceID(unit, instID)
     else
@@ -386,9 +395,17 @@ local function _ttp(msg) if _ttDebug then DEFAULT_CHAT_FRAME:AddMessage("|cff00f
 local hoveredAuraIcon
 local function RefreshAuraTooltip()
     if not hoveredAuraIcon or GameTooltip:IsForbidden() then return end
+    -- Icone masquee sous la souris (OnLeave jamais recu) ou plus survolee : survol perime. Sinon chaque evenement
+    -- (sortie de combat, touche modificatrice) reprenait le GameTooltip a un autre cadre (Questie...).
+    local ib = hoveredAuraIcon
+    if not ib:IsVisible() or not (ib.IsMouseOver and ib:IsMouseOver()) then
+        hoveredAuraIcon = nil
+        if GameTooltip:GetOwner() == ib then GameTooltip:Hide() end
+        return
+    end
     if not ShouldShowAuraTooltip() then
         _ttp("RefreshAuraTooltip: ShouldShowAuraTooltip=false -> Hide()")
-        GameTooltip:Hide()
+        if GameTooltip:GetOwner() == ib then GameTooltip:Hide() end
         return
     end
     GameTooltip:SetOwner(hoveredAuraIcon, "ANCHOR_BOTTOMRIGHT", 5, -5)

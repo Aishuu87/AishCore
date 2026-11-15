@@ -12,6 +12,7 @@ local PREVIEW_H = 130
 local TITLE_H, PIN_TOP_H = 30, 26
 local PREVIEW_MAX_SCALE = 2
 local GRAY = 0.35
+local DEG = "\194\176"   -- signe degre (UTF-8)
 
 local BAR_LABEL = {
   player = "SETTINGS_UNIT_PLAYER", target = "SETTINGS_UNIT_TARGET", focus = "SETTINGS_UNIT_FOCUS",
@@ -103,6 +104,7 @@ local function Subtitle(parent, text, width)
   lbl:SetPoint("LEFT", f, "LEFT", 0, 0)
   lbl:SetTextColor(unpack(Theme.textDim))
   lbl:SetText(text)
+  f._leKind, f._leText = "subheader", text   -- deplacable en mode disposition (UI/LayoutEditor.lua)
   return f
 end
 
@@ -696,13 +698,84 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
   Row(4, slCount, slDot, slDotR, slDotSp)
   local dotWidgets = { ddShape, rowSide, slDotGap, slCount, slDot, slDotR, slDotSp }
 
+  -- Mode JcJ (4 colonnes) : icone des epees a la place des points quand l'unite est JcJ -----------------------------
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["UNITBARS_SEC_PVP"], W))
+  local cbPvpShow = Bind(CB(L["UNITBARS_PVP_SHOW"], L["UNITBARS_PVP_SHOW_TT"], 4, 2), "pvpShow", "bool")
+  cbPvpShow._leId = "unitBars.pvpShow"
+  local cbPvp = Bind(CB(L["UNITBARS_PVP_REPLACE"], L["UNITBARS_PVP_REPLACE_TT"], 4, 2), "pvpReplace", "bool")
+  local pvpBtn = SW.CreateActionBtn(container, L["UNITBARS_PVP_PREVIEW"], Cols(4))
+  pvpBtn._leId = "unitBars.pvpPreview"   -- libelle variable (aperçu en cours) : identifiant fixe en mode disposition
+  local function PvPBtnLabel()
+    local m = UB()
+    pvpBtn._lbl:SetText((m and m.IsPvPPreview and m.IsPvPPreview()) and L["UNITBARS_PVP_PREVIEW_STOP"] or L["UNITBARS_PVP_PREVIEW"])
+  end
+  pvpBtn:SetScript("OnClick", function()
+    local m = UB()
+    if not (m and m.SetPvPPreview) then return end
+    m.SetPvPPreview(not m.IsPvPPreview())
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    PvPBtnLabel()
+    RefreshPreview()
+  end)
+  pvpBtn:HookScript("OnShow", PvPBtnLabel)   -- apercu coupe a la fermeture du GUI
+  local cbFaction = Bind(CB(L["UNITBARS_PVP_FACTION"], L["UNITBARS_PVP_FACTION_TT"], 4), "pvpFaction", "bool")
+  Row(4, cbPvpShow, false, pvpBtn)
+  Row(4, cbPvp, cbFaction, false)
+  local rowPvpSide = Bind(AR(L["UNITBARS_DOT_SIDE"], {
+    { k = "LEFT",  l = L["SETTINGS_ALIGN_LEFT"] },
+    { k = "RIGHT", l = L["SETTINGS_ALIGN_RIGHT"] },
+    { k = "BOTH",  l = L["UNITBARS_DOT_SIDE_BOTH"] },
+  }, 4), "pvpSide", "string")
+  Row(4, rowPvpSide, false, false, false)
+  -- Placement libre ("Remplacer" decoche) : point d'ancrage sur la barre + decalage. Identifiants fixes en mode
+  -- disposition (memes libelles que les reglages des icones, sinon leur numerotation changerait).
+  local ddPvpAnchor = Bind(DD(L["UNITBARS_ANCHOR"], AnchorOptions(), 4), "pvpAnchor", "string")
+  local slPvpX = Bind(SL(L["SETTINGS_OFFSET_X"], -300, 300, 1, 4), "pvpX", "number")
+  local slPvpY = Bind(SL(L["SETTINGS_OFFSET_Y"], -200, 200, 1, 4), "pvpY", "number")
+  ddPvpAnchor._leId, slPvpX._leId, slPvpY._leId = "unitBars.pvpAnchor", "unitBars.pvpX", "unitBars.pvpY"
+  Row(4, ddPvpAnchor, slPvpX, slPvpY, false)
+  local pvpFreeWidgets = { ddPvpAnchor, slPvpX, slPvpY }
+  -- Reglages d'une icone (prefixe pvp = epees, pvpF = emblemes Alliance / Horde, communs aux deux factions)
+  local function PvPIconBlock(pre, title, colorModes)
+    ctx:Add(Subtitle(container, title, W))
+    local ws = {}
+    local function B(w, key, kind)
+      Bind(w, pre .. key, kind)
+      ws[#ws + 1] = w
+      return w
+    end
+    local rowRot = B(AR(L["SETTINGS_ROTATION"], {
+      { k = "0",   l = "0" .. DEG },
+      { k = "90",  l = "90" .. DEG },
+      { k = "180", l = "180" .. DEG },
+      { k = "270", l = "270" .. DEG },
+    }, 4), "Rotation", "string")
+    local slA = B(SL(L["SETTINGS_OPACITY"], 0, 1, 0.05, 4), "Alpha", "number")
+    Row(4, rowRot, slA, false, false)
+    local rowColor = B(AR(L["UNITBARS_COLOR"], colorModes, 4, 2), "ColorMode", "string")
+    local col = Bind(COL(L["SETTINGS_SR_COLOR_CUSTOM"], 4), pre .. "Color", "color")
+    Row(4, rowColor, col, false)
+    local slSize = B(SL(L["SETTINGS_SIZE"], 4, 60, 1, 4), "Size", "number")
+    local slGap = B(SL(L["UNITBARS_DOT_GAP"], -40, 60, 1, 4), "Gap", "number")
+    local slY = B(SL(L["SETTINGS_OFFSET_Y"], -60, 60, 1, 4), "OffY", "number")
+    Row(4, slSize, slGap, slY, false)
+    return { pre = pre, ws = ws, col = col, place = { [slGap] = true, [slY] = true } }
+  end
+  local THEMED = { k = "themed", l = L["CASTBARS_THEMED"] }
+  local CUSTOM = { k = "custom", l = L["SETTINGS_SR_COLOR_CUSTOM"] }
+  local ORIGINAL = { k = "original", l = L["UNITBARS_COLOR_ORIGINAL"] }
+  -- Epees, puis emblemes de faction (actifs avec "Distinguer la faction")
+  local pvpSwords = PvPIconBlock("pvp", L["UNITBARS_PVP_SWORDS"], { THEMED, CUSTOM })
+  local pvpEmblems = PvPIconBlock("pvpF", L["UNITBARS_PVP_EMBLEMS"], { ORIGINAL, THEMED, CUSTOM })
+
   ctx:Spacer()
   ctx:Finalize()
 
   -- Apercu : zones survolables -------------------------------------------------------------------------------------
   -- Une zone par element ; clic droit = ouvre (deplie) sa section et y fait defiler la page.
   local zones = {}
-  local zDotsL, zDotsR
+  local zDotsL, zDotsR, zPvP
   local function OpenSection(labelKey)
     local panel = ns.SettingsPanel
     if panel and panel.OpenSection then panel:OpenSection("unitBars", L[labelKey]:upper(), true) end
@@ -828,6 +901,17 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
       Place(zDotsL, 1, n)
       if side == "BOTH" then Place(zDotsR, 2 * n, n + 1) else zDotsR:Hide() end
     end
+    -- Apercu JcJ : points masques, une zone par icone des epees
+    if pf._pvpActive then zDotsL:Hide(); zDotsR:Hide() end
+    zPvP = zPvP or {}
+    for i, t in ipairs(pf.pvpIcons or {}) do
+      local z = zPvP[i] or NewZone("UNITBARS_SEC_PVP", 30)
+      zPvP[i] = z
+      z:ClearAllPoints()
+      z:SetPoint("TOPLEFT", t, "TOPLEFT", -2, 2)
+      z:SetPoint("BOTTOMRIGHT", t, "BOTTOMRIGHT", 2, -2)
+      z:SetShown(t:IsShown())
+    end
     -- Mise a l'echelle : la barre la plus grande possible dans l'encart (textes compris), sans depasser x2
     local pw = preview:GetWidth()
     if not pw or pw < 50 then pw = W end
@@ -864,6 +948,19 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
     for _, w in ipairs(hpBoxWidgets) do Gray(w, not (hpOn and BV("hpBg")), off) end
     -- Formes decoratives desactivees : reglages grises
     for _, w in ipairs(dotWidgets) do Gray(w, not BV("showDots"), off) end
+    -- Mode JcJ : tout grise sans "Afficher" ; epees grisees quand la faction est distinguee, emblemes grises sinon ;
+    -- cote / ecart / decalage Y : a la place des points seulement, ancrage / X / Y : placement libre seulement
+    local pvpOn, facOn, replace = BV("pvpShow") ~= false, BV("pvpFaction"), BV("pvpReplace")
+    Gray(cbPvp, not pvpOn, off)
+    Gray(cbFaction, not pvpOn, off)
+    Gray(rowPvpSide, not (pvpOn and replace), off)
+    for _, w in ipairs(pvpFreeWidgets) do Gray(w, not pvpOn or replace, off) end
+    local function GrayBlock(b, on)
+      for _, w in ipairs(b.ws) do Gray(w, not on or (b.place[w] and not replace), off) end
+      Gray(b.col, not on or BV(b.pre .. "ColorMode") ~= "custom", off)
+    end
+    GrayBlock(pvpSwords, pvpOn and not facOn)
+    GrayBlock(pvpEmblems, pvpOn and facOn)
     -- Barre de ressource desactivee : reglages grises ; couleur unique grisee tant que la couleur du type est cochee
     local powerOn = BV("powerShow")
     for _, w in ipairs(powerWidgets) do Gray(w, not powerOn, off) end
@@ -926,6 +1023,8 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
         end
       end
     end
+    rowPvpSide:SetValue(BV("pvpSide") or BV("dotSide"))   -- pas de cote propre : celui des points
+    PvPBtnLabel()
     RefreshPos()   -- barre en symetrie : sa position calculee, pas celle enregistree
     if RefreshVis then RefreshVis() end
     RefreshStates()

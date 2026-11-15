@@ -913,6 +913,145 @@ end
 local POWER_FALLBACK = { 0.00, 0.45, 1.00 }   -- bleu mana : unite absente (apercu) ou type illisible
 local PREVIEW_DIM = 0.2   -- apercu du GUI : opacite des elements desactives (cf. LayoutBar)
 
+-- Mode JcJ ----------------------------------------------------------------------------------------------------------
+-- Unite JcJ : points decoratifs masques, remplaces par une icone (une par cote, pvpSide sinon dotSide). Epees par
+-- defaut ; "Distinguer la faction" (pvpFaction) : embleme Alliance / Horde de l'unite (epees si faction illisible ou
+-- neutre). Reglages par prefixe, pvp (epees) ou pvpF (emblemes, communs aux deux factions) : Size, Gap, OffY,
+-- Rotation, Alpha, ColorMode, Color. Apercu (UnitBars.SetPvPPreview) : etat force tant que le GUI est ouvert.
+-- Texture embarquee (extraite de l'atlas pvptalents-warmode-swords-disabled) : identique sur Retail et Forever
+local PVP_TEX    = "Interface\\AddOns\\AishCore\\Media\\UI\\pvp_swords.png"
+local PVP_RATIO  = 46 / 43   -- largeur / hauteur du fichier
+local PVP_FACTION_ATLAS = { Alliance = "AllianceEmblem", Horde = "HordeEmblem" }
+local pvpPreview = false
+
+-- true / false, nil si illisible (valeur secrete : l'etat precedent est garde)
+local function UnitPvPFlag(unit)
+    if not UnitExists(unit) then return false end
+    local ok, v = pcall(function()
+        return UnitIsPVP(unit) or (UnitIsPVPFreeForAll and UnitIsPVPFreeForAll(unit)) or false
+    end)
+    if not ok or (issecretvalue and issecretvalue(v)) then return nil end
+    return v and true or false
+end
+
+-- "Alliance" / "Horde", nil sinon (neutre, illisible, atlas absent du client)
+local function UnitPvPFaction(unit, preview)
+    local f
+    if preview then
+        f = UnitFactionGroup("player")   -- apercu : faction du joueur
+    else
+        local ok, v = pcall(UnitFactionGroup, unit)
+        if ok and not (issecretvalue and issecretvalue(v)) then f = v end
+    end
+    local atlas = f and PVP_FACTION_ATLAS[f]
+    if not (atlas and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas)) then return nil end
+    return f
+end
+
+-- Couleur : "themed" = celle des points (posee par UpdateBarColor), "custom" = <prefixe>Color, "original" = blanc
+local function ColorPvP(frame)
+    local icons = frame.pvpIcons
+    if not icons then return end
+    local key, pre = frame._def.key, frame._pvpPrefix or "pvp"
+    local mode = BV(key, pre .. "ColorMode")
+    local c
+    if mode == "custom" then c = BV(key, pre .. "Color")
+    elseif mode == "original" then c = { 1, 1, 1 }
+    else c = frame._dotColor end
+    c = c or { 1, 1, 1 }
+    local a = (BV(key, pre .. "Alpha") or 1) * (frame._pvpDim or 1)
+    for _, t in ipairs(icons) do t:SetVertexColor(c[1], c[2], c[3], a) end
+end
+
+-- Point d'ancrage (9 points) sur la barre, en coordonnees du cadre (coin bas gauche) : placement libre de l'icone
+local function BarPoint(frame, anchor)
+    local x0, w = frame._barOffX or 0, frame._barW or 0
+    local y0 = frame._barOffY or 0
+    local h = frame.bgTex and frame.bgTex:GetHeight() or 0
+    local x = anchor:find("LEFT") and x0 or anchor:find("RIGHT") and (x0 + w) or (x0 + w / 2)
+    local y = anchor:find("TOP") and (y0 + h) or anchor:find("BOTTOM") and y0 or (y0 + h / 2)
+    return x, y
+end
+
+-- pvpShow : icones affichees quand l'unite est JcJ. pvpReplace : a la place des points (masques), du cote pvpSide ;
+-- decoche, points gardes et une seule icone placee librement (pvpAnchor sur la barre + pvpX / pvpY).
+local function UpdatePvP(frame, preview)
+    if not (frame.dotLayer and frame._def) then return end
+    local key = frame._def.key
+    local show = BV(key, "pvpShow") ~= false
+    local replace = BV(key, "pvpReplace") and true or false
+    local active
+    if preview then
+        active = pvpPreview
+    elseif not show then
+        active = false
+    elseif pvpPreview and ubPreviewMode then
+        active = true
+    else
+        local s = UnitPvPFlag(frame.unit)
+        if s == nil then active = frame._pvpActive or false else active = s end
+    end
+    frame._pvpActive = active
+    frame._pvpDim = (preview and not show) and PREVIEW_DIM or nil
+    local hideDots = active and replace
+    for i = 1, frame._dotCount or 0 do
+        local d = frame.dots[i]
+        if d then d:SetShown(not hideDots) end
+    end
+    frame.pvpIcons = frame.pvpIcons or {}
+    local icons, n = frame.pvpIcons, 0
+    if active then
+        -- Icone : embleme de faction (option cochee, faction lisible), sinon epees
+        local faction = BV(key, "pvpFaction") and UnitPvPFaction(frame.unit, preview or (pvpPreview and ubPreviewMode))
+        local pre = faction and "pvpF" or "pvp"
+        local atlas = faction and PVP_FACTION_ATLAS[faction]
+        frame._pvpPrefix = pre
+        local side = BV(key, "pvpSide") or BV(key, "dotSide")   -- pas de cote propre : celui des points
+        local size = BV(key, pre .. "Size") or 18
+        local gap, oy = BV(key, pre .. "Gap") or 0, BV(key, pre .. "OffY") or 0
+        local x0, w = frame._barOffX or 0, frame._barW or 0
+        local yc = (frame._dotYCenter or 0) + oy
+        local ratio = PVP_RATIO
+        if atlas then
+            local info = C_Texture.GetAtlasInfo(atlas)
+            ratio = (info and info.height and info.height > 0) and info.width / info.height or 1
+        end
+        local iw = size * ratio
+        -- Rotation 0 / 90 / 180 / 270 : a 90 et 270, largeur et hauteur echangees (texture non deformee).
+        -- Des deux cotes : le droit en miroir du gauche (90 a gauche = 270 a droite).
+        local deg = tonumber(BV(key, pre .. "Rotation")) or 0
+        local tw, th = iw, size
+        if deg == 90 or deg == 270 then tw, th = size, iw end
+        local places = {}   -- { x, y, rotation }
+        if replace then
+            if side ~= "RIGHT" then places[#places + 1] = { x0 - gap - tw / 2, yc, deg } end
+            if side ~= "LEFT" then
+                places[#places + 1] = { x0 + w + gap + tw / 2, yc, side == "BOTH" and (360 - deg) % 360 or deg }
+            end
+        else
+            local px, py = BarPoint(frame, BV(key, "pvpAnchor") or "LEFT")
+            places[1] = { px + (BV(key, "pvpX") or 0), py + (BV(key, "pvpY") or 0), deg }
+        end
+        for _, pl in ipairs(places) do
+            n = n + 1
+            local t = icons[n]
+            if not t then
+                t = frame.dotLayer:CreateTexture(nil, "OVERLAY")
+                if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
+                icons[n] = t
+            end
+            if atlas then t:SetAtlas(atlas) else t:SetTexture(PVP_TEX); t:SetTexCoord(0, 1, 0, 1) end
+            t:SetRotation(math.rad(pl[3]))
+            t:SetSize(tw, th)
+            t:ClearAllPoints()
+            t:SetPoint("CENTER", frame, "BOTTOMLEFT", pl[1], pl[2])
+            t:Show()
+        end
+    end
+    for j = n + 1, #icons do icons[j]:Hide() end
+    ColorPvP(frame)
+end
+
 -- Couleur du type de ressource de l'unite (PowerBarColor de Blizzard). Indexation dans le pcall : en Retail, le type
 -- d'une autre unite peut etre une valeur secrete.
 local function PowerTypeColor(unit)
@@ -1039,6 +1178,8 @@ local function UpdateBarColor(frame)
         -- Alpha de vertex = alpha de la texture : l'estompage de l'apercu (_dotDim) passe donc ici
         d:SetVertexColor(c[1], c[2], c[3], frame._dotDim or 1)
     end
+    frame._dotColor = dc
+    ColorPvP(frame)
     if frame.border then frame.border:SetColorTexture(dark[1], dark[2], dark[3], dark[4] or 1) end
     if frame.textBGTex then
         local hc = BV(key, "hpBgColor") or bg
@@ -1164,6 +1305,7 @@ local function LayoutBar(frame, preview)
     end
 
     UpdateBarColor(frame)
+    UpdatePvP(frame, preview)   -- apres LayoutDots (qui remontre les points) et UpdateBarColor (teinte)
 end
 
 -- Glisser-deposer : la position est enregistree a chaque image (StoreDragPos), et les autres barres sont replacees en
@@ -1493,6 +1635,7 @@ local PREVIEW_NAMES = {
 local function UpdateBarName(frame)
     if not frame.nameTxt then return end
     UpdatePetHappiness(frame)
+    UpdatePvP(frame)   -- changement d'unite (cible, focus...) : etat JcJ relu
     local unit, key = frame.unit, frame._def.key
     local empty = true
     if key == "player" then
@@ -1634,6 +1777,13 @@ function UnitBars.StylePreview(f, key)
 end
 
 UnitBars.IsLinked = IsLinked
+
+--- Apercu du mode JcJ (bouton de la section Mode JcJ) : barres en jeu et apercu du GUI, tant que le GUI est ouvert.
+function UnitBars.SetPvPPreview(on)
+    pvpPreview = on and true or false
+    for _, f in pairs(bars) do UpdatePvP(f) end
+end
+function UnitBars.IsPvPPreview() return pvpPreview end
 
 
 -- Animation de visibilité (fade + slide in/out) — remplace les StateDrivers
@@ -2045,6 +2195,7 @@ function UnitBars.Create(parent)
             panel:HookScript("OnHide", function()
                 -- Fin de preview : nettoyer les données de test puis recalculer
                 ubPreviewMode = false
+                pvpPreview = false      -- apercu JcJ : seulement GUI ouvert
                 UnitBars.HideHitbox()   -- l'apercu de hitbox n'a plus lieu d'etre
                 for _, f in pairs(bars) do
                     UpdateBarName(f)
@@ -2095,6 +2246,9 @@ eventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
 ns.OnRestAreaChanged(function() UnitBars.UpdateAllVisibility() end)
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
+-- Mode JcJ : drapeau JcJ d'une unite (filtre par UNIT_KEY dans le handler)
+eventFrame:RegisterEvent("UNIT_FACTION")
+eventFrame:RegisterEvent("PLAYER_FLAGS_CHANGED")
 
 -- Debug : /ubtank, etat de la hauteur tank (pourquoi une barre ne prend pas sa taille)
 SLASH_UBTANK1 = "/ubtank"
@@ -2154,6 +2308,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
     if event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
+        -- En combat, le state driver (CreateUnitBar) a pose la souris sans passer par _mouseWanted : sans cet oubli,
+        -- SyncBarMouse sautait la mise a jour et une barre masquee gardait la souris (clic droit / camera bloques).
+        for _, f in pairs(bars) do f._mouseWanted = nil end
         -- Rattraper les snaps de position finale sautes en combat (cf. AnimateBar)
         if next(ubPosPending) then
             for k, f in pairs(ubPosPending) do
@@ -2313,6 +2470,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         local k = UNIT_KEY[arg1]
         local f = k and bars[k]
         if f then UpdateBarName(f) end
+        return
+    end
+
+    if event == "UNIT_FACTION" or event == "PLAYER_FLAGS_CHANGED" then
+        local k = UNIT_KEY[arg1]
+        local f = k and bars[k]
+        if f then UpdatePvP(f) end
         return
     end
 

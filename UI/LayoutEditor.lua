@@ -194,6 +194,26 @@ local function ItemWidgets(item)
   return (item.kind == "widget" and { item.w }) or (item.kind == "row" and item.widgets) or nil
 end
 
+-- Sous-titre fait main, non marque par sa page : simple cadre (sans enfants, bas) portant un seul texte, ajoute seul.
+-- Marque deplacable comme un sous-titre : sinon il restait hors de la grille de sa section, donc relegue sous elle.
+local SUBHEADER_MAX_H = 24
+local function AutoSubheader(w)
+  if Kind(w) or w._leEmpty or w._isSectionHeader or not w.GetRegions then return end
+  if w:GetObjectType() ~= "Frame" or w:GetNumChildren() > 0 or (w:GetHeight() or 0) > SUBHEADER_MAX_H then return end
+  local fs
+  for _, r in ipairs({ w:GetRegions() }) do
+    local t = r:GetObjectType()
+    if t == "FontString" then
+      if fs then return end
+      fs = r
+    elseif t ~= "Texture" then
+      return
+    end
+  end
+  local text = fs and fs:GetText()
+  if text and text ~= "" then w._leKind, w._leText = "subheader", text end
+end
+
 -- Rangees de la page : widgets deplacables de chaque section (pool commun a la page), places par la page
 local function Analyse(ctx, colW4, gap)
   local unit = colW4 + gap
@@ -203,6 +223,7 @@ local function Analyse(ctx, colW4, gap)
     local sec = item.section
     if sec and sec._leInfo and not (item.kind == "widget" and item.w == sec.header) then
       local ws = ItemWidgets(item)
+      if item.kind == "widget" then AutoSubheader(item.w) end
       -- Rangee deplacable : uniquement des widgets standards (cases vides des pages a grille propre comprises,
       -- cf. Row dans UI/CastBarsPage.lua / UI/UnitBarsPage.lua) et au moins un vrai widget
       local movable, real = ws and #ws > 0, 0

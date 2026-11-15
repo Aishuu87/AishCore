@@ -11589,6 +11589,18 @@ function Build.Visibility(container)
   BindCheckbox(cbHover, "visibility", "elvuiBuffsHoverReveal")
   ctx:Depends(cbEnable, { slOoc, slCombat, cbHover })
 
+  -- Cadres de groupe et de raid : attenues hors combat, opacite d'origine en combat / au survol (cf. Modules/Visibility.lua)
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_VIS_GROUP_FRAMES"], W))
+  local cbGroup = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_VIS_ELVUI_BUFFS_ENABLE"], L["SETTINGS_VIS_GROUP_FRAMES_ENABLE_TT"], W))
+  BindCheckbox(cbGroup, "visibility", "groupFramesEnabled")
+  local slGroup = SW.CreateSlider(container, L["SETTINGS_VIS_ELVUI_BUFFS_OOC_ALPHA"], 0, 1, 0.05, SL_W2)
+  BindSlider(slGroup, "visibility", "groupFramesOocAlpha")
+  local cbGroupHover = SW.CreateCheckbox(container, L["SETTINGS_VIS_ELVUI_BUFFS_HOVER"], L["SETTINGS_VIS_GROUP_FRAMES_HOVER_TT"], SL_W2)
+  BindCheckbox(cbGroupHover, "visibility", "groupFramesHoverReveal")
+  ctx:AddRow(8, slGroup, cbGroupHover)
+  ctx:Depends(cbGroup, { slGroup, cbGroupHover })
+
   -- Barres d'action d'EllesmereUI (1-3, 4-6, familier) : attenuees, opacite d'origine en monture, en combat, avec une cible, au survol,
   -- grimoire ouvert ou blesse (cf. Modules/Visibility.lua)
   ctx:Spacer(6)

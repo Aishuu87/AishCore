@@ -1,5 +1,27 @@
 # AishCore
 
+## [v4.7.2](https://github.com/Aishuu87/AishCore/tree/v4.7.2) (2026-11-15)
+
+### XP Bar
+- FIX: The Mail, Plate Mail, Parry, Dual Wield and Lockpicking skills could stay listed in the skills to buy even when the player already knew them
+
+### Unit Frames
+- Added a new customizable icon for units in PvP mode (PvP Mode)
+- An option lets you swap the decorative shapes for the icon in PvP mode (Replace decorative shapes in PvP mode)
+
+### Taxi Mode
+- FIX: Pets shown in the party frames should now also hide during the flight
+
+### Auras to Track
+- Hovering the icons or bars of tracked auras shows them at 100% opacity (in all "Modes" this time)
+
+### QoL
+- Added an option to set the opacity of party and raid frames out of combat (Party and raid frames opacity)
+- FIX: The buff bar did not show again on hover when its out-of-combat opacity was set to 0 (Player buffs zone opacity)
+
+### Fixes
+- FIX: Errors related to some tooltip reading conditions when leaving combat
+
 ## [v4.7.1](https://github.com/Aishuu87/AishCore/tree/v4.7.1) (2026-11-14)
 
 ### Unit Frames
