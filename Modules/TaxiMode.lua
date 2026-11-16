@@ -156,6 +156,12 @@ local function SplitName(full, mapID, x, y)
       if info and info.name and info.name ~= name then zone = info.name end
     end
   end
+  -- Premiere lettre en majuscule ("rives Claires" dans les donnees de Blizzard), accent compris
+  if zone then
+    zone = zone:gsub("^%l", string.upper):gsub("^\195([\160-\190])", function(c)
+      if c ~= "\183" then return "\195" .. string.char(c:byte() - 32) end
+    end)
+  end
   return name, zone
 end
 
@@ -733,9 +739,20 @@ function Refresh(force)
   textClock = textClock + 1
   if not force and textClock % 15 ~= 0 then return end
 
-  elapsedText:SetText(FormatTime(el))
-  PaintDot(startDot, "done")
   local stopIdx = f.stop
+  -- Texte vide tant qu'il est masque (chevauche le depart), alpha reapplique apres SetText
+  local elAlpha = min(1, max(0, el - 8))
+  if elAlpha <= 0 then
+    elapsedText:SetText("")
+  elseif cfg.elapsedRemaining then
+    -- Temps restant jusqu'a l'arret choisi a la main (sinon l'arrivee)
+    local target = eta[(stopIdx and stopIdx <= #n) and stopIdx or #n] or el
+    elapsedText:SetText(FormatTime(target - el))
+  else
+    elapsedText:SetText(FormatTime(el))
+  end
+  elapsedText:SetAlpha(elAlpha)
+  PaintDot(startDot, "done")
   PaintDot(endDot, (f.reached >= #n) and "done" or "todo")
   endEta:SetText(f.reached >= #n and "" or FormatTime(eta[#n]))   -- etape atteinte : plus d'ETA
   local beyond = stopIdx and #n > stopIdx
@@ -793,7 +810,10 @@ end
 -- Fenetres ouvertes : panneaux Blizzard (UIPanelWindows), fenetres fermables par Echap (UISpecialFrames, y compris
 -- celles des addons de sacs), sacs Blizzard, popups, butin, anciens menus deroulants.
 local EXTRA_PANELS = { "ContainerFrameCombinedBags", "LootFrame", "GroupLootContainer", "StaticPopup1", "StaticPopup2",
-  "StaticPopup3", "StaticPopup4", "DropDownList1", "DropDownList2", "DropDownList3" }
+  "StaticPopup3", "StaticPopup4", "DropDownList1", "DropDownList2", "DropDownList3",
+  -- Invitations et appels de groupe (fenetres "speciales", hors StaticPopup) : visibles meme en vol
+  "LFGInvitePopup", "LFGListInviteDialog", "LFGDungeonReadyPopup", "LFGDungeonReadyDialog", "LFDRoleCheckPopup",
+  "RolePollPopup", "ReadyCheckFrame", "PVPReadyDialog", "PetBattleQueueReadyFrame" }
 for i = 1, 13 do EXTRA_PANELS[#EXTRA_PANELS + 1] = "ContainerFrame" .. i end
 
 local function AddPanel(name)
@@ -1057,6 +1077,9 @@ end
 local function SetUIHidden(on)
   if on == uiHidden then return end
   uiHidden = on
+  -- Modeles 3D des animations (cercle hors combat...) : insensibles a l'alpha d'UIParent, coupes a part
+  local SE = ns.Modules and ns.Modules.SpellEffects
+  if SE and SE.SetTaxiMode then SE.SetTaxiMode(on) end
   if on then
     if uiAlpha >= uiSavedAlpha then   -- sinon : retour d'un vol precedent encore en cours, on repart de la
       uiSavedAlpha = UIParent:GetAlpha()

@@ -97,8 +97,14 @@ end
 -- GetAuraDataByIndex) : utilisable seulement hors combat, ou pour une ressource persistante sans minuteur
 -- (ex. Maelstrom Weapon via applications). En combat, voir ns.cdmAuraSwipePresence / ns.SubscribeCDMAuraSwipe
 -- (CDMHooks.lua), canal event-driven alimente par le CDM lui-meme, independant de C_UnitAuras.
-local function GetAuraDataForSpell(unit, spellID, name)
+local function GetAuraDataForSpell(unit, spellID, name, cdmInstID)
     unit = PhysicalUnit(unit, spellID)
+    -- Forever : case CDM de groupe (ex. Aspects, 1324056) dont l'aura reelle porte un autre spellID/nom que la
+    -- case. Le CDM donne l'instance exacte : lecture directe (aucune valeur secrete sur ce client).
+    if cdmInstID and _addon.IsForever and C_UnitAuras.GetAuraDataByAuraInstanceID then
+        local ok, d = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, unit, cdmInstID)
+        if ok and d then return d end
+    end
     if unit == "player" and C_UnitAuras.GetPlayerAuraBySpellID then
         local ok, auraData = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
         if ok and auraData then return auraData end
@@ -118,7 +124,7 @@ ns._lastKnownAura = ns._lastKnownAura or { player = {}, target = {} }
 -- garde, "== false" serait pris a tort pour une confirmation de disparition des le premier scan.
 local everConfirmedByCDM = { player = {}, target = {} }
 
-local function MakeEntry(unit, spellID, cdmName)
+local function MakeEntry(unit, spellID, cdmName, cdmInstID)
     if not spellID then return nil end
     local swipePresent = (ns.IsCDMAuraSwipePresent and ns.IsCDMAuraSwipePresent(spellID))
                        or (ns.IsCDMAuraBarPresent and ns.IsCDMAuraBarPresent(spellID))
@@ -128,7 +134,7 @@ local function MakeEntry(unit, spellID, cdmName)
     -- Hooks OnShow/OnHide sur AuraContainer natif rejetes par Blizzard ("blocked by secret aspects",
     -- contrairement a hooksecurefunc pour le CDM, cf. AuraTrackerContainer.lua) : le cache ci-dessous
     -- reste la seule approximation disponible.
-    local auraData = GetAuraDataForSpell(unit, spellID, cdmName)
+    local auraData = GetAuraDataForSpell(unit, spellID, cdmName, cdmInstID)
 
     if not auraData then
         local cached = cache[spellID]
@@ -175,7 +181,37 @@ local function MakeEntry(unit, spellID, cdmName)
         if okCalc and start ~= nil then directStart, directDuration = start, dur end
     end
 
+    -- Aura sans duree (permanente) : duration/expirationTime a 0, lisibles seulement hors valeur secrete.
+    -- Les barres l'affichent pleine plutot que vide (cf. Animation.lua AnimateBar).
+    local noDuration = false
+    if auraData then
+        local okND, nd = pcall(function()
+            local d, e = auraData.duration, auraData.expirationTime
+            if HAS_ISSECRET and (issecretvalue(d) or issecretvalue(e)) then return false end
+            return (d == 0) or (e == 0)
+        end)
+        noDuration = okND and nd == true
+    end
+    -- durObj de duree totale nulle, ou aucune source de duree du tout (rien pour vider la barre)
+    if not noDuration and durObj then
+        local okT, tot = pcall(function()
+            local t = durObj:GetTotalDuration()
+            if HAS_ISSECRET and issecretvalue(t) then return nil end
+            return t
+        end)
+        noDuration = okT and tot == 0
+    elseif not noDuration and auraData and not directStart then
+        -- Duree absente (nil) et lisible : jamais sur une valeur secrete (aura minutee en combat, Retail)
+        local okN, isNil = pcall(function()
+            local d = auraData.duration
+            if HAS_ISSECRET and issecretvalue(d) then return false end
+            return d == nil
+        end)
+        noDuration = okN and isNil == true
+    end
+
     local entry = {
+        noDuration = noDuration,
         aura     = auraData,
         durObj   = durObj,
         directStart    = directStart,
@@ -270,18 +306,132 @@ end
 -- Scratch reutilisee entre les 2 appels de CollectFromCDM par scan (target puis player) : sans risque, le
 -- premier appel est entierement consomme avant que le second ne demarre.
 local _collectScratch = {}
+local _gotScratch = {}
+local EMPTY = {}
+
+-- Forever : buffs que le CDM ne rapporte jamais (Aspects du chasseur, sans buff associe cote CDM, comme les
+-- totems). Les auras n'y sont pas secretes : lecture directe des buffs du joueur, une passe par scan, puis
+-- correspondance par spellID ou par nom (rang different de celui de la liste).
+local _buffByID, _buffByName, _nameCache = {}, {}, {}
+
+-- Forever : cases CDM de groupe (aura jamais posee sous l'ID de la case) -> sorts membres dont le buff
+-- represente la case. Correspondance par ID ou par nom localise du membre (rangs).
+-- Partagee avec Init.lua (ns.GetSpecSpells) : une entree par membre connu est ajoutee a la liste.
+local GROUP_MEMBERS = ns.CDM_GROUP_MEMBERS
+local GetSpellNameFn = (C_Spell and C_Spell.GetSpellName) or GetSpellInfo
+local function SpellNameOf(sid)
+    local n = _nameCache[sid]
+    if n == nil then
+        local ok, v = pcall(GetSpellNameFn, sid)
+        n = (ok and type(v) == "string") and v or false
+        _nameCache[sid] = n
+    end
+    return n or nil
+end
+local function SnapshotPlayerBuffs()
+    wipe(_buffByID); wipe(_buffByName)
+    for i = 1, 40 do
+        local name, sid, d
+        if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+            local ok
+            ok, d = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
+            if ok and not d then break end
+            if ok and d then name, sid = d.name, d.spellId end
+        elseif UnitAura then
+            local ok, n, _, _, _, _, _, _, _, _, s = pcall(UnitAura, "player", i, "HELPFUL")
+            if ok and not n then break end
+            if ok then name, sid = n, s end
+        end
+        if HAS_ISSECRET and (issecretvalue(name) or issecretvalue(sid)) then name, sid = nil, nil end
+        -- Valeur = auraInstanceID si connu (lecture directe du membre d'un groupe), sinon true
+        local inst = (type(d) == "table" and d.auraInstanceID) or true
+        if type(sid) == "number" then _buffByID[sid] = inst end
+        if type(name) == "string" then _buffByName[name] = inst end
+    end
+end
+
+-- Second repli : barre de postures (Aspects poses comme "forme", sans aura lisible). Forme active = presente.
+local _formByID, _formByName = {}, {}
+local function SnapshotForms()
+    wipe(_formByID); wipe(_formByName)
+    if not (GetNumShapeshiftForms and GetShapeshiftFormInfo) then return end
+    for i = 1, GetNumShapeshiftForms() or 0 do
+        local ok, _, active, _, sid = pcall(GetShapeshiftFormInfo, i)
+        if ok and active and type(sid) == "number" and not (HAS_ISSECRET and issecretvalue(sid)) then
+            _formByID[sid] = true
+            local n = SpellNameOf(sid)
+            if n then _formByName[n] = true end
+        end
+    end
+end
+
+-- Entree sans aura (forme active) : icone permanente, sans duree ni stacks
+local function FormEntry(spellID, name)
+    return { spellID = spellID, unit = "player", stacks = 0, name = name, instID = -(2000000000 + spellID), noDuration = true }
+end
+
+-- /aishdebug aspects : ce que voient les replis Forever (buffs du joueur, barre de postures) pour les sorts suivis
+function ns.DebugUntrackedBuffs()
+    local P = function(s) print("|cff33aaff[Aspects]|r " .. s) end
+    SnapshotPlayerBuffs(); SnapshotForms()
+    P("Buffs du joueur :")
+    for i = 1, 40 do
+        local ok, d = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
+        if not (ok and d) then break end
+        P(string.format("  %s  id=%s  duree=%s", tostring(d.name), tostring(d.spellId), tostring(d.duration)))
+    end
+    P("Barre de postures : " .. tostring(GetNumShapeshiftForms and GetNumShapeshiftForms() or "API absente"))
+    for i = 1, (GetNumShapeshiftForms and GetNumShapeshiftForms() or 0) do
+        local ok, _, active, _, sid = pcall(GetShapeshiftFormInfo, i)
+        P(string.format("  #%d  %s  id=%s  actif=%s", i, tostring(sid and SpellNameOf(sid)), tostring(sid), tostring(active)))
+    end
+    local cdmU = ns.cdmData and ns.cdmData.player or EMPTY
+    P("Sorts suivis :")
+    for sid, on in pairs(ns.anyWhitelist or EMPTY) do
+        if on == true then
+            local n = SpellNameOf(sid)
+            P(string.format("  %s (%d)  cdm=%s  buff=%s  posture=%s  courant=%s", tostring(n), sid, tostring(cdmU[sid] ~= nil),
+                tostring(_buffByID[sid] or (n and _buffByName[n]) or false),
+                tostring(_formByID[sid] or (n and _formByName[n]) or false),
+                tostring(IsCurrentSpell and IsCurrentSpell(sid) or false)))
+        end
+    end
+end
+
+-- Forever : nom d'aura correspondant a un sort suivi (filtre UNIT_AURA d'Events.lua, rang different de la liste)
+local _wlNames, _wlNamesFor = {}, nil
+function ns.IsWhitelistedAuraName(name)
+    local anyWL = ns.anyWhitelist
+    if not (anyWL and type(name) == "string") then return false end
+    if _wlNamesFor ~= anyWL then
+        wipe(_wlNames)
+        for sid, on in pairs(anyWL) do
+            local n = on == true and SpellNameOf(sid)
+            if n then _wlNames[n] = true end
+            for _, m in ipairs(on == true and GROUP_MEMBERS[sid] or EMPTY) do
+                local mn = SpellNameOf(m)
+                if mn then _wlNames[mn] = true end
+            end
+        end
+        _wlNamesFor = anyWL
+    end
+    return _wlNames[name] == true
+end
 
 local function CollectFromCDM(unit)
     wipe(_collectScratch)
     local all = _collectScratch
     local cdmDataU = ns.cdmData and ns.cdmData[unit]
-    if not cdmDataU then return all end
+    if not cdmDataU then
+        if not (_addon.IsForever and unit == "player") then return all end
+        cdmDataU = EMPTY
+    end
 
     local anyWL = ns.anyWhitelist
     for spellID, cdmEntry in pairs(cdmDataU) do
         local keep = (not anyWL) or (anyWL[spellID] == true)
         if keep then
-            local entry = MakeEntry(unit, spellID, cdmEntry.name)
+            local entry = MakeEntry(unit, spellID, cdmEntry.name, cdmEntry.instID)
             if entry then tinsert(all, entry) end
         end
     end
@@ -297,11 +447,71 @@ local function CollectFromCDM(unit)
             end
         end
     end
+
+    -- Forever : sorts suivis sans entree via le CDM (absents, ou connus du CDM sans aura liee) mais presents
+    -- en buff ou en posture (cf. SnapshotPlayerBuffs / SnapshotForms)
+    if unit == "player" and anyWL and _addon.IsForever then
+        SnapshotPlayerBuffs(); SnapshotForms()
+        local pet = ns.PetAuraSpells or EMPTY
+        local got = _gotScratch
+        wipe(got)
+        for _, e in ipairs(all) do got[e.spellID] = true end
+        for spellID, on in pairs(anyWL) do
+            if on == true and not got[spellID] and not pet[spellID] then
+                local name = SpellNameOf(spellID)
+                local entry
+                if _buffByID[spellID] or (name and _buffByName[name]) then
+                    entry = MakeEntry(unit, spellID, name)
+                end
+                if not entry and (_formByID[spellID] or (name and _formByName[name])) then
+                    entry = FormEntry(spellID, name)
+                end
+                -- Case de groupe : buff d'un membre, lu par son auraInstanceID sous l'ID de la case
+                local members = not entry and GROUP_MEMBERS[spellID]
+                if members then
+                    for _, m in ipairs(members) do
+                        local mn = SpellNameOf(m)
+                        local inst = _buffByID[m] or (mn and _buffByName[mn])
+                        if inst then
+                            entry = MakeEntry(unit, spellID, mn, type(inst) == "number" and inst or nil)
+                            if not entry and (_formByID[m] or (mn and _formByName[mn])) then
+                                entry = FormEntry(spellID, mn)
+                            end
+                            if entry then break end
+                        elseif _formByID[m] or (mn and _formByName[mn]) then
+                            entry = FormEntry(spellID, mn); break
+                        end
+                    end
+                end
+                if entry then tinsert(all, entry) end
+            end
+        end
+    end
     return all
 end
 
-function Scan:CollectAuras(unit)        return CollectFromCDM(unit) end
-function Scan:CollectPlayerBuffs()      return CollectFromCDM("player") end
+-- Sorts dont l'aura active n'a pas de duree, par unite (barres natives pleines, cf. Animation.lua)
+ns._noDurationByUnit = ns._noDurationByUnit or { player = {}, target = {} }
+ns._noDurationSpells = ns._noDurationSpells or {}
+local function Collect(unit)
+    local all = CollectFromCDM(unit)
+    local byU = ns._noDurationByUnit[unit]
+    if byU then
+        wipe(byU)
+        for _, e in ipairs(all) do
+            if e.noDuration then byU[e.spellID] = true end
+        end
+        local nd = ns._noDurationSpells
+        wipe(nd)
+        for _, t in pairs(ns._noDurationByUnit) do
+            for sid in pairs(t) do nd[sid] = true end
+        end
+        if ns.UpdateNoDurationBars then pcall(ns.UpdateNoDurationBars) end
+    end
+    return all
+end
+function Scan:CollectAuras(unit)        return Collect(unit) end
+function Scan:CollectPlayerBuffs()      return Collect("player") end
 
 function ns.IsInWhitelist(wl, sid)
     if not wl or sid == nil then return false end
@@ -328,6 +538,7 @@ local function _BuildOutputEntry(e, sid, si, dest, poolIdx)
     t.aura           = e.aura
     t.durObj         = e.durObj
     t.directStart    = e.directStart
+    t.noDuration     = e.noDuration
     t.directDuration = e.directDuration
     t.useCDMSwipe    = e.useCDMSwipe
     t.spellID        = sid

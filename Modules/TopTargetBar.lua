@@ -395,6 +395,15 @@ local function CreateTargetBar()
     deco:Hide()
     f.deco = deco
 
+    -- Mode JcJ : icone de la cible JcJ (cf. UpdatePvP), au-dessus des barres
+    local pvp = CreateFrame("Frame", nil, f)
+    pvp:SetFrameLevel(bar:GetFrameLevel() + 6)
+    pvp:SetAllPoints(f)
+    pvp.tex = pvp:CreateTexture(nil, "OVERLAY")
+    if pvp.tex.SetSnapToPixelGrid then pvp.tex:SetSnapToPixelGrid(false); pvp.tex:SetTexelSnappingBias(0) end
+    pvp.tex:Hide()
+    f.pvp = pvp
+
     f:Hide()
     return f
 end
@@ -598,8 +607,100 @@ local function UpdateEliteDeco()
     end
 end
 
+-- Mode JcJ (meme rendu que les barres d'unite, sans le remplacement des points) : icone des epees quand la cible est
+-- JcJ, embleme Alliance / Horde avec pvpFaction (epees si faction illisible ou neutre). Placement libre sur le fond
+-- (pvpAnchor + pvpX / pvpY). Reglages par prefixe, pvp (epees) ou pvpF (emblemes) : Size, Rotation, Alpha, ColorMode
+-- ("themed" = couleur de la barre de vie, "custom" = <prefixe>Color, "original" = blanc), Color.
+local PVP_TEX   = DECO_PATH .. "pvp_swords.png"
+local PVP_RATIO = 46 / 43   -- largeur / hauteur du fichier
+local PVP_FACTION_ATLAS = { Alliance = "AllianceEmblem", Horde = "HordeEmblem" }
+local pvpPreview = false    -- bouton "Apercu JcJ" du GUI, coupe a sa fermeture
+local pvpActive  = false    -- dernier etat lisible (valeur secrete : etat garde)
+
+local function TargetPvPFlag()
+    local ok, v = pcall(function()
+        return UnitIsPVP("target") or (UnitIsPVPFreeForAll and UnitIsPVPFreeForAll("target")) or false
+    end)
+    if not ok or (issecretvalue and issecretvalue(v)) then return nil end
+    return v and true or false
+end
+
+-- "Alliance" / "Horde", nil sinon (apercu : faction du joueur)
+local function TargetPvPFaction(preview)
+    local f
+    if preview then
+        f = UnitFactionGroup("player")
+    else
+        local ok, v = pcall(UnitFactionGroup, "target")
+        if ok and not (issecretvalue and issecretvalue(v)) then f = v end
+    end
+    local atlas = f and PVP_FACTION_ATLAS[f]
+    if not (atlas and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas)) then return nil end
+    return f
+end
+
+local function UpdatePvP()
+    local icon = f_target and f_target.pvp
+    if not icon then return end
+    local t = icon.tex
+    local db = ns.GetCfg("topTargetBar") or {}
+    local exists = UnitExists("target")
+    local preview = pvpPreview and ttbPreviewMode
+    local active = false
+    if db.enabled ~= false and db.pvpShow then
+        if preview then
+            active = true
+        elseif exists then
+            local s = TargetPvPFlag()
+            if s == nil then active = pvpActive else active = s end
+        end
+    end
+    pvpActive = active
+    if not active then t:Hide(); return end
+
+    local faction = db.pvpFaction and TargetPvPFaction(preview)
+    local pre = faction and "pvpF" or "pvp"
+    local atlas = faction and PVP_FACTION_ATLAS[faction]
+    local size = db[pre .. "Size"] or 18
+    local ratio = PVP_RATIO
+    if atlas then
+        local info = C_Texture.GetAtlasInfo(atlas)
+        ratio = (info and info.height and info.height > 0) and info.width / info.height or 1
+        t:SetAtlas(atlas)
+    else
+        t:SetTexture(PVP_TEX)
+        t:SetTexCoord(0, 1, 0, 1)
+    end
+    -- Rotation 0 / 90 / 180 / 270 : a 90 et 270, largeur et hauteur echangees (texture non deformee)
+    local deg = tonumber(db[pre .. "Rotation"]) or 0
+    local tw, th = size * ratio, size
+    if deg == 90 or deg == 270 then tw, th = th, tw end
+    t:SetRotation(math.rad(deg))
+    t:SetSize(tw, th)
+    local anchor = db.pvpAnchor or "LEFT"
+    t:ClearAllPoints()
+    t:SetPoint("CENTER", f_target.bgFull, anchor, db.pvpX or 0, db.pvpY or 0)
+
+    local mode = db[pre .. "ColorMode"]
+    local c
+    if mode == "custom" then c = db[pre .. "Color"]
+    elseif mode == "original" then c = { 1, 1, 1 }
+    else c = exists and GetUnitColor("target") or REACTION_COLORS.hostile end
+    c = c or { 1, 1, 1 }
+    t:SetVertexColor(c[1], c[2], c[3], db[pre .. "Alpha"] or 1)
+    t:Show()
+end
+
+--- Apercu du mode JcJ (bouton de la page Top Target), tant que le GUI est ouvert
+function TopTargetBar.SetPvPPreview(on)
+    pvpPreview = on and true or false
+    UpdatePvP()
+end
+function TopTargetBar.IsPvPPreview() return pvpPreview end
+
 local function UpdateTarget()
     UpdateEliteDeco()
+    UpdatePvP()
     if not f_target then return end
     local _db = ns.GetCfg("topTargetBar")
     if _db and _db.enabled == false then
@@ -796,6 +897,7 @@ function TopTargetBar.Create()
             end)
             panel:HookScript("OnHide", function()
                 ttbPreviewMode = false
+                pvpPreview = false
                 SetTTBVisibilityDrivers()
                 UpdateTarget()
                 UpdateTargetTarget()

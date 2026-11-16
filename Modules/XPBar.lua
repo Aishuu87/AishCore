@@ -25,7 +25,7 @@ local HOVER_W       = 50
 local HOVER_H       = 50
 local SHOW_DURATION = 4.5
 local ANIM_IN_DUR   = 0.3
-local ANIM_OUT_DUR  = 0.5
+local ANIM_OUT_DUR  = 0.8
 
 local TEAL_DARK  = CreateColor(0.01, 0.76, 0.55, 1)
 local TEAL_LIGHT = CreateColor(0.05, 1.00, 0.74, 1)
@@ -982,7 +982,7 @@ end
 
 -- Entree / sortie des elements du survol : fondu + leger glissement vers le haut, decales entre eux
 -- (fond, puis textes). Chaque cle (tooltipFrame, centerXPText) a une progression p dans [0,1].
-local FADE_IN, FADE_OUT = 0.3, 0.2
+local FADE_IN, FADE_OUT = 0.3, 0.45
 local SLIDE = 8
 local fades, fadeP, hookedFade = {}, {}, {}
 local fadeDriver
@@ -3067,7 +3067,11 @@ nlModEvt:SetScript("OnEvent", function(_, _, key)
 end)
 end  -- do (panneaux du prochain niveau / des quetes)
 
+local HOVER_LINGER = 0.35   -- l'affichage du survol reste un instant apres la sortie de la souris
+local hoverLeaveTimer
+
 local function OnHoverEnter()
+  if hoverLeaveTimer then hoverLeaveTimer:Cancel(); hoverLeaveTimer = nil end
   isHovered = true
   -- Mode badge (rep ou compagnon) : remplacer l'abréviation par le nom complet
   if IsMaxLevel() and repNameLabel and levelText then
@@ -3091,7 +3095,8 @@ local function OnHoverEnter()
   ShowQuestPanel()
 end
 
-local function OnHoverLeave()
+local function DoHoverLeave()
+  hoverLeaveTimer = nil
   isHovered = false
   NLSetAlt(false, true)
   HideNextLevelPanel()
@@ -3102,6 +3107,11 @@ local function OnHoverLeave()
   if tooltipFrame and not isLayoutMode then FadeTo(tooltipFrame, false) end
   if centerXPText then FadeTo(centerXPText, false) end
   if not showTimer then HideXPBar() end
+end
+
+local function OnHoverLeave()
+  if hoverLeaveTimer then hoverLeaveTimer:Cancel() end
+  hoverLeaveTimer = C_Timer.NewTimer(HOVER_LINGER, DoHoverLeave)
 end
 
 --- Détecte quel compagnon de gouffre gagne de l'XP (UPDATE_FACTION en scénario).

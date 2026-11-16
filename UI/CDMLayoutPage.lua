@@ -239,20 +239,40 @@ function ns.BuildCDMLayoutPage(p, cw)
     return CDM.GetSpecConfig(CDM.CurrentSpecID())
   end
 
+  local function EntryOf(cid, list)
+    for _, e in ipairs(list or CDM.ListCooldowns()) do if e.cooldownID == cid then return e end end
+  end
+
+  -- Raciaux : choix retenu sur ce perso, hors build (cf. Modules/CDMLayout.lua). Il faut seulement un build
+  -- actif pour pouvoir appliquer ; sans build, la 1re modification en crée un.
+  local function WithConf(fn)
+    if EditConf() then return fn() end
+    EnsureEditable(fn)
+  end
+
   local function SetCategory(cid, cat)
+    local e = EntryOf(cid)
+    if e and e.racial then
+      WithConf(function()
+        local pos
+        if cat == CDM.ESSENTIAL then
+          for i, x in ipairs(CDM.DisplayEssentials(EditConf(), CDM.ListCooldowns())) do if x == cid then pos = i end end
+        end
+        CDM.SetRacialOverride(cid, cat or 0, pos)
+        Refresh()
+      end)
+      return
+    end
     EnsureEditable(function()
     local conf = EditConf()
     if not conf then return end
-    -- Racial : emplacement generique "racial" (valable pour toutes les races), cf. Modules/CDMLayout.lua
-    local key = CDM.KeyForCid(cid)
-    if key ~= cid then conf.cats[cid] = nil end
-    conf.cats[key] = cat
+    conf.cats[cid] = cat
     if cat ~= CDM.ESSENTIAL then
-      for i = #conf.order, 1, -1 do if conf.order[i] == key or conf.order[i] == cid then table.remove(conf.order, i) end end
+      for i = #conf.order, 1, -1 do if conf.order[i] == cid then table.remove(conf.order, i) end end
     else
       local found = false
-      for _, x in ipairs(conf.order) do if x == key then found = true end end
-      if not found then conf.order[#conf.order + 1] = key end
+      for _, x in ipairs(conf.order) do if x == cid then found = true end end
+      if not found then conf.order[#conf.order + 1] = cid end
     end
     Refresh()
     end)
@@ -267,20 +287,41 @@ function ns.BuildCDMLayoutPage(p, cw)
 
   local function Move(cid, delta)
     if EssentialsReversed() then delta = -delta end
+    local list = CDM.ListCooldowns()
+    local conf0 = EditConf()
+    local ordered = CDM.DisplayEssentials(conf0 or { cats = {}, order = {} }, list)
+    local i
+    for k, x in ipairs(ordered) do if x == cid then i = k; break end end
+    local j = i and i + delta
+    if not (j and ordered[j]) then return end
+    local ei, ej = EntryOf(ordered[i], list), EntryOf(ordered[j], list)
+    -- Un racial dans l'échange : seul son rang change (choix du perso), l'ordre du build reste le même
+    if (ei and ei.racial) or (ej and ej.racial) then
+      WithConf(function()
+        if ei and ei.racial then CDM.SetRacialOverride(ei.cooldownID, CDM.ESSENTIAL, j) end
+        if ej and ej.racial then CDM.SetRacialOverride(ej.cooldownID, CDM.ESSENTIAL, i) end
+        Refresh()
+      end)
+      return
+    end
     EnsureEditable(function()
     local conf = EditConf()
     if not conf then return end
-    local ordered = CDM.OrderedEssentials(conf, CDM.ListCooldowns())
-    for i, x in ipairs(ordered) do
+    local cur = CDM.DisplayEssentials(conf, list)
+    for k, x in ipairs(cur) do
       if x == cid then
-        local j = i + delta
-        if ordered[j] then ordered[i], ordered[j] = ordered[j], ordered[i] end
+        local m = k + delta
+        if cur[m] then cur[k], cur[m] = cur[m], cur[k] end
         break
       end
     end
-    -- l'ordre du build est stocke en cles (le racial sous "racial")
-    for i, cid in ipairs(ordered) do ordered[i] = CDM.KeyForCid(cid) end
-    conf.order = ordered
+    -- l'ordre du build ne contient que les sorts non raciaux
+    local order = {}
+    for _, x in ipairs(cur) do
+      local e = EntryOf(x, list)
+      if not (e and e.racial) then order[#order + 1] = x end
+    end
+    conf.order = order
     Refresh()
     end)
   end
@@ -428,7 +469,7 @@ function ns.BuildCDMLayoutPage(p, cw)
         elseif cat ~= CDM.ESSENTIAL then none[#none + 1] = e end
       end
     end
-    for _, cid in ipairs(CDM.OrderedEssentials(view, entries)) do
+    for _, cid in ipairs(CDM.DisplayEssentials(view, entries)) do
       local e = byID[cid]
       if e then ess[#ess + 1] = e end
     end

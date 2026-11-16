@@ -569,6 +569,11 @@ ns.Defaults = {
     barSize = 100, barColor = { 1, 0.55, 0.15, 1 }, barSpark = "default", barTexture = "flat",
     barSparkSize = 100, barSparkColor = { 1, 1, 1, 1 }, barSparkAnim = true,   -- etincelle : animation "braise"
     barAnim = false,   -- barre : opacite qui ondule (75 a 100 %)
+    -- Sac de couchage : barre de la minute (couleur), stacks de Bien repose dans la pointe du bas ("max" = "2/3",
+    -- "count" = "2") ; police : Montserrat du HUD si non choisie ; taille en % de la taille calculee
+    sleepBarColor = { 0.3, 0.85, 0.35, 1 }, sleepStackFormat = "max",
+    sleepStackSize = 100, sleepStackColor = { 0.95, 0.89, 0.78, 1 }, sleepStackX = 0, sleepStackY = 0,
+    sleepStackOutline = "OUTLINE",
   },
   movementBuffs = {
     enabled = true,
@@ -1187,6 +1192,7 @@ ns.Defaults = {
     elapsedFont = ns.FONT_FALLBACK, elapsedSize = 14, elapsedAlign = "RIGHT",
     elapsedColor = { 1, 0.76, 0.25, 1 }, elapsedTheme = false,   -- Theme : couleurs thematiques (pas d'Accent)
     elapsedX = 0, elapsedY = 0,  -- decalage du temps ecoule (sous le losange)
+    elapsedRemaining = false,    -- temps restant (jusqu'a l'arret choisi ou l'arrivee) au lieu du temps ecoule
     doneHeight = 1,              -- hauteur du trajet parcouru (facteur)
     -- Pastilles passees (start / end / step) : teinte (sinon texture d'origine)
     startNodeTint = false, startNodeColor = { 1, 0.76, 0.25, 1 }, startNodeTheme = false,
@@ -1302,6 +1308,12 @@ ns.Defaults = {
     showPowerBar = false,
     -- Ornement argent (rare / rare élite) ou or (élite / boss mondial) sous la barre
     eliteDeco = true,
+    -- Mode JcJ : icône des épées quand la cible est JcJ, placée sur le fond (pvpAnchor + pvpX / pvpY) ; pvpFaction =
+    -- emblème Alliance / Horde (réglages pvpF...) ; couleur "themed" (celle de la barre de vie), "custom" ou "original"
+    pvpShow = false, pvpAnchor = "LEFT", pvpX = -14, pvpY = 0,
+    pvpSize = 18, pvpAlpha = 1, pvpRotation = "0", pvpColorMode = "themed", pvpColor = { 1, 1, 1, 1 },
+    pvpFaction = false,
+    pvpFSize = 20, pvpFAlpha = 1, pvpFRotation = "0", pvpFColorMode = "original", pvpFColor = { 1, 1, 1, 1 },
   },
 
   -- Buffs / Debuffs de la cible (sous la TopTargetBar)

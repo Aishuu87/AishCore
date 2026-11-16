@@ -1638,6 +1638,20 @@ local MAX_DECO     = 24
 local decoPreviewEntries = {}   -- { { entry, anim, anchor, lastModelID }, ... }
 local decoPreviewTicker  = nil
 local guiSuppressDeco    = false -- true quand le panneau Animations 3D est ouvert
+local taxiSuppressDeco   = false -- true pendant un vol du Taxi Mode (les modeles 3D ignorent l'alpha d'UIParent)
+
+--- Vol du Taxi Mode : coupe les décos (cercle hors combat, globes, buffs) tant que l'interface est masquée.
+function SpellEffects.SetTaxiMode(on)
+  on = (on == true)
+  if on == taxiSuppressDeco then return end
+  taxiSuppressDeco = on
+  if on then
+    SpellEffects.StopAllDeco()
+    SpellEffects.StartLogoDeco()
+  elseif not guiSuppressDeco then
+    SpellEffects.RefreshDecorations()
+  end
+end
 
 --- Active/désactive la suppression des décos réelles (panneau GUI ouvert).
 function SpellEffects.SetGuiMode(on)
@@ -1837,7 +1851,7 @@ end
 --- Démarre les décorations OOC sur le cercle de vie.
 function SpellEffects.StartOocDeco()
   if decoOocActive then return end
-  if guiSuppressDeco or #decoPreviewEntries > 0 then return end
+  if guiSuppressDeco or taxiSuppressDeco or #decoPreviewEntries > 0 then return end
   if AnimationsBlockedByGroupState() then return end
   local combo = ResolveOocCombo()
   if not combo then return end
@@ -2237,7 +2251,7 @@ end
 --- Les clés orbCombos sont qualifiées par classe : "combo_ROGUE", "rune_frost_DEATHKNIGHT", etc.
 function SpellEffects.StartOrbDeco()
   if decoOrbActive then return end
-  if guiSuppressDeco or #decoPreviewEntries > 0 then LogOrb("Start REFUSE : panneau Animations 3D / apercu ouvert"); return end
+  if guiSuppressDeco or taxiSuppressDeco or #decoPreviewEntries > 0 then LogOrb("Start REFUSE : panneau Animations 3D / apercu ouvert"); return end
   local cfg = ns.GetCfg("spellEffects")
   if not cfg or not cfg.enabled then LogOrb("Start REFUSE : animations desactivees"); return end
   if AnimationsBlockedByGroupState() then LogOrb("Start REFUSE : bloque en groupe / raid"); return end
@@ -2319,7 +2333,7 @@ end
 
 function SpellEffects.StartWellFedDeco()
   if wellFedActive or not wellFedState then return end
-  if guiSuppressDeco or #decoPreviewEntries > 0 then return end
+  if guiSuppressDeco or taxiSuppressDeco or #decoPreviewEntries > 0 then return end
   if AnimationsBlockedByGroupState() then return end
   local cfg = ns.GetCfg("spellEffects")
   if not cfg or not cfg.enabled or cfg.wellFedEnabled == false then return end
@@ -2391,7 +2405,7 @@ end
 -- fadeIn : les modeles apparaissent en fondu (changement d'etat), sinon d'un coup
 function SpellEffects.StartCampfireDeco(fadeIn)
   if campActive or not campState then return end
-  if guiSuppressDeco or #decoPreviewEntries > 0 then return end
+  if guiSuppressDeco or taxiSuppressDeco or #decoPreviewEntries > 0 then return end
   if AnimationsBlockedByGroupState() then return end
   local cfg = ns.GetCfg("spellEffects")
   if not cfg or not cfg.enabled or cfg.campfireEnabled == false then return end
@@ -2445,7 +2459,7 @@ end
 -- avait deja coupe les decos et le ticker). On reessaie donc quelques fois, jusqu'a ce qu'un globe soit visible.
 local function EnsureOrbDecoRetry(n)
   C_Timer.After(0.4, function()
-    if decoOrbActive or guiSuppressDeco then return end
+    if decoOrbActive or guiSuppressDeco or taxiSuppressDeco then return end
     if GetVisibleDotCount() > 0 then
       SpellEffects.StartOrbDeco()
     elseif n > 1 then
@@ -3319,7 +3333,7 @@ function SpellEffects.Init()
   -- relancait alors les animations. Essai limite a un toutes les 0,5 s.
   local _lastOrbTry = 0
   local function TryStartOrbsIfDots()
-    if decoOrbActive or guiSuppressDeco then return end
+    if decoOrbActive or guiSuppressDeco or taxiSuppressDeco then return end
     local now = GetTime()
     if now - _lastOrbTry < 0.5 then return end
     _lastOrbTry = now

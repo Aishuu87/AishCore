@@ -90,68 +90,62 @@ end
 -- PLAYER_TOTEM_UPDATE dans l'ordre de cast -- une case unique se ferait ecraser en cas de pose rapprochee.
 local pendingCastQueue = {} -- { {spellID=..., time=...}, ... }, plus ancien en tete
 local PENDING_WINDOW = 1.0 -- secondes
+-- Poses pas encore liees : l'ordre UNIT_SPELLCAST_SUCCEEDED / PLAYER_TOTEM_UPDATE n'est pas garanti.
+-- Pose recue avant le cast -> file vide, le totem restait invisible. Elle attend ici le cast qui suit.
+local pendingPoses = {} -- [slot] = { name = nom lisible ou nil, time = ... }
 
--- Appelee a chaque cast reussi du joueur, filtre tot les sorts deja classes debuff/equipment.
-local function OnPlayerCastSucceeded(spellID)
-    if not spellID then return end
-    local spells = ns.GetSpecSpells and ns.GetSpecSpells()
-    if not spells then return end
-    local existing = spells[spellID]
-    if existing and (existing.source == "debuff" or existing.source == "equipment") then return end
-    pendingCastQueue[#pendingCastQueue + 1] = { spellID = spellID, time = GetTime() }
-    if #pendingCastQueue > 8 then table.remove(pendingCastQueue, 1) end
-end
-
--- Appelee sur PLAYER_TOTEM_UPDATE(slot), qui se declenche pour la pose ET le retrait/expiration ;
--- un test de presence pure (startTime truthy) filtre les retraits pour ne lier que les poses reelles.
 local function IsSecret(v) return issecretvalue and issecretvalue(v) end
 
-local function OnTotemSlotChanged(slot)
-    if not (slot and GetTotemInfo) then return end
-    local okInfo, have, name, startTime = pcall(GetTotemInfo, slot)
-    if not okInfo then return end
-    -- Retrait/expiration, pas une pose : rien a lier. Slot vide = haveTotem false ET startTime 0 --
-    -- or 0 est VRAI en Lua : tester startTime seul liait le dernier sort lance (Attaque, Boisson,
-    -- potion...) a chaque disparition de totem.
-    if have ~= nil and not IsSecret(have) and not have then return end
-    if not startTime then return end
-    if not IsSecret(startTime) and type(startTime) == "number" and startTime <= 0 then return end
-
-    local spells = ns.GetSpecSpells and ns.GetSpecSpells()
-    if not spells then return end
-
-    -- Purge les candidats perimes en tete de file (plus vieux que la fenetre).
-    local now = GetTime()
-    while pendingCastQueue[1] and (now - pendingCastQueue[1].time) > PENDING_WINDOW do
-        table.remove(pendingCastQueue, 1)
+-- spellID de cast change (patch, talent qui remplace le sort) : le nouvel ID etait enregistre comme un
+-- sort neuf, non coche -> totem invisible. On le ramene a l'entree totem cochee de meme nom.
+local function ResolveTotemID(spellID, spells)
+    local info = spells[spellID]
+    if info and info.source == "totem" and info.destinations and info.destinations.totems then return spellID end
+    local name = SafeSpellName(spellID)
+    if not name then return spellID end
+    for sid, si in pairs(spells) do
+        if sid ~= spellID and si.source == "totem" and si.destinations and si.destinations.totems
+           and SafeSpellName(sid) == name then
+            return sid
+        end
     end
-    if not pendingCastQueue[1] then return end
+    return spellID
+end
 
-    -- Nom du totem lisible : on prend le candidat dont le nom correspond (le totem porte le nom du
-    -- sort, parfois suivi d'un rang). Sans correspondance, aucun lien -- sinon un Eclair lance juste
-    -- avant le totem etait classe "totem". Nom secret : repli FIFO (plus ancien candidat).
-    local pick
-    if type(name) == "string" and not IsSecret(name) and name ~= "" then
+-- Index dans pendingCastQueue du candidat correspondant a la pose (nil si aucun). Nom lisible : le totem
+-- porte le nom du sort, parfois suivi d'un rang ; sans correspondance, aucun lien -- sinon un Eclair lance
+-- juste avant le totem etait classe "totem". Nom secret (Retail, en combat) : rien ne distingue le totem
+-- d'un Choc lance juste avant, on ne lie qu'un sort DEJA classe totem.
+local function FindCandidate(name, spells)
+    if name then
         local lname = name:lower()
         for i, c in ipairs(pendingCastQueue) do
             local sn = SafeSpellName(c.spellID)
             local lsn = sn and sn:lower()
             if lsn and lsn ~= "" and (lname:find(lsn, 1, true) or lsn:find(lname, 1, true)) then
-                pick = i; break
+                return i
             end
         end
-        if not pick then return end
     else
-        -- Nom secret (Retail, en combat) : rien ne distingue le totem d'un Choc / Vague de soins lance juste
-        -- avant. On ne lie alors qu'un sort DEJA classe totem (decouvert hors combat, nom lisible) et on
-        -- n'en decouvre aucun nouveau.
         for i, c in ipairs(pendingCastQueue) do
-            local known = spells[c.spellID]
-            if known and known.source == "totem" then pick = i; break end
+            local known = spells[ResolveTotemID(c.spellID, spells)]
+            if known and known.source == "totem" then return i end
         end
-        if not pick then return end
     end
-    local spellID = table.remove(pendingCastQueue, pick).spellID
+end
+
+local function PurgeStale(now)
+    while pendingCastQueue[1] and (now - pendingCastQueue[1].time) > PENDING_WINDOW do
+        table.remove(pendingCastQueue, 1)
+    end
+    for slot, p in pairs(pendingPoses) do
+        if (now - p.time) > PENDING_WINDOW then pendingPoses[slot] = nil end
+    end
+end
+
+local function BindSlot(slot, spellID, spells)
+    spellID = ResolveTotemID(spellID, spells)
+    pendingPoses[slot] = nil
     slotSpellID[slot] = spellID
     -- Date de pose (delai de grace de la portee) : ici seulement, sur une pose confirmee. GetTotemDuration
     -- renvoie un objet neuf a chaque appel, le dater au rescan relancait la grace a chaque evenement.
@@ -174,6 +168,58 @@ local function OnTotemSlotChanged(slot)
         end
     else
         RegisterTotemSpell(spellID)
+    end
+end
+
+-- Lie les poses en attente aux casts presents dans la file (pose la plus ancienne d'abord).
+local function MatchPendingPoses(spells)
+    local slots = {}
+    for slot in pairs(pendingPoses) do slots[#slots + 1] = slot end
+    table.sort(slots, function(a, b) return pendingPoses[a].time < pendingPoses[b].time end)
+    for _, slot in ipairs(slots) do
+        local pick = FindCandidate(pendingPoses[slot].name, spells)
+        if pick then BindSlot(slot, table.remove(pendingCastQueue, pick).spellID, spells) end
+    end
+end
+
+-- Appelee a chaque cast reussi du joueur, filtre tot les sorts deja classes debuff/equipment.
+local function OnPlayerCastSucceeded(spellID)
+    if not spellID then return end
+    local spells = ns.GetSpecSpells and ns.GetSpecSpells()
+    if not spells then return end
+    local existing = spells[spellID]
+    if existing and (existing.source == "debuff" or existing.source == "equipment") then return end
+    pendingCastQueue[#pendingCastQueue + 1] = { spellID = spellID, time = GetTime() }
+    if #pendingCastQueue > 8 then table.remove(pendingCastQueue, 1) end
+    PurgeStale(GetTime())
+    if next(pendingPoses) then MatchPendingPoses(spells) end
+end
+
+-- Appelee sur PLAYER_TOTEM_UPDATE(slot), qui se declenche pour la pose ET le retrait/expiration ;
+-- un test de presence pure (startTime truthy) filtre les retraits pour ne lier que les poses reelles.
+local function OnTotemSlotChanged(slot)
+    if not (slot and GetTotemInfo) then return end
+    local okInfo, have, name, startTime = pcall(GetTotemInfo, slot)
+    if not okInfo then return end
+    -- Retrait/expiration, pas une pose : rien a lier. Slot vide = haveTotem false ET startTime 0 --
+    -- or 0 est VRAI en Lua : tester startTime seul liait le dernier sort lance (Attaque, Boisson,
+    -- potion...) a chaque disparition de totem.
+    if have ~= nil and not IsSecret(have) and not have then pendingPoses[slot] = nil; return end
+    if not startTime then pendingPoses[slot] = nil; return end
+    if not IsSecret(startTime) and type(startTime) == "number" and startTime <= 0 then pendingPoses[slot] = nil; return end
+
+    local spells = ns.GetSpecSpells and ns.GetSpecSpells()
+    if not spells then return end
+
+    local now = GetTime()
+    PurgeStale(now)
+    local readable = type(name) == "string" and not IsSecret(name) and name ~= "" and name or nil
+    local pick = FindCandidate(readable, spells)
+    if pick then
+        BindSlot(slot, table.remove(pendingCastQueue, pick).spellID, spells)
+    else
+        -- Cast pas encore recu : la pose attend (cf. pendingPoses).
+        pendingPoses[slot] = { name = readable, time = now }
     end
 end
 
@@ -871,6 +917,9 @@ local function RefreshTotemsGridBody()
 
     local visible = (cfg.totemsEnabled ~= false) and not (ns.db and ns.db.useNativeCDM)
     if visible and not (ns.IsAuraHidingContext and ns.IsAuraHidingContext()) then
+        -- Conteneur masque par Hide() ailleurs (changement de profil, cf. Profiles.lua / Init.lua) : seul
+        -- ce rendu manuel ne le reaffichait jamais, les totems restaient invisibles jusqu'au /reload.
+        if not cont:IsShown() then cont:Show() end
         pcall(function() if ns.UpdateRenderFade then ns.UpdateRenderFade("totems") end end)
     else
         cont:SetAlpha(0)
@@ -934,6 +983,23 @@ totemEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     RescanActiveTotems()
     pcall(ns.RefreshTotemsGrid)
 end)
+
+-- Fin d'un contexte qui masque les auras (taxi, vehicule, vol dynamique) ou ecran de chargement : le
+-- conteneur passe a alpha 0 dans ce contexte, il n'etait reevalue qu'au prochain evenement totem.
+local function RefreshAfterContext()
+    if not totemsContainer then return end
+    RescanActiveTotems()
+    pcall(ns.RefreshTotemsGrid)
+end
+local totemCtxFrame = CreateFrame("Frame")
+totemCtxFrame:RegisterEvent("PLAYER_CONTROL_GAINED")
+totemCtxFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+totemCtxFrame:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
+totemCtxFrame:SetScript("OnEvent", function()
+    RefreshAfterContext()
+    C_Timer.After(1, RefreshAfterContext)   -- UnitOnTaxi pas encore a jour au moment de l'evenement
+end)
+if _addon.CallbackRegistry then _addon.CallbackRegistry:Register("SKYRIDING_CHANGED", RefreshAfterContext) end
 
 -- Buffs du joueur : portee des totems (desaturation hors de portee)
 local totemRangeFrame = CreateFrame("Frame")
@@ -1058,6 +1124,11 @@ function ns.DebugDumpTotems()
     end
     if n2 == 0 then P("  (aucun totem actif detecte)") end
 
+    P(string.format("=== Contexte : masquage=%s taxi=%s vol=%s apercu=%s/%s UIParent=%s/%.2f useNativeCDM=%s totemsEnabled=%s ===",
+        tostring(ns.IsAuraHidingContext and ns.IsAuraHidingContext()), tostring(UnitOnTaxi("player")),
+        tostring(_addon.skyridingActive), tostring(ns._previewBars), tostring(ns._previewMode),
+        tostring(UIParent:IsShown()), UIParent:GetAlpha(), tostring(ns.db and ns.db.useNativeCDM),
+        tostring(ns.db and ns.db.totems and ns.db.totems.totemsEnabled)))
     P("=== Conteneur / widgets ===")
     if not totemsContainer then
         P("|cffff4444conteneur jamais cree|r")

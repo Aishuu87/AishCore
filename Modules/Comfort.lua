@@ -552,19 +552,35 @@ local function AnyMenuOpen()
   return false
 end
 
+-- Le menu s'ouvre sous le curseur : ancre au bouton de pistage, il resterait a l'ancienne place d'une minimap deplacee.
+local function CursorAnchor()
+  if not (_G.AnchorUtil and AnchorUtil.CreateAnchor) then return nil end
+  local x, y = GetCursorPosition()
+  local s = UIParent:GetEffectiveScale()
+  return AnchorUtil.CreateAnchor("TOPLEFT", UIParent, "BOTTOMLEFT", x / s, y / s)
+end
+
 local function OpenTrackingMenu()
   local cluster = _G.MinimapCluster
   local btn = cluster and cluster.Tracking and cluster.Tracking.Button
   if btn then
-    if btn.OpenMenu then pcall(btn.OpenMenu, btn); return end
+    if btn.OpenMenu then
+      local anchor = CursorAnchor()
+      local prev = btn.menuAnchor
+      if anchor and btn.SetMenuAnchor then pcall(btn.SetMenuAnchor, btn, anchor) end
+      pcall(btn.OpenMenu, btn)
+      if anchor and btn.SetMenuAnchor then pcall(btn.SetMenuAnchor, btn, prev) end
+      return
+    end
     if btn.ToggleMenu then pcall(btn.ToggleMenu, btn); return end
     if btn.Click then pcall(btn.Click, btn); return end
   end
-  local old = _G.MiniMapTrackingButton or _G.MiniMapTracking
-  if old and old.Click then pcall(old.Click, old); return end
   if _G.ToggleDropDownMenu and _G.MiniMapTrackingDropDown then
-    pcall(ToggleDropDownMenu, 1, nil, _G.MiniMapTrackingDropDown, "MiniMapTracking")
+    pcall(ToggleDropDownMenu, 1, nil, _G.MiniMapTrackingDropDown, "cursor")
+    return
   end
+  local old = _G.MiniMapTrackingButton or _G.MiniMapTracking
+  if old and old.Click then pcall(old.Click, old) end
 end
 
 local minimapHooked = false

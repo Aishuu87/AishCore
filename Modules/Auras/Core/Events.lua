@@ -82,7 +82,7 @@ end
 
 -- Events (dispatcher principal)
 local ef = CreateFrame("Frame")
-ef:SetScript("OnEvent", function(_, event, arg1)
+ef:SetScript("OnEvent", function(_, event, arg1, arg2)
     if event == "ADDON_LOADED" and arg1 == addonName then
         pcall(function() ns.InitDB() end)
         -- Copie de modules déposée par l'installeur : les deux bases sont prêtes, les rendus pas encore créés
@@ -322,9 +322,9 @@ ef:SetScript("OnEvent", function(_, event, arg1)
         -- Smooth → délai visuel parasite après le tab (c'est exactement le délai perçu).
         -- On skip l'incrément pour arg1 == "target" dans cette fenêtre.
 
-        if info then
-            -- TRACE : voir chaque aura qui arrive
-
+        -- pcall : ce bloc n'a jamais tourné avant la correction de la signature (arg2 manquant) ; un ID
+        -- secret dans les listes ne doit pas casser le scan.
+        if info then pcall(function()
             local now = GetTime()
             local isPostTargetChange = arg1 == "target" and ns._lastTargetChangeTime
                 and (now - ns._lastTargetChangeTime) < 0.3
@@ -341,28 +341,41 @@ ef:SetScript("OnEvent", function(_, event, arg1)
             if info.isFullUpdate then
                 wipe(ns._refreshCounter)
             end
-        end
+        end) end
 
-        -- Predicate pour ShouldSkipAuraUpdate : retourne true si l'aura EST pertinente
-        -- (on veut NE PAS skip l'event). Blizzard inverse la convention : le helper
-        -- ShouldSkipAuraUpdate retourne true si on peut skip (= aucune aura pertinente).
+        -- true si l'aura EST pertinente (event à traiter)
         local function isRelevant(aura)
             if not anyWL then return true end  -- pas de whitelist : on traite tout
             local sid = ns.SafeSpellID(aura)
             if not sid then return true end  -- illisible : on garde par sécurité
-            return anyWL[sid] == true
+            if anyWL[sid] == true then return true end
+            -- Forever : buff suivi d'un autre rang (Aspects, cf. Scan.lua SnapshotPlayerBuffs)
+            if _addon.IsForever and arg1 == "player" and ns.IsWhitelistedAuraName then
+                local okN, n = pcall(function() return aura.name end)
+                return okN and ns.IsWhitelistedAuraName(n) or false
+            end
+            return false
         end
 
-        -- Cas trivial : pas d'updateInfo (event leger ou client incompatible) → scan complet
-        -- Cas isFullUpdate : Blizzard nous dit de tout rescanner
-        -- Cas incrémental : on exploite ShouldSkipAuraUpdate
+        -- Skip seulement si l'event ne touche, de façon CERTAINE, aucune aura suivie : pas de mise à jour
+        -- complète, aucun retrait (l'aura retirée n'est plus lisible : impossible de savoir si elle était
+        -- suivie), aucun ajout ni rafraîchissement pertinent. Test maison : AuraUtil.ShouldSkipAuraUpdate
+        -- a changé de signature selon les versions et ne regarde pas les retraits.
         local shouldSkip = false
         if info and not info.isFullUpdate then
-            -- L'helper Blizzard vérifie addedAuras[] et updatedAuraInstanceIDs[]
-            if AuraUtil and AuraUtil.ShouldSkipAuraUpdate then
-                local ok, result = pcall(AuraUtil.ShouldSkipAuraUpdate, info, isRelevant)
-                if ok then shouldSkip = result end
-            end
+            local ok, result = pcall(function()
+                local rem = info.removedAuraInstanceIDs
+                if rem and #rem > 0 then return false end
+                for _, a in ipairs(info.addedAuras or {}) do
+                    if isRelevant(a) then return false end
+                end
+                for _, id in ipairs(info.updatedAuraInstanceIDs or {}) do
+                    local okA, a = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, arg1, id)
+                    if not (okA and a) or isRelevant(a) then return false end
+                end
+                return true
+            end)
+            shouldSkip = ok and result == true
             -- Ex-double-check "aura whitelistée retirée/refresh" via cdmU[instID] :
             -- supprimé. cdmData est désormais clé par spellID (pas par instID,
             -- cf. CDMHooks.lua, Secret Values 12.0+) donc ce lookup direct par

@@ -1,5 +1,41 @@
 # AishCore
 
+## [v4.7.3](https://github.com/Aishuu87/AishCore/tree/v4.7.3) (2026-11-16)
+
+### XP Bar
+- Hover information now stays displayed a little longer after the cursor leaves
+
+### Auras to Track
+- Hunter: Aspects can now be tracked correctly
+- A tracked aura without a duration now shows a full bar instead of an empty one
+- Circle Bars now show at the same time as the Central Circle. Previously, they only showed in combat
+
+### Taxi Mode
+- An option switches the Elapsed time to remaining time (Show remaining time). The remaining time also adapts to early landings at stops when needed
+- FIX: Group invites and the ready check window now stay visible in Taxi Mode
+
+### Camping HUD
+- Added tracking of the time needed to get the Well Rested buffs (Sleeping Bag)
+- This tracking is shown as a green bar on the Camping HUD
+- The Sleeping Bag bar can show at the same time as the time needed to gain the camp buffs
+- Well Rested stacks show at the bottom of the diamond by default
+- ♾️FIX: "Rives Claires" is now capitalized
+
+### Dynamic Bars
+- Added the other usable equipment to the former "Equipped trinkets" category, now "Usable equipment". Some armor pieces work the same way (helm, etc.)
+
+### Missing buffs
+- The Sleeping Bag alert no longer shows when your Sleeping Bag is on cooldown and you are not in a group (to borrow one)
+- 🌀FIX: The Soulstone alert no longer shows while the spell is on cooldown
+- ♾️Added the Soul Link alert. It only shows when you have a demon summoned
+- ♾️Added an independent duration threshold for the following buffs:
+  - Well Rested
+  - Thorns (Druid)
+  - Inner Fire (Priest)
+
+### Fixes
+- FIX: The tracking menu now opens on the minimap, even when the minimap has been moved
+
 ## [v4.7.2](https://github.com/Aishuu87/AishCore/tree/v4.7.2) (2026-11-15)
 
 ### XP Bar

@@ -103,15 +103,17 @@ local function MouseOverContainer(container)
         end
         return true
     end
-    local okC, kids = pcall(function() return { container:GetChildren() } end)
-    if okC and kids then
-        for _, k in ipairs(kids) do
-            if Add(k) then
-                local okG, sub = pcall(function() return { k:GetChildren() } end)
-                if okG and sub then for _, g in ipairs(sub) do Add(g) end end
-            end
+    -- Varargs plutot que { GetChildren() } : aucune table creee (appele toutes les 0,5 s par rendu)
+    local function AddSubs(...)
+        for i = 1, select("#", ...) do Add((select(i, ...))) end
+    end
+    local function AddKids(...)
+        for i = 1, select("#", ...) do
+            local k = select(i, ...)
+            if Add(k) then pcall(AddSubs, k:GetChildren()) end
         end
     end
+    pcall(function() AddKids(container:GetChildren()) end)
     if minX then
         local cx, cy = GetCursorPosition()
         if cx >= minX and cx <= maxX and cy >= minY and cy <= maxY then return true end
@@ -201,6 +203,25 @@ C_Timer.NewTicker(0.5, function()
     end
 end)
 
+-- Visibilite du cercle central (ResourceCircle.ShouldShow), nil si le module est absent
+local function CircleShown()
+    local RC = _addon.Modules and _addon.Modules.ResourceCircle
+    if not (RC and RC.ShouldShow) then return nil end
+    local ok, shown = pcall(RC.ShouldShow)
+    if not ok then return nil end
+    return shown == true
+end
+
+-- Rafraichit les barres de cercle a chaque changement de visibilite du cercle (cible, combat, instance...)
+do
+    local RC = _addon.Modules and _addon.Modules.ResourceCircle
+    if RC and RC.UpdateVisibility then
+        hooksecurefunc(RC, "UpdateVisibility", function()
+            if ns.db then pcall(ns.UpdateRenderFade, "freebars") end
+        end)
+    end
+end
+
 function ns.UpdateRenderFade(renderKey)
     local cfg = ns.db and ns.db[renderKey]; if not cfg then return end
     local frames = ns.renderFrames[renderKey]
@@ -218,11 +239,20 @@ function ns.UpdateRenderFade(renderKey)
     if not container then return end
     -- combatOnly : cache le container hors combat (sauf mode preview, forcé à 1.0)
     local previewActiveHere = ns._previewBars and (ns._previewMode == "all" or ns._previewMode == renderKey)
+    -- Barres de cercle : suivent la visibilite du cercle central (ex. "Toujours visible") au lieu du
+    -- seul combat. Le cercle n'a pas d'opacite propre : affiche = pleine opacite, masque = 0.
+    local followCircle   -- nil = autres rendus (regle habituelle)
+    if renderKey == "freebars" then followCircle = CircleShown() end
     local target
+    local hidden = false   -- masquage dur (pas une simple transparence) : le survol ne le leve pas
     if previewActiveHere then
         target = 1.0
+    elseif followCircle ~= nil and not ns._inCombat then
+        target = followCircle and (cfg.fadeIC or 1.0) or 0
+        hidden = not followCircle
     elseif cfg.combatOnly and not ns._inCombat then
         target = 0
+        hidden = true
     else
         target = ns._inCombat and (cfg.fadeIC or 1.0) or (cfg.fadeOOC or 0.4)
     end
@@ -230,7 +260,7 @@ function ns.UpdateRenderFade(renderKey)
     -- Fade court (0.05s) en combat pour réactivité tab target, complet hors combat
     local duration = ns._inCombat and 0.05 or (cfg.fadeDuration or 0.35)
     -- Survol : opaque tout de suite (hors "combat uniquement", cache hors combat)
-    if hovered[renderKey] and not (cfg.combatOnly and not ns._inCombat) then target, delay, duration = 1.0, 0, 0.15 end
+    if hovered[renderKey] and not hidden then target, delay, duration = 1.0, 0, 0.15 end
     ns.FadeTo(container, target, duration, delay)
 
     -- PlayerModel ne suit pas l'alpha parent (quirk Blizzard) : cache-le manuellement.
@@ -639,6 +669,45 @@ function ns.DebugDurationBars()
     end
 end
 
+-- Remplissage plein d'une aura sans durée (même texture que la barre, au-dessus du fill natif)
+local function ShowFullOverlay(bar, r, g, b)
+    if not r then r, g, b = bar:GetStatusBarColor() end
+    local ov = bar._aishFull
+    if not ov then
+        ov = bar:CreateTexture(nil, "ARTWORK", nil, 7)
+        ov:SetAllPoints(bar)
+        bar._aishFull = ov
+    end
+    local fill = bar:GetStatusBarTexture()
+    local path = fill and fill.GetTexture and fill:GetTexture()
+    if path then ov:SetTexture(path) else ov:SetColorTexture(1, 1, 1) end
+    ov:SetVertexColor(r, g, b)
+    ov:Show()
+end
+
+local function HideFullOverlay(bar)
+    if bar._aishFull then bar._aishFull:Hide() end
+end
+
+-- Barres natives (SetDurationBar, AuraTrackerContainer.lua) : Blizzard les pilote seul et laisse
+-- vide celle d'une aura sans durée. Boutons enregistres a leur construction, recouverts apres chaque scan.
+local _nativeButtons = setmetatable({}, { __mode = "k" })
+function ns.RegisterNativeAuraButton(btn) _nativeButtons[btn] = true end
+local NATIVE_BAR_FIELDS = { "_aishDurBar", "_aishBar", "_aishBarL", "_aishBarR" }
+function ns.UpdateNoDurationBars()
+    local nd = ns._noDurationSpells or {}
+    for btn in pairs(_nativeButtons) do
+        local sid = btn._aishSpellID
+        local full = sid and nd[sid] == true
+        for _, f in ipairs(NATIVE_BAR_FIELDS) do
+            local bar = btn[f]
+            if bar then
+                if full then pcall(ShowFullOverlay, bar) else HideFullOverlay(bar) end
+            end
+        end
+    end
+end
+
 local function AnimateBar(bar, entry, cR, cG, cB, isReverse, cfg)
     if not bar then return end
 
@@ -647,6 +716,7 @@ local function AnimateBar(bar, entry, cR, cG, cB, isReverse, cfg)
 
     -- Tier preview (menu Effets) : simule un cycle 12s sans durObj réel pour visualiser les FX
     if entry._isPreview then
+        HideFullOverlay(bar)
         if bar._timerMode then StopTimerMode(bar) end
         local CYCLE = 12
         local now = GetTime()
@@ -664,6 +734,17 @@ local function AnimateBar(bar, entry, cR, cG, cB, isReverse, cfg)
         bar:SetStatusBarColor(cR, cG, cB)
         return
     end
+
+    -- Aura sans durée : barre pleine. Texture par-dessus le remplissage plutôt que SetValue(1) : un
+    -- binding natif (SetDurationBar, AuraTrackerContainer.lua) peut repiloter la valeur à 0 derrière nous.
+    if entry.noDuration then
+        if bar._timerMode then StopTimerMode(bar) end
+        pcall(bar.SetMinMaxValues, bar, 0, 1)
+        pcall(bar.SetValue, bar, 1)
+        ShowFullOverlay(bar, cR, cG, cB)
+        return
+    end
+    HideFullOverlay(bar)
 
     -- Tier 2 : binding natif déjà posé (AuraTrackerContainer.lua), rien à faire ici
     if entry.useCDMSwipe then

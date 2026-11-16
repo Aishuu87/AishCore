@@ -575,6 +575,7 @@ ns.GUI_LAYOUT = {
       ["taxiMode.diamondThemeColors"] = { frFR = "Couleurs thématiques", enUS = "Themed colors" },
     } },
     ["SETTINGS_TAXI_TXT_ELAPSED"] = { cols = 5, rows = {
+      { [1] = "taxiMode.elapsedRemaining" },
       { [1] = "taxiMode.elapsedSize", [2] = "taxiMode.elapsedFont", [3] = "taxiMode.elapsedAlign" },
       { [1] = "taxiMode.elapsedX", [2] = "taxiMode.elapsedY" },
       { [1] = "taxiMode.elapsedColor", [2] = "taxiMode.elapsedTheme" },
@@ -862,6 +863,14 @@ ns.GUI_LAYOUT = {
       { [2] = "campfire.timerSize", [3] = "campfire.timerFont", [4] = "campfire.timerOutline" },
       { [2] = "campfire.timerX", [3] = "campfire.timerY", [4] = "campfire.timerColor" },
     } },
+    ["SETTINGS_CAMPFIRE_SEC_SLEEP"] = { cols = 5, rows = {
+      { [1] = "campfire.sleepBarColor" },
+      { [1] = "__div:4" },
+      { [1] = "campfire.sleepStackFormat", [2] = "campfire.sleepStackX", [3] = "campfire.sleepStackY" },
+      { [1] = "campfire.sleepStackSize", [2] = "campfire.sleepStackFont", [3] = "campfire.sleepStackColor", [4] = "campfire.sleepStackOutline" },
+    }, labels = {
+      ["campfire.sleepStackColor"] = { frFR = "Couleur des stacks", enUS = "Stack color" },
+    } },
   },
   unitBars = {
     ["UNITBARS_SEC_DOTS"] = { cols = 4, rows = {
@@ -871,9 +880,11 @@ ns.GUI_LAYOUT = {
       { [1] = "__div:3" },
     } },
     ["UNITBARS_SEC_PVP"] = { cols = 4, rows = {
-      { [1] = "unitBars.pvpShow", [4] = "unitBars.pvpPreview" },
+      { [1] = "unitBars.pvpShow" },
+      { [1] = "unitBars.pvpPreview" },
       { [1] = "check:$UNITBARS_PVP_REPLACE@$UNITBARS_SEC_PVP" },
       { [1] = "unitBars.pvpAnchor", [2] = "unitBars.pvpX", [3] = "unitBars.pvpY" },
+      { [1] = "__div:5" },
       { [1] = "subheader:$UNITBARS_PVP_SWORDS@$UNITBARS_SEC_PVP", [2] = "__div:2" },
       { [1] = "align:?@$UNITBARS_SEC_PVP", [2] = "align:?@$UNITBARS_SEC_PVP#2" },
       { [1] = "slider:$SETTINGS_SIZE@$UNITBARS_SEC_PVP", [2] = "slider:$UNITBARS_DOT_GAP@$UNITBARS_SEC_PVP", [3] = "slider:$SETTINGS_OFFSET_Y@$UNITBARS_SEC_PVP" },

@@ -94,6 +94,81 @@ local function NearCampfire()
   return false
 end
 
+-- ── Sac de couchage (Bien repose) ───────────────────────────────────────────
+-- Zone de repos d'un sac (le sien, deja pose ou non, ou celui d'un autre) : un stack de Bien repose toutes les 60 s,
+-- jusqu'a 3 (puis rafraichi). Le jeu ne donne pas ce minuteur : il repart a chaque BAG_UPDATE_COOLDOWN (allonge,
+-- releve, saut, stack, entree dans la zone du sac) ; sortie de la zone de repos : sac oublie. Reperage : pose du sac (429961),
+-- ou BAG_UPDATE_COOLDOWN en zone de repos sans sort lance juste avant (le GCD d'un sort en declenche un aussi).
+-- Sans stack 60 s apres le dernier BAG_UPDATE_COOLDOWN (debout, ou fausse alerte en auberge), le sac est oublie,
+-- retrouve au suivant. Le HUD montre la minute sur un anneau vert, sous celui du feu.
+-- Une seule table (limite des 200 locales du fichier). pos : lieu du sac ; start : debut de la minute en cours ;
+-- seen : dernier signal du sac ; castAt : dernier sort du joueur ; radius / forget (metres) : zone du sac / au-dela,
+-- sac oublie ; rested : bonus du feu deja gagnes dans ce sac (le feu n'est plus suivi).
+-- quietUntil : fin d'un vol ou d'un chargement, qui declenchent aussi BAG_UPDATE_COOLDOWN (faux sac a l'atterrissage
+-- en capitale) ; aucun reperage avant cette heure.
+local Bag = { CAST = 429961, DUR = 60, radius = 20, forget = 60, rgb = { 0.3, 0.85, 0.35, 1 }, castAt = 0, quietUntil = 0 }
+
+function Bag.Mark()
+  local y, x, inst = PlayerPos()
+  Bag.pos = y and { y = y, x = x, inst = inst } or { y = 0, x = 0 }
+end
+
+-- Dans le sac : zone de repos ET signal du sac recent (BAG_UPDATE_COOLDOWN accepte ou pose du sac, Bag.seen) ;
+-- une zone de repos seule (auberge, ville) ne suffit jamais
+-- Zone de repos native (auberge, capitale, village) : le sac ne peut pas y etre lance, donc jamais de sac.
+-- Bag.native : la periode de repos en cours a commence sans signal de sac (cf. PLAYER_UPDATE_RESTING).
+function Bag.NativeRest()
+  return Bag.native == true or (ns.IsInTown and ns.IsInTown())
+end
+
+function Bag.In()
+  local pos = Bag.pos
+  if not (pos and IsResting()) or Bag.NativeRest() then return false end
+  if not Bag.seen or GetTime() - Bag.seen > Bag.DUR + 2 then Bag.pos, Bag.seen = nil, nil; return false end
+  local y, x, inst = PlayerPos()
+  if not y then return true end   -- position illisible : on se fie a la zone de repos
+  local d2 = (y - pos.y) ^ 2 + (x - pos.x) ^ 2
+  if inst ~= pos.inst or d2 > Bag.forget ^ 2 then Bag.pos = nil; return false end
+  return d2 <= Bag.radius ^ 2
+end
+
+-- Vrai si une aura du feu (minute assise, recharge commune du camp) a commence vers l'instant t
+function Bag.CampAuraAt(t)
+  local ids = { COOLDOWN_AURA, unpack(WELCOME_AURAS) }
+  for _, id in ipairs(ids) do
+    local a = HasAura(id)
+    local dur, exp = a and a.duration, a and a.expirationTime
+    if type(dur) == "number" and type(exp) == "number" and dur > 0 and math.abs(exp - dur - t) < 1.5 then
+      return true
+    end
+  end
+  return false
+end
+
+-- Vrai si un stack de Bien repose (429959) a ete gagne / rafraichi vers l'instant t
+function Bag.StackAt(t)
+  local a = HasAura(429959)
+  local dur, exp = a and a.duration, a and a.expirationTime
+  return type(dur) == "number" and type(exp) == "number" and dur > 0 and math.abs(exp - dur - t) < 1.5
+end
+
+-- BAG_UPDATE_COOLDOWN vraiment du au sac ? En ville / auberge, n'importe quel objet en declenche un (potion,
+-- jouet...) : il faut un stack tout juste gagne, une zone de repos qui vient de commencer (entree dans la zone
+-- d'un sac), ou un sac deja repere.
+function Bag.Confirms(t)
+  if Bag.pos and Bag.seen and t - Bag.seen <= Bag.DUR + 2 then return true end
+  if Bag.restAt and t - Bag.restAt < 3 then return true end
+  return Bag.StackAt(t)
+end
+
+-- Debut de la minute en cours, nil hors du sac
+-- (en mouvement : aucune minute, elle repart de zero a l'arret)
+function Bag.Start()
+  if Bag.moving or not Bag.In() then Bag.start = nil; return nil end
+  Bag.start = Bag.start or GetTime()
+  return Bag.start
+end
+
 -- ── Objets reperes pres du feu (survol) ─────────────────────────────────────
 
 local seen = {}   -- index FEATURES -> true
@@ -171,6 +246,30 @@ end
 -- ── HUD ─────────────────────────────────────────────────────────────────────
 
 local hud, hint
+local rings = {}   -- anneaux de la minute : bag (sac de couchage, dessous), fire (feu de camp, dessus)
+
+-- Texte des stacks de Bien repose ("2/3", ou "2" avec sleepStackFormat = "count"), vide hors du sac (l'anneau SLUG
+-- suit le texte). on : nil = anneau du sac en cours ; apercu du GUI (Bag.preview) : 2 stacks.
+function Bag.ShowStacks(on)
+  local fs = hud and hud.stacks
+  if not fs then return end
+  if on == nil then on = rings.bag and rings.bag.sec ~= false end
+  local txt = ""
+  if on then
+    local n
+    if Bag.preview then
+      n = 2
+    else
+      local a = HasAura(429959)
+      n = a and not (issecretvalue and issecretvalue(a.applications)) and tonumber(a.applications)
+    end
+    if n then
+      n = math.max(n, 1)
+      txt = (ns.GetCfg("campfire") or {}).sleepStackFormat == "count" and tostring(n) or (n .. "/3")
+    end
+  end
+  fs:SetText(txt)
+end
 local LABEL_FONT = ns.FONT_FALLBACK
 local MEDIA_UI   = "Interface\\AddOns\\AishCore\\Media\\UI\\"
 local FRAME_TEX  = MEDIA_UI .. "camp_hud_frame.png"
@@ -296,15 +395,17 @@ local function Create()
   hud.halo:SetAlpha(0)
   hud.halo._ga = 0.22
 
-  -- Minute pres du feu : remplissage du filet interieur, 4 cotes pivotes autour de leur sommet de depart
-  hud.fill = {}
-  for i = 1, 4 do
-    hud.fill[i] = hud.core:CreateTexture(nil, "OVERLAY")
+  -- Anneaux de la minute : remplissage du filet interieur, 4 cotes pivotes autour de leur sommet de depart.
+  -- Sac de couchage dessous (sous-niveaux 0-1), feu de camp dessus (2-4) : chacun garde sa progression.
+  for key, sub in pairs({ bag = 0, fire = 2 }) do
+    local g = { fill = {}, p = 0, start = 0, dur = 1, sec = false, sleep = key == "bag" }
+    for i = 1, 4 do g.fill[i] = hud.core:CreateTexture(nil, "OVERLAY", nil, sub) end
+    g.spark = hud.core:CreateTexture(nil, "OVERLAY", nil, key == "bag" and 1 or 4)
+    g.spark:SetBlendMode("ADD")
+    rings[key] = g
   end
-  hud.spark = hud.core:CreateTexture(nil, "OVERLAY", nil, 2)
-  hud.spark:SetBlendMode("ADD")
-  -- Lueur doree de fin de minute, sur le contour (cf. doneFx)
-  hud.doneGlow = hud.core:CreateTexture(nil, "OVERLAY", nil, 1)
+  -- Lueur doree de fin de minute, sur le contour (cf. ring.done)
+  hud.doneGlow = hud.core:CreateTexture(nil, "OVERLAY", nil, 3)
   hud.doneGlow:SetTexture(GLOW_SQUARE)
   hud.doneGlow:SetBlendMode("ADD")
   hud.doneGlow:SetVertexColor(1, 0.8, 0.25, 1)
@@ -316,6 +417,11 @@ local function Create()
   hud.timerRing = ns.CreateSlugRing and ns.CreateSlugRing(hud.core, hud.timer, "ARTWORK")
   Outline(hud.timer, hud.timerRing, LABEL_FONT, 12, "OUTLINE")   -- police posee sur l'anneau avant tout SetText
   SetTimerAlpha(0)
+  -- Stacks de Bien repose (sac de couchage), dans la pointe du bas : meme style que le minuteur
+  hud.stacks = hud.core:CreateFontString(nil, "OVERLAY")
+  hud.stacks:SetFont(LABEL_FONT, 12, "OUTLINE")
+  hud.stacksRing = ns.CreateSlugRing and ns.CreateSlugRing(hud.core, hud.stacks, "ARTWORK")
+  Outline(hud.stacks, hud.stacksRing, LABEL_FONT, 12, "OUTLINE")
 
   hint = hud:CreateFontString(nil, "OVERLAY")
   hint:SetFont(LABEL_FONT, 11, "OUTLINE")
@@ -414,14 +520,16 @@ local DIAMOND = {
 }
 local PIVOT = CreateVector2D and CreateVector2D(0, 0.5)
 
--- Couleur et texture de la barre, avant LayoutDiamond (qui pose la rotation des cotes)
+-- Couleur et texture des anneaux (vert : sac, orange : feu), avant LayoutDiamond (qui pose la rotation des cotes)
 local function StyleBar()
   local c = Cfg()
   local path = ns.ResolveBarTexFromKey and ns.ResolveBarTexFromKey(c.barTexture or ns.BAR_TEXTURE_DEFAULT)
-  local col = c.barColor or BAR_RGB
-  for _, t in ipairs(hud.fill) do
-    t:SetTexture(path or "Interface\\Buttons\\WHITE8X8")
-    t:SetVertexColor(col[1], col[2], col[3], col[4] or 1)
+  for _, g in pairs(rings) do
+    local col = g.sleep and (c.sleepBarColor or Bag.rgb) or (c.barColor or BAR_RGB)
+    for _, t in ipairs(g.fill) do
+      t:SetTexture(path or "Interface\\Buttons\\WHITE8X8")
+      t:SetVertexColor(col[1], col[2], col[3], col[4] or 1)
+    end
   end
 end
 
@@ -436,13 +544,15 @@ local function LayoutDiamond(size)
   hud.core:SetSize(size, size)
   hud.bg:SetSize(size * FRAME_FIT, size * FRAME_FIT)
   for i, d in ipairs(DIAMOND) do
-    local t = hud.fill[i]
     local n = DIAMOND[i % 4 + 1]
     local ux, uy = (n[1] - d[1]) / SQRT2, (n[2] - d[2]) / SQRT2   -- direction du cote
-    t:ClearAllPoints()
-    t:SetPoint("LEFT", hud.core, "CENTER", d[1] * r - ux * thick / 2, d[2] * r - uy * thick / 2)
-    t:SetHeight(thick)
-    if PIVOT then t:SetRotation(d[3], PIVOT) else t:SetRotation(d[3]) end
+    for _, g in pairs(rings) do
+      local t = g.fill[i]
+      t:ClearAllPoints()
+      t:SetPoint("LEFT", hud.core, "CENTER", d[1] * r - ux * thick / 2, d[2] * r - uy * thick / 2)
+      t:SetHeight(thick)
+      if PIVOT then t:SetRotation(d[3], PIVOT) else t:SetRotation(d[3]) end
+    end
   end
   hud._thick = thick
   local ri = R * INNER
@@ -456,6 +566,14 @@ local function LayoutDiamond(size)
   hud.timer:SetTextColor(tc[1], tc[2], tc[3], tc[4] or 1)
   hud._timerX, hud._timerY = c.timerX or 0, ri - fs * 0.95 + (c.timerY or 0)
   PlaceTimer(0)
+  -- Stacks du sac de couchage : pointe du bas (taille en % de la taille calculee, comme le minuteur)
+  local ss = math.max(6, math.floor(math.max(12, R * 0.17) * Pct(c.sleepStackSize) + 0.5))
+  Outline(hud.stacks, hud.stacksRing, c.sleepStackFont or TIMER_FONT, ss, c.sleepStackOutline or "OUTLINE", "campfireStacks")
+  local sc0 = c.sleepStackColor or TIMER_RGB
+  hud.stacks:SetTextColor(sc0[1], sc0[2], sc0[3], sc0[4] or 1)
+  hud.stacks:ClearAllPoints()
+  hud.stacks:SetPoint("CENTER", hud.core, "CENTER", c.sleepStackX or 0, -(ri - ss * 0.95) + (c.sleepStackY or 0))
+  Bag.ShowStacks()
   -- Halo de survol : disque doux inscrit dans le filet interieur, la bordure exterieure reste intacte
   hud.halo:SetSize(ri * 1.5, ri * 1.5)
   hud.glow:SetSize(R * 2.6, R * 2.6)   -- le carre lumineux de la texture occupe ~56 % de sa largeur
@@ -473,32 +591,34 @@ local function LayoutDiamond(size)
   hud._spW, hud._spH = math.max(2, sp.w * ks), math.max(2, sp.h * ks)
   hud._spAnim = c.barSparkAnim ~= false
   hud._barAnim = c.barAnim == true
-  if not hud._barAnim then for _, t in ipairs(hud.fill) do t:SetAlpha(1) end end
   local sc = c.barSparkColor or SPARK_RGB
-  hud.spark:SetTexture(sp.path or ns.Media.circle)
-  hud.spark:SetVertexColor(sc[1], sc[2], sc[3], 1)
   hud._spA = sc[4] or 1
-  hud.spark:SetSize(hud._spW, hud._spH)
-  hud.spark:SetAlpha(hud._spA)
+  for _, g in pairs(rings) do
+    if not hud._barAnim and not g.done then for _, t in ipairs(g.fill) do t:SetAlpha(1) end end
+    g.spark:SetTexture(sp.path or ns.Media.circle)
+    g.spark:SetVertexColor(sc[1], sc[2], sc[3], 1)
+    g.spark:SetSize(hud._spW, hud._spH)
+    g.spark:SetAlpha(hud._spA)
+  end
   hud._side, hud._pr, hud._r, hud._size = side, r, R, size
 end
 
 -- p : 0..1 sur le contour entier
-local function SetDiamondProgress(p)
+local function SetRingProgress(g, p)
   local side, r = hud._side or 1, hud._pr or 1
   local total = math.max(0, math.min(1, p)) * 4
-  hud._p = p
+  g.p = p
   local tipX, tipY, tipA
   -- Braise sur la barre : opacite qui ondule entre 50 et 100 %
   if hud._barAnim then
     local t = GetTime()
     local n = (math.sin(t * 3.1) + math.sin(t * 5.3 + 1.7) + math.sin(t * 8.9 + 0.6)) / 3   -- -1..1
     local a = 0.75 + 0.25 * n
-    for _, f in ipairs(hud.fill) do f:SetAlpha(a) end
+    for _, f in ipairs(g.fill) do f:SetAlpha(a) end
   end
   for i, d in ipairs(DIAMOND) do
     local f = math.max(0, math.min(1, total - (i - 1)))
-    local fill = hud.fill[i]
+    local fill = g.fill[i]
     if f <= 0 then
       fill:Hide()
     else
@@ -510,101 +630,118 @@ local function SetDiamondProgress(p)
       tipA = d[3]
     end
   end
+  local sp = g.spark
   if tipX and p > 0 and p < 1 then
-    hud.spark:ClearAllPoints()
-    hud.spark:SetPoint("CENTER", hud.core, "CENTER", tipX, tipY)
-    hud.spark:SetRotation(tipA)
+    sp:ClearAllPoints()
+    sp:SetPoint("CENTER", hud.core, "CENTER", tipX, tipY)
+    sp:SetRotation(tipA)
     -- Braise : opacite qui vacille et leger pulse de taille (sinus de frequences sans rapport simple)
     if hud._spAnim then
       local t = GetTime()
       local n1 = (math.sin(t * 11) + math.sin(t * 17.3 + 1.3) + math.sin(t * 5.1 + 2)) / 3
       local n2 = (math.sin(t * 7.7 + 0.4) + math.sin(t * 13.1 + 2.2)) / 2
       local s = 1 + 0.12 * n2
-      hud.spark:SetSize(hud._spW * s, hud._spH * s)
-      hud.spark:SetAlpha((hud._spA or 1) * (0.72 + 0.28 * n1))
+      sp:SetSize(hud._spW * s, hud._spH * s)
+      sp:SetAlpha((hud._spA or 1) * (0.72 + 0.28 * n1))
     end
-    hud.spark:Show()
+    sp:Show()
   else
-    hud.spark:Hide()
+    sp:Hide()
   end
 end
 
-local diaStart, diaDur, diaSec = 0, 1, false   -- diaSec false : arrete
--- diaEnter : la barre rattrape la progression reelle en demarrant (minute deja entamee, barre en train de se vider) ;
--- drain : apres la minute (levee ou fin), la barre recule jusqu'a se vider au lieu de disparaitre
-local diaEnter, drain
-local diaLoop = false   -- apercu du GUI : la minute recommence aussitot finie, sans pause
--- doneFx : minute complete, la barre passe a l'or, brille un instant puis s'efface (au lieu de se vider)
-local doneFx
+-- Etat d'un anneau g : start / dur : minute suivie ; sec : seconde restante, false = arrete (nil : vient de partir) ;
+-- enter : la barre rattrape la progression reelle en demarrant ; drain : apres la minute (levee ou fin), la barre
+-- recule jusqu'a se vider ; done : minute complete, la barre passe a l'or, brille puis s'efface ; loop : apercu du
+-- GUI, la minute recommence aussitot finie, sans pause.
 local DONE_RGB = { 1, 0.8, 0.25 }
 local DONE_IN, DONE_HOLD, DONE_OUT = 0.35, 1.5, 1.6
 
-local function RestoreBar()
+local function RestoreRing(g)
+  g.done = nil
   StyleBar()
-  for _, t in ipairs(hud.fill) do t:SetAlpha(1) end
+  for _, t in ipairs(g.fill) do t:SetAlpha(1) end
   hud.doneGlow:SetAlpha(0)
 end
 
-local function DiamondUpdate()
-  local now = GetTime()
-  if diaLoop and now - diaStart >= diaDur then
-    diaStart = diaStart + diaDur * math.floor((now - diaStart) / diaDur)
-    diaEnter = nil
+-- Un pas d'un anneau en cours ; vrai tant qu'il bouge encore
+local function RingStep(g, now)
+  if g.sec == false then return false end
+  if g.loop and now - g.start >= g.dur then
+    g.start = g.start + g.dur * math.floor((now - g.start) / g.dur)
+    g.enter = nil
   end
-  local elapsed = now - diaStart
-  local p = Clamp(elapsed / diaDur)
-  if diaEnter then
-    local u = Clamp((now - diaEnter.t0) / BAR_IN)
-    if u >= 1 then diaEnter = nil else p = diaEnter.from + (p - diaEnter.from) * EaseOut(u) end
+  local elapsed = now - g.start
+  local p = Clamp(elapsed / g.dur)
+  if g.enter then
+    local u = Clamp((now - g.enter.t0) / BAR_IN)
+    if u >= 1 then g.enter = nil else p = g.enter.from + (p - g.enter.from) * EaseOut(u) end
   end
-  SetDiamondProgress(p)
-  local left = diaDur - elapsed
-  local sec = left > 0 and math.ceil(left) or 0
-  if sec ~= diaSec then
-    diaSec = sec
-    if sec > 0 then hud.timer:SetText(sec) else TimerFade(false) end   -- 0 : le dernier chiffre s'efface
-  end
-  if left <= 0 and not diaEnter then hud:SetScript("OnUpdate", nil) end
+  SetRingProgress(g, p)
+  local left = g.dur - elapsed
+  g.sec = left > 0 and math.ceil(left) or 0
+  return left > 0 or g.enter ~= nil
 end
 
--- instant : HUD masque ou reinitialise, sans animation de sortie
--- complete : minute allee a son terme (effet doré au lieu de la vidange)
-local function StopDiamond(instant, complete)
-  if instant then
-    hud:SetScript("OnUpdate", nil)
-    diaEnter, drain, diaLoop = nil, nil, false
-    if doneFx then doneFx = nil; RestoreBar() end
-    SetDiamondProgress(0)
-    hud._tf = nil
-    SetTimerAlpha(0)
-    hud.timer:SetText("")
-    PlaceTimer(0)
-    diaStart, diaDur, diaSec = 0, 1, false
-    return
+-- Minuteur : celui du feu tant qu'il tourne, sinon celui du sac
+local function DiamondUpdate()
+  local now = GetTime()
+  local busy = RingStep(rings.bag, now)
+  busy = RingStep(rings.fire, now) or busy
+  local f, b = rings.fire, rings.bag
+  local top = (f.sec ~= false and f.sec ~= 0) and f or (b.sec ~= false and b) or (f.sec ~= false and f) or nil
+  local sec = top and top.sec or 0
+  if sec ~= hud._sec then
+    hud._sec = sec
+    if sec > 0 then hud.timer:SetText(sec); TimerFade(true) else TimerFade(false) end   -- 0 : le chiffre s'efface
   end
-  if diaSec == false then return end   -- deja a l'arret
+  if not busy then hud:SetScript("OnUpdate", nil) end
+end
+
+-- HUD masque ou reinitialise : tous les anneaux a zero, sans animation de sortie
+local function ResetDiamond()
   hud:SetScript("OnUpdate", nil)
-  diaEnter = nil
-  diaStart, diaDur, diaSec = 0, 1, false
-  if (hud._p or 0) > 0 then
+  for _, g in pairs(rings) do
+    if g.done then RestoreRing(g) end
+    g.enter, g.drain, g.loop = nil, nil, false
+    g.start, g.dur, g.sec = 0, 1, false
+    SetRingProgress(g, 0)
+  end
+  hud._tf, hud._sec = nil, 0
+  SetTimerAlpha(0)
+  hud.timer:SetText("")
+  PlaceTimer(0)
+end
+
+-- Fin de la minute d'un anneau. complete : minute allee a son terme (effet dore au lieu de la vidange)
+local function StopRing(g, complete)
+  if g.sec == false then return end   -- deja a l'arret
+  g.enter, g.loop = nil, false
+  g.start, g.dur, g.sec = 0, 1, false
+  if (g.p or 0) > 0 then
     if complete then
-      SetDiamondProgress(1)
-      doneFx = { t0 = GetTime() }
+      SetRingProgress(g, 1)
+      g.done = { t0 = GetTime() }
     else
-      drain = { from = hud._p, t0 = GetTime() }
+      g.drain = { from = g.p, t0 = GetTime() }
     end
     WakeDriver()
   end
-  TimerFade(false)
+  hud._sec = nil
+  DiamondUpdate()   -- le minuteur passe a l'autre anneau, ou s'efface
+  Bag.ShowStacks()
 end
 
-local function RunDiamond(startTime, duration)
-  if diaSec ~= false and diaStart == startTime and diaDur == duration then return end   -- deja lance
-  if doneFx then doneFx = nil; RestoreBar(); SetDiamondProgress(0) end
-  diaStart, diaDur, diaSec = startTime, duration, nil
-  diaEnter, drain = { from = hud._p or 0, t0 = GetTime() }, nil
-  TimerFade(true)
+-- loop : apercu du GUI (la minute recommence aussitot finie)
+local function RunRing(g, startTime, duration, loop)
+  g.loop = loop or false
+  if g.sec ~= false and g.start == startTime and g.dur == duration then return end   -- deja lance
+  if g.done then RestoreRing(g); SetRingProgress(g, 0) end
+  g.start, g.dur, g.sec = startTime, duration, nil
+  g.enter, g.drain = { from = g.p or 0, t0 = GetTime() }, nil
+  hud._sec = nil
   hud:SetScript("OnUpdate", DiamondUpdate)
+  Bag.ShowStacks()
 end
 
 -- Resume du bonus : nombres de la description resolue au niveau du joueur, dans l'ordre (le client FR ecrit
@@ -1495,7 +1632,8 @@ end
 
 local function EndHide()
   hud._fade, hud._fadeOut = nil, nil
-  StopDiamond(true)
+  ResetDiamond()
+  Bag.ShowStacks(false)
   ResetFx()
   hud:Hide()
   hud:SetAlpha(1)
@@ -1553,28 +1691,31 @@ OnDriver = function(self, dt)
     hud.core:SetScale(1 + hv * HOVER_PX / (hud._size or 70))
   end
 
-  -- Barre de la minute qui se vide
-  if drain then
-    busy = true
-    local u = Clamp((now - drain.t0) / BAR_DRAIN)
-    SetDiamondProgress(drain.from * (1 - EaseInOut(u)))
-    if u >= 1 then drain = nil; SetDiamondProgress(0) end
-  end
-
-  -- Minute complete : la barre vire a l'or et brille (leger pulse), puis s'efface doucement
-  if doneFx then
-    busy = true
-    local t = now - doneFx.t0
-    local e = EaseOut(Clamp(t / DONE_IN))
-    local col = Cfg().barColor or BAR_RGB
-    local r, g, b = col[1] + (DONE_RGB[1] - col[1]) * e, col[2] + (DONE_RGB[2] - col[2]) * e, col[3] + (DONE_RGB[3] - col[3]) * e
-    local keep = 1 - EaseInOut(Clamp((t - DONE_HOLD) / DONE_OUT))
-    for _, f in ipairs(hud.fill) do
-      f:SetVertexColor(r, g, b, col[4] or 1)
-      f:SetAlpha(keep)
+  for _, rg in pairs(rings) do
+    -- Barre de la minute qui se vide
+    local dr = rg.drain
+    if dr then
+      busy = true
+      local u = Clamp((now - dr.t0) / BAR_DRAIN)
+      SetRingProgress(rg, dr.from * (1 - EaseInOut(u)))
+      if u >= 1 then rg.drain = nil; SetRingProgress(rg, 0) end
     end
-    hud.doneGlow:SetAlpha(e * keep * (0.75 + 0.25 * math.sin(t * 7)))
-    if keep <= 0 then doneFx = nil; SetDiamondProgress(0); RestoreBar() end
+
+    -- Minute complete : la barre vire a l'or et brille (leger pulse), puis s'efface doucement
+    if rg.done then
+      busy = true
+      local t = now - rg.done.t0
+      local e = EaseOut(Clamp(t / DONE_IN))
+      local col = Cfg().barColor or BAR_RGB
+      local r, g, b = col[1] + (DONE_RGB[1] - col[1]) * e, col[2] + (DONE_RGB[2] - col[2]) * e, col[3] + (DONE_RGB[3] - col[3]) * e
+      local keep = 1 - EaseInOut(Clamp((t - DONE_HOLD) / DONE_OUT))
+      for _, f in ipairs(rg.fill) do
+        f:SetVertexColor(r, g, b, col[4] or 1)
+        f:SetAlpha(keep)
+      end
+      hud.doneGlow:SetAlpha(e * keep * (0.75 + 0.25 * math.sin(t * 7)))
+      if keep <= 0 then SetRingProgress(rg, 0); RestoreRing(rg) end
+    end
   end
 
   -- Minuteur : fondu et glissement (descend en apparaissant, remonte en s'effacant)
@@ -1769,7 +1910,7 @@ UpdateDeco = function()
   local st
   if hud and hud:IsShown() and not hud._fadeOut then
     if fx.phase then st = "buffs"
-    elseif diaSec ~= false then st = "sitting"
+    elseif rings.fire.sec ~= false or rings.bag.sec ~= false then st = "sitting"
     else st = "shown" end
   end
   if st == decoState then return end
@@ -1791,7 +1932,7 @@ end
 
 local function Resize(size)
   LayoutDiamond(size)
-  SetDiamondProgress(hud._p or 0)
+  for _, g in pairs(rings) do SetRingProgress(g, g.p or 0) end
   laidSeen = nil
 end
 
@@ -1812,7 +1953,7 @@ function Campfire.Refresh()
   if not hud or previewing or GetTime() < testUntil then return end
   if InCombatLockdown() and not hud:IsShown() then return end
   local c = Cfg()
-  local near = c.enabled ~= false and NearCampfire()
+  local near = c.enabled ~= false and (NearCampfire() or Bag.In())
   local suppressed = HudSuppressed()
   -- Fin de la minute : "Feu de camp proche" peut manquer un instant quand "Feu de camp accueillant" tombe ; le HUD
   -- (et ses panneaux) reste le temps du rassemblement et du resume, puis Refresh est relance
@@ -1834,12 +1975,19 @@ function Campfire.Refresh()
   if hud._size ~= size then Resize(size) end
   ShowHud()
 
-  local welcome = WelcomeAura()
+  -- Sac de couchage : minute du prochain stack (anneau vert, sous celui du feu), suivie meme pendant celle du feu.
+  -- Bonus du feu deja gagnes dans ce sac (Bag.rested) : le feu n'est plus suivi tant qu'on y reste.
+  local sleep = Bag.Start()
+  if not Bag.In() then Bag.rested = nil end
+  if sleep then RunRing(rings.bag, sleep, Bag.DUR) else StopRing(rings.bag) end
+  Bag.ShowStacks(sleep and true or false)
+
+  local welcome = not Bag.rested and WelcomeAura()
   if welcome then
     -- Assis : le contour suit la minute restante, les bonus reperes flottent autour
     local dur, exp = welcome.duration, welcome.expirationTime
     if type(dur) == "number" and type(exp) == "number" and dur > 0 then
-      RunDiamond(exp - dur, dur)
+      RunRing(rings.fire, exp - dur, dur)
       sitting, sitExp = true, exp
     end
     local n = 0
@@ -1856,13 +2004,15 @@ function Campfire.Refresh()
     if sitting then
       sitting = false
       complete = GetTime() >= sitExp - 1.5
-      if complete then StartGather()
+      if complete then
+        StartGather()
+        if sleep then Bag.rested = true end
       elseif panelOpen and not InCombatLockdown() then Campfire.TogglePanels() end
     end
-    StopDiamond(false, complete)
+    StopRing(rings.fire, complete)
     if laidSeen and not fx.phase then LayoutOrbs({}) end
     laidSeen = nil
-    hint:SetText(HasAura(COOLDOWN_AURA) and ns.L["CAMPFIRE_HINT_COOLDOWN"] or "")
+    hint:SetText((not sleep and HasAura(COOLDOWN_AURA)) and ns.L["CAMPFIRE_HINT_COOLDOWN"] or "")
   end
   UpdateDeco()
 end
@@ -1905,6 +2055,7 @@ end
 
 function Campfire.SetHostPreview(host)
   if not ns.IsModuleAvailable("campfire") then return end
+  Bag.preview = nil
   if not host then
     if not (hud and hud._host) then return end
     previewing = false
@@ -1940,8 +2091,7 @@ function Campfire.SetHostPreview(host)
   PreviewSeen()
   ShowHud()
   hint:SetText("")
-  RunDiamond(GetTime(), PREVIEW_LOOP)
-  diaLoop = true
+  RunRing(rings.fire, GetTime(), PREVIEW_LOOP, true)
   LayoutOrbs(SeenList())
   UpdateDeco()
 end
@@ -1960,10 +2110,29 @@ function Campfire.GetPreviewCount() return previewCount end
 
 -- Bouton de l'apercu : fin de la minute assise (rassemblement des orbes puis resume des gains)
 function Campfire.PreviewGain()
-  if not (hud and hud._host) or fx.phase then return end
+  if not (hud and hud._host) or fx.phase or Bag.preview then return end
   StartGather()
   UpdateDeco()
 end
+
+-- Bouton de l'apercu : minute du sac de couchage (barre verte, 2 stacks) a la place de celle du feu de camp
+function Campfire.SetSleepPreview(on)
+  if not (hud and hud._host) or fx.phase then return end
+  Bag.preview = on and true or nil
+  if on then
+    LayoutOrbs({})
+  else
+    LayoutOrbs(SeenList())
+  end
+  -- Un seul anneau dans l'apercu : l'autre est remis a zero
+  local g, o = rings[on and "bag" or "fire"], rings[on and "fire" or "bag"]
+  StopRing(o)
+  o.drain = nil
+  SetRingProgress(o, 0)
+  g.sec = false   -- relance meme avec le meme depart
+  RunRing(g, GetTime(), PREVIEW_LOOP, true)
+end
+function Campfire.IsSleepPreview() return Bag.preview == true end
 
 -- Apercu depuis Animations 3D > Camping HUD : HUD affiche dans l'etat de l'entree selectionnee
 function Campfire.SetPreview(on, state)
@@ -1984,7 +2153,7 @@ function Campfire.SetPreview(on, state)
   ShowHud()
   hint:SetText("")
   if state == "sitting" then
-    RunDiamond(GetTime(), 60)
+    RunRing(rings.fire, GetTime(), 60)
   elseif state == "buffs" then
     StartSummary({ FEATURES[1], FEATURES[2], FEATURES[5] })
     fx.sumEnd = GetTime() + 3600
@@ -2082,6 +2251,7 @@ ns.NewTicker(1, function()
   if not hud or InCombatLockdown() or not ns.IsModuleAvailable("campfire") then return end
   local taxi = UnitOnTaxi("player")
   if campPos or taxi ~= wasTaxi then
+    if wasTaxi and not taxi then Bag.quietUntil = GetTime() + 5 end
     wasTaxi = taxi
     Campfire.Refresh()
   end
@@ -2097,6 +2267,12 @@ ev:RegisterEvent("PLAYER_DEAD")
 ev:RegisterEvent("PLAYER_ALIVE")
 ev:RegisterEvent("PLAYER_UNGHOST")
 ev:RegisterUnitEvent("UNIT_AURA", "player")
+ev:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+ev:RegisterEvent("PLAYER_UPDATE_RESTING")
+ev:RegisterEvent("PLAYER_STARTED_MOVING")
+ev:RegisterEvent("PLAYER_STOPPED_MOVING")
+ev:RegisterEvent("PLAYER_CONTROL_GAINED")
+ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
 ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
 ev:SetScript("OnEvent", function(_, event, _, _, spellID)
@@ -2117,9 +2293,75 @@ ev:SetScript("OnEvent", function(_, event, _, _, spellID)
     end
     return
   end
+  -- Fin de vol (controle rendu) ou chargement : pas de reperage du sac pendant quelques secondes
+  if event == "PLAYER_CONTROL_GAINED" or event == "PLAYER_ENTERING_WORLD" then
+    Bag.quietUntil = GetTime() + 5
+    -- Chargement deja en zone de repos, sans sac connu : zone native (auberge, capitale)
+    if event == "PLAYER_ENTERING_WORLD" then Bag.native = (IsResting() and not Bag.seen) or nil end
+    return
+  end
   -- Recharge d'un objet : swipe des cases (cadres non securises, permis en combat)
   if event == "BAG_UPDATE_COOLDOWN" then
     if slots[1] then Campfire.UpdateItemCooldowns() end
+    if UnitOnTaxi("player") or GetTime() < Bag.quietUntil then return end
+    -- Sac de couchage : la minute repart (allonge, releve, saut, stack gagne) ; sac repere s'il ne l'etait pas.
+    -- Lu un instant plus tard : la minute du feu (et la recharge commune du camp, posee sur les objets de camp des
+    -- sacs) declenche aussi l'evenement, sans rapport avec le sac.
+    if not InCombatLockdown() and IsResting() and GetTime() - Bag.castAt > 0.5 then
+      local t = GetTime()
+      C_Timer.After(0.3, function()
+        if InCombatLockdown() or not IsResting() or Bag.CampAuraAt(t) then return end
+        if UnitOnTaxi("player") or GetTime() < Bag.quietUntil or Bag.NativeRest() or not Bag.Confirms(t) then return end
+        Bag.seen = t
+        if not Bag.In() then Bag.Mark() end
+        if not Bag.In() then return end
+        -- Minute en cours gardee (gain des bonus du feu, objets...) : seul un deplacement la relance (cf.
+        -- PLAYER_STARTED_MOVING) ; nouvelle minute au reperage du sac ou au stack qui conclut la precedente
+        if not Bag.start or t - Bag.start >= Bag.DUR - 3 then Bag.start = t end
+        C_Timer.After(Bag.DUR + 2.1, Campfire.Refresh)   -- sans nouveau signal d'ici la : sac oublie (cf. Bag.In)
+        Campfire.Refresh()
+      end)
+    end
+    return
+  end
+  if event == "UNIT_SPELLCAST_SUCCEEDED" then
+    Bag.castAt = GetTime()
+    if spellID == Bag.CAST then
+      Bag.native = nil   -- pose possible : on n'est pas en zone native
+      Bag.Mark()
+      Bag.seen, Bag.start = GetTime(), nil
+      C_Timer.After(Bag.DUR + 2.1, Campfire.Refresh)
+      Campfire.Refresh()
+    end
+    return
+  end
+  -- Sac de couchage : bouger, c'est ne plus profiter du repos. La minute s'arrete, et repart de zero a l'arret.
+  if event == "PLAYER_STARTED_MOVING" or event == "PLAYER_STOPPED_MOVING" then
+    local moving = event == "PLAYER_STARTED_MOVING" or nil
+    if moving and not Bag.pos then return end
+    if Bag.moving == moving then return end
+    Bag.moving = moving
+    if Bag.pos then Campfire.Refresh() end
+    return
+  end
+  -- Zone de repos : sortie = arret (l'entree repart deja de zero : hors du sac, Bag.Start efface la minute).
+  -- Le feu de camp peut aussi declencher l'evenement : la minute du sac n'est pas touchee tant qu'on se repose.
+  if event == "PLAYER_UPDATE_RESTING" then
+    if not IsResting() then Bag.pos, Bag.seen, Bag.start, Bag.restAt, Bag.native = nil, nil, nil, nil, nil
+    elseif not Bag.restAt then
+      -- Debut d'un repos : sans signal de sac (pose, entree dans sa zone) dans les 3 s, c'est une zone native
+      local t = GetTime()
+      Bag.restAt = t
+      C_Timer.After(3, function()
+        -- Pres d'un feu de camp (qui declenche aussi l'evenement) : pas de verdict
+        if Bag.restAt == t and IsResting() and not (Bag.seen and Bag.seen >= t - 1) and not NearCampfire() then
+          Bag.native = true
+          Bag.pos, Bag.start = nil, nil
+          Campfire.Refresh()
+        end
+      end)
+    end
+    if Bag.pos then Campfire.Refresh() end
     return
   end
   -- Objet pose ou recu : barres d'objets a jour tant que les panneaux sont deplies
@@ -2159,11 +2401,11 @@ SlashCmdList["AISHCAMP"] = function(msg)
     local want = math.max(1, math.min(10, tonumber(msg:match("(%d+)")) or 4))
     local ids = want == 4 and { 1, 2, 5, 9 } or { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }
     for k = 1, want do seen[ids[k]] = true end
-    RunDiamond(GetTime(), DEMO)
+    RunRing(rings.fire, GetTime(), DEMO)
     UpdateDeco()
     LayoutOrbs(SeenList())
     C_Timer.After(DEMO, function()
-      if hud and GetTime() < testUntil then StopDiamond(false, true); StartGather(); UpdateDeco() end
+      if hud and GetTime() < testUntil then StopRing(rings.fire, true); StartGather(); UpdateDeco() end
     end)
     C_Timer.After(DEMO + SUM_HOLD + 4.1, function() if hud then wipe(seen); Campfire.Refresh() end end)
     print(P .. "test : demo de " .. (DEMO + SUM_HOLD + 4) .. " s (clic droit : panneaux des metiers)")

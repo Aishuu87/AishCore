@@ -1111,8 +1111,32 @@ local function KnowsSpellAnyRank(spellId)
     return id and known(id) or false
 end
 
+-- Familier vivant dont la famille est dans la liste : ID de famille (nom localise via C_CreatureInfo, en cache) ou
+-- nom en clair (repli si l'API manque)
+MissingBuffs._petFamilyNames = {}
+function MissingBuffs.PetFamilyIn(list)
+    local petFamilyNames = MissingBuffs._petFamilyNames
+    if not (UnitExists("pet") and not UnitIsDead("pet") and UnitCreatureFamily) then return false end
+    local fam = UnitCreatureFamily("pet")
+    if not fam or IsSecret(fam) then return false end
+    for _, v in ipairs(list) do
+        local name = v
+        if type(v) == "number" then
+            name = petFamilyNames[v]
+            if name == nil then
+                local ok, info = pcall(function() return C_CreatureInfo.GetCreatureFamilyInfo(v) end)
+                name = ok and type(info) == "table" and info.name or false
+                petFamilyNames[v] = name
+            end
+        end
+        if name and name == fam then return true end
+    end
+    return false
+end
+
 local function EntryApplies(entry)
     if entry.requiresSpell and not KnowsSpellAnyRank(entry.requiresSpell) then return false end
+    if entry.petFamilies and not MissingBuffs.PetFamilyIn(entry.petFamilies) then return false end
     if entry.specIds then
         local specID = _addon._specID
         if not specID then return false end
@@ -2482,6 +2506,20 @@ local function IsKnownSpell(id)
     return ok and known == true
 end
 
+-- Pierre d'ame en recharge (hors GCD) : inutile de la reclamer. Valeur illisible : pas de recharge supposee.
+-- Sur la table, pas en locale : limite des 200 locales du fichier
+function MissingBuffs.SoulstoneOnCooldown()
+    if not (C_Spell and C_Spell.GetSpellCooldown) then return false end
+    local ok, onCD = pcall(function()
+        local cd = C_Spell.GetSpellCooldown(SPELL_SOULSTONE)
+        if not cd then return false end
+        local d, gcd = cd.duration, cd.isOnGCD
+        if issecretvalue and (issecretvalue(d) or issecretvalue(gcd)) then return false end
+        return gcd ~= true and type(d) == "number" and d > 1.5
+    end)
+    return ok and onCD == true
+end
+
 -- Contexte d'affichage des alertes de pierres : hors combat, en instance OU avec une cible attaquable
 local function StoneAlertContext()
     if InCombatLockdown() then return false end
@@ -2494,7 +2532,8 @@ end
 local function CheckWarlockStones(cfg)
     if _addon.IsForever or not StoneAlertContext() then return nil end
 
-    if not cfg.ignoreSoulstoneAlert and IsKnownSpell(SPELL_SOULSTONE) and AnyoneMissingBuff(SOULSTONE_ENTRY) then
+    if not cfg.ignoreSoulstoneAlert and IsKnownSpell(SPELL_SOULSTONE) and not MissingBuffs.SoulstoneOnCooldown()
+        and AnyoneMissingBuff(SOULSTONE_ENTRY) then
         return { { key = SPELL_SOULSTONE, spellId = SPELL_SOULSTONE,
                    spellName = SpellNameById(SPELL_SOULSTONE), useTarget = true } },
             ns.MISSING_TEXT.NO_SOULSTONE
@@ -2899,17 +2938,29 @@ local function WellRestedIcon()
     return (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(id)) or ns.MISSING_WELL_RESTED_ICON
 end
 MissingBuffs.WellRestedIcon = WellRestedIcon
+-- Sac de couchage utilisable (pas en recharge, GCD ignore). Lecture impossible : suppose pret.
+local function WellRestedItemReady()
+    local GetCD = (C_Container and C_Container.GetItemCooldown) or GetItemCooldown
+    if not GetCD then return true end
+    local ok, start, duration = pcall(GetCD, ns.MISSING_WELL_RESTED_ITEM)
+    if not ok or not start or (issecretvalue and (issecretvalue(start) or issecretvalue(duration))) then return true end
+    return start == 0 or (duration or 0) <= 1.5
+end
+MissingBuffs.WellRestedItemReady = WellRestedItemReady
 local function WellRestedChoices(cfg)
     local id = ns.MISSING_WELL_RESTED_ITEM
     local Count = (C_Item and C_Item.GetItemCount) or GetItemCount
     if not Count or (Count(id) or 0) <= 0 then return nil end
+    -- Seul et sac de couchage en recharge : rien a faire (en groupe, un autre joueur peut en poser un)
+    if not IsInGroup() and not WellRestedItemReady() then return nil end
     if IsPlayerAtEffectiveMaxLevel and IsPlayerAtEffectiveMaxLevel() then return nil end
     local text
     if not SelfHasBuff(WELL_RESTED_ENTRY) then
         text = ns.MISSING_TEXT.MISSING
     else
-        local thr = cfg.expiringSoonEnabled and cfg.expiringSoonThreshold and (cfg.expiringSoonThreshold * 60)
-        if not (thr and GetSelfBuffExpiringSoon(WELL_RESTED_ENTRY, thr)) then return nil end
+        -- Seuil propre (minutes), independant du seuil global
+        local thr = (cfg.wellRestedThreshold or 5) * 60
+        if not GetSelfBuffExpiringSoon(WELL_RESTED_ENTRY, thr) then return nil end
         text = ns.MISSING_TEXT.EXPIRING_SOON
     end
     return { { key = ns.MISSING_WELL_RESTED_KEY, icon = WellRestedIcon(), item = id, macro = "/use item:" .. id } }, text
@@ -3313,9 +3364,12 @@ function MissingBuffs.CheckForMissings()
                     end
                     local line = (not entry.kind) and BuildCastLine(entry, unit) or nil
                     if line then castLines[#castLines + 1] = line end
-                elseif expiringThreshold and not expiringEntry and not primaryEntry
+                elseif not expiringEntry and not primaryEntry
                        and not (entry.shoutReminder and _addon.IsForever) then  -- Cri de guerre : jamais de rappel "bientot expire"
-                    if GetSelfBuffExpiringSoon(entry, expiringThreshold) then
+                    -- expiringKey : seuil propre (minutes), toujours actif, independant du seuil global
+                    local thr = expiringThreshold
+                    if entry.expiringKey then thr = (cfg[entry.expiringKey] or entry.expiringDefault or 5) * 60 end
+                    if thr and GetSelfBuffExpiringSoon(entry, thr) then
                         expiringEntry = entry
                     end
                 end
@@ -3673,8 +3727,17 @@ function MissingBuffs.Init()
 
     -- Familier en combat : la mort / le renvoi du familier ne declenche pas toujours d'evenement exploitable
     local wasFlying = -1
-    local lastShoutState
+    local lastShoutState, lastWellRestedReady, lastSoulstoneCD
     _addon.NewTicker(1, function()
+        -- Retail, Demoniste : pierre d'ame sortie de recharge (aucun evenement dedie)
+        if not _addon.IsForever and not InCombatLockdown()
+            and (_addon._playerClass or select(2, UnitClass("player"))) == "WARLOCK" then
+            local cd = MissingBuffs.SoulstoneOnCooldown()
+            if cd ~= lastSoulstoneCD then
+                lastSoulstoneCD = cd
+                MissingBuffs.RequestCheck()
+            end
+        end
         if (_addon._playerClass or select(2, UnitClass("player"))) == "HUNTER" then MissingBuffs.NoteHunterPetState() end
         if InCombatLockdown() and Cfg().enabled then MissingBuffs.CheckPetInCombat() end
         -- Mise en selle / descente, vol, nage, taxi (aucun evenement pour ces etats) : on relance l'evaluation
@@ -3685,6 +3748,14 @@ function MissingBuffs.Init()
         if fl ~= wasFlying then
             wasFlying = fl
             if not InCombatLockdown() then MissingBuffs.RequestCheck() end
+        end
+        -- Forever, sac de couchage sorti de recharge (aucun evenement dedie)
+        if _addon.IsForever and not InCombatLockdown() then
+            local wr = WellRestedItemReady()
+            if wr ~= lastWellRestedReady then
+                lastWellRestedReady = wr
+                MissingBuffs.RequestCheck()
+            end
         end
         -- Forever, Cri de guerre : sort devenu lancable ou non (rage), sans evenement dedie
         local shout = not InCombatLockdown() and (_addon._playerClass or select(2, UnitClass("player"))) == "WARRIOR"
@@ -3709,7 +3780,8 @@ function MissingBuffs.Init()
         if not cfg.enabled then return end
         local shown = frame and frame:IsShown() and not InCombatLockdown() and not previewMode
         if shown then auraGen = auraGen + 1 end
-        if shown or cfg.expiringSoonEnabled then
+        -- Forever : seuils propres (Epines, Feu interieur, Bien repose, poisons), actifs sans le seuil global
+        if shown or cfg.expiringSoonEnabled or _addon.IsForever then
             MissingBuffs.RequestCheck()
         end
     end)

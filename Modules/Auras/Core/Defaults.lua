@@ -211,6 +211,9 @@ ns.Defaults = {
         -- Forever : ignoreLethalPoisons = rappel d'application (poison des sacs), seuil de duree en minutes ;
         -- stock de poisons a fabriquer sous poisonStockThreshold
         poisonDurationThreshold = 5,
+        thornsThreshold = 2,
+        innerFireThreshold = 2,
+        wellRestedThreshold = 5,
         ignorePoisonStock = false, poisonStockThreshold = 5,
         -- Rappel "bientot expire" (2026-08-30) : affiche l'alerte native
         -- (texte "RAFRAICHIR") quand un buff suivi sur SOI est encore actif

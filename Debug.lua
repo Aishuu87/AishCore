@@ -248,6 +248,11 @@ SlashCmdList["AISHDEBUG"] = function(msg)
             end
         end
 
+    elseif msg == "aspects" then
+        local auras = ns.Auras
+        if auras and auras.DebugUntrackedBuffs then auras.DebugUntrackedBuffs()
+        else print("|cff00ccffAishCore Debug|r |cffff4444DebugUntrackedBuffs introuvable.|r") end
+
     elseif msg:match("^auratrace%s+%d+") then
         local spellIDStr = msg:match("^auratrace%s+(%d+)$")
         local spellID = tonumber(spellIDStr)

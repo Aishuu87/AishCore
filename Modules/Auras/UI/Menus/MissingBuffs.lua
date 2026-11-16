@@ -243,6 +243,13 @@ local function ThresholdOf(entry)
     if _addon.IsForever and entry.dbKey == "ignoreLethalPoisons" then
         return { "poisonDurationThreshold", 1, 30, 1, 5, fmt = "MISSINGBUFFS_THRESHOLD_MIN", labelW = 72 }
     end
+    -- Seuils propres (minutes) : Epines, Feu interieur (expiringKey des donnees), Bien repose
+    if entry.expiringKey then
+        return { entry.expiringKey, 1, 30, 1, entry.expiringDefault or 5, fmt = "MISSINGBUFFS_THRESHOLD_MIN", labelW = 72 }
+    end
+    if entry.dbKey == "ignoreWellRested" then
+        return { "wellRestedThreshold", 1, 30, 1, 5, fmt = "MISSINGBUFFS_THRESHOLD_MIN", labelW = 72 }
+    end
     if entry.dbKey == "ignorePoisonStock" then return { "poisonStockThreshold", 1, 40, 1, 5 } end
 end
 

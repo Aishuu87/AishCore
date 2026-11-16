@@ -230,6 +230,46 @@ local function MergeSpecListsIntoClass(key)
     end
 end
 
+-- Forever : cases CDM de groupe (aura jamais posee sous l'ID de la case) -> sorts membres dont le buff
+-- represente la case. Lu aussi par Scan.lua (repli de la case de groupe).
+ns.CDM_GROUP_MEMBERS = {
+    [1324056] = { 13165, 13163, 5118, 13159, 20043, 13161, 34074, 61846 },  -- Aspects (Faucon, Singe, Guepard, Meute, Nature, Bete, Vipere, Faucon-dragon)
+}
+
+-- Sort connu du joueur, tous rangs confondus (repli par nom : le rang appris peut avoir un autre ID)
+local function KnowsSpell(id)
+    if IsPlayerSpell and IsPlayerSpell(id) then return true end
+    if IsSpellKnown and IsSpellKnown(id) then return true end
+    local n = _LiveSpellName(id)
+    if not n then return false end
+    if C_Spell and C_Spell.GetSpellInfo then
+        local ok, info = pcall(C_Spell.GetSpellInfo, n)
+        return ok and info ~= nil
+    end
+    return GetSpellInfo and GetSpellInfo(n) ~= nil or false
+end
+
+-- Forever : une entree propre par membre connu d'une case de groupe (sans attendre la case), pour suivre
+-- chaque Aspect separement (le CDM ne connait que la case). Destinations a false, comme une decouverte.
+local function AddGroupMemberEntries(spells)
+    for _, members in pairs(ns.CDM_GROUP_MEMBERS) do
+        for _, id in ipairs(members) do
+            if spells[id] == nil and KnowsSpell(id) then
+                local n = _LiveSpellName(id)
+                if n then
+                    local d = ns.NewSpellEntry()
+                    d.name = n
+                    ns.ApplyAutoColor(d, AishUIAuraDB and AishUIAuraDB.activeProfile, id)
+                    d.priority = id
+                    d.source = "buff"
+                    d.destinations = { iconlist=false, circlebars=false, icons=false, freebars=false, totems=false }
+                    spells[id] = d
+                end
+            end
+        end
+    end
+end
+
 function ns.GetSpecSpells()
     local key = ns.GetSpecKey()
     if not key or not ns.db then return nil end
@@ -242,6 +282,7 @@ function ns.GetSpecSpells()
     if not _namesSyncedForKey[key] then
         _namesSyncedForKey[key] = true
         ns.RefreshSpellNames(spells)
+        if _addon.IsForever then AddGroupMemberEntries(spells) end
         -- Entrées ajoutées hors ns.NewSpellEntry (import, copie) : repose ns.SPELL_MT
         for _, info in pairs(spells) do
             if type(info) == "table" and getmetatable(info) ~= ns.SPELL_MT then setmetatable(info, ns.SPELL_MT) end

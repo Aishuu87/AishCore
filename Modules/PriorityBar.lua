@@ -2813,14 +2813,21 @@ end
 local ScanSpellUsable
 do
   local REACTIVE_SPELL_IDS = { 6572, 7384, 14251, 19306, 1495 } -- Revanche, Fulgurance, Riposte, Contre-attaque, Morsure de la mangouste
+  -- Tous clients : Ivresse de la victoire, lancable seulement sous Elan victorieux.
+  local REACTIVE_ALL_CLIENTS = { 34428 }
   local reactiveNames
   local function IsReactiveSpell(sid)
-    if not ns.IsForever then return false end
     if not reactiveNames then
       reactiveNames = {}
-      for _, id in ipairs(REACTIVE_SPELL_IDS) do
+      for _, id in ipairs(REACTIVE_ALL_CLIENTS) do
         local n = GetSpellName(id)
         if n then reactiveNames[n] = true end
+      end
+      if ns.IsForever then
+        for _, id in ipairs(REACTIVE_SPELL_IDS) do
+          local n = GetSpellName(id)
+          if n then reactiveNames[n] = true end
+        end
       end
     end
     local n = GetSpellName(sid)

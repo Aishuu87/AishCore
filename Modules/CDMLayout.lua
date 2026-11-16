@@ -290,11 +290,11 @@ end
 
 local function Readable(v) return v ~= nil and not (issecretvalue and issecretvalue(v)) end
 
--- Raciaux : un build ne retient pas LE sort racial (son cooldown change d'une race a l'autre) mais un emplacement
--- generique "racial" : categorie et position dans les Essentiels. Sans cela, la meme classe sur une autre race voyait
--- le build "different" en boucle. Detection par le sous-texte du sort ("Raciale", "Racial"...), toutes langues.
-local RACIAL_KEY = "racial"
-CDMLayout.RACIAL_KEY = RACIAL_KEY
+-- Raciaux : HORS des builds (un build sert a toutes les races, le racial change avec la race). Le choix est retenu
+-- par personnage et par spe (AishUISetupCharDB.cdmRacial[specID][cooldownID] = { cat = 0|1|2, pos = n|nil }, pos =
+-- rang dans les Essentiels). Sans choix, le racial reste tel que le CDM natif l'a ("libre") : jamais compare, jamais
+-- ecrit. Les anciennes cles "racial" / cooldownID raciaux des builds sont ignorees.
+-- Detection par le sous-texte du sort ("Raciale", "Racial"...), toutes langues.
 local RACIAL_WORDS = { "racial", "raciale", "razziale", "volksf", "расов", "종족", "种族", "種族" }
 local _racialCache = {}
 local function IsRacial(spellID)
@@ -315,8 +315,38 @@ local function IsRacial(spellID)
   return r
 end
 
--- Cle d'un cooldown dans un build : "racial" pour un racial, son cooldownID sinon
-local function KeyOf(e) return e.racial and RACIAL_KEY or e.cooldownID end
+-- Cle d'un cooldown dans un build (son cooldownID ; les raciaux n'y figurent plus)
+local function KeyOf(e) return e.cooldownID end
+
+-- Choix racial de ce perso pour la spe courante
+local function RacialTable(create)
+  local specID = CDMLayout.CurrentSpecID()
+  if not specID then return nil end
+  AishUISetupCharDB = AishUISetupCharDB or {}
+  local t = AishUISetupCharDB.cdmRacial
+  if not t then
+    if not create then return nil end
+    t = {}; AishUISetupCharDB.cdmRacial = t
+  end
+  if not t[specID] and create then t[specID] = {} end
+  return t[specID]
+end
+function CDMLayout.GetRacialOverride(cid)
+  local s = RacialTable(false)
+  return s and s[cid]
+end
+function CDMLayout.SetRacialOverride(cid, cat, pos)
+  local s = RacialTable(true)
+  if s then s[cid] = { cat = cat or 0, pos = pos } end
+end
+function CDMLayout.ClearRacialOverrides()
+  AishUISetupCharDB = AishUISetupCharDB or {}
+  local specID = CDMLayout.CurrentSpecID()
+  if specID and AishUISetupCharDB.cdmRacial then AishUISetupCharDB.cdmRacial[specID] = nil end
+end
+-- Racial sans choix sur ce perso : laisse tel quel, hors comparaison
+local function FreeRacial(e) return e.racial and not CDMLayout.GetRacialOverride(e.cooldownID) end
+CDMLayout.FreeRacial = FreeRacial
 
 --- Config du build virtuel "Défaut" : chaque cooldown dans SA catégorie d'origine (côté Blizzard),
 --- l'ordre restant celui du CDM courant (l'ordre d'origine n'est exposé nulle part). Table neuve a
@@ -324,18 +354,23 @@ local function KeyOf(e) return e.racial and RACIAL_KEY or e.cooldownID end
 function CDMLayout.DefaultConf()
   local conf = { cats = {}, order = {} }
   for _, e in ipairs(CDMLayout.ListCooldowns()) do
-    if e.defaultCategory ~= 0 or e.racial then conf.cats[KeyOf(e)] = e.defaultCategory end
-    if e.defaultCategory == ESSENTIAL then conf.order[#conf.order + 1] = KeyOf(e) end
+    if not e.racial then
+      if e.defaultCategory ~= 0 then conf.cats[KeyOf(e)] = e.defaultCategory end
+      if e.defaultCategory == ESSENTIAL then conf.order[#conf.order + 1] = KeyOf(e) end
+    end
   end
   return conf
 end
 CDMLayout.KeyOf = KeyOf
 
--- Categorie voulue par un build pour une entree ; nil = le build ne dit rien (racial d'une autre race, build ancien)
+-- Categorie voulue pour une entree (nil = non suivi). Racial : choix du perso, sinon son etat actuel.
 function CDMLayout.CatOf(conf, e)
-  local c = conf.cats[KeyOf(e)]
-  if c == nil and e.racial then c = conf.cats[e.cooldownID] end   -- builds d'avant l'emplacement generique
-  return c
+  if e.racial then
+    local o = CDMLayout.GetRacialOverride(e.cooldownID)
+    local c = o and o.cat or e.current
+    return c ~= 0 and c or nil
+  end
+  return conf.cats[e.cooldownID]
 end
 local CatOf = CDMLayout.CatOf
 
@@ -388,9 +423,10 @@ function CDMLayout.CaptureCurrent()
   if not CDMLayout.IsAvailable() then return nil end
   local b = { cats = {}, order = {} }
   for _, e in ipairs(CDMLayout.ListCooldowns()) do
-    -- le racial est toujours note, meme non suivi (0) : "non suivi" doit se distinguer de "inconnu"
-    if e.current ~= 0 or e.racial then b.cats[KeyOf(e)] = e.current end
-    if e.current == ESSENTIAL then b.order[#b.order + 1] = KeyOf(e) end
+    if not e.racial then
+      if e.current ~= 0 then b.cats[KeyOf(e)] = e.current end
+      if e.current == ESSENTIAL then b.order[#b.order + 1] = KeyOf(e) end
+    end
   end
   return b
 end
@@ -403,38 +439,52 @@ function CDMLayout.SaveCurrentAs(specID, name)
   if not d then return nil end
   d.builds[name] = b
   d.active = name
-  -- Capturé depuis le CDM : c'est, par définition, ce qui est appliqué sur ce perso
+  -- Capturé depuis le CDM : c'est, par définition, ce qui est appliqué sur ce perso (raciaux compris)
   CDMLayout.SetLastApplied(specID, name)
+  CDMLayout.ClearRacialOverrides()
   return b
 end
 
--- Essentiels de la config, dans l'ordre voulu (order d'abord, puis ceux qui n'y figurent pas)
--- Renvoie des cooldownIDs ; l'ordre du build peut contenir la cle "racial" (le racial de CE personnage).
+-- Essentiels voulus, dans l'ordre (order d'abord, puis ceux qui n'y figurent pas), puis les raciaux mis en
+-- Essentiels sur ce perso, inseres a leur rang. Les raciaux libres n'y sont pas : ils gardent leur place native.
 function CDMLayout.OrderedEssentials(conf, list)
-  local byKey, byCid, out, seen = {}, {}, {}, {}
-  for _, e in ipairs(list) do
-    byKey[KeyOf(e)] = e
-    byCid[e.cooldownID] = e
-  end
+  local byCid, out, seen = {}, {}, {}
+  for _, e in ipairs(list) do byCid[e.cooldownID] = e end
   for _, k in ipairs(conf.order or {}) do
-    local e = byKey[k] or byCid[k]
-    if e and CatOf(conf, e) == ESSENTIAL and not seen[e.cooldownID] then
-      out[#out + 1] = e.cooldownID; seen[e.cooldownID] = true
+    local e = byCid[k]
+    if e and not e.racial and CatOf(conf, e) == ESSENTIAL and not seen[k] then
+      out[#out + 1] = k; seen[k] = true
     end
   end
   for _, e in ipairs(list) do
-    if CatOf(conf, e) == ESSENTIAL and not seen[e.cooldownID] then out[#out + 1] = e.cooldownID; seen[e.cooldownID] = true end
+    if not e.racial and CatOf(conf, e) == ESSENTIAL and not seen[e.cooldownID] then
+      out[#out + 1] = e.cooldownID; seen[e.cooldownID] = true
+    end
+  end
+  local rac = {}
+  for _, e in ipairs(list) do
+    local o = e.racial and CDMLayout.GetRacialOverride(e.cooldownID)
+    if o and o.cat == ESSENTIAL then rac[#rac + 1] = { cid = e.cooldownID, pos = o.pos or math.huge } end
+  end
+  table.sort(rac, function(a, b) if a.pos ~= b.pos then return a.pos < b.pos end return a.cid < b.cid end)
+  for _, r in ipairs(rac) do table.insert(out, math.min(r.pos, #out + 1), r.cid) end
+  return out
+end
+
+-- Essentiels tels qu'affiches par la page : les voulus, plus les raciaux libres deja en Essentiels, a leur rang actuel
+function CDMLayout.DisplayEssentials(conf, list)
+  local out, idx = CDMLayout.OrderedEssentials(conf, list), 0
+  for _, e in ipairs(list) do
+    if e.current == ESSENTIAL then
+      idx = idx + 1
+      if FreeRacial(e) then table.insert(out, math.min(idx, #out + 1), e.cooldownID) end
+    end
   end
   return out
 end
 
--- Cle de build d'un cooldownID (pour la page : "racial" si c'est le racial du personnage)
-function CDMLayout.KeyForCid(cid)
-  for _, e in ipairs(CDMLayout.ListCooldowns()) do
-    if e.cooldownID == cid then return KeyOf(e) end
-  end
-  return cid
-end
+-- Cle de build d'un cooldownID (compat page)
+function CDMLayout.KeyForCid(cid) return cid end
 
 -- Écarts entre le CDM et la config de la spé : liste de { entry, want, current } (catégories), plus
 -- orderDiffers si les Essentiels ne sont pas dans l'ordre voulu.
@@ -445,16 +495,14 @@ function CDMLayout.Diff(specID)
   local list = CDMLayout.ListCooldowns()
   local currentEss = {}
   for _, e in ipairs(list) do
-    local want = CatOf(conf, e)
-    -- Racial dont le build ne dit rien (autre race, ancien build) : pas un ecart
-    local ignore = e.racial and want == nil
-    want = want or 0
+    -- Racial libre : CatOf renvoie son etat actuel, donc jamais un ecart
+    local want = CatOf(conf, e) or 0
     -- Cooldown pas appris : le viewer ne l'affiche pas (aucune frame), sa categorie courante est donc
     -- illisible depuis les frames. On ne le compare pas ; Apply, lui, le range quand meme.
-    if e.isKnown and not ignore and want ~= e.current then diffs[#diffs + 1] = { entry = e, want = want, current = e.current } end
+    if e.isKnown and want ~= e.current then diffs[#diffs + 1] = { entry = e, want = want, current = e.current } end
     -- Meme filtre que l'ordre voulu : un cooldown "non appris" peut avoir une frame (ex. Haymaker)
-    -- Racial ignoré par le build : hors comparaison d'ordre aussi (sinon "ordre différent" en boucle)
-    if e.current == ESSENTIAL and e.isKnown and not ignore then currentEss[#currentEss + 1] = e.cooldownID end
+    -- Racial libre : hors comparaison d'ordre (sinon "ordre différent" en boucle)
+    if e.current == ESSENTIAL and e.isKnown and not FreeRacial(e) then currentEss[#currentEss + 1] = e.cooldownID end
   end
   local orderDiffers = false
   if #diffs == 0 then
@@ -523,8 +571,8 @@ function CDMLayout.Apply(specID)
   for _, e in ipairs(list) do
     local want = CatOf(conf, e)
     local target = (want == ESSENTIAL and essential) or (want == UTILITY and utility) or e.restCategory
-    -- racial dont le build ne dit rien : laisse tel quel
-    if not (e.racial and want == nil) and (want or 0) ~= e.current then
+    -- racial libre : want == current, laisse tel quel
+    if (want or 0) ~= e.current then
       local ok, status = pcall(dp.SetCooldownToCategory, dp, e.cooldownID, target)
       if not ok or (Enum.CooldownLayoutStatus and status ~= Enum.CooldownLayoutStatus.Success) then
         local name = e.spellID and C_Spell.GetSpellName(e.spellID) or ("#" .. e.cooldownID)
@@ -643,7 +691,7 @@ SlashCmdList["AISHCDMDIFF"] = function()
     local cur, byId = {}, {}
     for _, e in ipairs(list) do
       byId[e.cooldownID] = e
-      if e.current == ESSENTIAL and e.isKnown and not (e.racial and CatOf(conf, e) == nil) then cur[#cur + 1] = e end
+      if e.current == ESSENTIAL and e.isKnown and not FreeRacial(e) then cur[#cur + 1] = e end
     end
     local want = {}
     for _, cid in ipairs(CDMLayout.OrderedEssentials(conf, list)) do

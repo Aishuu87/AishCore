@@ -9841,6 +9841,107 @@ function Build.TopTargetBar(container)
     if TTB and TTB.ApplySettings then TTB.ApplySettings() end
   end
 
+  -- Mode JcJ : comme les barres d'unite (UI/UnitBarsPage.lua), sans le remplacement des points (absents ici)
+  do
+    local W3 = math.floor((W - 20) / 3)
+    local pvpWidgets, blocks = {}, {}
+    local RefreshPvP
+    local function OnChange(w)
+      local orig = w.onChanged
+      w.onChanged = function(...) if orig then orig(...) end; RefreshPvP() end
+      return w
+    end
+    local function Subtitle(text)
+      local f = CreateFrame("Frame", nil, container)
+      f:SetSize(W, 18)
+      local lbl = f:CreateFontString(nil, "OVERLAY")
+      lbl:SetFont(ns.Media.fontGui, 10)
+      lbl:SetPoint("LEFT", f, "LEFT", 0, 0)
+      lbl:SetTextColor(unpack(Theme.textDim))
+      lbl:SetText(text)
+      f._leKind, f._leText = "subheader", text
+      return ctx:Add(f)
+    end
+    ctx:Spacer(4)
+    ctx:Add(SW.CreateSectionHeader(container, L["UNITBARS_SEC_PVP"], W))
+    local cbPvpShow = SW.CreateCheckbox(container, L["UNITBARS_PVP_SHOW"], L["UNITBARS_PVP_SHOW_TT"], W3)
+    BindCheckbox(cbPvpShow, "topTargetBar", "pvpShow")
+    OnChange(cbPvpShow)
+    local cbFaction = SW.CreateCheckbox(container, L["UNITBARS_PVP_FACTION"], L["UNITBARS_PVP_FACTION_TT"], W3)
+    BindCheckbox(cbFaction, "topTargetBar", "pvpFaction")
+    OnChange(cbFaction)
+    local pvpBtn = SW.CreateActionBtn(container, L["UNITBARS_PVP_PREVIEW"], W3)
+    local function PvPBtnLabel()
+      local TTB = ns.Modules and ns.Modules.TopTargetBar
+      local on = TTB and TTB.IsPvPPreview and TTB.IsPvPPreview()
+      pvpBtn._lbl:SetText(on and L["UNITBARS_PVP_PREVIEW_STOP"] or L["UNITBARS_PVP_PREVIEW"])
+    end
+    pvpBtn:SetScript("OnClick", function()
+      local TTB = ns.Modules and ns.Modules.TopTargetBar
+      if not (TTB and TTB.SetPvPPreview) then return end
+      TTB.SetPvPPreview(not TTB.IsPvPPreview())
+      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+      PvPBtnLabel()
+    end)
+    pvpBtn:HookScript("OnShow", PvPBtnLabel)   -- apercu coupe a la fermeture du GUI
+    ctx:AddRow(10, cbPvpShow, cbFaction, pvpBtn)
+    -- Placement libre : point d'ancrage sur le fond + decalage
+    local anchors = {}
+    for _, p in ipairs({ "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" }) do
+      anchors[#anchors + 1] = { value = p, text = L["SETTINGS_ANCHOR_" .. p] }
+    end
+    local ddAnchor = SW.CreateDropdown(container, L["UNITBARS_ANCHOR"], anchors, W3)
+    BindDropdown(ddAnchor, "topTargetBar", "pvpAnchor")
+    local slX = SW.CreateSlider(container, L["SETTINGS_OFFSET_X"], -300, 300, 1, W3)
+    BindSlider(slX, "topTargetBar", "pvpX")
+    local slY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -200, 200, 1, W3)
+    BindSlider(slY, "topTargetBar", "pvpY")
+    ctx:AddRow(10, ddAnchor, slX, slY)
+    pvpWidgets[#pvpWidgets + 1] = cbFaction
+    for _, w in ipairs({ ddAnchor, slX, slY }) do pvpWidgets[#pvpWidgets + 1] = w end
+    -- Reglages d'une icone (prefixe pvp = epees, pvpF = emblemes Alliance / Horde)
+    local function IconBlock(pre, title, colorModes)
+      Subtitle(title)
+      local rowRot = SW.CreateAlignRow(container, L["SETTINGS_ROTATION"], W3 * 2, {
+        { k = "0", l = "0\194\176" }, { k = "90", l = "90\194\176" },
+        { k = "180", l = "180\194\176" }, { k = "270", l = "270\194\176" },
+      }, true)
+      rowRot:SetValue(DBGet("topTargetBar", pre .. "Rotation") or "0")
+      rowRot.onChanged = function(v) DBSet("topTargetBar", pre .. "Rotation", v); LiveApply("topTargetBar") end
+      local slA = SW.CreateSlider(container, L["SETTINGS_OPACITY"], 0, 1, 0.05, W3)
+      BindSlider(slA, "topTargetBar", pre .. "Alpha")
+      ctx:AddRow(10, rowRot, slA)
+      local rowColor = SW.CreateAlignRow(container, L["UNITBARS_COLOR"], W3 * 2, colorModes, true)
+      rowColor:SetValue(DBGet("topTargetBar", pre .. "ColorMode") or colorModes[1].k)
+      rowColor.onChanged = function(v)
+        DBSet("topTargetBar", pre .. "ColorMode", v); LiveApply("topTargetBar"); RefreshPvP()
+      end
+      local col = SW.CreateColorButton(container, L["SETTINGS_SR_COLOR_CUSTOM"], W3)
+      BindColorButton(col, "topTargetBar", pre .. "Color")
+      ctx:AddRow(10, rowColor, col)
+      local slSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 4, 60, 1, W3)
+      BindSlider(slSize, "topTargetBar", pre .. "Size")
+      ctx:AddRow(10, slSize)
+      blocks[#blocks + 1] = { pre = pre, ws = { rowRot, slA, rowColor, slSize }, col = col }
+    end
+    local THEMED   = { k = "themed",   l = L["CASTBARS_THEMED"] }
+    local CUSTOM   = { k = "custom",   l = L["SETTINGS_SR_COLOR_CUSTOM"] }
+    local ORIGINAL = { k = "original", l = L["UNITBARS_COLOR_ORIGINAL"] }
+    IconBlock("pvp", L["UNITBARS_PVP_SWORDS"], { THEMED, CUSTOM })
+    IconBlock("pvpF", L["UNITBARS_PVP_EMBLEMS"], { ORIGINAL, THEMED, CUSTOM })
+    -- Grisage : tout sans "Afficher" ; epees grisees quand la faction est distinguee, emblemes grises sinon
+    RefreshPvP = function()
+      local on, fac = DBGet("topTargetBar", "pvpShow"), DBGet("topTargetBar", "pvpFaction")
+      for _, w in ipairs(pvpWidgets) do Build.GrayWidget(w, not on) end
+      for _, b in ipairs(blocks) do
+        local bOn = on and ((b.pre == "pvpF") == (fac and true or false))
+        for _, w in ipairs(b.ws) do Build.GrayWidget(w, not bOn) end
+        Build.GrayWidget(b.col, not bOn or DBGet("topTargetBar", b.pre .. "ColorMode") ~= "custom")
+      end
+    end
+    RefreshPvP()
+  end
+
   ctx:Spacer(4)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_CONTAINER"], W))
   MakeTTBSliderRow("x", "y", L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"], -400, 400, 1, -400, 400, 1)
@@ -14230,6 +14331,20 @@ function Build.Campfire(container)
       if CF and CF.PreviewGain then CF.PreviewGain() end
       PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
+    -- Apercu du sac de couchage (barre verte, stacks), en bas a gauche
+    local sleepBtn = SW.CreateActionBtn(pin, L["SETTINGS_CAMPFIRE_PREVIEW_SLEEP"], 190, nil, Theme.gold, Theme.accentText)
+    sleepBtn:SetPoint("BOTTOMLEFT", pin, "BOTTOMLEFT", 10, 10)
+    sleepBtn:SetFrameLevel(pin:GetFrameLevel() + 20)
+    local function SleepLabel()
+      local on = CF and CF.IsSleepPreview and CF.IsSleepPreview()
+      sleepBtn._lbl:SetText(on and L["SETTINGS_CAMPFIRE_PREVIEW_CAMP"] or L["SETTINGS_CAMPFIRE_PREVIEW_SLEEP"])
+    end
+    sleepBtn:SetScript("OnClick", function()
+      if CF and CF.SetSleepPreview then CF.SetSleepPreview(not CF.IsSleepPreview()) end
+      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+      SleepLabel()
+    end)
+    sleepBtn:HookScript("OnShow", SleepLabel)
     -- Nombre de buffs de l'apercu : [-] X Buffs [+], a gauche du bouton de gain (1 a 10)
     local plus = SW.CreateActionBtn(pin, "+", 28, nil, Theme.gold, Theme.accentText)
     plus:SetPoint("RIGHT", gain, "LEFT", -10, 0)
@@ -14387,6 +14502,22 @@ function Build.Campfire(container)
   BindCheckbox(cbBarAnim, "campfire", "barAnim")
   ctx:AddRow(8, cbBarAnim, cbSparkAnim)
   ctx:Spacer(6)
+
+  -- Sac de couchage : barre de la minute et stacks de Bien repose (pointe du bas)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAMPFIRE_SEC_SLEEP"], W))
+  local rowFmt = SW.CreateAlignRow(container, L["SETTINGS_CAMPFIRE_SLEEP_FORMAT"], SL3 * 2 + 8, {
+    { k = "max",   l = "2/3" },
+    { k = "count", l = "2" },
+  })
+  rowFmt:SetValue(DBGet("campfire", "sleepStackFormat") or "max")
+  rowFmt.onChanged = function(v) DBSet("campfire", "sleepStackFormat", v); LiveApply("campfire") end
+  rowFmt._leId = "campfire.sleepStackFormat"   -- identifiant fixe en mode disposition (rangee sans cle DB liee)
+  ctx:AddRow(8, rowFmt, Color(L["SETTINGS_CAMPFIRE_SLEEP_BAR_COLOR"], "sleepBarColor", SL3))
+  ctx:AddRow(8, Slider(L["SETTINGS_CAMPFIRE_SCALE_PCT"], "sleepStackSize", 50, 300, 5, SL3),
+    Font("sleepStackFont", SL3, CFm and CFm.TIMER_FONT), Color(L["SETTINGS_CAMPFIRE_COLOR"], "sleepStackColor", SL3))
+  ctx:AddRow(8, Slider(L["SETTINGS_OFFSET_X"], "sleepStackX", -100, 100, 1, SL3),
+    Slider(L["SETTINGS_OFFSET_Y"], "sleepStackY", -100, 100, 1, SL3), OutlineDD("sleepStackOutline", SL3))
+  ctx:Spacer(6)
   local reset = SW.CreateActionBtn(container, L["SETTINGS_CAMPFIRE_RESET"], W, nil, Theme.gold, Theme.accentText)
   reset:SetScript("OnClick", function()
     local CF = ns.Modules.Campfire
@@ -14524,6 +14655,8 @@ function Build.TaxiMode(container)
   TextBlock("eta",       L["SETTINGS_TAXI_TXT_ETA"])
   TextBlock("elapsed",   L["SETTINGS_TAXI_TXT_ELAPSED"], "elapsedX", "elapsedY",
     L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"])
+  local cbRemain = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_TAXI_ELAPSED_REMAINING"], L["SETTINGS_TAXI_ELAPSED_REMAINING_TT"], W))
+  BindCheckbox(cbRemain, "taxiMode", "elapsedRemaining")
 
   -- Losange de position : taille et couleur propres (sinon couleur d'accent de la route)
   ctx:Spacer(6)

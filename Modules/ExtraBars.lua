@@ -376,10 +376,15 @@ local function Collect(bc)
       end
     end
   end
-  if wanted.trinket then
-    for _, invSlot in ipairs({ 13, 14 }) do
-      local itemID = GetInventoryItemID("player", invSlot)
-      if itemID and not blacklist[itemID] and HasUseSpell(itemID) then Add({ invSlot = invSlot, itemID = itemID }, { trinket = true }) end
+  -- Equipement porte utilisable (bijoux, mais aussi casque, bague, cape... a effet "Utiliser") ; un objet porte de la
+  -- whitelist est affiche meme sans ce tag. Les objets qui teleportent (hors bijoux) restent dans leur categorie.
+  for invSlot = 1, 19 do
+    local itemID = GetInventoryItemID("player", invSlot)
+    local forced = itemID and whitelist[itemID]
+    if itemID and (wanted.trinket or forced) and not seen[itemID] and not blacklist[itemID] and HasUseSpell(itemID)
+       and (forced or invSlot == 13 or invSlot == 14 or not (wanted.teleport and IsTeleport(itemID))) then
+      seen[itemID] = true
+      Add({ invSlot = invSlot, itemID = itemID }, { trinket = true, __forced = forced or nil })
     end
   end
   -- Equipement porte qui teleporte (bague, cape, tabard...) ; les bijoux equipes restent dans leur categorie

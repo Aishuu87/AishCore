@@ -302,7 +302,7 @@ if _addon.IsForever then
               casts = { 1126, "Mark of the Wild" },
               displayName = "Mark of the Wild", icon = I .. "Spell_Nature_Regeneration",
               showRaidCount = true, text = "MISSING" },
-            { settingsId = 101, onlySelf = true, names = { 467, "Thorns" }, casts = { 467, "Thorns" },
+            { settingsId = 101, onlySelf = true, expiringKey = "thornsThreshold", expiringDefault = 2, names = { 467, "Thorns" }, casts = { 467, "Thorns" },
               displayName = "Thorns", icon = I .. "Spell_Nature_Thorns", text = "MISSING" },
         },
         EVOKER = {},
@@ -338,7 +338,7 @@ if _addon.IsForever then
             { settingsId = 12, names = { 1243, "Power Word: Fortitude", 21562, "Prayer of Fortitude" },
               casts = { 1243, "Power Word: Fortitude" }, blockers = { 8099, "Stamina" }, displayName = "Power Word: Fortitude",
               icon = I .. "Spell_Holy_WordFortitude", showRaidCount = true, text = "MISSING" },
-            { settingsId = 104, onlySelf = true, names = { 588, "Inner Fire" }, casts = { 588, "Inner Fire" },
+            { settingsId = 104, onlySelf = true, expiringKey = "innerFireThreshold", expiringDefault = 2, names = { 588, "Inner Fire" }, casts = { 588, "Inner Fire" },
               displayName = "Inner Fire", icon = I .. "Spell_Holy_InnerFire", text = "MISSING" },
             -- Optionnels (decoches par defaut)
             { settingsId = 115, optIn = true, onlySelf = true,
@@ -373,6 +373,12 @@ if _addon.IsForever then
               names = { 28176, "Fel Armor", 706, "Demon Armor", 687, "Demon Skin" },
               casts = { 28176, "Fel Armor", 706, "Demon Armor", 687, "Demon Skin" },
               displayName = "Demon Armor / Skin", icon = I .. "Spell_Shadow_RagingScream", text = "MISSING" },
+            -- Lien spirituel (buff 25228) : seulement avec un demon eligible sorti (familles du tooltip du sort,
+            -- cf. MissingBuffs.PetFamilyIn), cumulable avec l'armure
+            { settingsId = 120, onlySelf = true, names = { 25228, 19028, "Soul Link" }, casts = { 19028, "Soul Link" },
+              petFamilies = { 23, 16, 17, 15, "Imp", "Voidwalker", "Succubus", "Incubus", "Felhunter",
+                              "Diablotin", "Marcheur du Vide", "Succube", "Incube", "Chasseur corrompu" },
+              displayName = "Soul Link", icon = I .. "Spell_Shadow_GatherShadows", text = "MISSING" },
             -- Fragments d'ame : objet des sacs (6265), alerte sous le seuil
             -- requiresSpell 1120 (Siphon d'ame) : sans lui, aucun moyen de generer un fragment, l'alerte n'a pas de sens
             { settingsId = 106, kind = "item", item = 6265, min = 3, text = "LOW_SHARDS", pseudoKey = 9000012, requiresSpell = 1120,

@@ -8,6 +8,44 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.7.3", date = "2026-11-16",
+    lines = {
+      { k = "h", link = { page = "xpBar" }, t = "XP Bar", fr = "Barre d'XP" },
+      { k = "li", lvl = 1, link = { page = "xpBar" }, t = "Hover information now stays displayed a little longer after the cursor leaves", fr = "Les informations au survol s'afficheront un peu plus longtemps après avoir quitté le survol" },
+
+      { k = "h", link = { page = "aurasTracked" }, t = "Auras to Track", fr = "Suivis d'auras" },
+      { k = "li", lvl = 1, link = { page = "aurasTracked" }, t = "Hunter: Aspects can now be tracked correctly", fr = "Chasseur : Les aspects peuvent maintenant être suivis correctement" },
+      { k = "li", lvl = 1, link = { page = "aurasTracked" }, t = "A tracked aura without a duration now shows a full bar instead of an empty one", fr = "Lorsqu'une aura sans durée est suivie, celle-ci affiche une barre totalement pleine plutôt que vide" },
+      { k = "li", lvl = 1, link = { page = "aurasTracked" }, t = "Circle Bars now show at the same time as the Central Circle. Previously, they only showed in combat", fr = "Les Barres de cercle s'afficheront en même temps que le Cercle Central. Auparavant, elles ne s'affichaient qu'en combat" },
+
+      { k = "h", link = { page = "taxiMode" }, t = "Taxi Mode", fr = "Mode Taxi" },
+      { k = "li", lvl = 1, link = { page = "taxiMode" }, t = "An option switches the Elapsed time to remaining time (Show remaining time). The remaining time also adapts to early landings at stops when needed", fr = "Une option permet de basculer le Temps écoulé en « Temps restant ». Le Temps restant s'adapte aussi aux arrêts prématurés aux étapes, au besoin" },
+      { k = "li", lvl = 1, link = { page = "taxiMode" }, t = "FIX: Group invites and the ready check window now stay visible in Taxi Mode", fr = "FIX : Les invitations de groupe et fenêtre d'appel resteront visibles en Mode Taxi" },
+
+      { k = "h", link = { page = "campfire" }, t = "Camping HUD", fr = "Campement HUD" },
+      { k = "li", lvl = 1, link = { page = "campfire" }, t = "Added tracking of the time needed to get the Well Rested buffs (Sleeping Bag)", fr = "Ajout du suivi de la durée nécessaire à l'obtention des buffs Bien reposé (Sac de couchage)" },
+      { k = "li", lvl = 1, link = { page = "campfire" }, t = "This tracking is shown as a green bar on the Camping HUD", fr = "Le suivi est représenté par une barre verte sur le Camping HUD" },
+      { k = "li", lvl = 1, link = { page = "campfire" }, t = "The Sleeping Bag bar can show at the same time as the time needed to gain the camp buffs", fr = "La barre de sac de couchage peut s'afficher en même temps que la durée nécessaire aux gains de buffs de campement" },
+      { k = "li", lvl = 1, link = { page = "campfire" }, t = "Well Rested stacks show at the bottom of the diamond by default", fr = "Les stacks de buff Bien reposé s'affichent en bas du losange par défaut" },
+      { k = "li", lvl = 1, link = false, t = "[Forever] FIX: \"Rives Claires\" is now capitalized", fr = "[Forever] FIX : « Rives Claires » s'écrit maintenant avec une majuscule" },
+
+      { k = "h", link = { page = "extraBars" }, t = "Dynamic Bars", fr = "Barres dynamiques" },
+      { k = "li", lvl = 1, link = { page = "extraBars" }, t = "Added the other usable equipment to the former \"Equipped trinkets\" category, now \"Usable equipment\". Some armor pieces work the same way (helm, etc.)", fr = "Ajout des autres équipements utilisables dans la catégorie « Bijoux », désormais « Équipement utilisable ». Certaines pièces d'armure fonctionnent de la même façon (heaume, etc.)" },
+
+      { k = "h", link = { page = "aurasMissingBuffs" }, t = "Missing buffs", fr = "Buffs manquants" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "The Sleeping Bag alert no longer shows when your Sleeping Bag is on cooldown and you are not in a group (to borrow one)", fr = "L'alerte du Sac de couchage ne se montrera plus si votre Sac de couchage est en recharge et que vous n'êtes pas dans un groupe (pour en emprunter un)" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "[Retail] FIX: The Soulstone alert no longer shows while the spell is on cooldown", fr = "[Retail] FIX : L'alerte Pierre d'âme ne s'affiche plus pendant que le sort est en recharge" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "[Forever] Added the Soul Link alert. It only shows when you have a demon summoned", fr = "[Forever] Ajout de l'alerte pour Lien spirituel. Celle-ci ne s'affichera que si vous avez un démon invoqué" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "[Forever] Added an independent duration threshold for the following buffs:", fr = "[Forever] Ajout de seuils de durée indépendants pour les buffs suivants :" },
+      { k = "li", lvl = 2, link = { page = "aurasMissingBuffs" }, t = "Well Rested", fr = "Bien reposé" },
+      { k = "li", lvl = 2, link = { page = "aurasMissingBuffs" }, t = "Thorns (Druid)", fr = "Épines (Druide)" },
+      { k = "li", lvl = 2, link = { page = "aurasMissingBuffs" }, t = "Inner Fire (Priest)", fr = "Feu intérieur (Prêtre)" },
+
+      { k = "h", t = "Fixes", fr = "Correctifs" },
+      { k = "li", lvl = 1, link = false, t = "FIX: The tracking menu now opens on the minimap, even when the minimap has been moved", fr = "FIX : Le menu des pistages s'ouvrira sur la minimap, même si celle-ci a été déplacée" },
+    },
+  },
+  {
     version = "4.7.2", date = "2026-11-15",
     lines = {
       { k = "h", link = { page = "xpBar" }, t = "XP Bar", fr = "Barre d'XP" },

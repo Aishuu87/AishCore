@@ -1042,7 +1042,7 @@ end
 local function TestBarTargetAsIcon(auraButton, spellID)
     if not (AishUIAuraDB and AishUIAuraDB._dbgBarTargetIcon) then return false end
     pcall(function()
-        auraButton._aishSpellID = spellID
+        auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
         auraButton:SetSize(26, 26)
         local icon = auraButton:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints(auraButton)
@@ -1405,7 +1405,7 @@ function ns.EnsureIconsNativeGrid()
                         if not (okCheck and canAccess) then return end
                         local okBuild, errBuild = pcall(function()
                             local liveCfgAtCreate = ns.db and ns.db.icons or ns.Defaults.icons
-                            auraButton._aishSpellID = spellID
+                            auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
                             local icon = auraButton:CreateTexture(nil, "ARTWORK")
                             icon:SetAllPoints(auraButton)
                             icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
@@ -1886,7 +1886,7 @@ function ns.EnsureIconsNativeGridTarget()
                             if not (okCheck and canAccess) then return end
                             local okBuild, errBuild = pcall(function()
                                 local liveCfgAtCreate = ns.db and ns.db.icons or ns.Defaults.icons
-                                auraButton._aishSpellID = spellID
+                                auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
                                 local icon = auraButton:CreateTexture(nil, "ARTWORK")
                                 icon:SetAllPoints(auraButton)
                                 icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
@@ -2228,7 +2228,7 @@ function ns.EnsureIconsNativeGridPet()
                             if not (okCheck and canAccess) then return end
                             local okBuild, errBuild = pcall(function()
                                 local liveCfgAtCreate = ns.db and ns.db.icons or ns.Defaults.icons
-                                auraButton._aishSpellID = spellID
+                                auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
                                 local icon = auraButton:CreateTexture(nil, "ARTWORK")
                                 icon:SetAllPoints(auraButton)
                                 icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
@@ -2693,7 +2693,7 @@ function ns.EnsureCircleBarsNativeGrid()
                             local lbw, lbh, lgp = liveCfg.barW or 45, liveCfg.barH or 3, liveCfg.gap or 50
                             local liveSpells = ns.GetSpecSpells()
                             local liveSi = ns.GetStyleInfo(spellID)
-                            auraButton._aishSpellID = spellID
+                            auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
                             circleBarsSlotCounter = circleBarsSlotCounter + 1
                             auraButton:SetSize(lbw * 2 + lgp * 2, lbh)
 
@@ -3057,7 +3057,7 @@ function ns.EnsureCircleBarsNativeGridTarget()
                                 local lbw, lbh, lgp = liveCfg.barW or 45, liveCfg.barH or 3, liveCfg.gap or 50
                                 local liveSpells = ns.GetSpecSpells()
                                 local liveSi = ns.GetStyleInfo(spellID)
-                                auraButton._aishSpellID = spellID
+                                auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
                                 auraButton:SetSize(lbw * 2 + lgp * 2, lbh)
 
                                 local tex = ns.ResolveBarTexFromKey(liveCfg.texture)
@@ -3402,7 +3402,7 @@ function ns.EnsureCircleBarsNativeGridPet()
                                 local lbw, lbh, lgp = liveCfg.barW or 45, liveCfg.barH or 3, liveCfg.gap or 50
                                 local liveSpells = ns.GetSpecSpells()
                                 local liveSi = ns.GetStyleInfo(spellID)
-                                auraButton._aishSpellID = spellID
+                                auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
                                 auraButton:SetSize(lbw * 2 + lgp * 2, lbh)
 
                                 local tex = ns.ResolveBarTexFromKey(liveCfg.texture)
@@ -3742,7 +3742,7 @@ function ns.EnsureFreeBarsNativeGrid()
                             local liveCfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
                             local liveSpells = ns.GetSpecSpells()
                             local liveSi = ns.GetStyleInfo(spellID)
-                            auraButton._aishSpellID = spellID
+                            auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
                             auraButton:SetSize(rowW, rowH)
 
                             -- ICONE (sauf mode "barres seules")
@@ -4146,7 +4146,7 @@ function ns.EnsureFreeBarsNativeGridTarget()
                                 local liveCfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
                                 local liveSpells = ns.GetSpecSpells()
                                 local liveSi = ns.GetStyleInfo(spellID)
-                                auraButton._aishSpellID = spellID
+                                auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
                                 auraButton:SetSize(rowW, rowH)
 
                                 local icon, cd, stackFS
@@ -4585,7 +4585,7 @@ function ns.EnsureFreeBarsNativeGridPet()
                                 local liveCfg = ns.db and ns.db.circlebars or ns.Defaults.circlebars
                                 local liveSpells = ns.GetSpecSpells()
                                 local liveSi = ns.GetStyleInfo(spellID)
-                                auraButton._aishSpellID = spellID
+                                auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
                                 auraButton:SetSize(rowW, rowH)
 
                                 local icon, cd, stackFS
@@ -5072,7 +5072,7 @@ end
 function IL.Build(auraButton, spellID, isLeft, elemW, elemH, pool, isTarget)
     local liveCfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
     local liveSi = ns.GetStyleInfo(spellID)
-    auraButton._aishSpellID = spellID
+    auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
     local lbw, lbh, liw, lih, lgp, lpg, lrg, llayout, lisDual = IconListGeom(liveCfg)
     auraButton:SetSize(elemW, elemH)
 
@@ -5749,7 +5749,7 @@ function ns.EnsureIconListNativeGridPet()
                                 local liveCfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
                                 local liveSpells = ns.GetSpecSpells()
                                 local liveSi = ns.GetStyleInfo(spellID)
-                                auraButton._aishSpellID = spellID
+                                auraButton._aishSpellID = spellID; ns.RegisterNativeAuraButton(auraButton)
                                 local lbw, lbh, liw, lih, lgp, lpg, lrg, llayout, lisDual = IconListGeom(liveCfg)
                                 auraButton:SetSize(elemW, elemH)
 
