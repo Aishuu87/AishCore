@@ -55,7 +55,11 @@ local function IsCraftingReagent(itemID)
 end
 
 -- Pierres de soins : rien ne les distingue des autres consommables dans les catégories du jeu
-local HEALTHSTONES = { [5512] = true, [224464] = true }
+-- Retail : 5512, 224464 (demoniaque). Forever : un objet par rang (mineure, inferieure, normale, superieure,
+-- majeure), et deux de plus par rang avec le talent Pierre de soins amelioree.
+local HEALTHSTONES = { [5512] = true, [224464] = true,
+  [19004] = true, [19005] = true, [5511] = true, [19006] = true, [19007] = true, [5509] = true, [19008] = true,
+  [19009] = true, [5510] = true, [19010] = true, [19011] = true, [9421] = true, [19012] = true, [19013] = true }
 
 -- Ordre d'affichage des tags (et de la grille de la page de réglages)
 ExtraBars.TAGS = {
@@ -100,6 +104,20 @@ function ExtraBars.BarName(i, bc)
   return tags ~= "" and (name .. " - " .. tags) or name
 end
 
+-- Sort "Utiliser :" de l'objet pas encore chargé (Retail) : la ligne de l'infobulle est absente ou incomplète,
+-- le résultat ne doit pas être mis en cache. Chargement demandé, SPELL_DATA_LOAD_RESULT relance le tri.
+local pendingSpells = {}
+local function UseSpellReady(itemID)
+  if not (C_Spell and C_Spell.IsSpellDataCached and C_Spell.RequestLoadSpellData) then return true end
+  local ok, _, spellID = pcall(C_Item.GetItemSpell, itemID)
+  if ok and spellID and not C_Spell.IsSpellDataCached(spellID) then
+    pendingSpells[spellID] = true
+    C_Spell.RequestLoadSpellData(spellID)
+    return false
+  end
+  return true
+end
+
 -- Objets invoqués (nourriture de mage...) : ligne "Objet invoqué" de l'infobulle, mise en cache
 local conjuredCache = {}
 local function IsConjured(itemID)
@@ -112,6 +130,7 @@ local function IsConjured(itemID)
     C_Item.RequestLoadItemDataByID(itemID)
     return false
   end
+  if not UseSpellReady(itemID) then return false end
   c = false
   for _, line in ipairs(data.lines) do
     if line.leftText == ITEM_CONJURED then c = true; break end
@@ -138,6 +157,7 @@ local function IsKnowledge(itemID)
     C_Item.RequestLoadItemDataByID(itemID)
     return false
   end
+  if not UseSpellReady(itemID) then return false end
   c = false
   local use = ITEM_SPELL_TRIGGER_ONUSE or "Use:"
   for _, line in ipairs(data.lines) do
@@ -191,6 +211,7 @@ local function IsWeaponEnhancement(itemID)
     C_Item.RequestLoadItemDataByID(itemID)
     return false
   end
+  if not UseSpellReady(itemID) then return false end
   c = false
   local use = ITEM_SPELL_TRIGGER_ONUSE or "Use:"
   for _, line in ipairs(data.lines) do
@@ -229,6 +250,7 @@ local function IsTeleport(itemID)
     C_Item.RequestLoadItemDataByID(itemID)
     return false
   end
+  if not UseSpellReady(itemID) then return false end
   c = false
   local use = ITEM_SPELL_TRIGGER_ONUSE or "Use:"
   for _, line in ipairs(data.lines) do
@@ -1105,6 +1127,7 @@ ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("BAG_UPDATE_DELAYED")
 ev:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 ev:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+if C_Spell and C_Spell.RequestLoadSpellData then ev:RegisterEvent("SPELL_DATA_LOAD_RESULT") end
 ev:RegisterEvent("BAG_UPDATE_COOLDOWN")
 ev:RegisterUnitEvent("UNIT_AURA", "player")
 ev:RegisterEvent("SPELL_UPDATE_COOLDOWN")
@@ -1115,7 +1138,12 @@ ev:RegisterUnitEvent("UNIT_HEALTH", "player")
 ev:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
 -- Bandage pose : le debuff commence avec la canalisation (lisible meme en combat, contrairement a l'aura)
 ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
-ev:SetScript("OnEvent", function(_, event, _, _, spellID)
+ev:SetScript("OnEvent", function(_, event, arg1, _, spellID)
+  -- Sort d'un objet chargé : seuls ceux demandés par le tri relancent le scan (l'event vaut pour tout le client)
+  if event == "SPELL_DATA_LOAD_RESULT" then
+    if not pendingSpells[arg1] then return end
+    pendingSpells[arg1] = nil
+  end
   if event == "UNIT_SPELLCAST_CHANNEL_START" then
     if issecretvalue and issecretvalue(spellID) then return end
     for _, bar in pairs(bars) do

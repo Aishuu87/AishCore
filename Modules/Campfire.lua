@@ -115,10 +115,11 @@ end
 
 -- Dans le sac : zone de repos ET signal du sac recent (BAG_UPDATE_COOLDOWN accepte ou pose du sac, Bag.seen) ;
 -- une zone de repos seule (auberge, ville) ne suffit jamais
--- Zone de repos native (auberge, capitale, village) : le sac ne peut pas y etre lance, donc jamais de sac.
+-- Zone de repos native (auberge, capitale) : le sac ne peut pas y etre lance, donc jamais de sac.
 -- Bag.native : la periode de repos en cours a commence sans signal de sac (cf. PLAYER_UPDATE_RESTING).
+-- Pas ns.IsInTown : un village (La Croisee...) n'est pas une zone de repos hors de l'auberge, le sac s'y pose.
 function Bag.NativeRest()
-  return Bag.native == true or (ns.IsInTown and ns.IsInTown())
+  return Bag.native == true
 end
 
 function Bag.In()
@@ -171,7 +172,14 @@ end
 
 -- ── Objets reperes pres du feu (survol) ─────────────────────────────────────
 
-local seen = {}   -- index FEATURES -> true
+local seen = {}   -- index FEATURES -> nom de l'objet survole (true : sans nom, apercu / objet de meme bonus)
+
+-- Nom de l'objet survole pour ce bonus (ex. Ratelier de tannage, meme bonus que la Tente du camp), nil sinon
+local function SeenName(f)
+  for i, g in ipairs(FEATURES) do
+    if g.buff == f.buff and type(seen[i]) == "string" then return seen[i] end
+  end
+end
 
 local function Plain(s) return type(s) == "string" and not (issecretvalue and issecretvalue(s)) end
 
@@ -233,12 +241,12 @@ local function OnObjectTooltip(_, data)
   if not NearCampfire() then return end
   local i = MatchFeature(name)
   if not i then return end
-  if not seen[i] then
-    seen[i] = true
-    -- Bannieres Alliance / Horde : un seul bonus
+  if seen[i] ~= name then
+    -- Bannieres Alliance / Horde : un seul bonus ; le nom survole reste sur l'objet trouve
     for j, f in ipairs(FEATURES) do
       if f.buff == FEATURES[i].buff then seen[j] = true end
     end
+    seen[i] = name
   end
   if Campfire.Refresh then Campfire.Refresh() end
 end
@@ -959,7 +967,7 @@ local function LayoutOrbs(list)
     end
     o.tex:SetTexture(SpellIcon(f.buff) or FIRE_ICON)
     o.stat = Summary(f, SpellDesc(f.place)) or SpellName(f.buff) or "?"
-    o.item = SpellName(f.place)
+    o.item = SeenName(f) or SpellName(f.place)
   end
   for i, o in pairs(orbs) do
     if not want[i] then
@@ -1177,6 +1185,7 @@ local placeSpell
 local CAMP_ITEMS = {
   [279962] = true,      -- Bougie d'encens
   [211527] = "right",   -- Sac de couchage douillet (Forever)
+  [279981] = "right",   -- Feu de camp (objet) : garde malgre le filtre des feux
 }
 -- Jouets de camp (coffre a jouets, hors sacs) : ajoutes apres les objets des sacs s'ils sont connus
 local CAMP_TOYS = {
@@ -1237,7 +1246,7 @@ local function CampItems(diag)
         end
         local iname = (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)) or (GetItemInfo and GetItemInfo(id))
         if not fi and Plain(iname) and #iname >= 6 then fi = MatchFeature(iname) end
-        local isFire = (sid and fires[sid]) or (Plain(iname) and IsCampfireName(iname))
+        local isFire = not CAMP_ITEMS[id] and ((sid and fires[sid]) or (Plain(iname) and IsCampfireName(iname)))
         local mention = not fi and not isFire and TooltipMentions(bag, slot, id, words)
         if mention then fi = #FEATURES + 1 end   -- objet de camp hors FEATURES : apres les autres
         if diag and (fi or isFire) then
@@ -1990,8 +1999,10 @@ function Campfire.Refresh()
       RunRing(rings.fire, exp - dur, dur)
       sitting, sitExp = true, exp
     end
-    local n = 0
-    for _ in pairs(seen) do n = n + 1 end
+    -- Signature : nombre de bonus et noms survoles (un autre objet du meme bonus renomme l'orbe)
+    local n, names = 0, ""
+    for _, v in pairs(seen) do n = n + 1; if type(v) == "string" then names = names .. v end end
+    n = n .. names
     if n ~= laidSeen then
       laidSeen = n
       local list = SeenList()
@@ -2039,7 +2050,7 @@ end
 local function RestoreSeen()
   if not savedSeen then return end
   wipe(seen)
-  for k in pairs(savedSeen) do seen[k] = true end
+  for k, v in pairs(savedSeen) do seen[k] = v end
   savedSeen = nil
 end
 
@@ -2086,7 +2097,7 @@ function Campfire.SetHostPreview(host)
   Resize(Cfg().size or 70)
   FitStage()
   savedSeen = {}
-  for k in pairs(seen) do savedSeen[k] = true end
+  for k, v in pairs(seen) do savedSeen[k] = v end
   wipe(seen)
   PreviewSeen()
   ShowHud()
@@ -2307,7 +2318,9 @@ ev:SetScript("OnEvent", function(_, event, _, _, spellID)
     -- Sac de couchage : la minute repart (allonge, releve, saut, stack gagne) ; sac repere s'il ne l'etait pas.
     -- Lu un instant plus tard : la minute du feu (et la recharge commune du camp, posee sur les objets de camp des
     -- sacs) declenche aussi l'evenement, sans rapport avec le sac.
-    if not InCombatLockdown() and IsResting() and GetTime() - Bag.castAt > 0.5 then
+    -- IsResting lu seulement apres le delai : a l'entree dans la zone du sac, l'evenement peut preceder
+    -- PLAYER_UPDATE_RESTING (signal perdu, puis zone jugee native 3 s plus tard).
+    if not InCombatLockdown() and GetTime() - Bag.castAt > 0.5 then
       local t = GetTime()
       C_Timer.After(0.3, function()
         if InCombatLockdown() or not IsResting() or Bag.CampAuraAt(t) then return end

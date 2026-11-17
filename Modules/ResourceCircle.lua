@@ -3197,6 +3197,77 @@ local ApplyStacksToText
 -- 8 autres FontStrings. La comparaison est protegee : string.format sur une valeur secrete
 -- rend une SECRET STRING, que l'on ne peut pas comparer.
 local _rcLastText
+-- Survol du texte de pourcentage (cercle central, cercle hors combat) : la mana passe en valeur abregee.
+-- Ticker 0.15 s, sans EnableMouse (le cercle reste traversable par les clics). getFs() -> fontstring a surveiller.
+-- Texte a valeur secrete => taille, ancre et IsMouseOver secrets : zone calculee depuis le centre du cercle
+-- (le texte y est ancre sans decalage) et la taille de police de la config, environ 3 chiffres de large.
+local function CursorOnText(circle, size)
+  local cx, cy = circle:GetCenter()
+  if not cx then return false end
+  local scale = circle:GetEffectiveScale()
+  local mx, my = GetCursorPosition()
+  local dx, dy = mx / scale - cx, my / scale - cy
+  return math.abs(dx) <= size * 0.9 + 4 and math.abs(dy) <= size * 0.5 + 4
+end
+
+-- getTarget() -> cercle, fontstring, taille de police
+function ns.WatchManaTextHover(getTarget, onChange)
+  local hovered = false
+  ns.NewTicker(0.15, function()
+    local circle, fs, size = getTarget()
+    local now = false
+    if circle and fs and fs:IsVisible() and ns.GetPlayerResource() == Enum.PowerType.Mana then
+      local ok, over = pcall(CursorOnText, circle, size or 14)
+      now = ok and over or false
+    end
+    if now ~= hovered then
+      hovered = now
+      onChange(now)
+    end
+  end)
+end
+
+-- Valeur de mana abregee (AbbreviateNumbers est C-side, accepte les secret numbers), nil si indisponible
+-- Repli (client sans AbbreviateNumbers) : AbbreviateLargeNumbers, puis format maison sur valeur non secrete.
+ns._manaAbbrevCfg = { breakpointData = {
+  { breakpoint = 1e9, abbreviation = "B", significandDivisor = 1e8, fractionDivisor = 10, abbreviationIsGlobal = false },
+  { breakpoint = 1e6, abbreviation = "M", significandDivisor = 1e5, fractionDivisor = 10, abbreviationIsGlobal = false },
+  { breakpoint = 1e3, abbreviation = "K", significandDivisor = 1e2, fractionDivisor = 10, abbreviationIsGlobal = false },
+} }
+function ns.ManaValueText()
+  local abbr = AbbreviateNumbers or AbbreviateLargeNumbers
+  local ok, txt = pcall(function()
+    local v = UnitPower("player", Enum.PowerType.Mana)
+    -- Paliers explicites, abreviation sans espace : la valeur (secrete en combat) reste formatee cote client.
+    -- Une decimale (2.8K) ; le defaut Forever n'abrege rien sous 10 000 et met un espace en frFR.
+    if AbbreviateNumbers then
+      local okB, sB = pcall(AbbreviateNumbers, v, ns._manaAbbrevCfg)
+      if okB and sB then return sB end
+    end
+    if abbr then
+      local s = abbr(v)
+      -- "48.2 k" -> "48.2k" : espaces simples et insecables UTF-8 (U+00A0, U+202F, U+2009) du frFR. s eventuellement secret : repli brut
+      local okG, g = pcall(function()
+        return (s:gsub("\194\160", ""):gsub("\226\128[\175\137]", ""):gsub("%s", ""))
+      end)
+      return okG and g or s
+    end
+    if v >= 1000000 then return string.format("%.1fM", v / 1000000) end
+    if v >= 1000 then return string.format("%.1fk", v / 1000) end
+    return tostring(v)
+  end)
+  return ok and txt or nil
+end
+
+local _rcManaHover = false
+ns.WatchManaTextHover(function()
+  local c = ns.GetCfg("resourceCircle")
+  return bar, bar and bar.text, c and c.fontSize
+end, function(on)
+  _rcManaHover = on
+  ResourceCircle.Update()
+end)
+
 local function SetResourceText(txt)
   -- Texte secret : aucune comparaison possible (elle serait bloquee et journalisee)
   local okCmp, same = false, nil
@@ -3301,6 +3372,9 @@ function ResourceCircle.Update()
         end
       else
         displayText = string.format("%.0f", pct)
+        if _rcManaHover and resource == Enum.PowerType.Mana then
+          displayText = ns.ManaValueText() or displayText
+        end
       end
     end
   end
@@ -4013,17 +4087,24 @@ end
 -- Forever, chaman : charges du bouclier actif (Foudre / Eau), aura reconnue par son NOM localise (deduit des
 -- spellIDs de def.shieldNames, chaines = repli anglais). Noms resolus une seule fois. nil si aucun bouclier.
 function ResourceCircle.ShieldCharges(def)
-  if not def._names then
-    local set = {}
+  -- Nom pas encore charge par le client (sort de rune 408510 au login) : nouvel essai 5 s plus tard, sinon seul le
+  -- repli anglais restait, introuvable sur un client FR
+  if not def._names or (def._namesRetry and GetTime() >= def._namesRetry) then
+    local set, complete = {}, true
     for _, v in ipairs(def.shieldNames or {}) do
       if type(v) == "number" then
         local n = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(v)) or (GetSpellInfo and GetSpellInfo(v))
-        if n then set[n] = true end
+        if n then
+          set[n] = true
+        elseif not (C_Spell and C_Spell.DoesSpellExist and not C_Spell.DoesSpellExist(v)) then
+          complete = false
+        end
       else
         set[v] = true
       end
     end
     def._names = set
+    def._namesRetry = (not complete) and (GetTime() + 5) or nil
   end
   def._ids = def._ids or {}
   if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return nil end
@@ -4034,7 +4115,7 @@ function ResourceCircle.ShieldCharges(def)
     local n = a.name
     if not (issecretvalue and issecretvalue(n)) and def._names[n] then
       local sid = a.spellId
-      if sid and Plain(sid) then def._ids[sid] = true end
+      if sid and Plain(sid) then def._ids[sid] = true; def._activeId = sid end   -- bouclier porte (foudre OU eau)
       -- Identifiant d'instance (jamais secret) : seule lecture des charges possible en combat
       if a.auraInstanceID and Plain(a.auraInstanceID) then def._instID = a.auraInstanceID end
       local c = a.applications
@@ -4106,6 +4187,7 @@ function ResourceCircle.ShieldAuraEvent(_, event, unit, a1, a2)
     if not (sid and Plain(sid)) then return end
     local n = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)) or (GetSpellInfo and GetSpellInfo(sid))
     if def._ids and def._ids[sid] or (n and Plain(n) and def._names[n]) then
+      def._activeId = sid   -- changement de bouclier : filtre natif refait a la sortie du combat
       def._pendingAt, def._present = GetTime(), true   -- bouclier (re)lance : affiche, compte ecrit par le bouton natif
     end
   elseif event == "UNIT_AURA" and def._pendingAt and GetTime() - def._pendingAt < 1 then
@@ -4131,8 +4213,14 @@ end
 function ResourceCircle.EnsureShieldNative(def)
   if InCombatLockdown() or not (bar and bar.secResText) then return end
   -- Filtre limite aux rangs reellement vus sur ce client (un spellID inconnu fait echouer le filtre entier)
+  -- Un seul bouclier actif a la fois : filtre sur le dernier porte (foudre et eau cumules = filtre multi-ID,
+  -- compteur vide en combat). Aucun encore lu : tous les rangs vus.
   local ids, sig = {}, {}
-  for v in pairs(def._ids or {}) do ids[v] = true; sig[#sig + 1] = v end
+  if def._activeId then
+    ids[def._activeId] = true; sig[1] = def._activeId
+  else
+    for v in pairs(def._ids or {}) do ids[v] = true; sig[#sig + 1] = v end
+  end
   -- Secours seulement tant qu'aucune aura n'a ete lue : rangs appris (sort = aura pour les boucliers), pour qu'un
   -- /reload suivi d'un pull cree quand meme le bouton. Des qu'un rang est lu sur l'aura, le filtre ne garde que lui
   -- (filtre multi-rangs : compteur vide en combat).

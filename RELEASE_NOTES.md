@@ -1,5 +1,55 @@
 # AishCore
 
+## [v4.7.4](https://github.com/Aishuu87/AishCore/tree/v4.7.4) (2026-11-17)
+
+### Central Circle
+- ♾️Shaman: Added support for Water Shield (Charges)
+- Hovering the mana text now shows the player's exact mana value
+
+### Unit Frames
+- Added a new option to show a glow when the player can dispel the debuff (Highlight dispellable debuffs)
+- The level on the target, focus, target of target and Top Target health bars now uses the same colors as Platynator:
+  - Gray: the target no longer grants experience
+  - Green: the target is 3 to 8 levels below you
+  - Yellow: -2 to +2
+  - Orange: +3 and +4
+  - Red: +5 and ??
+- New options in the Health Bars (and Top Target) color the level, the name and the bar by difficulty (Difficulty color)
+- New options in the Health Bars (and Top Target) color the level, the name and the bar by reaction: hostile, friendly, neutral (Reaction color)
+- Reaction and difficulty colors can be customized
+
+### Camping HUD
+- ♾️FIX: Some cases where the Sleeping Bag HUD did not start (some villages)
+- ♾️Added the Campfire Kit to the list of camping items
+- ♾️FIX: Higher items that can replace lower ones (Tanning Rack > Camp Tent) now show their real names in the buff tooltips
+
+### Dynamic Bars
+- ♾️FIX: The Greater Healthstone was not recognized
+- 🌀FIX: Better detection of Profession knowledge items (*thanks TheDooft!*)
+
+### Priority Bar
+- FIX: Victory Rush now stays grayed out in the Priority Bar until the Victorious buff is active (for good this time?)
+
+### Fishing
+- New "Fishing" page in the HUD category
+- When a fishing pole is equipped, only the Well Rested (Sleeping Bag) alert is offered
+- Fishing accessories are offered in the Missing buffs alerts. A dedicated column enables or disables specific lures
+- An adjustable bubble shows the lure duration, and hovering it shows the lure's information
+- The bubble also shows your Fishing skill and the total of the applied bonuses
+- The bubble can float like a fishing bobber
+- When you start moving, a round button re-equips the weapons you had before the fishing pole
+- The "Double right-click: fish" option moved to the new Fishing section
+- An option lowers music and ambience volumes while fishing. Volume returns to normal after an adjustable fade duration
+
+### Auras to Track
+- 🌀Rogue: Circle Bars shifted when using Shadow Dance
+
+### Missing buffs
+- ♾️Shaman: Added Water Shield to the missing buff alerts
+
+### Fixes
+- FIX: Performance optimization when shapeshifting (Druid) and entering Stealth (Rogue), which could sometimes cause slowdowns
+
 ## [v4.7.3](https://github.com/Aishuu87/AishCore/tree/v4.7.3) (2026-11-16)
 
 ### XP Bar

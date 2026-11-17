@@ -23,6 +23,8 @@ local HIDE_KEYS = { player = "hideBlizzPlayer", target = "hideBlizzTarget", focu
 -- Ordre d'affichage (selecteur, cases) : Familier - Joueur - Cible - Cible de la cible - Focalisation
 local ORDER = { "pet", "player", "target", "targettarget", "focus" }
 -- Copie : tout sauf ce qui place ou active la barre
+-- Barres reglables en couleur de difficulte / reaction (Modules/UnitBars.lua, COLOR_KEYS)
+local COLOR_BARS = { target = true, focus = true, targettarget = true }
 local NOT_COPIED = { enabled = true, x = true, y = true, layout = true, mirrorOf = true, collapsed = true, fillColor = true }
 
 local function UB() return ns.Modules and ns.Modules.UnitBars end
@@ -104,7 +106,20 @@ local function Subtitle(parent, text, width)
   lbl:SetPoint("LEFT", f, "LEFT", 0, 0)
   lbl:SetTextColor(unpack(Theme.textDim))
   lbl:SetText(text)
+  f._lbl = lbl
   f._leKind, f._leText = "subheader", text   -- deplacable en mode disposition (UI/LayoutEditor.lua)
+  return f
+end
+
+-- Sous-titre suivi d'un filet jusqu'au bout de la rangee (separateur titre)
+local function SubDivider(parent, text, width)
+  local f = Subtitle(parent, text, width)
+  local line = f:CreateTexture(nil, "ARTWORK")
+  line:SetHeight(1)
+  SW.PixelLine(line)
+  line:SetPoint("LEFT", f._lbl, "RIGHT", 8, 0)
+  line:SetPoint("RIGHT", f, "RIGHT", 0, 0)
+  line:SetColorTexture(1, 1, 1, 0.12)
   return f
 end
 
@@ -338,14 +353,6 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
   Row(5, Sub("UNITBARS_SUB_COLORS"), false, false, false, false)
   Row(5, cbThemed, false, false, false, false)
   Row(5, colBar, colBg, false, false, false)
-  -- Reaction des PNJ (cible, cible de la cible) : grisees hors couleurs thematiques
-  local colReact = {
-    GBind(COL(L["UNITBARS_COLOR_HOSTILE"], 5), "hostileColor", "color"),
-    GBind(COL(L["UNITBARS_COLOR_NEUTRAL"], 5), "neutralColor", "color"),
-    GBind(COL(L["UNITBARS_COLOR_FRIENDLY"], 5), "friendlyColor", "color"),
-    GBind(COL(L["UNITBARS_COLOR_LOWLEVEL"], 5), "lowLevelColor", "color"),
-  }
-  Row(5, colReact[1], colReact[2], colReact[3], colReact[4], false)
   Row(5, cbInvert, false, false, false, false)
   -- Hauteur elargie en spe tank (joueur, cible, focalisation) : slider sans titre, grise tant que la case est decochee
   local cbTank = GBind(CB(L["SETTINGS_UB_TANK_HEIGHT"], L["SETTINGS_UB_TANK_HEIGHT_TT"],3), "useTankHeight", "bool")
@@ -612,6 +619,66 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
   local slShadowH = Bind(SL(L["UNITBARS_SHADOW_H"], 10, 400, 5, 4), "nameShadowH", "number")
   Row(4, slShadowW, slShadowH, false, false)
   local nameWidgets = { cbLevel, ddNameFont, slNameSize, ddNameOutline, ddNameAnchor, rowJustify, slNameX, slNameY, slNameBox }
+  -- Couleur de la difficulte, puis de la reaction (5 colonnes) : elements colores (Niveau / Nom / Barre), puis couleurs
+  -- (cf. TopTargetBar.ResolveUnitColor). Cible, focalisation et cible de la cible seulement.
+  local colorBlocks = {}
+  local COLOR_ELEMS = {
+    { "Level", L["UNITBARS_COLOR_ELEM_LEVEL"] }, { "Name", L["UNITBARS_COLOR_ELEM_NAME"] }, { "Bar", L["UNITBARS_COLOR_ELEM_BAR"] },
+  }
+  local function ColorBlock(title, tt, pre, colors)
+    ctx:Spacer(4)
+    local sub = SubDivider(container, title, W)
+    sub:EnableMouse(true)
+    sub:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetText(tt, 1, 1, 1, 1, true)
+      GameTooltip:Show()
+    end)
+    sub:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    ctx:Add(sub)
+    local themedTT = L["UNITBARS_COLOR_ELEM_THEMED_TT"]
+    local b = { cbs = {}, cols = {} }
+    for i, e in ipairs(COLOR_ELEMS) do
+      local cb = Bind(CB(e[2], i > 1 and themedTT or nil, 5), pre .. e[1], "bool")
+      cb._colorKey = pre .. e[1]
+      b.cbs[i] = cb
+    end
+    Row(5, b.cbs[1], b.cbs[2], b.cbs[3], false, false)
+    local cells = {}
+    for i = 1, 5 do
+      local c = colors[i]
+      if c then
+        b.cols[i] = Bind(COL(c[2], 5), pre .. "Color" .. c[1], "color")
+        cells[i] = b.cols[i]
+      else
+        cells[i] = false
+      end
+    end
+    Row(5, unpack(cells, 1, 5))
+    colorBlocks[#colorBlocks + 1] = b
+  end
+  ColorBlock(L["UNITBARS_SUB_DIFF_COLOR"], L["UNITBARS_SUB_DIFF_COLOR_TT"], "diff", {
+    { "Trivial", L["UNITBARS_DIFF_TRIVIAL"] }, { "Easy", L["UNITBARS_DIFF_EASY"] }, { "Normal", L["UNITBARS_DIFF_NORMAL"] },
+    { "Hard", L["UNITBARS_DIFF_HARD"] }, { "Skull", L["UNITBARS_DIFF_SKULL"] },
+  })
+  ColorBlock(L["UNITBARS_SUB_REACT_COLOR"], L["UNITBARS_SUB_REACT_COLOR_TT"], "react", {
+    { "Hostile", L["UNITBARS_COLOR_HOSTILE"] }, { "Neutral", L["UNITBARS_COLOR_NEUTRAL"] }, { "Friendly", L["UNITBARS_COLOR_FRIENDLY"] },
+  })
+  -- Une seule couleur par element : cocher Niveau / Nom / Barre dans une section le decoche dans l'autre
+  for i = 1, 3 do
+    local a, b = colorBlocks[1].cbs[i], colorBlocks[2].cbs[i]
+    for _, pair in ipairs({ { a, b }, { b, a } }) do
+      local cb, other = pair[1], pair[2]
+      local orig = cb.onChanged
+      cb.onChanged = function(v)
+        if v and BV(other._colorKey) then
+          Bar()[other._colorKey] = false
+          other:SetChecked(false)
+        end
+        orig(v)
+      end
+    end
+  end
 
   -- Texte de vie (4 colonnes) : texte, puis son cadre (forme, taille, couleur) --------------------------------------
   ctx:Spacer(6)
@@ -768,6 +835,54 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
   -- Epees, puis emblemes de faction (actifs avec "Distinguer la faction")
   local pvpSwords = PvPIconBlock("pvp", L["UNITBARS_PVP_SWORDS"], { THEMED, CUSTOM })
   local pvpEmblems = PvPIconBlock("pvpF", L["UNITBARS_PVP_EMBLEMS"], { ORIGINAL, THEMED, CUSTOM })
+
+  -- Debuffs dissipables (commun a toutes les barres) : halo de la couleur du type, unites alliees -----------------
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["UNITBARS_SEC_DISPEL"], W))
+  local cbDispel = GBind(CB(L["UNITBARS_DISPEL_SHOW"], L["UNITBARS_DISPEL_SHOW_TT"], 4, 2), "dispelGlow", "bool")
+  local dispelBtn = SW.CreateActionBtn(container, L["UNITBARS_DISPEL_PREVIEW"], Cols(4))
+  dispelBtn._leId = "unitBars.dispelPreview"   -- libelle variable : identifiant fixe en mode disposition
+  local DISPEL_LIST = { "Magic", "Curse", "Disease", "Poison", "Bleed" }
+  local function DispelBtnLabel()
+    local m = UB()
+    local t = m and m.GetDispelPreview and m.GetDispelPreview()
+    if t then
+      local c = GV("dispelColor" .. t) or { 1, 1, 1 }
+      dispelBtn._lbl:SetText(string.format("|cff%02x%02x%02x%s|r", c[1] * 255, c[2] * 255, c[3] * 255,
+        L["UNITBARS_DISPEL_" .. t:upper()]))
+    else
+      dispelBtn._lbl:SetText(L["UNITBARS_DISPEL_PREVIEW"])
+    end
+  end
+  dispelBtn:SetScript("OnClick", function()
+    local m = UB()
+    if not (m and m.CycleDispelPreview) then return end
+    m.CycleDispelPreview()
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    DispelBtnLabel()
+    RefreshPreview()
+  end)
+  dispelBtn:HookScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText(L["UNITBARS_DISPEL_PREVIEW_TT"], 1, 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  dispelBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+  dispelBtn:HookScript("OnShow", DispelBtnLabel)   -- apercu coupe a la fermeture du GUI
+  Row(4, cbDispel, false, dispelBtn)
+  local slDispelSize = GBind(SL(L["UNITBARS_DISPEL_SIZE"], 2, 16, 1, 4), "dispelGlowSize", "number")
+  local slDispelA = GBind(SL(L["SETTINGS_OPACITY"], 0.1, 1, 0.05, 4), "dispelGlowAlpha", "number")
+  Row(4, slDispelSize, slDispelA, false, false)
+  local dispelWidgets = { slDispelSize, slDispelA }   -- apercu toujours actif (estompe dans l'apercu si coupe)
+  local dispelCols = {}
+  for _, t in ipairs(DISPEL_LIST) do
+    local col = GBind(COL(L["UNITBARS_DISPEL_" .. t:upper()], 5), "dispelColor" .. t, "color")
+    local orig = col.onChanged
+    col.onChanged = function(v) orig(v); DispelBtnLabel() end
+    dispelCols[#dispelCols + 1] = col
+    dispelWidgets[#dispelWidgets + 1] = col
+  end
+  Row(5, unpack(dispelCols))
 
   ctx:Spacer()
   ctx:Finalize()
@@ -966,8 +1081,21 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
     for _, w in ipairs(powerWidgets) do Gray(w, not powerOn, off) end
     Gray(colPower, not powerOn or BV("powerTypeColor") ~= false, off)
     Gray(slTank, not GV("useTankHeight"), off)
+    for _, w in ipairs(dispelWidgets) do Gray(w, GV("dispelGlow") == false, off) end
     Gray(colBar, GV("themedColors") ~= false, off)
-    for _, w in ipairs(colReact) do Gray(w, GV("themedColors") == false, off) end
+    -- Couleur de la difficulte / de la reaction : cible, focalisation et cible de la cible seulement ; cases Nom / Barre
+    -- inactives hors couleurs thematiques ; couleurs grisees sans aucune case cochee
+    local colorBar = COLOR_BARS[key]
+    local themed = GV("themedColors") ~= false
+    for _, b in ipairs(colorBlocks) do
+      local any = false
+      for i, cb in ipairs(b.cbs) do
+        local active = colorBar and (i == 1 or themed)
+        Gray(cb, not active, off)
+        if active and BV(cb._colorKey) then any = true end
+      end
+      for _, w in ipairs(b.cols) do Gray(w, not any, off) end
+    end
     -- Nom du joueur : au survol seulement (hors combat)
     cbName.label:SetText(key == "player" and L["UNITBARS_SHOW_NAME_HOVER"] or L["UNITBARS_SHOW_NAME"])
     cbName.tooltipText = key == "player" and L["SETTINGS_UB_PLAYER_NAME_HOVER_TT"] or nil
@@ -1025,6 +1153,7 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
     end
     rowPvpSide:SetValue(BV("pvpSide") or BV("dotSide"))   -- pas de cote propre : celui des points
     PvPBtnLabel()
+    DispelBtnLabel()
     RefreshPos()   -- barre en symetrie : sa position calculee, pas celle enregistree
     if RefreshVis then RefreshVis() end
     RefreshStates()

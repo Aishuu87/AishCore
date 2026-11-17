@@ -214,6 +214,8 @@ ns.Defaults = {
         thornsThreshold = 2,
         innerFireThreshold = 2,
         wellRestedThreshold = 5,
+        -- Peche (Forever) : appat sur la canne ; ignoredLures[itemID] = true -> objet jamais propose
+        ignoreFishingLures = false, ignoredLures = {},
         ignorePoisonStock = false, poisonStockThreshold = 5,
         -- Rappel "bientot expire" (2026-08-30) : affiche l'alerte native
         -- (texte "RAFRAICHIR") quand un buff suivi sur SOI est encore actif

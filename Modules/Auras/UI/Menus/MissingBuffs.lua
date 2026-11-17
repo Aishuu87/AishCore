@@ -88,10 +88,16 @@ local function CreateBuffRow(parent, entry, y, W)
     end)
     if entry.casts or entry.kind then name = ForeverEntryLabel(entry) or name end
     label:SetText(name)
+    -- Objet (appat de peche) : nom lu une fois l'objet en cache
+    if entry.lureId and Item and Item.CreateFromItemID then
+        local it = Item:CreateFromItemID(entry.lureId)
+        it:ContinueOnItemLoad(function() label:SetText(it:GetItemName() or name) end)
+    end
 
     -- entry.dbKey : ligne liee a une cle "ignoreX" de ns.db.missingBuffs (cochee si absente) au lieu d'un spell ;
     -- entry.dbKeyOn : cle d'activation (cochee si vraie), entry.onToggle(valeur) appele apres le clic
     local function IsIgnored()
+        if entry.lureId then return (Cfg().ignoredLures or {})[entry.lureId] and true or false end
         if entry.dbKeyOn then return not Cfg()[entry.dbKeyOn] end
         if entry.dbKey then return Cfg()[entry.dbKey] and true or false end
         return ns.MissingBuffs.IsIgnored(entry.settingsId)
@@ -103,7 +109,12 @@ local function CreateBuffRow(parent, entry, y, W)
     end
     Refresh()
     row:SetScript("OnClick", function()
-        if entry.dbKeyOn then
+        if entry.lureId then
+            local t = Cfg().ignoredLures or {}
+            Cfg().ignoredLures = t
+            t[entry.lureId] = (not IsIgnored()) or nil
+            ns.MissingBuffs.RequestCheck()
+        elseif entry.dbKeyOn then
             local v = not Cfg()[entry.dbKeyOn]
             Cfg()[entry.dbKeyOn] = v
             if entry.onToggle then entry.onToggle(v) end
@@ -158,6 +169,18 @@ local function ConsumableRows()
         { dbKey = "ignoreElixirs",        displayName = L["MISSINGBUFFS_ELIXIRS"],        icon = I .. "INV_Potion_32" },
         { dbKey = "ignoreWeaponStones",   displayName = L["MISSINGBUFFS_WEAPON_STONES"],  icon = I .. "INV_Stone_SharpeningStone_05" },
     }
+end
+
+-- Colonne "Peche" (Forever : canne en main) : interrupteur general puis un appat par ligne (decoche = jamais propose).
+-- Seuls les appats connus du client sont listes.
+local function FishingRows()
+    local rows = { { dbKey = "ignoreFishingLures", displayName = L["MISSINGBUFFS_FISHING_LURES"], icon = I .. "Trade_Fishing" } }
+    for _, id in ipairs(ns.MISSING_FISHING_LURES or {}) do
+        if C_Item.GetItemInfoInstant(id) then
+            rows[#rows + 1] = { lureId = id, displayName = "item:" .. id, icon = C_Item.GetItemIconByID(id) }
+        end
+    end
+    return rows
 end
 
 -- Ruee ardente (Retail) : alerte "presence" inverse, resynchronise SpellEffects tout de suite
@@ -377,6 +400,9 @@ local function BuildAlertsSection(c, w)
           topToggle = { "consumablesInstanceOnly", L["MISSINGBUFFS_CONSUMABLES_INSTANCE_ONLY"],
                         tt = L["MISSINGBUFFS_CONSUMABLES_INSTANCE_ONLY_TT"] } },
     }
+    if _addon.IsForever then
+        columns[#columns + 1] = { label = L["MISSINGBUFFS_COL_FISHING"], color = GENERAL_COLOR, rows = FishingRows() }
+    end
     for _, cc in ipairs(CLASS_COLUMNS) do
         if not (_addon.IsForever and cc.class == "EVOKER") then   -- Forever : pas d'evocateur
             local rows = cc.rows()

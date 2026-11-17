@@ -67,6 +67,14 @@ local function UnitBarDefaults(o)
     -- de vie ; couleur du type de ressource (powerTypeColor) ou couleur unique (powerColor)
     powerShow = false, powerPlacement = "outside", powerWidth = 100, powerHeight = 3, powerOffX = 0, powerOffY = 0,
     powerTypeColor = true, powerColor = { 0.00, 0.45, 1.00, 1 }, powerBgColor = { 0.0549, 0.0549, 0.0549, 1 }, powerAlpha = 1,
+    -- Couleur de la difficulte / de la reaction (cible, focalisation, cible de la cible) : elements colores (niveau,
+    -- nom, barre ; difficulte prioritaire) et couleurs
+    diffLevel = true, diffName = false, diffBar = false,
+    reactLevel = false, reactName = true, reactBar = true,
+    diffColorTrivial = { 0.50, 0.50, 0.50, 1 }, diffColorEasy = { 0.25, 0.75, 0.25, 1 }, diffColorNormal = { 1.00, 0.82, 0.00, 1 },
+    diffColorHard = { 1.00, 0.50, 0.25, 1 }, diffColorSkull = { 1.00, 0.10, 0.10, 1 },
+    reactColorHostile = { 0.780, 0.251, 0.251, 1 }, reactColorNeutral = { 0.855, 0.773, 0.361, 1 },
+    reactColorFriendly = { 0.294, 0.686, 0.298, 1 },
   }
   for k, v in pairs(o) do t[k] = v end
   return t
@@ -575,6 +583,21 @@ ns.Defaults = {
     sleepStackSize = 100, sleepStackColor = { 0.95, 0.89, 0.78, 1 }, sleepStackX = 0, sleepStackY = 0,
     sleepStackOutline = "OUTLINE",
   },
+  -- Peche (Modules/Fishing.lua, Forever) : icone de l'appat de la canne, bouton de reequipement des armes
+  fishing = {
+    lureEnabled = true, lureLocked = false, lureX = 0, lureY = -150, lureSize = 30,
+    lureRingColor = { 1, 0.55, 0.15, 0.9 }, lureFloat = true, lureGrow = 60,
+    lureTimerFont = ns.FONT_FALLBACK, lureTimerSize = 11, lureTimerColor = { 1, 1, 1, 1 }, lureTimerOutline = "OUTLINE",
+    lureTimerX = 0, lureTimerY = -2,
+    -- Infobulle (appat et bouton) : facon orbe du Camping HUD ; direction "TOP" | "BOTTOM" | "LEFT" | "RIGHT"
+    tipFont = ns.FONT_FALLBACK, tipFontSize = 13, tipOutline = "NONE", tipNameColor = { 0.74, 0.48, 0.27, 1 },
+    tipStatColor = { 1, 0.83, 0.42, 1 }, tipOffset = 8, tipDir = "TOP",
+    swapEnabled = true, swapLocked = false, swapX = 0, swapY = -210, swapSize = 36,
+    swapRingColor = { 1, 0.82, 0.3, 0.9 }, swapFloat = false, swapGrow = 20,
+    swapAlpha = 0.6, swapHoverAlpha = 1, swapDelay = 3,
+    -- Canne lancee : ambiance et musique a duckLevel % de leur volume, remontee en fondu (duckFade s) a l'arret
+    duckEnabled = false, duckLevel = 30, duckFade = 4,
+  },
   movementBuffs = {
     enabled = true,
     locked = false,
@@ -1052,11 +1075,15 @@ ns.Defaults = {
     showPlayerNameHover = false,              -- nom du personnage au survol de sa barre de vie (hors combat)
     showTargetLevel = false,                  -- niveau devant le nom de la barre de cible ("7 \226\128\162 Nom")
     barColor = { 0.71, 0.60, 0.49, 1 },       -- couleur des barres de vie (hors couleurs thematiques)
-    -- Couleurs de reaction des PNJ (cible, cible de la cible ; couleurs thematiques)
-    hostileColor  = { 0.780, 0.251, 0.251, 1 },
-    neutralColor  = { 0.855, 0.773, 0.361, 1 },
-    friendlyColor = { 0.294, 0.686, 0.298, 1 },
-    lowLevelColor = { 0.5, 0.5, 0.5, 1 },
+    -- Debuffs dissipables (unites alliees) : halo autour de la barre, couleur du type (Modules/UnitBars.lua, UpdateDispel)
+    dispelGlow        = true,
+    dispelGlowSize    = 5,
+    dispelGlowAlpha   = 1,
+    dispelColorMagic   = { 0.20, 0.60, 1.00, 1 },
+    dispelColorCurse   = { 0.60, 0.00, 1.00, 1 },
+    dispelColorDisease = { 0.60, 0.40, 0.00, 1 },
+    dispelColorPoison  = { 0.00, 0.60, 0.00, 1 },
+    dispelColorBleed   = { 1.00, 0.00, 0.00, 1 },
     -- Réglages par barre (cf. UnitBarDefaults). Nom du joueur : au survol seulement (showName), décalé
     -- automatiquement en miroir de celui de la cible (EnsurePlayerNameOffset).
     bars = {
@@ -1065,7 +1092,7 @@ ns.Defaults = {
       target = UnitBarDefaults({ x = 260, y = -120, fillColor = { 0.72, 0.59, 0.39, 1 }, mirrorOf = "player",
         hpShow = true, dotSide = "RIGHT" }),
       focus = UnitBarDefaults({ x = -260, y = -145, fillColor = { 0.71, 0.60, 0.49, 1 }, mirrorOf = "targettarget",
-        hpAnchor = "TOPRIGHT", hpOffX = 1 }),
+        hpAnchor = "TOPRIGHT", hpOffX = 1, reactName = false, reactBar = false }),
       pet = UnitBarDefaults({ width = 143, x = -260, y = -100, fillColor = { 0.71, 0.60, 0.49, 1 }, mirrorOf = "target",
         nameAnchor = "TOPRIGHT", nameJustify = "RIGHT", hpAnchor = "TOPRIGHT", hpOffX = 1 }),
       targettarget = UnitBarDefaults({ width = 80, x = 260, y = -145, fillColor = { 0.41, 0.41, 0.41, 1 }, mirrorOf = "focus",
@@ -1314,6 +1341,13 @@ ns.Defaults = {
     pvpSize = 18, pvpAlpha = 1, pvpRotation = "0", pvpColorMode = "themed", pvpColor = { 1, 1, 1, 1 },
     pvpFaction = false,
     pvpFSize = 20, pvpFAlpha = 1, pvpFRotation = "0", pvpFColorMode = "original", pvpFColor = { 1, 1, 1, 1 },
+    -- Couleur de la difficulte / de la reaction : elements colores (niveau, nom, barre ; difficulte prioritaire) et couleurs
+    diffLevel = true, diffName = false, diffBar = false,
+    reactLevel = false, reactName = true, reactBar = true,
+    diffColorTrivial = { 0.50, 0.50, 0.50, 1 }, diffColorEasy = { 0.25, 0.75, 0.25, 1 }, diffColorNormal = { 1.00, 0.82, 0.00, 1 },
+    diffColorHard = { 1.00, 0.50, 0.25, 1 }, diffColorSkull = { 1.00, 0.10, 0.10, 1 },
+    reactColorHostile = { 0.780, 0.251, 0.251, 1 }, reactColorNeutral = { 0.855, 0.773, 0.361, 1 },
+    reactColorFriendly = { 0.294, 0.686, 0.298, 1 },
   },
 
   -- Buffs / Debuffs de la cible (sous la TopTargetBar)

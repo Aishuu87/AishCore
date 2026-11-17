@@ -441,8 +441,14 @@ ef:SetScript("OnEvent", function(_, event, arg1, arg2)
         for _, d in ipairs({0.3, 0.8}) do C_Timer.After(d, _ScanAurasSafe) end
 
     elseif event == "UPDATE_SHAPESHIFT_FORM" then
-        ns.BuildWhitelist()
-        for _, d in ipairs({0.1, 0.3, 0.8}) do C_Timer.After(d, _ScanAurasSafe) end
+        -- Pas de BuildWhitelist : la whitelist ne depend pas de la forme, et son rebuild (groupes d'auras
+        -- natifs de toutes les grilles) figeait l'image a chaque forme / furtivite (forme sur Forever).
+        -- L'event peut aussi se repeter sans changement reel : on ne rescanne qu'au vrai changement.
+        local form = GetShapeshiftForm and GetShapeshiftForm() or 0
+        if form ~= ns._lastShapeshiftForm then
+            ns._lastShapeshiftForm = form
+            for _, d in ipairs({0.1, 0.3, 0.8}) do C_Timer.After(d, _ScanAurasSafe) end
+        end
 
     elseif (event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE") and arg1 == "player" then
         wipe(ns.cdmData.target)

@@ -43,12 +43,13 @@ local REACTION_COLORS = {
 }
 
 -- Couleurs de difficulté de niveau (texte de niveau)
+-- Paliers de difficulte (memes valeurs que Platynator / couleurs Blizzard de quete)
 local LEVEL_COLORS = {
-    skull   = { 1.000, 0.000, 0.133 },   -- diff >= 4 / elite / worldboss
-    hard    = { 0.922, 0.408, 0.000 },   -- diff >= 3
-    normal  = { 0.894, 0.816, 0.282 },   -- diff +/- 2
-    easy    = { 0.153, 0.706, 0.275 },   -- diff <= -2
-    trivial = { 0.722, 0.753, 0.686 },   -- diff <= -6
+    skull   = { 1.00, 0.10, 0.10 },   -- impossible (rouge)
+    hard    = { 1.00, 0.50, 0.25 },   -- tres difficile (orange)
+    normal  = { 1.00, 0.82, 0.00 },   -- difficile (jaune)
+    easy    = { 0.25, 0.75, 0.25 },   -- standard (vert)
+    trivial = { 0.50, 0.50, 0.50 },   -- trivial (gris)
 }
 
 -- Couleurs des barres de ressource par type de puissance (fallback si PowerBarColor absent)
@@ -112,27 +113,94 @@ local function GetPowerBarColor(unit)
     return { 1.00, 0.82, 0.00 }  -- jaune (énergie) par défaut
 end
 
-local function GetLevelColor(unit)
-    if UnitIsPlayer(unit) then return GetUnitColor(unit) end
+-- Palier de difficulte d'un PNJ ("Trivial" / "Easy" / "Normal" / "Hard" / "Skull" = gris / vert / jaune / orange / rouge),
+-- comme Platynator : difficulte relative du client (Retail / Forever), sinon ecart de niveau (seuils Blizzard).
+-- nil : unite absente.
+local function GetDifficultyTier(unit)
+    if not UnitExists(unit) then return nil end
+    local api, E = C_PlayerInfo and C_PlayerInfo.GetContentDifficultyCreatureForPlayer, Enum and Enum.RelativeContentDifficulty
+    if api and E then
+        local ok, t = pcall(function()
+            local d = api(unit)
+            if     d == E.Trivial    then return "Trivial"
+            elseif d == E.Easy       then return "Easy"
+            elseif d == E.Fair       then return "Normal"
+            elseif d == E.Difficult  then return "Hard"
+            elseif d == E.Impossible then return "Skull"
+            end
+        end)
+        if ok and t then return t end
+    end
     -- tonumber(tostring()) necessaire pour detainter les valeurs privees TWW (tonumber seul ne suffit pas)
-    local ok1, lvl  = pcall(function() return tonumber(tostring(UnitLevel(unit)))  or 0 end)
-    local ok2, plvl = pcall(function() return tonumber(tostring(UnitLevel("player"))) or 0 end)
-    local classif = UnitClassification(unit) or ""
+    local ok1, lvl  = pcall(function() return tonumber(tostring(UnitLevel(unit))) or 0 end)
+    local ok2, plvl = pcall(function() return tonumber(tostring(UnitEffectiveLevel and UnitEffectiveLevel("player") or UnitLevel("player"))) or 0 end)
     if not ok1 then lvl = 0 end
     if not ok2 then plvl = 0 end
-    if lvl == -1 or classif == "worldboss" then return LEVEL_COLORS.skull end
+    if lvl == -1 then return "Skull" end
     local diff = lvl - plvl
-    if diff >= 4 or classif == "elite" or classif == "rareelite" then
-        return LEVEL_COLORS.skull
-    elseif diff >= 3 then
-        return LEVEL_COLORS.hard
-    elseif math.abs(diff) <= 2 then
-        return LEVEL_COLORS.normal
-    elseif diff <= -6 then
-        return LEVEL_COLORS.trivial
-    else
-        return LEVEL_COLORS.easy
+    if diff >= 5 then return "Skull"
+    elseif diff >= 3 then return "Hard"
+    elseif diff >= -2 then return "Normal"
+    elseif -diff <= ((GetQuestGreenRange and GetQuestGreenRange()) or 8) then return "Easy"
     end
+    return "Trivial"
+end
+
+-- Reaction d'une unite : "Hostile" / "Neutral" / "Friendly" (illisible, valeur privee en instance : hostile)
+local function GetReactionKind(unit)
+    local ok, reaction = pcall(function() return UnitReaction(unit, "player") end)
+    if ok and reaction then
+        local r = tonumber(tostring(reaction)) or 0
+        if r == 4 then return "Neutral" elseif r > 4 then return "Friendly" end
+    end
+    return "Hostile"
+end
+
+local TIER_COLOR = { Trivial = "trivial", Easy = "easy", Normal = "normal", Hard = "hard", Skull = "skull" }
+local REACT_COLOR = { Hostile = "hostile", Neutral = "neutral", Friendly = "friendly" }
+
+-- Couleur d'un element ("Level" / "Name" / "Bar") selon les cases diff<Elem> / react<Elem> lues par get(prop) ;
+-- couleurs diffColor<Palier> / reactColor<Reaction>. Difficulte prioritaire sur la reaction. Joueurs : couleur de
+-- classe. nil = aucune case cochee (couleur par defaut de l'element). preview : unite absente, palier "Skull" /
+-- reaction "Hostile" pour l'apercu.
+local function ResolveUnitColor(unit, elem, get, preview)
+    local diffOn, reactOn = get("diff" .. elem), get("react" .. elem)
+    if not (diffOn or reactOn) then return nil end
+    local exists = UnitExists(unit)
+    if not exists and not preview then return nil end
+    if exists and UnitIsPlayer(unit) then return GetUnitColor(unit) end
+    if diffOn then
+        local t = exists and GetDifficultyTier(unit) or "Skull"
+        if t then return get("diffColor" .. t) or LEVEL_COLORS[TIER_COLOR[t]] end
+    end
+    local r = exists and GetReactionKind(unit) or (type(preview) == "string" and preview or "Hostile")
+    return get("reactColor" .. r) or REACTION_COLORS[REACT_COLOR[r]]
+end
+
+-- Reglage de la Top Target (defaut si absent)
+local function TTBGet(prop)
+    local db = ns.GetCfg("topTargetBar")
+    local v = db and db[prop]
+    if v == nil then
+        local d = ns.Defaults and ns.Defaults.topTargetBar
+        v = d and d[prop]
+    end
+    return v
+end
+
+-- Couleur du nom / de la barre : case Difficulte / Reaction cochee, sinon classe (joueurs) ou gris clair (PNJ)
+local NPC_PLAIN = { 0.85, 0.85, 0.85 }
+local function ElemColor(unit, elem, preview)
+    local c = ResolveUnitColor(unit, elem, TTBGet, preview)
+    if c then return c end
+    if UnitExists(unit) and UnitIsPlayer(unit) then return GetUnitColor(unit) end
+    return NPC_PLAIN
+end
+
+-- Couleur du niveau (barre du joueur : pas de reglage propre)
+local function GetLevelColor(unit)
+    if UnitIsPlayer(unit) then return GetUnitColor(unit) end
+    return LEVEL_COLORS[TIER_COLOR[GetDifficultyTier(unit) or "Normal"]]
 end
 
 -- Séparateur bullet (U+2022), échappé en décimal Lua
@@ -156,6 +224,7 @@ end
 -- Partages avec UnitBars (niveau devant le nom de la barre de cible)
 TopTargetBar.GetLevelColor  = GetLevelColor
 TopTargetBar.GetLevelPrefix = GetLevelPrefix
+TopTargetBar.ResolveUnitColor = ResolveUnitColor
 
 local function AbbreviateNumber(n)
     -- n est un nombre propre (fourni par Blizzard C via OnValueChanged), comparaisons >= sures
@@ -499,7 +568,7 @@ end
 -- Mises à jour (textes + couleurs uniquement — la visibilité est gérée par RegisterStateDriver dans SetTTBVisibilityDrivers).
 -- Fonctions pré-allouées pour pcall (évite 4 closures par appel, plusieurs/sec en combat), accèdent à f_target/f_tt via upvalue.
 local function _UpdateTargetColor()
-    local c = GetUnitColor("target")
+    local c = ElemColor("target", "Bar", ttbPreviewMode)
     f_target.bar:SetStatusBarColor(c[1], c[2], c[3], 1)
     if f_target.hpTxt then f_target.hpTxt:SetTextColor(c[1], c[2], c[3], 1) end
     if f_target.hpFrame and not f_target.hpFrame:IsShown() then f_target.hpFrame:Show() end
@@ -518,8 +587,8 @@ local function _UpdateTargetName()
     -- Mode preview : pas de cible réelle → noms de test
     if ttbPreviewMode and not UnitExists("target") then
         if f_target.nameFrame then f_target.nameFrame:Show() end
-        local lc = LEVEL_COLORS.skull
-        local nc = REACTION_COLORS.hostile
+        local nc = ElemColor("target", "Name", true)
+        local lc = ResolveUnitColor("target", "Level", TTBGet, true) or nc
         f_target.nameTxt:SetText(string.format("|cff%02x%02x%02x90 \226\128\162 |r|cff%02x%02x%02x%s|r",
             math.floor(lc[1]*255), math.floor(lc[2]*255), math.floor(lc[3]*255),
             math.floor(nc[1]*255), math.floor(nc[2]*255), math.floor(nc[3]*255), L["TOPTARGET_PREVIEW_NAME"]))
@@ -531,8 +600,8 @@ local function _UpdateTargetName()
     f_target.nameTxt:SetText(rawName or "")
     -- Colorisation via string.format %s uniquement : concatener une secret string echoue toujours
     local _ok, _result = pcall(function()
-        local lc  = GetLevelColor("target")
-        local nc  = GetUnitColor("target")
+        local nc  = ElemColor("target", "Name")
+        local lc  = ResolveUnitColor("target", "Level", TTBGet) or nc
         local lvl = GetLevelPrefix("target")
         return string.format("|cff%02x%02x%02x%s|r|cff%02x%02x%02x%s|r",
             math.floor(lc[1]*255), math.floor(lc[2]*255), math.floor(lc[3]*255), lvl,
@@ -550,21 +619,21 @@ local function _UpdateTargetName()
     end
 end
 local function _UpdateTTColor()
-    local c = GetUnitColor("targettarget")
+    local c = ElemColor("targettarget", "Bar", ttbPreviewMode and "Friendly")
     f_tt.bar:SetStatusBarColor(c[1], c[2], c[3], 1)
 end
 local function _UpdateTTName()
     -- Mode preview : pas de cible de la cible réelle → noms de test
     if ttbPreviewMode and not UnitExists("targettarget") then
         if not f_tt then return end
-        local nc = REACTION_COLORS.friendly
+        local nc = ElemColor("targettarget", "Name", "Friendly")
         f_tt.nameTxt:SetText(string.format("|cff%02x%02x%02x%s|r",
             math.floor(nc[1]*255), math.floor(nc[2]*255), math.floor(nc[3]*255), L["TOPTARGET_PREVIEW_TT_NAME"]))
         return
     end
     local rawName = UnitName("targettarget")
     local _ok2, _result2 = pcall(function()
-        local nc = GetUnitColor("targettarget")
+        local nc = ElemColor("targettarget", "Name")
         return string.format("|cff%02x%02x%02x%s|r",
             math.floor(nc[1]*255), math.floor(nc[2]*255), math.floor(nc[3]*255), rawName or "")
     end)
@@ -685,7 +754,7 @@ local function UpdatePvP()
     local c
     if mode == "custom" then c = db[pre .. "Color"]
     elseif mode == "original" then c = { 1, 1, 1 }
-    else c = exists and GetUnitColor("target") or REACTION_COLORS.hostile end
+    else c = ElemColor("target", "Bar", true) end
     c = c or { 1, 1, 1 }
     t:SetVertexColor(c[1], c[2], c[3], db[pre .. "Alpha"] or 1)
     t:Show()
@@ -1032,6 +1101,13 @@ end
 function TopTargetBar.ApplySettings()
     local db = ns.GetCfg("topTargetBar")
     UpdateEliteDeco()
+    -- Couleurs de difficulte / reaction : reglages relus tout de suite
+    if f_target and (UnitExists("target") or ttbPreviewMode) then
+        pcall(_UpdateTargetColor); pcall(_UpdateTargetName)
+    end
+    if f_tt and (UnitExists("targettarget") or ttbPreviewMode) then
+        pcall(_UpdateTTColor); pcall(_UpdateTTName)
+    end
 
     -- Module désactivé → StateDriver "hide" (sécurisé en combat)
     -- Module activé → StateDriver normal (géré en fin de fonction)

@@ -38,6 +38,7 @@ local ALERT_TEXT_KEYS = {
     TRACKING_OFF     = "MISSINGBUFFS_ALERT_TRACKING_OFF",
     APPLY_WEAPON_STONE = "MISSINGBUFFS_ALERT_APPLY_WEAPON_STONE",
     LOW_POISONS      = "MISSINGBUFFS_ALERT_LOW_POISONS",
+    APPLY_LURE       = "MISSINGBUFFS_ALERT_APPLY_LURE",
 }
 ns.MISSING_TEXT = setmetatable({}, {
     __index = function(_, key)
@@ -225,6 +226,20 @@ ns.MISSING_POISON_STOCK_KEY   = 9000040  -- Forever : stock de poisons sous le s
 ns.MISSING_WELL_RESTED_KEY    = 9000041
 ns.MISSING_WELL_RESTED_SPELL  = 429959
 ns.MISSING_WELL_RESTED_ITEM   = 211527
+-- Peche : appat a fixer sur la canne equipee en main (Forever). Objets des sacs proposes, decochables un par un.
+ns.MISSING_FISHING_LURE_KEY   = 9000042
+ns.MISSING_FISHING_LURES = {
+    6529,   -- Verroterie brillante (+25)
+    6530,   -- Asticots (+50)
+    6532,   -- Verroterie eclatante (+75)
+    6533,   -- Attracteur de poissons aquadynamique (+100)
+    6811,   -- Lentille a poissons aquadynamique (+50)
+    7307,   -- Ver mangeur de chair (+75)
+    34861,  -- Hamecon aiguise (+100)
+    46006,  -- Ver luisant (+100)
+    62673,  -- Leurre a plumes (+100)
+    68049,  -- Leurre tournant traite a chaud (+150)
+}
 ns.MISSING_WELL_RESTED_ICON   = "Interface\\Icons\\INV_Misc_Bag_08"   -- repli si l'icone de l'objet est illisible
 -- Sorts de pistage de recolte (cf. GatherTrackingChoices dans MissingBuffs.lua) ; une ligne de combo chacun
 ns.MISSING_GATHER_FINDERS = {
@@ -351,12 +366,12 @@ if _addon.IsForever then
               displayName = "Shadow Protection", icon = I .. "Spell_Shadow_AntiShadow", text = "MISSING" },
         },
         SHAMAN = {
-            { settingsId = 14, specIds = { 262, 263 }, onlySelf = true,
-              names = { 324, "Lightning Shield", 24398, 52127, 33736, "Water Shield" }, casts = { 324, "Lightning Shield" },
-              displayName = "Lightning Shield", icon = I .. "Spell_Nature_LightningShield", text = "MISSING" },
-            { settingsId = 15, specIds = { 264 }, onlySelf = true,
-              names = { 24398, 52127, 33736, "Water Shield", 324, "Lightning Shield" }, casts = { 24398, 52127, 33736, "Water Shield" },
-              displayName = "Water Shield", icon = I .. "Ability_Shaman_WaterShield", text = "MISSING" },
+            -- Un seul bouclier actif a la fois : l'un ou l'autre suffit. Les deux connus = deux icones au choix
+            -- (une par sort de casts appris, cf. ChoicesFromEntry). Bouclier d'eau : 408510 (sort = buff).
+            { settingsId = 14, onlySelf = true,
+              names = { 324, "Lightning Shield", 408510, 24398, 52127, 33736, "Water Shield" },
+              casts = { 324, "Lightning Shield", 408510, 24398, 52127, 33736, "Water Shield" },
+              displayName = "Lightning / Water Shield", icon = I .. "Spell_Nature_LightningShield", text = "MISSING" },
             { settingsId = 17, names = { 974, "Earth Shield" }, casts = { 974, "Earth Shield" },
               displayName = "Earth Shield", icon = I .. "Spell_Nature_SkinofEarth",
               clickingUsesTarget = true, ignoreSelf = true, onlyOnePerGroup = true,

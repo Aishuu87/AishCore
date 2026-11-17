@@ -1,4 +1,4 @@
--- Modules/UnitBars.lua : Barres de vie Player, Target, Focus, Pet, TargetTarget
+﻿-- Modules/UnitBars.lua : Barres de vie Player, Target, Focus, Pet, TargetTarget
 -- Reglages communs (couleurs, bouclier, soins previsionnels, hauteur tank, visibilite) a la racine de ns.DB.unitBars ;
 -- tout le reste est propre a chaque barre (ns.DB.unitBars.bars.<cle>, lu par BV). Le rendu d'une barre (LayoutBar)
 -- sert aussi a l'apercu du GUI (UnitBars.CreatePreview / StylePreview, UI/UnitBarsPage.lua).
@@ -115,32 +115,9 @@ local CLASS_COLORS = {
     WARRIOR     = { 0.780, 0.612, 0.431, 1 },
 }
 
--- Couleurs de réaction PNJ : réglables (unitBars.hostileColor...), repli identique à TopTargetBar
-local REACTION_DEFAULTS = {
-    neutral  = { 0.855, 0.773, 0.361, 1 },
-    friendly = { 0.294, 0.686, 0.298, 1 },
-    hostile  = { 0.780, 0.251, 0.251, 1 },
-    lowLevel = { 0.5, 0.5, 0.5, 1 },
-}
-local function ReactionColor(kind)
-    local db = ns.GetCfg("unitBars")
-    return db and db[kind .. "Color"] or REACTION_DEFAULTS[kind]
-end
-
--- PNJ "gris" (trop bas niveau pour rapporter de l'XP) : difficulté relative si l'API existe, sinon écart de niveau
-local function IsLowLevel(unit)
-    local ok, low = pcall(function()
-        local api = C_PlayerInfo and C_PlayerInfo.GetContentDifficultyCreatureForPlayer
-        if api and Enum and Enum.RelativeContentDifficulty then
-            return api(unit) == Enum.RelativeContentDifficulty.Trivial
-        end
-        local lvl = tonumber(tostring(UnitLevel(unit))) or 0
-        if lvl <= 0 then return false end
-        local green = (GetQuestGreenRange and GetQuestGreenRange()) or 8
-        return lvl < UnitLevel("player") - green
-    end)
-    return ok and low or false
-end
+-- Barres reglables en couleur de difficulte / reaction (cf. TopTargetBar.ResolveUnitColor)
+local COLOR_KEYS = { target = true, focus = true, targettarget = true }
+local FRIENDLY_FALLBACK = { 0.294, 0.686, 0.298, 1 }
 
 -- Descripteurs de chaque barre (ordre de creation : le pet s'ancre sur le joueur). Les reglages par defaut d'une barre
 -- sont dans Config/Defaults.lua (unitBars.bars) ; `defaults` ne sert que de repli de position / couleur.
@@ -213,6 +190,23 @@ local function EnsurePerBar()
     bb.player.showName = db.showPlayerNameHover == true
     bb.target.showLevel = db.showTargetLevel == true
     bb.targettarget.showDots = false   -- n'en a jamais eu
+end
+
+-- Anciennes couleurs de reaction communes (unitBars.hostileColor...) : reprises une fois par barre (cible, focalisation,
+-- cible de la cible), qui ont maintenant les leurs (reactColor...).
+local function EnsureReactPerBar()
+    local db = ns.DB and ns.DB.unitBars
+    if not db or db.reactPerBar then return end
+    db.reactPerBar = true
+    db.bars = db.bars or {}
+    for key in pairs(COLOR_KEYS) do
+        local b = db.bars[key] or {}
+        db.bars[key] = b
+        if db.hostileColor  then b.reactColorHostile  = db.hostileColor  end
+        if db.neutralColor  then b.reactColorNeutral  = db.neutralColor  end
+        if db.friendlyColor then b.reactColorFriendly = db.friendlyColor end
+    end
+    db.hostileColor, db.neutralColor, db.friendlyColor, db.lowLevelColor = nil, nil, nil, nil
 end
 
 -- Nom du joueur (au survol de sa barre) : une seule fois, meme decalage que le nom de la barre de cible, en miroir
@@ -488,6 +482,8 @@ local function ShouldShowBar(frame)
     -- Survol : prime sur les "Cacher" (monture, repos), mais reste apres les masquages durs (skyriding, vehicule,
     -- pet battle), qui ne se rouvrent pas a la souris
     if r.hover and ubHovered[frame._def.key] then return true end
+    -- Debuff dissipable (cf. UpdateDispel) : la barre se montre pour que sa lueur soit visible
+    if frame._dispelOn then return true end
     -- Furtivite : la visibilite du Mode furtif remplace les regles ci-dessous (joueur et cible)
     local key = frame._def.key
     if (key == "player" or key == "target") and ns.StealthVisOverride then
@@ -551,7 +547,7 @@ local function GetEffectiveHeight(key)
     return BV(key, "height")
 end
 
--- Couleur d'une unité : classe pour les joueurs, réaction pour les PNJ (cf. TopTargetBar.GetUnitColor)
+-- Couleur d'une unité joueur : sa classe ; PNJ : `fallback` (couleur de la barre)
 local function GetClassFillColor(unit, fallback)
     if UnitIsPlayer(unit) then
         -- classFile peut être une valeur secrète (targettarget) : indexation dans le même pcall que UnitClass()
@@ -563,18 +559,20 @@ local function GetClassFillColor(unit, fallback)
             return color
         end
         -- Lecture ratée : repli "allié visible" plutôt que le gris de config par défaut (evite un gris fige)
-        return ReactionColor("friendly")
-    end
-    local ok, reaction = pcall(function() return UnitReaction(unit, "player") end)
-    if ok and reaction then
-        -- UnitReaction peut être un nombre privé en raid : détainter avant comparaison (sinon erreur Lua)
-        local r = tonumber(tostring(reaction)) or 0
-        if r > 4 then return ReactionColor("friendly") end
-        -- Bas niveau : seulement les PNJ hostiles / neutres (les amicaux gardent leur couleur)
-        if IsLowLevel(unit) then return ReactionColor("lowLevel") end
-        return ReactionColor(r == 4 and "neutral" or "hostile")
+        return FRIENDLY_FALLBACK
     end
     return fallback
+end
+
+-- Couleur de difficulte / reaction d'un element ("Level" / "Name" / "Bar") des barres reglables (COLOR_KEYS) ;
+-- nil = aucune case cochee. force : apercu du GUI, couleurs fictives (palier rouge, hostile) meme si l'unite existe.
+local function ElemColor(key, unit, elem, force)
+    if not COLOR_KEYS[key] then return nil end
+    local TTB = ns.Modules and ns.Modules.TopTargetBar
+    if not (TTB and TTB.ResolveUnitColor) then return nil end
+    local ok, c = pcall(TTB.ResolveUnitColor, force and "none" or unit, elem,
+        function(p) return BV(key, p) end, force or ubPreviewMode)
+    return ok and c or nil
 end
 
 -- Geometrie d'une barre, calculee depuis la config (jamais lue sur la frame, pour ignorer les animations) :
@@ -817,6 +815,14 @@ local function NewVisual(frame)
     nameTxt:SetText("")
     frame.nameTxt = nameTxt
     frame._nameEmpty = true
+
+    -- Halo des debuffs dissipables (cf. UpdateDispel) : devant le cadre du texte de vie (+2) et la puissance (+4),
+    -- derriere les points decoratifs (+6). Backdrop pose par LayoutDispel
+    local dg = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    dg:SetFrameLevel(lvl + 5)
+    dg:EnableMouse(false)
+    dg:Hide()
+    frame.dispelGlow = dg
 end
 
 -- Opacite du nom (animations) ; en jeu, l'ombre de la barre la suit (cf. LayoutBar)
@@ -1128,6 +1134,195 @@ local function LayoutPower(frame, key, g, preview)
     pb:Show()
 end
 
+-- ═══ Debuffs dissipables ═══════════════════════════════════════════════════════════════════════════════
+-- Halo autour de la barre de vie, a la couleur du type du premier debuff que le joueur peut dissiper lui-meme (filtre
+-- RAID_PLAYER_DISPELLABLE), sur les unites alliees seulement. Retail : le type est une valeur secrete en combat, la
+-- couleur passe alors par une ColorCurve (C_UnitAuras.GetAuraDispelTypeColor), jamais lue cote Lua.
+-- Apercu (UnitBars.CycleDispelPreview) : un type force, tant que le GUI est ouvert.
+local DISPEL_TYPES  = { "Magic", "Curse", "Disease", "Poison", "Bleed" }
+local DISPEL_ENUM   = { Magic = 1, Curse = 2, Disease = 3, Poison = 4, Bleed = 11 }   -- index SpellDispelType
+local DISPEL_FILTER = "HARMFUL|RAID_PLAYER_DISPELLABLE"
+local DISPEL_GLOW_TEX = "Interface\\AddOns\\AishCore\\Media\\UI\\GlowTex.tga"
+local dispelPreview = 0          -- 0 = aucun, sinon index dans DISPEL_TYPES
+local dispelCurve, dispelCurveKey
+
+local function DispelColor(t)
+    local db = ns.GetCfg("unitBars") or {}
+    local c = db["dispelColor" .. t]
+    if type(c) ~= "table" then
+        local d = ns.Defaults and ns.Defaults.unitBars
+        c = d and d["dispelColor" .. t]
+    end
+    return c or { 1, 1, 1, 1 }
+end
+
+-- Courbe en escalier : point = index du type, couleur = celle reglee. Reconstruite quand une couleur change.
+local function GetDispelCurve()
+    if not (C_CurveUtil and C_CurveUtil.CreateColorCurve) then return nil end
+    local parts = {}
+    for _, t in ipairs(DISPEL_TYPES) do
+        local c = DispelColor(t)
+        parts[#parts + 1] = string.format("%.3f,%.3f,%.3f", c[1], c[2], c[3])
+    end
+    local key = table.concat(parts, ";")
+    if dispelCurve and dispelCurveKey == key then return dispelCurve end
+    local ok, curve = pcall(C_CurveUtil.CreateColorCurve)
+    if not ok or not curve then return nil end
+    ok = pcall(function()
+        if Enum and Enum.LuaCurveType and Enum.LuaCurveType.Step then curve:SetType(Enum.LuaCurveType.Step) end
+        curve:AddPoint(0, CreateColor(0, 0, 0, 0))
+        for _, t in ipairs(DISPEL_TYPES) do
+            local c = DispelColor(t)
+            curve:AddPoint(DISPEL_ENUM[t], CreateColor(c[1], c[2], c[3], 1))
+        end
+    end)
+    if not ok then return nil end
+    dispelCurve, dispelCurveKey = curve, key
+    return curve
+end
+
+-- Taille du halo (backdrop) : rappele par LayoutBar
+local function LayoutDispel(frame)
+    local dg = frame.dispelGlow
+    if not (dg and frame.bgTex) then return end
+    local size = (ns.GetCfg("unitBars") or {}).dispelGlowSize or 5
+    if dg._size == size then return end
+    dg._size = size
+    dg:ClearAllPoints()
+    dg:SetPoint("TOPLEFT",     frame.bgTex, "TOPLEFT",     -size,  size)
+    dg:SetPoint("BOTTOMRIGHT", frame.bgTex, "BOTTOMRIGHT",  size, -size)
+    dg:SetBackdrop({ edgeFile = DISPEL_GLOW_TEX, edgeSize = size })
+    dg:SetBackdropColor(0, 0, 0, 0)
+end
+
+-- Conteneur d'auras du moteur (12.1, Forever) : en combat, les auras sont secretes et GetAuraDataByIndex est refuse
+-- a l'addon. Le moteur trouve lui-meme le debuff dissipable (slot HARMFUL|RAID_PLAYER_DISPELLABLE), affiche le bouton
+-- du slot et teinte nos textures de lueur selon le type, via notre courbe (meme methode qu'ElvUI / Ellesmere).
+-- Absent (client plus ancien) : repli sur FirstDispellable + dispelGlow.
+local DISPEL_GLOW_PARTS = { "TopLeftCorner", "TopRightCorner", "BottomLeftCorner", "BottomRightCorner",
+                            "TopEdge", "BottomEdge", "LeftEdge", "RightEdge" }
+
+-- (Re)inscrit les 8 morceaux de la lueur aupres du bouton, quand la taille ou les couleurs changent.
+-- Refuse par le moteur tant que les auras sont secretes (combat) : retente au prochain appel.
+local function RegisterDispelTextures(frame)
+    local btn, g = frame._dispelBtn, frame._dispelBtnGlow
+    if not (btn and g and btn.AddDispelTypeTexture) then return end
+    local size  = (ns.GetCfg("unitBars") or {}).dispelGlowSize or 5
+    local curve = GetDispelCurve()
+    local key   = size .. ":" .. tostring(curve)
+    if frame._dispelRegKey == key then return end
+    if btn.ClearDispelTypeTextures and not pcall(btn.ClearDispelTypeTextures, btn) then return end
+    frame._dispelRegKey = nil
+    g:SetBackdrop({ edgeFile = DISPEL_GLOW_TEX, edgeSize = size })
+    g:SetBackdropColor(0, 0, 0, 0)
+    local st = Enum.CustomAuraButtonDispelTypeTextureStyle
+    local opts = { style = st and st.PreserveAsset, showWhenHarmful = true, showWhenHelpful = false,
+                   customDispelColorCurve = curve }
+    for _, p in ipairs(DISPEL_GLOW_PARTS) do
+        if g[p] and not pcall(btn.AddDispelTypeTexture, btn, g[p], opts) then
+            -- Tout ou rien : un jeu partiel garderait des cotes non teintes
+            if btn.ClearDispelTypeTextures then pcall(btn.ClearDispelTypeTextures, btn) end
+            return
+        end
+    end
+    frame._dispelRegKey = key
+end
+
+local function CreateDispelContainer(frame, lvl)
+    if not (Enum and Enum.CustomAuraButtonDispelTypeTextureStyle and C_AddOns) then return end
+    if not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then pcall(C_AddOns.LoadAddOn, "Blizzard_AuraContainer") end
+    local ok, c = pcall(CreateFrame, "AuraContainer", nil, frame, "CustomAuraContainerTemplate")
+    if not (ok and c) then return end
+    c:SetFrameLevel(lvl)
+    c:SetAllPoints(frame.dispelGlow)   -- meme cadre que la lueur classique (cf. LayoutDispel)
+    ok = pcall(c.AddAuraSlot, c, "dispel", "HARMFUL|RAID_PLAYER_DISPELLABLE", {
+        initializeFrame = function(btn)
+            pcall(btn.EnableMouse, btn, false)
+            btn:SetAllPoints()
+            local g = CreateFrame("Frame", nil, btn, "BackdropTemplate")
+            g:SetAllPoints()
+            -- Le moteur monte son bouton au-dessus du conteneur : niveau fixe, sous les points decoratifs (+6)
+            g:SetFrameLevel(lvl)
+            frame._dispelBtn, frame._dispelBtnGlow, frame._dispelRegKey = btn, g, nil
+            RegisterDispelTextures(frame)
+        end,
+    })
+    if not ok then c:Hide(); return end
+    frame.dispelContainer = c
+end
+
+-- Premier debuff dissipable par le joueur sur une unite alliee : table d'aura, nil sinon. Hors combat seulement sur
+-- Forever (auras secretes ensuite) : sert a l'apparition de la barre, la lueur en jeu passant par le conteneur.
+local function FirstDispellable(unit)
+    if not (unit and UnitExists(unit)) then return nil end
+    local okA, assist = pcall(UnitCanAssist, "player", unit)
+    if not okA or (issecretvalue and issecretvalue(assist)) or not assist then return nil end
+    if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return nil end
+    local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, unit, 1, DISPEL_FILTER)
+    return ok and aura or nil
+end
+
+-- fromAura : appel sur UNIT_AURA, le conteneur se met a jour seul
+local function UpdateDispel(frame, fromAura)
+    local dg = frame.dispelGlow
+    if not dg then return end
+    if not dg._size then LayoutDispel(frame) end
+    local db = ns.GetCfg("unitBars") or {}
+    local on = db.dispelGlow ~= false
+    local alpha = db.dispelGlowAlpha or 1
+    local pt = DISPEL_TYPES[dispelPreview]
+    local c = frame.dispelContainer
+    -- Apercu : apercu du GUI (estompe si desactive) ou barres en jeu, GUI ouvert
+    if frame._preview or (pt and ubPreviewMode and on) then
+        if c then c:Hide() end
+        frame._dispelActive = nil
+        if not pt then dg:Hide(); return end
+        local col = DispelColor(pt)
+        dg:SetBackdropBorderColor(col[1], col[2], col[3], 1)
+        dg:SetAlpha(alpha * ((frame._preview and not on) and PREVIEW_DIM or 1))
+        dg:Show()
+        return
+    end
+    local aura = on and FirstDispellable(frame.unit)
+    frame._dispelActive = aura and true or nil
+    -- Conteneur cree a la premiere mise a jour en jeu (creation legale en combat), jamais pour l'apercu du GUI
+    if not c and not frame._dcTried then
+        frame._dcTried = true
+        CreateDispelContainer(frame, frame:GetFrameLevel() + 5)
+        c = frame.dispelContainer
+    end
+    if c then
+        dg:Hide()
+        if not on then c:Hide(); return end
+        RegisterDispelTextures(frame)
+        c:SetAlpha(alpha)
+        if frame._dcUnit ~= frame.unit then
+            frame._dcUnit = frame.unit
+            pcall(c.SetUnit, c, frame.unit or "")
+        end
+        if not c:IsShown() then c:Show() end
+        if not fromAura then pcall(c.UpdateAllAuras, c) end
+        return
+    end
+    if not aura then dg:Hide(); return end
+    local dn = aura.dispelName
+    if dn ~= nil and not (issecretvalue and issecretvalue(dn)) then
+        if not DISPEL_ENUM[dn] then dg:Hide(); return end
+        local col = DispelColor(dn)
+        dg:SetBackdropBorderColor(col[1], col[2], col[3], 1)
+    else
+        -- Type secret : couleur calculee cote client, passee telle quelle
+        local curve = GetDispelCurve()
+        local okC = curve and C_UnitAuras.GetAuraDispelTypeColor and pcall(function()
+            local col = C_UnitAuras.GetAuraDispelTypeColor(frame.unit, aura.auraInstanceID, curve)
+            dg:SetBackdropBorderColor(col:GetRGBA())
+        end)
+        if not okC then dg:Hide(); return end
+    end
+    dg:SetAlpha(alpha)
+    dg:Show()
+end
+
 -- Met à jour la couleur de la barre (target = classe, autres = config/Colors)
 local function UpdateBarColor(frame)
     local def = frame._def
@@ -1144,6 +1339,9 @@ local function UpdateBarColor(frame)
     elseif key == "pet" and CLR then
         fc = CLR.Get("pethealthbar")
     end
+    -- Cible, focalisation, cible de la cible : couleur de difficulte / reaction (cases "Barre"), en couleurs thematiques
+    local themed = IsThemedColors()
+    if themed then fc = ElemColor(key, def.unit, "Bar", frame._preview) or fc end
 
     -- Couleur des points : peut différer du fill pour player/pet
     local dc = fc
@@ -1154,11 +1352,13 @@ local function UpdateBarColor(frame)
     end
 
     -- Hors couleurs thematiques : couleur des barres unique (remplissage, points, textes) ; le "noir" suit l'arriere plan
-    if not IsThemedColors() then
+    if not themed then
         local ubdb = ns.GetCfg("unitBars")
         local bc = ubdb and ubdb.barColor or fc
         fc, dc = bc, bc
     end
+    -- Nom : couleur de la barre, ou de difficulte / reaction (cases "Nom")
+    local nc = themed and ElemColor(key, def.unit, "Name", frame._preview) or fc
     local dark = GetDarkColor()
 
     if IsReversed() then
@@ -1189,15 +1389,15 @@ local function UpdateBarColor(frame)
     if frame.hpText then
         frame.hpText:SetTextColor(fc[1], fc[2], fc[3], 1)
     end
-    -- Couleur du nom = fill color
     if frame.nameTxt then
-        frame.nameTxt:SetTextColor(fc[1], fc[2], fc[3], 1)
+        frame.nameTxt:SetTextColor(nc[1], nc[2], nc[3], 1)
     end
     -- Couleur du glow
     if frame.glowFrame then
         frame.glowFrame:SetBackdropBorderColor(fc[1], fc[2], fc[3], 0.9)
     end
     UpdatePowerColor(frame)
+    UpdateDispel(frame)
 end
 
 -- Mise en page complete d'une barre (tailles, remplissage, points, textes, couleurs), sans toucher a sa position a
@@ -1304,6 +1504,8 @@ local function LayoutBar(frame, preview)
         sh:Hide()
     end
 
+    if frame.dispelGlow then frame.dispelGlow._size = nil end   -- taille du halo relue
+    LayoutDispel(frame)
     UpdateBarColor(frame)
     UpdatePvP(frame, preview)   -- apres LayoutDots (qui remontre les points) et UpdateBarColor (teinte)
 end
@@ -1607,16 +1809,25 @@ end
 local function SetNameWithLevel(frame, unit, rawName, preview)
     local TTB = ns.Modules and ns.Modules.TopTargetBar
     if not (TTB and TTB.GetLevelColor and TTB.GetLevelPrefix) then return false end
+    local key = frame._def and frame._def.key
     local ok = pcall(function()
-        local lc, pfx
-        if preview then
-            lc, pfx = { 1.000, 0.000, 0.133 }, "90 \226\128\162 "
+        local lc
+        local pfx = preview and "90 \226\128\162 " or TTB.GetLevelPrefix(unit)
+        if COLOR_KEYS[key] then
+            -- Cases "Niveau" de la difficulte / reaction ; aucune : couleur du nom
+            lc = ElemColor(key, unit, "Level", preview)
+        elseif preview then
+            lc = { 1.00, 0.10, 0.10 }
         else
-            lc, pfx = TTB.GetLevelColor(unit), TTB.GetLevelPrefix(unit)
+            lc = TTB.GetLevelColor(unit)
         end
         -- string.format %s : seul moyen de composer avec une chaine secrete (concatener echoue)
-        frame.nameTxt:SetText(string.format("|cff%02x%02x%02x%s|r%s",
-            math.floor(lc[1] * 255), math.floor(lc[2] * 255), math.floor(lc[3] * 255), pfx, rawName or ""))
+        if lc then
+            frame.nameTxt:SetText(string.format("|cff%02x%02x%02x%s|r%s",
+                math.floor(lc[1] * 255), math.floor(lc[2] * 255), math.floor(lc[3] * 255), pfx, rawName or ""))
+        else
+            frame.nameTxt:SetText(string.format("%s%s", pfx, rawName or ""))
+        end
         -- l'anneau SLUG recopie le texte : version sans couleur, sinon il peindrait le niveau a la place du contour noir
         ns.SetSlugRingText(frame.nameTxtSlug, string.format("%s%s", pfx, rawName or ""))
     end)
@@ -1735,6 +1946,7 @@ end
 --- Apercu du GUI : simple cadre portant les memes elements qu'une barre en jeu (cf. UnitBars.StylePreview).
 function UnitBars.CreatePreview(parent)
     local f = CreateFrame("Frame", nil, parent)
+    f._preview = true
     NewVisual(f)
     return f
 end
@@ -1784,6 +1996,15 @@ function UnitBars.SetPvPPreview(on)
     for _, f in pairs(bars) do UpdatePvP(f) end
 end
 function UnitBars.IsPvPPreview() return pvpPreview end
+
+--- Apercu des debuffs dissipables (bouton de la section) : chaque appel passe au type suivant, puis revient a aucun.
+--- Rend le type affiche (cle de DISPEL_TYPES), nil = apercu coupe.
+function UnitBars.CycleDispelPreview()
+    dispelPreview = (dispelPreview + 1) % (#DISPEL_TYPES + 1)
+    for _, f in pairs(bars) do UpdateDispel(f) end
+    return DISPEL_TYPES[dispelPreview]
+end
+function UnitBars.GetDispelPreview() return DISPEL_TYPES[dispelPreview] end
 
 
 -- Animation de visibilité (fade + slide in/out) — remplace les StateDrivers
@@ -2039,6 +2260,7 @@ end
 
 -- Interface publique
 function UnitBars.ApplySettings()
+    EnsureReactPerBar()
     EnsurePerBar()   -- profil tout juste charge (changement de profil) : anciens reglages communs repris par barre
     EnsureBarAnchor()
     for _, frame in pairs(bars) do
@@ -2196,6 +2418,8 @@ function UnitBars.Create(parent)
                 -- Fin de preview : nettoyer les données de test puis recalculer
                 ubPreviewMode = false
                 pvpPreview = false      -- apercu JcJ : seulement GUI ouvert
+                dispelPreview = 0       -- idem apercu des debuffs dissipables
+                for _, f in pairs(bars) do UpdateDispel(f) end
                 UnitBars.HideHitbox()   -- l'apercu de hitbox n'a plus lieu d'etre
                 for _, f in pairs(bars) do
                     UpdateBarName(f)
@@ -2249,6 +2473,8 @@ eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 -- Mode JcJ : drapeau JcJ d'une unite (filtre par UNIT_KEY dans le handler)
 eventFrame:RegisterEvent("UNIT_FACTION")
 eventFrame:RegisterEvent("PLAYER_FLAGS_CHANGED")
+-- Debuffs dissipables (filtre par UNIT_KEY dans le handler)
+eventFrame:RegisterEvent("UNIT_AURA")
 
 -- Debug : /ubtank, etat de la hauteur tank (pourquoi une barre ne prend pas sa taille)
 SLASH_UBTANK1 = "/ubtank"
@@ -2477,6 +2703,21 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         local k = UNIT_KEY[arg1]
         local f = k and bars[k]
         if f then UpdatePvP(f) end
+        return
+    end
+
+    if event == "UNIT_AURA" then
+        local k = UNIT_KEY[arg1]
+        local f = k and bars[k]
+        if f then
+            UpdateDispel(f, true)
+            -- Debuff dissipable apparu / parti : la barre suit (cf. ShouldShowBar). Apercu du GUI exclu.
+            local on = f._dispelActive and not ubPreviewMode or false
+            if on ~= (f._dispelOn or false) then
+                f._dispelOn = on or nil
+                UnitBars.UpdateAllVisibility()
+            end
+        end
         return
     end
 

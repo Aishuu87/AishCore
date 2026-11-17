@@ -1206,6 +1206,7 @@ local function GetModKey(dbKey)
     bigCursor                  = "BigCursor",
     stealthMode                = "StealthMode",
     campfire                   = "Campfire",
+    fishing                    = "Fishing",
     menuBar                    = "MenuBar",
     addonCompartment           = "AddonCompartment",
     minimapNodes               = "MinimapNodes",
@@ -3913,6 +3914,8 @@ local PSEUDO_SPELLS_3D = {
   -- Forever : buff Bien repose (cf. ns.MISSING_WELL_RESTED_KEY ; icone de l'objet 211527 si lisible)
   [9000041] = { name = L["SETTINGS_PSEUDO_MB_WELL_RESTED"],
                 icon = (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(211527)) or "Interface\\Icons\\INV_Misc_Bag_08" },
+  -- Forever : appat de peche (cf. ns.MISSING_FISHING_LURE_KEY)
+  [9000042] = { name = L["SETTINGS_PSEUDO_MB_LURE"],    icon = (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(6529)) or "Interface\\Icons\\Trade_Fishing" },
   [9000032] = { name = L["SETTINGS_PSEUDO_MB_STONE"],   icon = "Interface\\Icons\\INV_Stone_SharpeningStone_05" },
   [9000033] = { name = L["SETTINGS_PSEUDO_MB_TALENTS"], icon = "Interface\\Icons\\Ability_Marksmanship" },
   [9000034] = { name = L["SETTINGS_PSEUDO_MB_LEGACY"],  icon = "Interface\\Icons\\INV_Misc_Book_11" },
@@ -9965,6 +9968,55 @@ function Build.TopTargetBar(container)
   BindDropdown(ddTTBNameFont, "topTargetBar", "nameFont")
   MakeTTBSliderRow("nameOX", "nameOY", L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"], -50, 50, 1, -50, 50, 1)
 
+  -- Couleur de la difficulte, puis de la reaction : elements colores (niveau, nom, barre ; cible et cible de la cible),
+  -- puis couleurs (cf. TopTargetBar.ResolveUnitColor ; difficulte prioritaire)
+  do
+    local W5 = math.floor((W - 40) / 5)
+    local COLOR_ELEMS = {
+      { "Level", L["UNITBARS_COLOR_ELEM_LEVEL"] }, { "Name", L["UNITBARS_COLOR_ELEM_NAME"] }, { "Bar", L["UNITBARS_COLOR_ELEM_BAR"] },
+    }
+    local function ColorSection(title, tt, pre, colors)
+      ctx:Spacer(8)
+      ctx:Add(SW.CreateSectionHeader(container, title, W))
+      local cbs = {}
+      for i, e in ipairs(COLOR_ELEMS) do
+        local cb = SW.CreateCheckbox(container, e[2], tt, W5)
+        BindCheckbox(cb, "topTargetBar", pre .. e[1])
+        cbs[i] = cb
+      end
+      ctx:AddRow(10, unpack(cbs))
+      local cols = {}
+      for i, c in ipairs(colors) do
+        local col = SW.CreateColorButton(container, c[2], W5)
+        BindColorButton(col, "topTargetBar", pre .. "Color" .. c[1])
+        cols[i] = col
+      end
+      ctx:AddRow(10, unpack(cols))
+      return cbs
+    end
+    local diffCbs = ColorSection(L["UNITBARS_SUB_DIFF_COLOR"], L["UNITBARS_SUB_DIFF_COLOR_TT"], "diff", {
+      { "Trivial", L["UNITBARS_DIFF_TRIVIAL"] }, { "Easy", L["UNITBARS_DIFF_EASY"] }, { "Normal", L["UNITBARS_DIFF_NORMAL"] },
+      { "Hard", L["UNITBARS_DIFF_HARD"] }, { "Skull", L["UNITBARS_DIFF_SKULL"] },
+    })
+    local reactCbs = ColorSection(L["UNITBARS_SUB_REACT_COLOR"], L["UNITBARS_SUB_REACT_COLOR_TT"], "react", {
+      { "Hostile", L["UNITBARS_COLOR_HOSTILE"] }, { "Neutral", L["UNITBARS_COLOR_NEUTRAL"] }, { "Friendly", L["UNITBARS_COLOR_FRIENDLY"] },
+    })
+    -- Une seule couleur par element : cocher Niveau / Nom / Barre dans une section le decoche dans l'autre
+    for i = 1, 3 do
+      for _, pair in ipairs({ { diffCbs[i], reactCbs[i] }, { reactCbs[i], diffCbs[i] } }) do
+        local cb, other = pair[1], pair[2]
+        local orig = cb.onChanged
+        cb.onChanged = function(v)
+          if v and other:GetChecked() then
+            DBSet("topTargetBar", other._subKey, false)
+            other:SetChecked(false)
+          end
+          orig(v)
+        end
+      end
+    end
+  end
+
   ctx:Spacer(8)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_HP_TEXT"], W))
   local ddTTBHpFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
@@ -12791,9 +12843,28 @@ local MODULE_CATEGORIES = {
   {
     key = "world", label = L["SETTINGS_GROUP_WORLD"],
     modules = {
-      ModEntry("healthCircle",              L["SETTINGS_MOD_HEALTH_CIRCLE"], "healthCircle",              "enabled"),
-      ModEntry("outOfCombatResourceCircle", L["SETTINGS_SEC_OCRC"],          "outOfCombatResourceCircle", "enabled"),
-      ModEntry("petHealthCircle",           L["SETTINGS_MOD_PET_HEALTH_CIRCLE"], "petHealthCircle",         "enabled"),
+      -- Cercles hors combat : ligne parente (coupe / rallume les trois), les cercles en dessous
+      (function()
+        local KEYS = { "healthCircle", "outOfCombatResourceCircle", "petHealthCircle" }
+        local m = ModEntry("outOfCombat", L["SETTINGS_CAT_OOC_CIRCLES"], "healthCircle", "enabled")
+        m.get = function()
+          for _, k in ipairs(KEYS) do if DBGet(k, "enabled") ~= false then return true end end
+          return false
+        end
+        m.set = function(val)
+          for _, k in ipairs(KEYS) do
+            DBSet(k, "enabled", val)
+            LiveApply(k)
+          end
+          InvalidateOwnPage("healthCircle")
+        end
+        m.children = {
+          ModEntry("healthCircle",              L["SETTINGS_MOD_HEALTH_CIRCLE"], "healthCircle",              "enabled"),
+          ModEntry("outOfCombatResourceCircle", L["SETTINGS_SEC_OCRC"],          "outOfCombatResourceCircle", "enabled"),
+          ModEntry("petHealthCircle",           L["SETTINGS_MOD_PET_HEALTH_CIRCLE"], "petHealthCircle",         "enabled"),
+        }
+        return m
+      end)(),
       ModEntry("xpBar",     L["SETTINGS_CAT_XP_BAR"],    "xpBar",     "enabled"),
       ModEntry("skyriding", L["SETTINGS_CAT_SKYRIDING"], "skyriding", "enabled"),
       ModEntry("extraBars", L["SETTINGS_CAT_EXTRA_BARS"], "extraBars", "enabled", L["SETTINGS_CAT_EXTRA_BARS_TT"]),
@@ -12876,6 +12947,24 @@ function ns.ModuleEntryEnabled(id)
   end
 end
 -- Modules indisponibles sur ce client (cf. ns.IsModuleAvailable) : absents de la page Modules
+-- Peche (Forever, HUD) : une seule ligne, qui coupe / rallume l'appat et le bouton de reequipement
+if ns.IsForever then
+  local m = ModEntry("fishing", L["SETTINGS_CAT_FISHING"], "fishing", "lureEnabled")
+  m.get = function() return DBGet("fishing", "lureEnabled") ~= false or DBGet("fishing", "swapEnabled") ~= false end
+  m.set = function(val)
+    DBSet("fishing", "lureEnabled", val)
+    DBSet("fishing", "swapEnabled", val)
+    LiveApply("fishing")
+    InvalidateOwnPage("fishing")
+  end
+  for _, c in ipairs(MODULE_CATEGORIES) do
+    if c.key == "world" then
+      for i, e in ipairs(c.modules) do
+        if e.id == "campfire" then table.insert(c.modules, i + 1, m); break end
+      end
+    end
+  end
+end
 for _, c in ipairs(MODULE_CATEGORIES) do ns.PruneUnavailable(c.modules) end
 
 -- ns.DB.modulesPanel.categoryOff[catKey] : true si la catégorie a été coupée
@@ -14120,12 +14209,7 @@ function Build.ComfortQoL(container)
     local cbFocus = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_CTRL_FOCUS"], L["SETTINGS_COMFORT_CTRL_FOCUS_TT"], W))
     BindCheckbox(cbFocus, "comfort", "ctrlFocus")
   end
-  -- Peche au double clic : Ctrl requis en Retail (pas de canne a equiper)
-  local cbFish = ns.IsForever
-    and SW.CreateCheckbox(container, L["SETTINGS_COMFORT_FISH"], L["SETTINGS_COMFORT_FISH_TT"], W)
-    or SW.CreateCheckbox(container, L["SETTINGS_COMFORT_FISH_CTRL"], L["SETTINGS_COMFORT_FISH_CTRL_TT"], W)
-  ctx:Add(cbFish)
-  BindCheckbox(cbFish, "comfort", "doubleClickFish")
+  -- (Peche au double clic : page HUD > Peche, cf. Build.Fishing)
 
   -- Barre de totems Blizzard : Forever seulement (cf. Modules/Comfort.lua)
   if ns.IsForever then
@@ -14525,6 +14609,142 @@ function Build.Campfire(container)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
   end)
   ctx:Add(reset)
+  ctx:Finalize()
+  return ctx.widgets
+end
+
+-- BUILD : Peche (HUD) -- cf. Modules/Fishing.lua. Double clic (reglage comfort) ; Forever : icone de l'appat de la
+-- canne et bouton de reequipement des armes. Apercu (appat fictif, bouton) tant que la page est ouverte.
+function Build.Fishing(container)
+  local ctx = NewLayout(container)
+  local W = CONTENT_W
+  local SL3 = math.floor((W - 16) / 3)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_FISHING"], W))
+
+  -- Peche au double clic : Ctrl requis en Retail (pas de canne a equiper)
+  local cbFish = ns.IsForever
+    and SW.CreateCheckbox(container, L["SETTINGS_COMFORT_FISH"], L["SETTINGS_COMFORT_FISH_TT"], W)
+    or SW.CreateCheckbox(container, L["SETTINGS_COMFORT_FISH_CTRL"], L["SETTINGS_COMFORT_FISH_CTRL_TT"], W)
+  ctx:Add(cbFish)
+  BindCheckbox(cbFish, "comfort", "doubleClickFish")
+
+  -- Son d'ambiance et musique baisses canne lancee (tous les clients)
+  do
+    local S3 = math.floor((W - 16) / 3)
+    local cbDuck = SW.CreateCheckbox(container, L["SETTINGS_FISHING_DUCK"], L["SETTINGS_FISHING_DUCK_TT"], S3)
+    BindCheckbox(cbDuck, "fishing", "duckEnabled")
+    local slLvl = SW.CreateSlider(container, L["SETTINGS_FISHING_DUCK_LEVEL"], 0, 100, 5, S3)
+    BindSlider(slLvl, "fishing", "duckLevel")
+    local slFade = SW.CreateSlider(container, L["SETTINGS_FISHING_DUCK_FADE"], 0.5, 10, 0.5, S3)
+    BindSlider(slFade, "fishing", "duckFade")
+    ctx:AddRow(8, cbDuck, slLvl, slFade)
+    ctx:Depends(cbDuck, { slLvl, slFade })
+  end
+
+  if not ns.IsForever then
+    ctx:Finalize()
+    return ctx.widgets
+  end
+
+  local function Slider(label, key, lo, hi, step)
+    local sl = SW.CreateSlider(container, label, lo, hi, step, SL3)
+    BindSlider(sl, "fishing", key)
+    return sl
+  end
+  local function Color(label, key)
+    local b = SW.CreateColorButton(container, label, SL3)
+    BindColorButton(b, "fishing", key)
+    return b
+  end
+  local function Check(label, tt, key)
+    local cb = SW.CreateCheckbox(container, label, tt, SL3)
+    BindCheckbox(cb, "fishing", key)
+    return cb
+  end
+  local function Font(key)
+    local dd = SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), SL3)
+    BindDropdown(dd, "fishing", key)
+    return dd
+  end
+  local OUTLINES = {
+    { value = "NONE",         text = L["SETTINGS_WF_OUTLINE_NONE"] },
+    { value = "OUTLINE",      text = L["TEXT_OUTLINE_THIN"] },
+    { value = "THICKOUTLINE", text = L["TEXT_OUTLINE_THICK"] },
+    { value = "SLUG",         text = L["TEXT_OUTLINE_SLUG"] },
+  }
+  local function OutlineDD(key)
+    local dd = SW.CreateDropdown(container, L["SETTINGS_TEXT_OUTLINE"], OUTLINES, SL3)
+    BindDropdown(dd, "fishing", key)
+    return dd
+  end
+  local function ResetBtn(prefix)
+    local b = SW.CreateActionBtn(container, L["SETTINGS_MVB_RESET_POSITION"], SL3, nil, Theme.gold, Theme.accentText)
+    b:SetScript("OnClick", function()
+      local F = ns.Modules.Fishing
+      if F and F.ResetPosition then F.ResetPosition(prefix) end
+      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+      if _invalidateCategory then _invalidateCategory("fishing") end
+    end)
+    return b
+  end
+  -- Rangees d'une section dont l'interrupteur grise tout le reste
+  local group
+  local function Row(...)
+    ctx:AddRow(8, ...)
+    for i = 1, select("#", ...) do group[#group + 1] = select(i, ...) end
+  end
+
+  -- Icone de l'appat : position, taille, cercle, animations
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_FISHING_SEC_LURE"], W))
+  local cbLure = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_FISHING_LURE_ENABLE"], L["SETTINGS_FISHING_LURE_ENABLE_TT"], W))
+  BindCheckbox(cbLure, "fishing", "lureEnabled")
+  group = {}
+  Row(Check(L["SETTINGS_LOCK_POSITION"], L["SETTINGS_LOCK_POSITION_TT"], "lureLocked"),
+    Slider(L["SETTINGS_OFFSET_X"], "lureX", -1200, 1200, 1), Slider(L["SETTINGS_OFFSET_Y"], "lureY", -700, 700, 1))
+  Row(Slider(L["SETTINGS_SIZE"], "lureSize", 16, 96, 1), Color(L["SETTINGS_FISHING_RING_COLOR"], "lureRingColor"),
+    ResetBtn("lure"))
+  Row(Check(L["SETTINGS_FISHING_FLOAT"], L["SETTINGS_FISHING_FLOAT_TT"], "lureFloat"),
+    Slider(L["SETTINGS_FISHING_GROW"], "lureGrow", 0, 100, 5))
+  ctx:Depends(cbLure, group)
+
+  -- Minuteur sous l'icone
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_FISHING_SEC_LURE_TIMER"], W))
+  ctx:AddRow(8, Slider(L["SETTINGS_FONT_SIZE"], "lureTimerSize", 6, 30, 1), Font("lureTimerFont"),
+    Color(L["SETTINGS_CAMPFIRE_COLOR"], "lureTimerColor"))
+  ctx:AddRow(8, Slider(L["SETTINGS_OFFSET_X"], "lureTimerX", -60, 60, 1), Slider(L["SETTINGS_OFFSET_Y"], "lureTimerY", -60, 60, 1),
+    OutlineDD("lureTimerOutline"))
+
+  -- Infobulle (appat et bouton)
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_FISHING_SEC_TIP"], W))
+  local dirs = {}
+  for _, d in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do dirs[#dirs + 1] = { value = d, text = L["SETTINGS_ANCHOR_" .. d] } end
+  local ddDir = SW.CreateDropdown(container, L["SETTINGS_FISHING_TIP_DIR"], dirs, SL3)
+  BindDropdown(ddDir, "fishing", "tipDir")
+  ctx:AddRow(8, Slider(L["SETTINGS_FONT_SIZE"], "tipFontSize", 8, 32, 1), Font("tipFont"),
+    Color(L["SETTINGS_CAMPFIRE_NAME_COLOR"], "tipNameColor"))
+  ctx:AddRow(8, ddDir, OutlineDD("tipOutline"), Color(L["SETTINGS_CAMPFIRE_STAT_COLOR"], "tipStatColor"))
+  ctx:AddRow(8, Slider(L["SETTINGS_CAMPFIRE_TIP_OFFSET"], "tipOffset", 0, 60, 1))
+
+  -- Bouton de reequipement
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_FISHING_SEC_SWAP"], W))
+  local cbSwap = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_FISHING_SWAP_ENABLE"], L["SETTINGS_FISHING_SWAP_ENABLE_TT"], W))
+  BindCheckbox(cbSwap, "fishing", "swapEnabled")
+  group = {}
+  Row(Check(L["SETTINGS_LOCK_POSITION"], L["SETTINGS_LOCK_POSITION_TT"], "swapLocked"),
+    Slider(L["SETTINGS_OFFSET_X"], "swapX", -1200, 1200, 1), Slider(L["SETTINGS_OFFSET_Y"], "swapY", -700, 700, 1))
+  Row(Slider(L["SETTINGS_SIZE"], "swapSize", 16, 96, 1), Color(L["SETTINGS_FISHING_RING_COLOR"], "swapRingColor"),
+    ResetBtn("swap"))
+  Row(Slider(L["SETTINGS_OPACITY"], "swapAlpha", 0, 1, 0.05),
+    Slider(L["SETTINGS_FISHING_SWAP_HOVER_ALPHA"], "swapHoverAlpha", 0, 1, 0.05),
+    Slider(L["SETTINGS_FISHING_SWAP_DELAY"], "swapDelay", 0, 15, 0.5))
+  Row(Check(L["SETTINGS_FISHING_FLOAT"], L["SETTINGS_FISHING_FLOAT_TT"], "swapFloat"),
+    Slider(L["SETTINGS_FISHING_GROW"], "swapGrow", 0, 100, 5))
+  ctx:Depends(cbSwap, group)
+
   ctx:Finalize()
   return ctx.widgets
 end
@@ -15476,6 +15696,12 @@ local CATEGORIES = {
     build = Build.Campfire,
   },
   {
+    id    = "fishing",
+    label = L["SETTINGS_CAT_FISHING"],
+    icon  = 136245,
+    build = Build.Fishing,
+  },
+  {
     id    = "menuBar",
     label = L["SETTINGS_CAT_MENU_BAR"],
     icon  = "Interface\\Icons\\INV_Misc_Book_09",
@@ -15582,7 +15808,7 @@ local SIDEBAR_GROUPS = {
   { label = L["SETTINGS_GROUP_GLOBAL"],      ids = { "profiles", "modulesOverview", "colors", "patchNotes", "heroicSupport" } },
   { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "castBars", "topTargetBar", "targetAuras" } },
   { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "rotationHelper", "cdmAppearance", "cdmLayout" } },
-  { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "wellFed", "campfire", "stealthMode", "xpBar", "extraBars", "skyriding", "characterArmory" } },
+  { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "wellFed", "campfire", "fishing", "stealthMode", "xpBar", "extraBars", "skyriding", "characterArmory" } },
   { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasMissingBuffs", "movementBuffs" } },
   -- Groupes sans sous-section : le clic sur le header ouvre directement la page (single)
   { label = L["SETTINGS_GROUP_ANIMATIONS"],  ids = { "spellEffects" }, single = true },
@@ -16338,6 +16564,13 @@ function MainFrame:SelectCategory(catId)
     local SMo = ns.Modules.StealthMode
     if SMo and SMo.SetPreview then SMo.SetPreview(true) end
   end
+  -- Peche : appat fictif et bouton de reequipement tant que la page est ouverte
+  do
+    local FSH = ns.Modules.Fishing
+    if FSH and FSH.SetPreview and (prevCat == "fishing") ~= (catId == "fishing") then
+      FSH.SetPreview(catId == "fishing")
+    end
+  end
   -- Mode Taxi : vol fictif tant que sa page est ouverte
   do
     local TXM = ns.Modules.TaxiMode
@@ -16790,14 +17023,38 @@ MainFrame:SetScript("OnSizeChanged", function(self, w, h)
   if _resizeTimer then _resizeTimer:Cancel() end
   _resizeTimer = C_Timer.NewTimer(0.25, function()
     _resizeTimer = nil
+    -- Etat plie / deplie des sections de la page active et defilement : repris tels quels apres la reconstruction
+    local prev = activeCategory
+    local oldCtx = prev and SW.pageCtx[prev]
+    local folds = {}
+    if oldCtx and oldCtx.sections then
+      for i, sec in ipairs(oldCtx.sections) do folds[i] = { text = sec.header._baseText, collapsed = sec.collapsed } end
+    end
+    local scroll = scrollFrame:GetVerticalScroll()
     for _, entry in pairs(categoryContainers) do
       entry.frame:Hide()
     end
     wipe(categoryContainers)
-    if activeCategory then
-      local prev = activeCategory
+    if prev then
       activeCategory = nil
       MainFrame:SelectCategory(prev)
+      local ctx = SW.pageCtx[activeCategory]
+      if ctx and ctx ~= oldCtx and ctx.sections and not ctx.noCollapse then
+        local changed = false
+        for i, sec in ipairs(ctx.sections) do
+          local f = folds[i]
+          if f and f.text == sec.header._baseText and f.collapsed ~= nil and f.collapsed ~= sec.collapsed then
+            sec.collapsed = f.collapsed
+            if sec.key then _sectionCollapsed[sec.key] = (not f.collapsed) and false or nil end
+            SW.SetHeaderCollapsedState(sec.header, f.collapsed)
+            changed = true
+          end
+        end
+        if changed then ctx:Relayout(false) end
+      end
+      C_Timer.After(0, function()
+        scrollFrame:SetVerticalScroll(math.min(scroll, scrollFrame:GetVerticalScrollRange() or 0))
+      end)
     end
   end)
 end)
@@ -16954,6 +17211,10 @@ MainFrame:SetScript("OnShow", function(self)
     local TXM = ns.Modules.TaxiMode
     if TXM and TXM.SetPreview then TXM.SetPreview(true) end
   end
+  if activeCategory == "fishing" then
+    local FSH = ns.Modules.Fishing
+    if FSH and FSH.SetPreview then FSH.SetPreview(true) end
+  end
   -- Panneau rouvert directement sur les cercles hors combat : meme masquage que dans SelectCategory
   if activeCategory == "outOfCombat" or activeCategory == "wellFed" then
     C_Timer.After(0, function()
@@ -17037,6 +17298,8 @@ MainFrame:SetScript("OnHide", function(self)
   if SMd  and SMd.SetPreview     then SMd.SetPreview(false)     end
   local TXM = ns.Modules.TaxiMode
   if TXM  and TXM.SetPreview     then TXM.SetPreview(false)     end
+  local FSH = ns.Modules.Fishing
+  if FSH  and FSH.SetPreview     then FSH.SetPreview(false)     end
   -- Buffs manquants : meme filet de securite -- SetPreview(true) est lance a
   -- l'entree de la categorie "aurasMissingBuffs" (cf. bloc SelectCategory
   -- plus haut) mais son pendant SetPreview(false) n'est appele QUE sur un

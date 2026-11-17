@@ -2078,6 +2078,7 @@ function MissingBuffs.SetPreview(on, spellId)
             [ns.MISSING_BAGS_KEY]         = { "Interface\\Icons\\INV_Misc_Bag_08", "BAGS_FULL" },
             [ns.MISSING_TRACKING_HERBS_KEY] = { "Interface\\Icons\\INV_Misc_Flower_02", "TRACKING_OFF" },
             [ns.MISSING_TRACKING_ORE_KEY]   = { "Interface\\Icons\\Spell_Nature_Earthquake", "TRACKING_OFF" },
+            [ns.MISSING_FISHING_LURE_KEY]   = { C_Item.GetItemIconByID(6529) or "Interface\\Icons\\Trade_Fishing", "APPLY_LURE" },
         }
         if _addon.IsForever and MissingBuffs.WellRestedIcon then
             PREVIEW_PSEUDO[ns.MISSING_WELL_RESTED_KEY] = { MissingBuffs.WellRestedIcon(), "MISSING" }
@@ -2493,7 +2494,9 @@ function MissingBuffs.ArmPetCombatButton()
 end
 
 -- Pierres du Demoniste (Retail) : pierre de soins en sac, pierre d'ame posee sur quelqu'un.
-local HEALTHSTONE_ITEMS = { 5512, 224464 }  -- Healthstone, Demonic Healthstone
+-- Healthstone, Demonic Healthstone ; Forever : un objet par rang (+ 2 avec Pierre de soins amelioree)
+local HEALTHSTONE_ITEMS = { 5512, 224464, 19004, 19005, 5511, 19006, 19007, 5509, 19008, 19009,
+                            5510, 19010, 19011, 9421, 19012, 19013 }
 local SPELL_CREATE_HEALTHSTONE = 6201
 local SPELL_SOULSTONE = 20707
 -- Aura de pierre d'ame sur n'importe qui du groupe (soi inclus), sans exigence de portee
@@ -2966,6 +2969,35 @@ local function WellRestedChoices(cfg)
     return { { key = ns.MISSING_WELL_RESTED_KEY, icon = WellRestedIcon(), item = id, macro = "/use item:" .. id } }, text
 end
 
+-- Canne a peche en main droite (arme, sous-classe 20). Retail : la canne est dans l'emplacement
+-- d'outil de metier, jamais en main : renvoie toujours false.
+function MissingBuffs.FishingPoleEquipped()
+    local id = GetInventoryItemID("player", INVSLOT_MAINHAND or 16)
+    if not id then return false end
+    local Info = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    if not Info then return false end
+    local _, _, _, _, _, classID, subClassID = Info(id)
+    return classID == 2 and subClassID == ((Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Fishingpole) or 20)
+end
+
+-- Canne sans appat (pas d'amelioration temporaire en main droite) : une icone par appat des sacs non decoche
+-- (au plus 4, le plus fort d'abord), le clic le fixe sur la canne.
+function MissingBuffs.LureChoices(cfg)
+    if cfg.ignoreFishingLures or not GetWeaponEnchantInfo or ConsumablesBlocked(true) then return nil end
+    if GetWeaponEnchantInfo() then return nil end
+    local Count = (C_Item and C_Item.GetItemCount) or GetItemCount
+    local off = cfg.ignoredLures or {}
+    local choices = {}
+    for i = #ns.MISSING_FISHING_LURES, 1, -1 do
+        local id = ns.MISSING_FISHING_LURES[i]
+        if not off[id] and (Count(id) or 0) > 0 and #choices < 4 then
+            choices[#choices + 1] = { key = (#choices == 0) and ns.MISSING_FISHING_LURE_KEY or nil,
+                                      icon = C_Item.GetItemIconByID(id), item = id, macro = "/use item:" .. id .. "\n/use 16" }
+        end
+    end
+    return #choices > 0 and choices or nil
+end
+
 -- Points de talents a depenser : arbre de traits (Retail et Forever), sinon API des anciens clients
 local function UnspentTalentPoints()
     -- HasUnspentTalentPoints ne couvre que classe / spe : les points de talents de heros passent par
@@ -3188,6 +3220,12 @@ function MissingBuffs.CheckForMissings()
     if _addon.IsForever and not cfg.ignoreWellRested and not MissingBuffs.SelfAurasBlind() then
         local choices, text = WellRestedChoices(cfg)
         if choices then MissingBuffs.ShowAlertChoices(choices, text); return end
+    end
+    -- Canne a peche en main : on peche, seul l'appat est rappele (et le sac de couchage, ci-dessus)
+    if MissingBuffs.FishingPoleEquipped() then
+        local lures = MissingBuffs.LureChoices(cfg)
+        if lures then MissingBuffs.ShowAlertChoices(lures, ns.MISSING_TEXT.APPLY_LURE) else MissingBuffs.HideAlert() end
+        return
     end
     -- Paladin en monture : Aura du croise rappelee si absente, avant (et malgre) "Ignorer si monte"
     if (_addon._playerClass or select(2, UnitClass("player"))) == "PALADIN" then
@@ -3894,7 +3932,7 @@ function MissingBuffs.GetTriggerSpells()
     add(ns.MISSING_FLASK_KEY)
     add(ns.MISSING_ELIXIR_KEY)
     add(ns.MISSING_FOOD_KEY)
-    if _addon.IsForever then add(ns.MISSING_WELL_RESTED_KEY) end   -- Bien repose (sac de couchage)
+    if _addon.IsForever then add(ns.MISSING_WELL_RESTED_KEY); add(ns.MISSING_FISHING_LURE_KEY) end   -- Bien repose, appat de peche
 
     return out
 end

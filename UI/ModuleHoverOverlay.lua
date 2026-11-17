@@ -118,6 +118,12 @@ STATIC_ENTRIES[#STATIC_ENTRIES + 1] = {
   end,
 }
 
+-- Peche (Forever) : icone de l'appat et bouton de reequipement, chacun vers sa section
+STATIC_ENTRIES[#STATIC_ENTRIES + 1] = { category = "fishing", mod = "fishingLure", section = "SETTINGS_FISHING_SEC_LURE",
+  getFrame = function() return G("AishCoreFishingLure") end }
+STATIC_ENTRIES[#STATIC_ENTRIES + 1] = { category = "fishing", mod = "fishingSwap", section = "SETTINGS_FISHING_SEC_SWAP",
+  getFrame = function() return G("AishCoreFishingSwap") end }
+
 -- Barre de menu
 STATIC_ENTRIES[#STATIC_ENTRIES + 1] = {
   category = "menuBar",
@@ -416,6 +422,8 @@ local function EntryMatches(e, id)
   if mod == id then return true end
   -- "Cadres d'unite" (ligne parente) : toutes les barres
   if id == "unitBars" and e.category == "unitBars" then return true end
+  if id == "fishing" and e.category == "fishing" then return true end   -- "Peche" : appat et bouton
+  if id == "outOfCombat" and e.category == "outOfCombat" then return true end   -- les trois cercles hors combat
   return false
 end
 

@@ -48,6 +48,7 @@ ns.ProfileTree = {
     { id = "extraBars", label = "SETTINGS_CAT_EXTRA_BARS", core = { "extraBars" }, apply = { "ExtraBars" } },
     { id = "stealthMode", label = "SETTINGS_CAT_STEALTH_MODE", core = { "stealthMode" }, apply = { "StealthMode" } },
     { id = "campfire", label = "SETTINGS_CAT_CAMPFIRE", core = { "campfire" }, apply = { "Campfire" } },
+    { id = "fishing", label = "SETTINGS_CAT_FISHING", core = { "fishing" }, apply = { "Fishing" } },
     { id = "characterArmory", label = "SETTINGS_CAT_CHARACTER_ARMORY", core = { "characterArmory" }, apply = { "CharacterArmory" } },
   } },
   -- Section porteuse de données : réglages communs de spellEffects (activation globale, taille des

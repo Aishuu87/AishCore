@@ -179,7 +179,7 @@ local function ArrowTexture(tex)
   if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
     tex:SetAtlas(atlas)
   else
-    tex:SetTexture("Interface\Buttons\UI-MicroStream-Green")
+    tex:SetTexture("Interface\\Buttons\\UI-MicroStream-Green")
     tex:SetRotation(math.pi)
   end
 end
@@ -661,9 +661,19 @@ ev:RegisterEvent("ADDON_LOADED")
 ev:RegisterEvent("SPELLS_CHANGED")
 ev:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
 pcall(ev.RegisterEvent, ev, "LEARNED_SPELL_IN_TAB")
+-- Les fleches et la bulle ne vivent que dans le grimoire, qui relance l'analyse a son ouverture (OnShow) :
+-- grimoire ferme, inutile de rebalayer. SPELLS_CHANGED / ACTIONBAR_SLOT_CHANGED tombent a chaque forme ou
+-- furtivite, et le balayage du grimoire Forever (tous les rangs) provoquait un micro-freeze.
+local function BookVisible()
+  local sb = ModernBook()
+  if sb and sb:IsVisible() then return true end
+  return _G.SpellBookFrame and _G.SpellBookFrame:IsVisible() or false
+end
+
 ev:SetScript("OnEvent", function(_, event)
   if event == "ADDON_LOADED" or event == "PLAYER_LOGIN" then HookBook() end
   if event == "ADDON_LOADED" then return end
+  if event ~= "PLAYER_LOGIN" and not BookVisible() then return end
   QueueScan()
 end)
 

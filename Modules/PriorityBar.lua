@@ -2834,6 +2834,34 @@ do
     return n and reactiveNames[n] or false
   end
 
+  -- Forever : IsSpellUsable reste vrai pour Ivresse de la victoire meme sans Elan victorieux
+  -- (402975). On lit donc le buff directement. Ids du sort : 34428 et la rune SoD 402927.
+  local AURA_GATED = { [34428] = 402975, [402927] = 402975 }
+  local gatedNames
+  local function GatedAuraMissing(sid)
+    if not ns.IsForever then return false end
+    if not gatedNames then
+      gatedNames = {}
+      for id, aura in pairs(AURA_GATED) do
+        local n = GetSpellName(id)
+        if n then gatedNames[n] = aura end
+      end
+    end
+    local n = GetSpellName(sid)
+    local aura = AURA_GATED[sid] or (n and gatedNames[n])
+    if not aura then return false end
+    if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+      local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, aura)
+      if ok then return a == nil end
+    end
+    for i = 1, 40 do
+      local name, _, _, _, _, _, _, _, _, auraID = UnitBuff("player", i)
+      if not name then break end
+      if auraID == aura then return false end
+    end
+    return true
+  end
+
 ScanSpellUsable = function()
   RecycleInto(_usableState)
   wipe(_rangeState)
@@ -2849,7 +2877,7 @@ ScanSpellUsable = function()
       if ok and usable ~= nil then
         local e = PooledTable()
         e.usable, e.noPower = usable and true or false, noPower and true or false
-        e.procMissing = (not e.usable) and (not e.noPower) and IsReactiveSpell(sid) or false
+        e.procMissing = ((not e.usable) and (not e.noPower) and IsReactiveSpell(sid)) or GatedAuraMissing(sid)
         _usableState[sid] = e
       end
       -- nil = le sort ne se preoccupe pas de la portee (buff perso, sort de zone...) : aucune
@@ -3984,6 +4012,16 @@ function PriorityBar.Init()
   -- Edition par glisser-deposer depuis le grimoire
   PBEdit.Setup()
 
+  -- Rebuild differe et unique des caches (cf. fin du handler ci-dessous)
+  local _cacheRebuildQueued = false
+  local function FlushCacheRebuild()
+    _cacheRebuildQueued = false
+    if InCombatLockdown() then return end
+    RebuildSpellButtonCache()
+    RebuildChargeCache()
+    RebuildCooldownCache()
+  end
+
   -- Frame d'evenements pour reconstruire le cache bouton→sort hors combat
   local eventFrame = CreateFrame("Frame")
   eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -4252,9 +4290,12 @@ function PriorityBar.Init()
       end)
     end
 
-    RebuildSpellButtonCache()
-    RebuildChargeCache()
-    RebuildCooldownCache()
+    -- Regroupe la rafale : un changement de forme / de furtivite emet un ACTIONBAR_SLOT_CHANGED par
+    -- bouton de la barre bonus, chacun relancait les trois rebuilds complets (micro-freeze).
+    if not _cacheRebuildQueued then
+      _cacheRebuildQueued = true
+      C_Timer.After(0.1, FlushCacheRebuild)
+    end
     -- Ne pas appeler RebuildLearnedCache ici : provoquerait une race condition avec ACTIVE_TALENT_GROUP_CHANGED
   end)
 

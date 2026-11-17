@@ -2234,7 +2234,7 @@ do
     return inTown == true
   end
 
-  -- Village / capitale de la liste (sans IsResting) : zone de repos native (le sac de couchage y est impossible)
+  -- Village / capitale de la liste (sans IsResting)
   function ns.IsInTown() return inTown == true end
 
   function ns.OnRestAreaChanged(fn) listeners[#listeners + 1] = fn end

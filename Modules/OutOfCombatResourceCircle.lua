@@ -669,6 +669,16 @@ function OutOfCombatResourceCircle.ApplyRegenPulse(c)
 end
 
 -- Mise a jour des valeurs (copie de ResourceCircle.Update)
+-- Survol du texte : mana en valeur abregee (cf. ns.WatchManaTextHover, ResourceCircle.lua)
+local _oocManaHover = false
+ns.WatchManaTextHover(function()
+  local c = ns.GetCfg("outOfCombatResourceCircle")
+  return bar, bar and bar.text, c and c.fontSize
+end, function(on)
+  _oocManaHover = on
+  OutOfCombatResourceCircle.Update()
+end)
+
 function OutOfCombatResourceCircle.Update()
   if not bar or not bar.text then return end
   if previewMode then return end
@@ -715,6 +725,9 @@ function OutOfCombatResourceCircle.Update()
         end
       else
         displayText = string.format("%.0f", pct)
+        if _oocManaHover and resource == Enum.PowerType.Mana then
+          displayText = ns.ManaValueText() or displayText
+        end
       end
     end
   end

@@ -91,7 +91,7 @@ ns.GUI_LAYOUT = {
     } },
     ["SETTINGS_COMFORT_SEC_SHORTCUTS"] = { cols = 5, rows = {
       { [1] = "comfort.shortcuts", [3] = "comfort.ctrlFocus" },
-      { [1] = "comfort.minimapTracking", [3] = "comfort.doubleClickFish" },
+      { [1] = "comfort.minimapTracking" },
     } },
     ["SETTINGS_MAPREVEAL_TITLE"] = { cols = 6, rows = {
       { [1] = "comfort.mapReveal" },
@@ -870,6 +870,29 @@ ns.GUI_LAYOUT = {
       { [1] = "campfire.sleepStackSize", [2] = "campfire.sleepStackFont", [3] = "campfire.sleepStackColor", [4] = "campfire.sleepStackOutline" },
     }, labels = {
       ["campfire.sleepStackColor"] = { frFR = "Couleur des stacks", enUS = "Stack color" },
+    } },
+  },
+  fishing = {
+    ["SETTINGS_FISHING_SEC_LURE"] = { cols = 5, rows = {
+      { [1] = "fishing.lureEnabled" },
+      { [1] = "fishing.lureLocked", [2] = "fishing.lureX", [3] = "fishing.lureY", [5] = "button:$SETTINGS_MVB_RESET_POSITION" },
+      { [1] = "fishing.lureSize", [2] = "fishing.lureGrow", [3] = "fishing.lureRingColor" },
+      { [1] = "fishing.lureFloat" },
+    } },
+    ["SETTINGS_FISHING_SEC_LURE_TIMER"] = { cols = 5, rows = {
+      { [1] = "fishing.lureTimerSize", [2] = "fishing.lureTimerFont", [3] = "fishing.lureTimerColor", [4] = "fishing.lureTimerOutline" },
+      { [1] = "fishing.lureTimerX", [2] = "fishing.lureTimerY" },
+    } },
+    ["SETTINGS_FISHING_SEC_SWAP"] = { cols = 5, rows = {
+      { [1] = "fishing.swapEnabled" },
+      { [1] = "fishing.swapLocked", [2] = "fishing.swapX", [3] = "fishing.swapY", [5] = "button:$SETTINGS_MVB_RESET_POSITION#2" },
+      { [1] = "fishing.swapSize", [2] = "fishing.swapGrow", [3] = "fishing.swapRingColor" },
+      { [1] = "fishing.swapAlpha", [2] = "fishing.swapHoverAlpha", [3] = "fishing.swapDelay" },
+      { [1] = "fishing.swapFloat" },
+    } },
+    ["SETTINGS_FISHING_SEC_TIP"] = { cols = 5, rows = {
+      { [1] = "fishing.tipFontSize", [2] = "fishing.tipFont", [3] = "fishing.tipOutline", [4] = "fishing.tipOffset" },
+      { [1] = "fishing.tipDir", [2] = "fishing.tipStatColor", [3] = "fishing.tipNameColor" },
     } },
   },
   unitBars = {

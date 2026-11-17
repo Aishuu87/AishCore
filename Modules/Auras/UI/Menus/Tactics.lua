@@ -10,7 +10,9 @@ local TC = 0.07
 -- ne les met a jour que sur changement de donnee d'aura) : a appeler explicitement apres tout edit.
 local function RefreshAllNativeGlow()
     pcall(ns.RepositionIconsNativeGrid)      -- [I] ICONES
-    pcall(ns.RepositionCircleBarsNativeGrid) -- [C] CERCLE (GUI "Circle Bars", cle freebars)
+    -- [C] CERCLE (GUI "Circle Bars", cle freebars) : pas de glow, style seul. Un Reposition (SetSize +
+    -- SetFlowLayout*) sur barre affichee la decale vers le haut (Broadcast de furtivite, Danse de l'ombre).
+    pcall(ns.RefreshCircleBarsNativeGridStyle)
     pcall(ns.RepositionFreeBarsNativeGrid)   -- [B] LIBRES (GUI "Free Bars", cle circlebars)
     pcall(ns.RepositionIconListNativeGrid)   -- [L] LISTE (GUI "Liste d'icones", cle iconlist)
 end
