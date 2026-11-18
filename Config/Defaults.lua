@@ -597,6 +597,8 @@ ns.Defaults = {
     swapAlpha = 0.6, swapHoverAlpha = 1, swapDelay = 3,
     -- Canne lancee : ambiance et musique a duckLevel % de leur volume, remontee en fondu (duckFade s) a l'arret
     duckEnabled = false, duckLevel = 30, duckFade = 4,
+    -- Raccourci lancer / relever : touche au format des liaisons ("F", "SHIFT-BUTTON4"...), nil = aucune
+    castKeyEnabled = false,
   },
   movementBuffs = {
     enabled = true,

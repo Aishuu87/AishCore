@@ -2990,7 +2990,9 @@ function MissingBuffs.LureChoices(cfg)
     local choices = {}
     for i = #ns.MISSING_FISHING_LURES, 1, -1 do
         local id = ns.MISSING_FISHING_LURES[i]
-        if not off[id] and (Count(id) or 0) > 0 and #choices < 4 then
+        -- Appat inutilisable (competence de peche insuffisante) : pas propose (cf. Fishing.LureUsable)
+        local F = _addon.Modules and _addon.Modules.Fishing
+        if not off[id] and (Count(id) or 0) > 0 and #choices < 4 and not (F and F.LureUsable and not F.LureUsable(id)) then
             choices[#choices + 1] = { key = (#choices == 0) and ns.MISSING_FISHING_LURE_KEY or nil,
                                       icon = C_Item.GetItemIconByID(id), item = id, macro = "/use item:" .. id .. "\n/use 16" }
         end

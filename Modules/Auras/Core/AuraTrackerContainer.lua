@@ -2618,14 +2618,18 @@ end
 local function AllowNextCapSlot(wl, spellID, maxBars, seenInfo, state)
     -- Variante a entree propre : comptee avec son ancre, sinon chaque rang Forever decouvert prend une place
     local info = LinkAnchorOf(ns.GetSpecSpells and ns.GetSpecSpells(), spellID) or (wl and wl[spellID])
-    if info and seenInfo[info] then
+    -- Forever : un rang decouvert COCHE a sa propre entree (Immolation 348 / 11665...), LinkAnchorOf ne le
+    -- rattache pas -> chaque rang prenait une place et le dernier sort de la liste sortait du cap (Siphon de
+    -- vie rang 2 absent de la Liste d'icones). Les rangs d'un sort partagent son nom : cle d'identite.
+    local key = info and ((ns.IsForever and info.name) and ("n:" .. info.name) or info)
+    if key and seenInfo[key] then
         return true -- variante d'un buff deja compte : jamais bloquee par le cap
     end
     if state.count >= maxBars then
         return false
     end
     state.count = state.count + 1
-    if info then seenInfo[info] = true end
+    if key then seenInfo[key] = true end
     return true
 end
 
@@ -6253,6 +6257,36 @@ function ns.DebugDumpSpellTracking(...)
                 local hasGroupTarget = destGroupsTarget[dest][spellID] and true or false
                 print(string.format("    %-10s dansWhitelist=%-5s  groupeDedieCree(joueur)=%-5s  groupeDedieCree(cible)=%-5s",
                     dest, tostring(inOrder), tostring(hasGroupPlayer), tostring(hasGroupTarget)))
+            end
+            -- Liste d'icones cible : routage (RouteInfo), rang dans le cap, colonne Double icone
+            local route = RouteInfo(spells, spellID)
+            local anchor = ns.linkAnchorInfo and ns.linkAnchorInfo[spellID]
+            print(string.format("  route: source=%s name=%s | sourcePropre=%s | ancre=%s | familier=%s",
+                tostring(route and route.source), tostring(route and route.name), tostring(info and info.source),
+                tostring(anchor and anchor.name), tostring(ns.GetPetAuraUnit and ns.GetPetAuraUnit(spellID))))
+            local order = ns.slotOrderByDest and ns.slotOrderByDest.iconlist
+            local wl = ns.whitelistByDest and ns.whitelistByDest.iconlist
+            local cfg = ns.db and ns.db.iconlist or ns.Defaults.iconlist
+            local _, _, _, _, _, _, _, _, isDual, maxBars, _, b = IconListGeom(cfg)
+            local groupCap = isDual and (2 * b) or maxBars
+            local seenInfo, capState, capPos = {}, { count = 0 }, "hors cap"
+            for _, id in ipairs(order or {}) do
+                local ri = RouteInfo(spells, id)
+                if ri and ri.source == "debuff" then
+                    if not AllowNextCapSlot(wl, id, groupCap, seenInfo, capState) then break end
+                    if id == spellID then capPos = tostring(capState.count) end
+                end
+            end
+            print(string.format("  iconlist cible: layout=%s cap=%d place=%s colonne=%s groupeColDroite=%s",
+                tostring(cfg.layout), groupCap, capPos, tostring(IL.dualSide and IL.dualSide[spellID]),
+                tostring(IL.groupsColRT and IL.groupsColRT[spellID] and true or false)))
+            if order then
+                local parts = {}
+                for _, id in ipairs(order) do
+                    local ri = RouteInfo(spells, id)
+                    parts[#parts + 1] = id .. (ri and ri.source == "debuff" and "d" or "b")
+                end
+                print("  ordre iconlist: " .. table.concat(parts, " "))
             end
         end
     end

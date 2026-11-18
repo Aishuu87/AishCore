@@ -1,5 +1,20 @@
 # AishCore
 
+## [v4.7.5](https://github.com/Aishuu87/AishCore/tree/v4.7.5) (2026-11-18)
+
+### Unit Frames
+- FIX: The dispellable debuff glow should no longer show on neutral and enemy targets
+
+### Fishing
+- FIX: Missing buffs alerts also offered fishing gear that cannot be used at your current Fishing skill
+- Added an option to set a shortcut key to cast your line and reel it in (Cast / reel in shortcut)
+- The buff bubble now shows when you have usable lures in your bags, with a "+" inside
+- Hovering the buff bubble shows every available and usable lure in your bags, including the one already applied, so you can refresh the buff
+
+### 3D Animations
+- Deleting a custom tag is now much easier: the cross on the right of the tag deletes it, after a confirmation message
+- Right-clicking an asset in the library lets you add it to a new tag
+
 ## [v4.7.4](https://github.com/Aishuu87/AishCore/tree/v4.7.4) (2026-11-17)
 
 ### Central Circle

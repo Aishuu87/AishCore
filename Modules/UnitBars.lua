@@ -1251,10 +1251,17 @@ local function CreateDispelContainer(frame, lvl)
     frame.dispelContainer = c
 end
 
+-- Unite alliee (ni ennemie ni neutre) : seule cible de la lueur de dissipation
+local function IsFriendlyUnit(unit)
+    if not (unit and UnitExists(unit)) then return false end
+    local ok, friend = pcall(UnitIsFriend, "player", unit)
+    return ok and not (issecretvalue and issecretvalue(friend)) and friend and true or false
+end
+
 -- Premier debuff dissipable par le joueur sur une unite alliee : table d'aura, nil sinon. Hors combat seulement sur
 -- Forever (auras secretes ensuite) : sert a l'apparition de la barre, la lueur en jeu passant par le conteneur.
 local function FirstDispellable(unit)
-    if not (unit and UnitExists(unit)) then return nil end
+    if not IsFriendlyUnit(unit) then return nil end
     local okA, assist = pcall(UnitCanAssist, "player", unit)
     if not okA or (issecretvalue and issecretvalue(assist)) or not assist then return nil end
     if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return nil end
@@ -1293,7 +1300,7 @@ local function UpdateDispel(frame, fromAura)
     end
     if c then
         dg:Hide()
-        if not on then c:Hide(); return end
+        if not (on and IsFriendlyUnit(frame.unit)) then c:Hide(); return end
         RegisterDispelTextures(frame)
         c:SetAlpha(alpha)
         if frame._dcUnit ~= frame.unit then
@@ -2702,7 +2709,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "UNIT_FACTION" or event == "PLAYER_FLAGS_CHANGED" then
         local k = UNIT_KEY[arg1]
         local f = k and bars[k]
-        if f then UpdatePvP(f) end
+        if f then
+            UpdatePvP(f)
+            if event == "UNIT_FACTION" then UpdateDispel(f) end   -- allie <-> ennemi (controle mental, duel)
+        end
         return
     end
 

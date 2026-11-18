@@ -19,6 +19,7 @@ local GLOW_RGB   = { 1, 0.85, 0.3 }
 local FISH_ICON  = 136245
 local PREVIEW_LURE, PREVIEW_DUR = 6532, 600
 local POP = 0.55
+local EMPTY_GROW = 0.25   -- rond vide : grossit moins au survol (le chapelet se deroule dessous)
 
 local preview = false
 local lure, swap, tip, driver
@@ -135,6 +136,15 @@ end
 
 -- ── Icones rondes (orbe du Camping HUD) ─────────────────────────────────────
 
+-- Flotteur sur l'eau : petits sautillements rapides (~1 par seconde, pointe vers le bas plus franche), portes par
+-- une houle lente, derive laterale legere. Relue a un instant decale par les plombs du chapelet.
+local function BobberWave(f, t)
+  local bob = math.sin(t * 6.2 + f.py)
+  bob = bob < 0 and bob * 1.4 or bob * 0.8
+  return 2.5 * math.sin(t * 0.9 + f.px) + 0.9 * math.sin(t * 3.1 + f.py),   -- derive + petit tangage
+         2.2 * bob + 1.6 * math.sin(t * 1.4 + f.px)
+end
+
 local function WakeDriver() if driver then driver:Show() end end
 
 local function FitGrunge(tex, w, h)
@@ -195,7 +205,10 @@ local function ShowTip(f)
   t.extra:ClearAllPoints()
   t.extra:SetPoint("TOP", t.stat, "BOTTOM", 0, -3)
   FitGrunge(t.bg, w, h)
-  t.owner, t.dir, t.t0, t.out = f, c.tipDir or "TOP", GetTime(), nil
+  -- Grains du chapelet : infobulle sur le cote (en dessous / au-dessus, elle couvrirait les grains voisins)
+  local dir = c.tipDir or "TOP"
+  if f.sideTip then dir = (dir == "LEFT") and "LEFT" or "RIGHT" end
+  t.owner, t.dir, t.t0, t.out = f, dir, GetTime(), nil
   t:SetAlpha(0)
   t:Show()
   WakeDriver()
@@ -317,19 +330,16 @@ local function OnDriver(_, dt)
     local f = (i == 1) and lure or swap   -- pas d'ipairs : lure peut etre nil (jamais cree) avant swap
     if f and f:IsShown() then
       busy = true
-      f.h = f.h + ((f.hover and 1 or 0) - f.h) * math.min(1, dt * 12)
+      local hov = f.hover or f.hold   -- hold : chapelet d'appats ouvert, le rond reste grossi
+      f.h = f.h + ((hov and 1 or 0) - f.h) * math.min(1, dt * 12)
       f.popT = f.popT + dt
       local s = EaseBack(Clamp(f.popT / POP)) * (1 + (f.grow or 0.6) * f.h)
       local x, y = 0, 0
       if f.float then
-        local amp = 1 - 0.7 * f.h
+        local amp = 1 - (f.empty and 0.3 or 0.7) * f.h   -- rond vide : continue de flotter, chapelet ouvert
         if f == lure then
-          -- Flotteur sur l'eau : petits sautillements rapides (~1 par seconde, pointe vers le bas plus franche),
-          -- portes par une houle lente, derive laterale legere
-          local bob = math.sin(now * 6.2 + f.py)
-          bob = bob < 0 and bob * 1.4 or bob * 0.8
-          x = amp * (2.5 * math.sin(now * 0.9 + f.px) + 0.9 * math.sin(now * 3.1 + f.py))   -- derive + petit tangage
-          y = amp * (2.2 * bob + 1.6 * math.sin(now * 1.4 + f.px))
+          local wx, wy = BobberWave(f, now)
+          x, y = amp * wx, amp * wy
         else
           x = 1.5 * amp * math.sin(now * f.fx + f.px)
           y = 3 * amp * math.sin(now * f.fy + f.py)
@@ -340,7 +350,7 @@ local function OnDriver(_, dt)
       f.body:ClearAllPoints()
       f.body:SetPoint("CENTER", f, "CENTER", x / s, y / s)
       -- Opacites gardees ici : GetAlpha arrondit au 1/255, un petit pas de fondu (haut framerate) n'y descendrait plus
-      local gt = f.hover and 0.75 or 0
+      local gt = hov and 0.75 or 0
       local g = (f.ga or 0) + (gt - (f.ga or 0)) * math.min(1, dt * 10)
       if math.abs(g - gt) < 0.01 then g = gt end
       f.ga = g
@@ -384,6 +394,7 @@ local function OnDriver(_, dt)
     swapHideAt = nil
     if not preview then Vanish(swap) end
   end
+  if Fishing.UpdateChain and Fishing.UpdateChain(now, dt) then busy = true end
   if not busy and not swapHideAt then driver:Hide() end
 end
 
@@ -404,9 +415,22 @@ local function EnsureLure()
   lure.grunge = 2
   lure.timer = lure:CreateFontString(nil, "OVERLAY")
   lure.timerRing = ns.CreateSlugRing and ns.CreateSlugRing(lure, lure.timer, "ARTWORK")
+  -- "+" de l'etat vide (canne sans appat, appats dans les sacs)
+  lure.plusH = lure.body:CreateTexture(nil, "OVERLAY")
+  lure.plusV = lure.body:CreateTexture(nil, "OVERLAY")
+  for _, t in ipairs({ lure.plusH, lure.plusV }) do
+    t:SetColorTexture(1, 1, 1, 1)
+    t:SetPoint("CENTER")
+    t:Hide()
+  end
+  lure:HookScript("OnEnter", function(self) if self.choices then Fishing.OpenChain() end end)
   lure.onTick = function(f, now)
     if (f._tt or 0) > now then return end
     f._tt = now + 0.2
+    if f.empty then
+      if not preview and GetWeaponEnchantInfo and GetWeaponEnchantInfo() then Fishing.RefreshLure() end
+      return
+    end
     -- Duree relue a chaque tick : appat retire puis repose, l'evenement d'inventaire peut arriver avant que
     -- le jeu ait mis a jour l'amelioration (ancienne duree gardee sinon)
     if not preview and GetWeaponEnchantInfo then
@@ -434,7 +458,7 @@ end
 
 function Fishing.RefreshLure()
   local c = Cfg()
-  local item, left
+  local item, left, choices
   local show = c.lureEnabled ~= false and ns.IsForever
   if show and preview then
     item = PREVIEW_LURE
@@ -442,23 +466,245 @@ function Fishing.RefreshLure()
   elseif show then
     local active
     active, left = ActiveLure()
-    if left then item = active; lureEnd = GetTime() + left else show = false end
+    if left then
+      item = active; lureEnd = GetTime() + left
+      choices = Fishing.BagLures()   -- chapelet au survol aussi : changer d'appat ou rafraichir le meme
+    else
+      -- Canne sans appat : rond vide si les sacs en contiennent
+      choices = Fishing.PoleEquipped() and Fishing.BagLures() or nil
+      show = choices ~= nil
+    end
   end
   if not show then
-    if lure then Vanish(lure, true) end
+    if lure then lure.empty, lure.choices = nil, nil; Fishing.CloseChain(true); Vanish(lure, true) end
     return
   end
   local f = EnsureLure()
   Layout(f)
   StyleTimer()
-  f.tex:SetTexture((item and C_Item.GetItemIconByID(item)) or FISH_ICON)
   f.item = item
+  f.empty = not item and not preview   -- canne sans appat : rond vide "+"
+  f.choices = not preview and choices or nil
+  if f.empty then
+    local S = c.lureSize or 32
+    f.grow = math.min(f.grow or 0.6, EMPTY_GROW)
+    f.tex:SetColorTexture(0.16, 0.10, 0.05, 1)
+    local len, th = math.floor(S * 0.3 + 0.5), math.max(2, math.floor(S * 0.06 + 0.5))
+    f.plusH:SetSize(len, th)
+    f.plusV:SetSize(th, len)
+    for _, t in ipairs({ f.plusH, f.plusV }) do t:SetVertexColor(1, 0.82, 0.3, 1); t:Show() end
+    f.timer:SetText("")   -- pas Hide : le contour slug suit SetText, pas la visibilite (texte noir restant)
+  else
+    f.tex:SetTexture((item and C_Item.GetItemIconByID(item)) or FISH_ICON)
+    f.plusH:Hide(); f.plusV:Hide()
+  end
+  f.tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+  if not f.choices then Fishing.CloseChain(true)
+  elseif f.hold then Fishing.OpenChain() end   -- sacs ou appat changes pendant que le chapelet est ouvert
   f._ench = (not preview and GetWeaponEnchantInfo) and select(4, GetWeaponEnchantInfo()) or nil
-  f.getTip = function(o) return ItemName(o.item) or L["FISHING_LURE"], LureStat(o.item), BonusLine() end
+  f.getTip = function(o)
+    if o.empty then return nil end   -- etat vide : le chapelet tient lieu d'infobulle
+    return ItemName(o.item) or L["FISHING_LURE"], LureStat(o.item), BonusLine()
+  end
   f.hoverAlpha = nil
   f:EnableMouse(true)
   f._tt = 0
   Appear(f, 1)
+end
+
+-- ── Chapelet des appats ──────────────────────────────────────────────────────
+-- Survol du rond (vide ou appat pose) : les appats des sacs se deroulent dessous, en colonne de ronds plus petits (le
+-- plus fort en haut). Celui deja pose porte une fleche "rafraichir". Grains = boutons securises (/use appat puis
+-- /use 16), montres / caches hors combat seulement.
+local REFRESH_ICON = "Interface\\Buttons\\UI-RefreshButton"
+
+local GetCount = (C_Item and C_Item.GetItemCount) or GetItemCount
+local BEAD_K, BEAD_GAP, BEAD_DROP, CHAIN_GRACE = 0.72, 10, 20, 0.25
+local beads, chain = {}, { open = false, shown = false, t0 = 0, leaveAt = nil }
+
+-- Appat utilisable : aucune ligne rouge dans son infobulle (competence de peche ou niveau insuffisants). Relu au
+-- plus toutes les 5 s par objet (competence qui monte). Objet pas encore en cache : propose.
+local usableCache = {}
+local scanTip
+local function IsRed(r, g, b) return r and r > 0.95 and g < 0.2 and b < 0.2 end
+function Fishing.LureUsable(id)
+  local now = GetTime()
+  local e = usableCache[id]
+  if e and e.t > now then return e.ok end
+  local ok = true
+  if C_TooltipInfo and C_TooltipInfo.GetItemByID then
+    local okT, data = pcall(C_TooltipInfo.GetItemByID, id)
+    for _, line in ipairs(okT and data and data.lines or {}) do
+      local lc, rc = line.leftColor, line.rightColor
+      if (lc and line.leftText and IsRed(lc.r, lc.g, lc.b)) or (rc and line.rightText and IsRed(rc.r, rc.g, rc.b)) then
+        ok = false; break
+      end
+    end
+  else
+    scanTip = scanTip or CreateFrame("GameTooltip", "AishCoreFishingScanTip", nil, "GameTooltipTemplate")
+    scanTip:SetOwner(WorldFrame, "ANCHOR_NONE")
+    scanTip:SetItemByID(id)
+    for i = 1, scanTip:NumLines() do
+      for _, side in ipairs({ "Left", "Right" }) do
+        local fs = _G["AishCoreFishingScanTipText" .. side .. i]
+        if fs and fs:IsShown() and (fs:GetText() or "") ~= "" and IsRed(fs:GetTextColor()) then ok = false end
+      end
+    end
+    scanTip:Hide()
+  end
+  usableCache[id] = { ok = ok, t = now + 5 }
+  return ok
+end
+
+function Fishing.BagLures()
+  local list = Lures()
+  local out = {}
+  for i = #list, 1, -1 do
+    local id = list[i]
+    local n = GetCount(id) or 0
+    if n > 0 and Fishing.LureUsable(id) then out[#out + 1] = { item = id, count = n } end
+  end
+  return #out > 0 and out or nil
+end
+
+local function Bead(i)
+  if beads[i] then return beads[i] end
+  local b = NewRound("AishCoreFishingLureChoice" .. i, "bead", true)
+  b.secure, b.sideTip, b.grunge = true, true, 2
+  b:RegisterForDrag()   -- grains non deplacables
+  b:RegisterForClicks("AnyUp", "AnyDown")
+  b:SetScript("PostClick", function() C_Timer.After(0, function() Fishing.CloseChain() end) end)
+  -- Fil : du bas du grain du dessus (ou du bouchon) au haut de celui-ci, suit leur flottement
+  if b.CreateLine then
+    b.line = b:CreateLine(nil, "BACKGROUND", nil, -3)
+    b.line:SetThickness(1)
+    b.line:SetColorTexture(1, 0.82, 0.3, 0.45)
+  end
+  -- Appat deja pose sur la canne : un clic le rafraichit
+  b.refresh = b.body:CreateTexture(nil, "OVERLAY")
+  b.refresh:SetTexture(REFRESH_ICON)
+  b.refresh:SetPoint("CENTER")
+  b.refresh:Hide()
+  b.getTip = function(o)
+    local n = ItemName(o.item) or L["FISHING_LURE"]
+    return (o.count and o.count > 1) and (n .. " (" .. o.count .. ")") or n, LureStat(o.item), nil
+  end
+  beads[i] = b
+  return b
+end
+
+function Fishing.OpenChain()
+  if InCombatLockdown() or not (lure and lure.choices and lure:IsShown()) then return end
+  local c = Cfg()
+  local S = c.lureSize or 32
+  local bs = math.floor(S * BEAD_K + 0.5)
+  local rc = c.lureRingColor or { 1, 0.55, 0.15, 0.9 }
+  local top = S * (1 + (lure.grow or 0.6)) / 2 + BEAD_DROP + bs / 2   -- sous le rond principal grossi
+  local list = lure.choices
+  for i, e in ipairs(list) do
+    local b = Bead(i)
+    b.item, b.count = e.item, e.count
+    b:SetAttribute("type", "macro")
+    b:SetAttribute("macrotext", "/use item:" .. e.item .. "\n/use 16")
+    b:SetSize(bs, bs)
+    b:ClearAllPoints()
+    b:SetPoint("CENTER", lure, "CENTER", 0, -(top + (i - 1) * (bs + BEAD_GAP)))
+    b:SetFrameLevel(lure:GetFrameLevel() + 2)
+    b.body:SetSize(bs, bs)
+    b.ring:SetSize(bs + 3, bs + 3)
+    b.ring:SetVertexColor(rc[1], rc[2], rc[3], rc[4] or 0.9)
+    b.tex:SetSize(bs, bs)
+    b.tex:SetTexture(C_Item.GetItemIconByID(e.item) or FISH_ICON)
+    local same = lure.item == e.item
+    b.tex:SetVertexColor(same and 0.55 or 1, same and 0.55 or 1, same and 0.55 or 1)   -- icone assombrie sous la fleche
+    b.refresh:SetSize(bs * 0.62, bs * 0.62)
+    b.refresh:SetShown(same)
+    b.glow:SetSize(bs * 1.9, bs * 1.9)
+    b.step = bs + BEAD_GAP
+    if b.line then
+      b.line:SetStartPoint("BOTTOM", i == 1 and lure.body or beads[i - 1].body, 0, 0)
+      b.line:SetEndPoint("TOP", b.body, 0, 0)
+    end
+    if not chain.open or not b:IsShown() then b.h, b.ga = 0, 0; b:SetAlpha(0) end
+    b:Show()
+  end
+  for i = #list + 1, #beads do beads[i]:Hide() end
+  chain.n = #list
+  if not chain.open then chain.t0 = GetTime() end
+  chain.open, chain.shown, chain.leaveAt = true, true, nil
+  lure.hold = true
+  WakeDriver()
+end
+
+function Fishing.CloseChain(instant)
+  if lure then lure.hold = nil end
+  if not chain.shown then return end
+  if instant then
+    if InCombatLockdown() then
+      for _, b in ipairs(beads) do b:SetAlpha(0) end
+      chain.open = false
+      return
+    end
+    for _, b in ipairs(beads) do b:Hide(); b.hover = nil; HideTip(b) end
+    chain.open, chain.shown = false, false
+    return
+  end
+  if chain.open then chain.open, chain.t0 = false, GetTime() end
+  WakeDriver()
+end
+
+-- Animation (appelee par le driver) : deroulement grain apres grain depuis le rond, fermeture par le bas
+function Fishing.UpdateChain(now, dt)
+  if not chain.shown then return false end
+  if chain.open then
+    local over = lure and lure:IsShown() and lure.hover
+    for _, b in ipairs(beads) do if b:IsShown() and b.hover then over = true end end
+    if over then chain.leaveAt = nil
+    else
+      chain.leaveAt = chain.leaveAt or (now + CHAIN_GRACE)
+      if now >= chain.leaveAt then Fishing.CloseChain() end
+    end
+  end
+  local n, done = chain.n or #beads, true
+  for i, b in ipairs(beads) do
+    if b:IsShown() then
+      local e
+      if chain.open then
+        local u = Clamp((now - chain.t0 - (i - 1) * 0.045) / 0.28)
+        e = u > 0 and EaseBack(u) or 0
+        if u < 1 then done = false end
+      else
+        local u = Clamp((now - chain.t0 - (n - i) * 0.02) / 0.15)
+        e = 1 - EaseIn(u)
+        if u < 1 then done = false end
+      end
+      b.h = (b.h or 0) + ((b.hover and 1 or 0) - (b.h or 0)) * math.min(1, dt * 12)
+      local s = math.max(0.05, (0.4 + 0.6 * e) * (1 + 0.25 * b.h))
+      b.body:SetScale(s)
+      -- Plombs sur la ligne : reprennent la vague du bouchon avec un retard et une ampleur qui decroissent vers le
+      -- bas, plus un leger balancement propre
+      local x, y = 0, 0
+      if lure and lure.float then
+        local wx, wy = BobberWave(lure, now - i * 0.18)
+        local k = 0.6 * 0.85 ^ (i - 1)
+        x = k * wx + 0.9 * math.sin(now * 1.7 + i * 1.3)
+        y = k * wy * 0.7 + 0.6 * math.sin(now * 2.3 + i * 0.9)
+      end
+      b.body:ClearAllPoints()
+      b.body:SetPoint("CENTER", b, "CENTER", x / s, (y + (b.step or 0) * (1 - math.min(1, e))) / s)   -- glisse depuis le grain du dessus
+      local gt = b.hover and 0.75 or 0
+      b.ga = (b.ga or 0) + (gt - (b.ga or 0)) * math.min(1, dt * 10)
+      b.glow:SetAlpha(b.ga)
+      b:SetAlpha(Clamp(e))
+    end
+  end
+  if chain.open then return true end
+  if done and not InCombatLockdown() then
+    for _, b in ipairs(beads) do b:Hide(); b.hover = nil; HideTip(b) end
+    chain.shown = false
+    return false
+  end
+  return true
 end
 
 -- ── Bouton de reequipement ──────────────────────────────────────────────────
@@ -645,6 +891,80 @@ local function DuckRecover()
 end
 Fishing.DuckRecover = DuckRecover
 
+-- ── Raccourci lancer / relever ───────────────────────────────────────────────
+-- Touche choisie dans le GUI (fishing.castKey), liee en priorite (override, hors combat) selon la cible d'interaction
+-- (ciblage doux) : bouchon ou autre cible -> INTERACTTARGET (relever) ; aucune -> bouton securise Peche (lancer).
+-- Rien de lie monte, en vehicule, mort, en combat ou (Forever) sans canne : la touche garde son action habituelle.
+local CAST_SPELL = ns.IsForever and 7620 or 131474
+local CAST_BTN = "AishCoreFishingCastButton"
+local RANGE_CVAR, RANGE_FISH = "SoftTargetInteractRange", 30
+local castBtn, castState, softChecked
+local GetCV = (C_CVar and C_CVar.GetCVar) or GetCVar
+local SetCV = (C_CVar and C_CVar.SetCVar) or SetCVar
+
+local function CastKey()
+  local c = Cfg()
+  local k = c.castKeyEnabled and c.castKey
+  return (type(k) == "string" and k ~= "") and k or nil
+end
+
+local function CastReady()
+  if IsMounted() or (UnitInVehicle and UnitInVehicle("player")) or UnitIsDeadOrGhost("player") then return false end
+  return not ns.IsForever or Fishing.PoleEquipped()
+end
+
+-- Ciblage doux de l'interaction (CVar SoftTargetInteract : 2 clavier-souris, 3 toujours) : requis pour viser le bouchon
+local function EnsureSoftInteract()
+  if softChecked then return end
+  softChecked = true
+  local v = tonumber(GetCV("SoftTargetInteract"))
+  if v and v ~= 2 and v ~= 3 then pcall(SetCV, "SoftTargetInteract", "3") end
+end
+
+-- off : entree en combat (PLAYER_REGEN_DISABLED, encore permis) -> liaison retiree
+function Fishing.UpdateCastKey(off)
+  if InCombatLockdown() then return end
+  local key = not off and CastKey()
+  local want
+  if key then
+    EnsureSoftInteract()
+    if CastReady() then want = (UnitGUID and UnitGUID("softinteract") ~= nil) and "interact" or "cast" end
+  end
+  local sig = want and (want .. key) or nil
+  if sig == castState then return end
+  if not castBtn then
+    if not want then return end
+    castBtn = CreateFrame("Button", CAST_BTN, UIParent, "SecureActionButtonTemplate")
+    castBtn:RegisterForClicks("AnyUp", "AnyDown")
+    castBtn:SetAttribute("type", "spell")
+  end
+  castState = sig
+  ClearOverrideBindings(castBtn)
+  if want == "interact" then
+    SetOverrideBinding(castBtn, true, key, "INTERACTTARGET")
+  elseif want == "cast" then
+    castBtn:SetAttribute("spell", C_Spell.GetSpellName(CAST_SPELL) or CAST_SPELL)   -- par nom : rang le plus haut (Forever)
+    SetOverrideBindingClick(castBtn, true, key, CAST_BTN)
+  end
+end
+
+-- Portee du ciblage doux elargie le temps de la peche (bouchon lointain), rendue a l'arret ; restauree au chargement
+-- si l'interface a ete rechargee canne lancee (AishaddonDB._fishing.interactRange)
+local function RangeUp()
+  if not CastKey() then return end
+  local cur = tonumber(GetCV(RANGE_CVAR))
+  if not cur or cur >= RANGE_FISH then return end
+  local s = Store()
+  if not s.interactRange then s.interactRange = cur end
+  pcall(SetCV, RANGE_CVAR, tostring(RANGE_FISH))
+end
+local function RangeDown()
+  local s = Store()
+  if not s.interactRange then return end
+  pcall(SetCV, RANGE_CVAR, tostring(s.interactRange))
+  s.interactRange = nil
+end
+
 -- ── Reglages, apercu ─────────────────────────────────────────────────────────
 
 function Fishing.SetPreview(on)
@@ -668,6 +988,7 @@ function Fishing.ApplySettings()
   end
   Fishing.RefreshLure()
   Fishing.RefreshSwap(IsPlayerMoving and IsPlayerMoving() or nil)
+  Fishing.UpdateCastKey()
   -- Option coupee en pleine peche : volumes rendus en fondu
   if not Cfg().duckEnabled and Store().duck and not (duck.stopAt or (duck.from and duck.restore)) then
     DuckTo(1, Cfg().duckFade or 4)
@@ -680,19 +1001,35 @@ ev:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 ev:RegisterEvent("PLAYER_STARTED_MOVING")
 ev:RegisterEvent("PLAYER_STOPPED_MOVING")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+ev:RegisterEvent("PLAYER_REGEN_DISABLED")
+ev:RegisterEvent("BAG_UPDATE_DELAYED")
 ev:RegisterUnitEvent("UNIT_INVENTORY_CHANGED", "player")
 ev:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
 ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
+-- Raccourci lancer / relever (evenements absents d'un client : ignores)
+local CAST_EVENTS = { PLAYER_SOFT_INTERACT_CHANGED = true, PLAYER_MOUNT_DISPLAY_CHANGED = true, PLAYER_DEAD = true,
+                      PLAYER_ALIVE = true, PLAYER_UNGHOST = true }
+for e in pairs(CAST_EVENTS) do pcall(ev.RegisterEvent, ev, e) end
+pcall(ev.RegisterUnitEvent, ev, "UNIT_ENTERED_VEHICLE", "player")
+pcall(ev.RegisterUnitEvent, ev, "UNIT_EXITED_VEHICLE", "player")
+CAST_EVENTS.UNIT_ENTERED_VEHICLE, CAST_EVENTS.UNIT_EXITED_VEHICLE = true, true
 ev:SetScript("OnEvent", function(_, event, a1, _, a3)
+  -- Raccourci lancer / relever : tous les clients
+  if CAST_EVENTS[event] then Fishing.UpdateCastKey(); return end
+  if event == "PLAYER_REGEN_DISABLED" then Fishing.UpdateCastKey(true)
+  elseif event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_LOGIN"
+    or (event == "PLAYER_EQUIPMENT_CHANGED" and a1 == 16) then
+    C_Timer.After(0, function() Fishing.UpdateCastKey() end)
+  end
   -- Son baisse pendant la peche : tous les clients
   if event == "UNIT_SPELLCAST_CHANNEL_START" or event == "UNIT_SPELLCAST_CHANNEL_STOP" then
     if IsFishingSpell(a3) then
-      if event == "UNIT_SPELLCAST_CHANNEL_START" then DuckStart() else DuckStop() end
+      if event == "UNIT_SPELLCAST_CHANNEL_START" then DuckStart(); RangeUp() else DuckStop(); RangeDown() end
     end
     return
   end
-  if event == "PLAYER_LOGIN" then DuckRecover() end
+  if event == "PLAYER_LOGIN" then DuckRecover(); RangeDown() end
   if not ns.IsForever then return end
   if event == "PLAYER_LOGIN" then
     Snapshot()
@@ -714,5 +1051,10 @@ ev:SetScript("OnEvent", function(_, event, a1, _, a3)
     Fishing.RefreshSwap(false)
   elseif event == "PLAYER_REGEN_ENABLED" then
     Fishing.RefreshSwap(IsPlayerMoving and IsPlayerMoving() or nil)
+    if not (lure and lure.hold) then Fishing.CloseChain(true) end   -- grains masques en combat (alpha 0)
+  elseif event == "PLAYER_REGEN_DISABLED" then
+    Fishing.CloseChain(true)   -- encore permis a cet instant : pas de grains cliquables en combat
+  elseif event == "BAG_UPDATE_DELAYED" then
+    Fishing.RefreshLure()
   end
 end)

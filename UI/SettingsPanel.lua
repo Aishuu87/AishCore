@@ -4324,6 +4324,14 @@ local MODEL_TAGS = {
 -- Nombre de tags built-in (figé au moment de la déclaration, avant les user-defined)
 local MODEL_TAGS_BUILTIN_COUNT = #MODEL_TAGS
 
+-- Tag cree par le joueur (bouton "+ Nouveau tag") : affiche dans la colonne meme sans contenu
+local function IsUserTag(label)
+  local ut = ns.DB and ns.DB.modelTagUserDefined
+  if not ut then return false end
+  for _, t in ipairs(ut) do if t.label == label then return true end end
+  return false
+end
+
 -- ExposE pour pouvoir Etre patchE depuis SavedVariables
 ns.ModelTags = MODEL_TAGS
 
@@ -4372,6 +4380,15 @@ StaticPopupDialogs["AISD_CONFIRM_DELETE_TAG"] = {
   button1 = L["SETTINGS_CONFIRM"], button2 = L["SETTINGS_CANCEL"],
   OnAccept = function(self, data)
     if data and data.callback then data.callback() end
+  end,
+  -- Popups Blizzard en DIALOG, sous le model picker (FULLSCREEN_DIALOG) : au-dessus de tout le temps de l'affichage
+  OnShow = function(self)
+    if not self._aishStrata then self._aishStrata = self:GetFrameStrata() end
+    self:SetFrameStrata("TOOLTIP")
+    self:Raise()
+  end,
+  OnHide = function(self)
+    if self._aishStrata then self:SetFrameStrata(self._aishStrata); self._aishStrata = nil end
   end,
   timeout = 0, whileDead = true, hideOnEscape = true,
 }
@@ -4711,7 +4728,7 @@ local function EnsureModelPicker()
 
   local tagScrollFrame = CreateFrame("ScrollFrame", nil, tagFrame, "UIPanelScrollFrameTemplate")
   tagScrollFrame:SetPoint("TOPLEFT", tagTitle, "BOTTOMLEFT", 0, -2)
-  tagScrollFrame:SetPoint("BOTTOMRIGHT", tagFrame, "BOTTOMRIGHT", -14, 56)
+  tagScrollFrame:SetPoint("BOTTOMRIGHT", tagFrame, "BOTTOMRIGHT", -14, 30)
   local tagSC = CreateFrame("Frame", nil, tagScrollFrame)
   tagSC:SetWidth(TAG_W - 14)
   tagSC:SetHeight(1)
@@ -4729,7 +4746,6 @@ local function EnsureModelPicker()
   local tagBtnPool = {}
   local tagButtons  = {}
   f._activeTag  = nil   -- label du tag actif ou nil
-  f._deleteMode = false -- mode "choisir un tag E supprimer"
 
   -- RebuildTagSidebar : recrée/reconfigure tous les boutons depuis MODEL_TAGS
   function f:RebuildTagSidebar()
@@ -4753,10 +4769,31 @@ local function EnsureModelPicker()
         local lbl = btn:CreateFontString(nil, "OVERLAY")
         lbl:SetFont(ns.Media.fontGui, 10)
         lbl:SetPoint("LEFT", colorDot, "RIGHT", 4, 0)
-        lbl:SetPoint("RIGHT", btn, "RIGHT", -2, 0)
+        lbl:SetPoint("RIGHT", btn, "RIGHT", -16, 0)
         lbl:SetJustifyH("LEFT")
         btn._lbl = lbl
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        -- Croix de suppression, visible au survol de la ligne
+        local del = CreateFrame("Button", nil, btn)
+        del:SetSize(14, 14)
+        del:SetPoint("RIGHT", btn, "RIGHT", -1, 0)
+        local delLbl = del:CreateFontString(nil, "OVERLAY")
+        delLbl:SetFont(ns.Media.fontGui, 11, "OUTLINE"); delLbl:SetPoint("CENTER")
+        delLbl:SetText("X"); delLbl:SetTextColor(0.75, 0.25, 0.25)
+        del:SetScript("OnEnter", function(s)
+          delLbl:SetTextColor(1, 0.45, 0.45)
+          GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+          GameTooltip:SetText(L["SETTINGS_DELETE"])
+          GameTooltip:Show()
+        end)
+        del:SetScript("OnLeave", function(s)
+          delLbl:SetTextColor(0.75, 0.25, 0.25)
+          GameTooltip:Hide()
+          if not btn:IsMouseOver() then s:Hide() end
+        end)
+        del:SetScript("OnClick", function() if btn._tag then f:ConfirmDeleteTag(btn._tag) end end)
+        del:Hide()
+        btn._del = del
         tagBtnPool[idx] = btn
       end
 
@@ -4767,8 +4804,8 @@ local function EnsureModelPicker()
           if _entries[tag.label] then _hasContent = true; break end
         end
       end
-      if not _hasContent then
-        -- pas de contenu : ne pas afficher, passer au suivant
+      if not _hasContent and not IsUserTag(tag.label) then
+        -- tag d'origine sans contenu : ne pas afficher (un tag cree par le joueur reste visible, estompe)
       else
       visIdx = visIdx + 1
       btn:ClearAllPoints()
@@ -4782,52 +4819,15 @@ local function EnsureModelPicker()
         if f._activeTag ~= tag.label then
           s._bg:SetColorTexture(tag.color[1], tag.color[2], tag.color[3], 0.15)
         end
-        if f._deleteMode then
-          s._lbl:SetTextColor(1, 0.3, 0.3)
-        end
+        s._del:Show()
       end)
       btn:SetScript("OnLeave", function(s)
         if f._activeTag ~= tag.label then
           s._bg:SetColorTexture(0, 0, 0, 0)
         end
-        if f._deleteMode then
-          s._lbl:SetTextColor(tag.color[1] * 0.5, tag.color[2] * 0.5, tag.color[3] * 0.5, 0.5)
-        end
+        if not s._del:IsMouseOver() then s._del:Hide() end
       end)
       btn:SetScript("OnClick", function(s, button)
-        -- Mode suppression : clic gauche ? demande confirmation
-        if f._deleteMode and button == "LeftButton" then
-          local delTag = tag
-          StaticPopup_Show("AISD_CONFIRM_DELETE_TAG", tag.label, nil, {
-            callback = function()
-              for i, t in ipairs(MODEL_TAGS) do
-                if t == delTag then table.remove(MODEL_TAGS, i); break end
-              end
-              if ns.DB then
-                if ns.DB.modelTagKeywords   then ns.DB.modelTagKeywords[delTag.label]   = nil end
-                if ns.DB.modelTagColors     then ns.DB.modelTagColors[delTag.label]     = nil end
-                if ns.DB.modelTagUserDefined then
-                  for i, ut in ipairs(ns.DB.modelTagUserDefined) do
-                    if ut.label == delTag.label then table.remove(ns.DB.modelTagUserDefined, i); break end
-                  end
-                end
-              end
-              if f._activeTag == delTag.label then
-                f._activeTag = nil; f._activeTagKeywords = nil
-                if f._searchBox then f._searchBox:SetText(""); f:FilterModels("") end
-              end
-              f._deleteMode = false
-              if f._delBtnLbl then
-                f._delBtnBg:SetColorTexture(0.18, 0.04, 0.04, 1)
-                f._delBtnLbl:SetText(L["SETTINGS_DELETE"])
-                f._delBtnLbl:SetTextColor(1, 0.35, 0.35)
-              end
-              f:RebuildTagSidebar()
-              if kwEditor and kwEditor:IsShown() and kwEditor._tag == delTag then kwEditor:Hide() end
-            end
-          })
-          return
-        end
         if button == "RightButton" then
           f:OpenKeywordEditor(tag, s)
           return
@@ -4866,7 +4866,7 @@ local function EnsureModelPicker()
   -- Bouton "+ Nouveau tag"
   local newTagBtn = CreateFrame("Button", nil, tagFrame)
   newTagBtn:SetSize(TAG_W - 16, 22)
-  newTagBtn:SetPoint("BOTTOMLEFT", tagFrame, "BOTTOMLEFT", 2, 30)
+  newTagBtn:SetPoint("BOTTOMLEFT", tagFrame, "BOTTOMLEFT", 2, 4)
   local newTagBtnBg = newTagBtn:CreateTexture(nil, "BACKGROUND")
   newTagBtnBg:SetAllPoints(); newTagBtnBg:SetColorTexture(0.06, 0.16, 0.06, 1)
   local newTagBtnLbl = newTagBtn:CreateFontString(nil, "OVERLAY")
@@ -4878,7 +4878,10 @@ local function EnsureModelPicker()
   newTagBtn:SetScript("OnLeave", function()
     newTagBtnBg:SetColorTexture(0.06, 0.16, 0.06, 1); newTagBtnLbl:SetTextColor(0.35, 0.85, 0.35)
   end)
-  newTagBtn:SetScript("OnClick", function()
+  newTagBtn:SetScript("OnClick", function() f:CreateNewTag() end)
+
+  -- Cree un tag joueur, l'affecte au modele fid s'il est fourni, puis ouvre son editeur (renommage, couleur)
+  function f:CreateNewTag(fid)
     local n, existingLabels = 1, {}
     for _, t in ipairs(MODEL_TAGS) do existingLabels[t.label] = true end
     while existingLabels[string.format(L["SETTINGS_NEW_TAG_DEFAULT_NAME"], n)] do n = n + 1 end
@@ -4887,53 +4890,20 @@ local function EnsureModelPicker()
     if not ns.DB then ns.DB = {} end
     if not ns.DB.modelTagUserDefined then ns.DB.modelTagUserDefined = {} end
     ns.DB.modelTagUserDefined[#ns.DB.modelTagUserDefined + 1] = { label = newTag.label, color = newTag.color }
-    f:RebuildTagSidebar()
-    -- Un-dim le nouveau tag (pas encore de keywords, mais on vient de le créer)
+    if fid then AddCustomTag(fid, newTag.label) end
+    self:RebuildTagSidebar()
     for _, btn in ipairs(tagButtons) do
       if btn._tag == newTag then
+        -- Un-dim : pas encore de contenu, mais on vient de le creer
         btn._lbl:SetTextColor(newTag.color[1], newTag.color[2], newTag.color[3], 1)
         btn._dot:SetAlpha(1)
+        tagScrollFrame:SetVerticalScroll(tagScrollFrame:GetVerticalScrollRange())
+        self:OpenKeywordEditor(newTag, btn)
         break
       end
     end
-    local lastBtn = tagButtons[#tagButtons]
-    if lastBtn then f:OpenKeywordEditor(newTag, lastBtn) end
-  end)
-
-  -- Bouton "Supprimer" (rouge E mode suppression)
-  local delBtn = CreateFrame("Button", nil, tagFrame)
-  delBtn:SetSize(TAG_W - 16, 22)
-  delBtn:SetPoint("BOTTOMLEFT", tagFrame, "BOTTOMLEFT", 2, 4)
-  local delBtnBg = delBtn:CreateTexture(nil, "BACKGROUND")
-  delBtnBg:SetAllPoints(); delBtnBg:SetColorTexture(0.18, 0.04, 0.04, 1)
-  local delBtnLbl = delBtn:CreateFontString(nil, "OVERLAY")
-  delBtnLbl:SetFont(ns.Media.fontGui, 10); delBtnLbl:SetPoint("CENTER")
-  delBtnLbl:SetText(L["SETTINGS_DELETE"]); delBtnLbl:SetTextColor(1, 0.35, 0.35)
-  f._delBtnBg  = delBtnBg
-  f._delBtnLbl = delBtnLbl
-  delBtn:SetScript("OnEnter", function()
-    delBtnBg:SetColorTexture(0.30, 0.06, 0.06, 1); delBtnLbl:SetTextColor(1, 0.6, 0.6)
-  end)
-  delBtn:SetScript("OnLeave", function()
-    if f._deleteMode then
-      delBtnBg:SetColorTexture(0.40, 0.08, 0.08, 1)
-    else
-      delBtnBg:SetColorTexture(0.18, 0.04, 0.04, 1)
-    end
-    delBtnLbl:SetTextColor(1, 0.35, 0.35)
-  end)
-  delBtn:SetScript("OnClick", function()
-    f._deleteMode = not f._deleteMode
-    if f._deleteMode then
-      delBtnBg:SetColorTexture(0.40, 0.08, 0.08, 1)
-      delBtnLbl:SetText(L["SETTINGS_CANCEL_BACK"])
-    else
-      delBtnBg:SetColorTexture(0.18, 0.04, 0.04, 1)
-      delBtnLbl:SetText(L["SETTINGS_DELETE"])
-      -- Réinitialiser le dimming qui peut être rouge en mode suppression
-      f:RebuildTagSidebar()
-    end
-  end)
+    return newTag
+  end
 
   -- Rafraîchir le dimming des tags : un tag est "actif" s'il a des keywords OU des custom tags
   function f:RefreshTagDimming()
@@ -5162,11 +5132,12 @@ local function EnsureModelPicker()
     for _, mt in ipairs(matched) do matchedSet[mt.label] = true end
 
     local n = #MODEL_TAGS
-    -- Masquer les lignes du pool au-delE du nombre actuel de tags
-    for ci = n + 1, #ctxMenu._rows do ctxMenu._rows[ci]:Hide() end
-    ctxMenu:SetSize(CTX_W, 8 + n * CTX_ROW_H)
+    -- Masquer les lignes du pool au-dela des tags + la ligne "+ Nouveau tag"
+    for ci = n + 2, #ctxMenu._rows do ctxMenu._rows[ci]:Hide() end
+    ctxMenu:SetSize(CTX_W, 8 + (n + 1) * CTX_ROW_H)
     for ci, tag in ipairs(MODEL_TAGS) do
       local cr        = GetCtxRow(ci)
+      cr:Show()
       local hasCustom = HasCustomTag(fid, tag.label)
       local isMatched = matchedSet[tag.label] or false
       local c         = tag.color
@@ -5198,6 +5169,20 @@ local function EnsureModelPicker()
         f:ShowTagContextMenu(row)
       end)
     end
+    -- Derniere ligne : cree un tag, deja affecte a ce modele
+    local nr = GetCtxRow(n + 1)
+    nr:Show()
+    nr._isMatched = false
+    nr._dot:SetColorTexture(0, 0, 0, 0)
+    nr._check:SetText("")
+    nr._bg:SetColorTexture(0, 0, 0, 0)
+    nr._lbl:SetText(L["SETTINGS_NEW_TAG_BTN"])
+    nr._lbl:SetTextColor(0.35, 0.85, 0.35)
+    nr:SetScript("OnClick", function()
+      ctxMenu:Hide()
+      f:CreateNewTag(fid)
+      f:UpdateRowTagIndicators(row)
+    end)
     ctxMenu:ClearAllPoints()
     local cx, cy = GetCursorPosition()
     local scale = UIParent:GetEffectiveScale()
@@ -5528,6 +5513,37 @@ local function EnsureModelPicker()
   end
   kwInput:SetScript("OnEnterPressed", function(s) s:ClearFocus(); CommitKw() end)
   kwAddBtn:SetScript("OnClick", CommitKw)
+
+  -- Suppression d'un tag (croix au survol de la sidebar), apres confirmation
+  function f:ConfirmDeleteTag(delTag)
+    StaticPopup_Show("AISD_CONFIRM_DELETE_TAG", delTag.label, nil, {
+      callback = function()
+        for i, t in ipairs(MODEL_TAGS) do
+          if t == delTag then table.remove(MODEL_TAGS, i); break end
+        end
+        if ns.DB then
+          if ns.DB.modelTagKeywords then ns.DB.modelTagKeywords[delTag.label] = nil end
+          if ns.DB.modelTagColors   then ns.DB.modelTagColors[delTag.label]   = nil end
+          if ns.DB.modelTagUserDefined then
+            for i, ut in ipairs(ns.DB.modelTagUserDefined) do
+              if ut.label == delTag.label then table.remove(ns.DB.modelTagUserDefined, i); break end
+            end
+          end
+          -- Affectations aux modeles : sinon un tag recree sous ce nom les retrouverait
+          for _, entries in pairs(GetCustomTags()) do entries[delTag.label] = nil end
+        end
+        if f._activeTag == delTag.label then
+          f._activeTag = nil; f._activeTagKeywords = nil
+          if f._searchBox then f._searchBox:SetText(""); f:FilterModels("") end
+        end
+        if kwEditor:IsShown() and kwEditor._tag == delTag then kwEditor:Hide() end
+        f:RebuildTagSidebar()
+        for _, r in ipairs(f._rows or {}) do
+          if r:IsShown() then f:UpdateRowTagIndicators(r) end
+        end
+      end
+    })
+  end
 
   function f:OpenKeywordEditor(tag, anchorBtn)
     kwEditor._tag = tag
@@ -14627,6 +14643,70 @@ function Build.Fishing(container)
     or SW.CreateCheckbox(container, L["SETTINGS_COMFORT_FISH_CTRL"], L["SETTINGS_COMFORT_FISH_CTRL_TT"], W)
   ctx:Add(cbFish)
   BindCheckbox(cbFish, "comfort", "doubleClickFish")
+
+  -- Raccourci lancer / relever : clic sur le bouton puis touche (modificateurs admis) ; Echap annule, clic droit efface
+  do
+    local S2 = math.floor((W - 8) / 2)
+    local cbKey = SW.CreateCheckbox(container, L["SETTINGS_FISHING_KEY"], L["SETTINGS_FISHING_KEY_TT"], S2)
+    BindCheckbox(cbKey, "fishing", "castKeyEnabled")
+    local btn = SW.CreateActionBtn(container, "", S2)
+    local MODS = { LSHIFT = true, RSHIFT = true, LCTRL = true, RCTRL = true, LALT = true, RALT = true,
+                   LMETA = true, RMETA = true }
+    local MOUSE = { MiddleButton = "BUTTON3", Button4 = "BUTTON4", Button5 = "BUTTON5" }
+    local capturing = false
+    local function Label()
+      if capturing then btn._lbl:SetText(L["SETTINGS_FISHING_KEY_PRESS"]); return end
+      local k = DBGet("fishing", "castKey")
+      if type(k) == "string" and k ~= "" then
+        btn._lbl:SetText(GetBindingText and GetBindingText(k) or k)
+      else
+        btn._lbl:SetText(L["SETTINGS_FISHING_KEY_NONE"])
+      end
+    end
+    local function Stop()
+      capturing = false
+      if not InCombatLockdown() then btn:EnableKeyboard(false) end
+      Label()
+    end
+    local function Set(k)
+      DBSet("fishing", "castKey", k)
+      LiveApply("fishing")
+      Stop()
+      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    end
+    local function Mods()
+      return (IsAltKeyDown() and "ALT-" or "") .. (IsControlKeyDown() and "CTRL-" or "")
+        .. (IsShiftKeyDown() and "SHIFT-" or "") .. ((IsMetaKeyDown and IsMetaKeyDown()) and "META-" or "")
+    end
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp", "Button4Up", "Button5Up")
+    btn:SetScript("OnClick", function(self, button)
+      if capturing then
+        if MOUSE[button] then Set(Mods() .. MOUSE[button]) else Stop() end
+      elseif button == "RightButton" then
+        Set(nil)
+      elseif button == "LeftButton" and not InCombatLockdown() then
+        capturing = true
+        self:EnableKeyboard(true)
+        self:SetPropagateKeyboardInput(false)
+        Label()
+      end
+    end)
+    btn:SetScript("OnKeyDown", function(_, key)
+      if MODS[key] then return end
+      if key == "ESCAPE" then Stop() else Set(Mods() .. key) end
+    end)
+    btn:SetScript("OnHide", function() if capturing then Stop() end end)
+    btn:HookScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
+      GameTooltip:SetText(L["SETTINGS_FISHING_KEY"], 1, 1, 1)
+      GameTooltip:AddLine(L["SETTINGS_FISHING_KEY_BTN_TT"], unpack(Theme.textNormal))
+      GameTooltip:Show()
+    end)
+    btn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    Label()
+    ctx:AddRow(8, cbKey, btn)
+    ctx:Depends(cbKey, { btn })
+  end
 
   -- Son d'ambiance et musique baisses canne lancee (tous les clients)
   do
