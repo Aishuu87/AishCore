@@ -1,5 +1,32 @@
 # AishCore
 
+## [v4.7.6](https://github.com/Aishuu87/AishCore/tree/v4.7.6) (2026-11-22)
+
+### Well Fed Circle
+- When the player eats and drinks at the same time, a second small circle shows the drink's duration
+
+### Unit Frames
+- The Glow now also shows on the player's and pet's Out-of-Combat Health Circles
+
+### Camping HUD
+- ♾️FIX: Sleeping Bag detection is now much more reliable (Blizzard added a "buff" for this specific condition)
+
+### Tracked Auras
+- ♾️Shaman: Added support for Strength of Earth Totem (Rank 4)
+- A new technique finally shows whether the player is in range of their totems, **in combat** too. In instances, the distance to your totems still cannot always be known.
+- ♾️Hunter: Added tracking for Summon Hawk (treated as a Totem)
+- ♾️Warlock: Demonic Brand is now treated as a debuff, and its tracking should work properly
+- ♾️Mage: Arcane Blast is now treated as a debuff, and its tracking should work properly
+
+### Missing buffs
+- Right-clicking to hide an alert now only hides the first alert, the next ones show one after another
+- Water Breathing and Swim Speed elixirs are now only suggested while the player is swimming
+- Cat's Eye elixirs (stealth detection) are no longer suggested as regular elixirs
+
+### QoL
+- Added sliders for the Graphics rendering options
+- Added the Distant terrain, Distant buildings, Horizon distance, Shadow resolution, Water ripples and Sun shafts options
+
 ## [v4.7.5](https://github.com/Aishuu87/AishCore/tree/v4.7.5) (2026-11-18)
 
 ### Unit Frames

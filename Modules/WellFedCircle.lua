@@ -1,6 +1,7 @@
 -- Modules/WellFedCircle.lua : Cercle Bien Nourri
 -- Visible uniquement pendant qu'on mange : le cercle se vide sur la duree du repas (lue sur l'aura, ~20 s), puis change de couleur
 -- a l'obtention du buff "Bien nourri" (un "+" avec l'icone monte alors en pulsant).
+-- Nourriture + boisson en meme temps : un petit cercle (en bas a droite) suit la boisson, le principal la nourriture.
 -- Animations 3D : SpellEffects.SetWellFedState("eating" | "fed" | nil), ancre AishCoreWellFedRing.
 
 local addonName, ns = ...
@@ -368,8 +369,78 @@ local function SetState(newState)
   end
 end
 
+-- ============================================================
+-- Petit cercle de boisson : on mange ET on boit en meme temps. Le cercle principal suit la nourriture, le petit
+-- (meme construction, enfant du principal : suit son fondu et sa position) suit la duree de la boisson.
+-- ============================================================
+local drinkBar = nil
+local DRINK_RATIO = 0.5
+local drinkInst, drinkStart, drinkDur, drinkExp, drinkIcon = nil, 0, nil, nil, nil
+local lastDrinkID, lastDrinkAt = nil, 0   -- objet de boisson (infobulle : mana sans vie), suivi a part de la nourriture
+
+-- Fonction de rendu (qui travaille sur "bar") appliquee au petit cercle
+local function OnDrink(fn, ...)
+  local real = bar
+  bar = drinkBar
+  local ok, err = pcall(fn, ...)
+  bar = real
+  if not ok then geterrorhandler()(err) end
+end
+
+local function DrinkIcon()
+  if not drinkBar then return end
+  local cfg = Cfg()
+  if cfg.showFoodIcon then
+    local px = (cfg.size or 28) * DRINK_RATIO * (cfg.foodIconScale or 0.6)
+    drinkBar.foodTex:SetSize(px, px)
+    drinkBar.foodTex:SetTexture(drinkIcon or FALLBACK_ICON)
+    drinkBar.foodFrame:Show()
+  else
+    drinkBar.foodFrame:Hide()
+  end
+end
+
+local function DrinkTick()
+  if not (drinkBar and drinkBar:IsShown()) then return end
+  local p
+  if drinkExp then p = (drinkExp - GetTime()) / drinkDur
+  else p = 1 - (GetTime() - drinkStart) / EAT_TOTAL end
+  p = math.max(0, math.min(1, p)) * 100
+  for _, a in ipairs({ drinkBar.arc, drinkBar.arc2, drinkBar.arcV }) do pcall(a.SetValue, a, p) end
+end
+
+-- a : aura de boisson (ou nil = pas de petit cercle)
+local function UpdateDrink(a)
+  if not drinkBar then return end
+  if not (a and state and not previewMode) then
+    drinkInst = nil
+    drinkBar:Hide()
+    return
+  end
+  local issecret = issecretvalue
+  if a.auraInstanceID ~= drinkInst then
+    drinkInst, drinkStart = a.auraInstanceID, GetTime()
+    -- Icone de l'objet bu s'il vient d'etre repere, sinon celle de l'aura
+    drinkIcon = (lastDrinkID and GetTime() - lastDrinkAt < 4 and C_Item and C_Item.GetItemIconByID
+      and C_Item.GetItemIconByID(lastDrinkID)) or a.icon
+  end
+  local d, e = a.duration, a.expirationTime
+  if type(d) == "number" and type(e) == "number" and not (issecret and (issecret(d) or issecret(e))) and d > 0 then
+    drinkDur, drinkExp = d, e
+  else
+    drinkDur, drinkExp = nil, nil
+  end
+  OnDrink(ApplyColor, Cfg().eatingColor)
+  DrinkIcon()
+  if not drinkBar:IsShown() then
+    drinkBar:Show()
+    DrinkTick()
+  end
+end
+
 -- Avancement du cercle pendant le repas + fondu de sortie (OnUpdate leger, uniquement tant que le cercle est affiche)
 local function OnBarUpdate(self, dt)
+  DrinkTick()
   if introT then
     introT = introT + dt
     local u = math.min(1, introT / INTRO)
@@ -420,11 +491,23 @@ local lastItemID, lastItemAt = nil, 0
 local eligibleCache = {}
 local skipEat = false
 
+local sessionDrinkOnly = false            -- le cercle principal suit une boisson seule
+
 local lateItem   -- defini plus bas : traite un objet repere APRES le debut du repas
+local ItemFoodInfo, lateDrink
 
 local function NoteItem(id)
   id = tonumber(id)
-  if id then
+  if not id then return end
+  local info = ItemFoodInfo and ItemFoodInfo(id)
+  if info and info.drink then
+    lastDrinkID, lastDrinkAt = id, GetTime()
+    if sessionDrinkOnly then
+      if lateItem then lateItem(id) end
+    elseif lateDrink then
+      lateDrink(id)
+    end
+  else
     lastItemID, lastItemAt = id, GetTime()
     if lateItem then lateItem(id) end
   end
@@ -491,7 +574,7 @@ do
       if not ok then return end
       if event ~= "PLAYER_ENTERING_WORLD" then
         for id, n in pairs(snap) do
-          if (now[id] or 0) < n then NoteItem(id); break end
+          if (now[id] or 0) < n then NoteItem(id) end   -- nourriture ET boisson prises ensemble : les deux comptent
         end
       end
       snap = now
@@ -587,7 +670,7 @@ local function AuraStats(inst)
 end
 
 -- { fed = bool, total = secondes|nil, delay = secondes|nil, stats = texte|nil } ou nil (inconnu)
-local function ItemFoodInfo(itemID)
+ItemFoodInfo = function(itemID)
   local cached = eligibleCache[itemID]
   if cached ~= nil then return cached end
   if not (C_TooltipInfo and C_TooltipInfo.GetItemByID) then return nil end
@@ -595,10 +678,12 @@ local function ItemFoodInfo(itemID)
   if not ok or not data or not data.lines then return nil end
   if not next(fedNames) then FillNames(FED_IDS, fedNames) end
   local found, total, delay, fedText, fedLine = false, nil, nil, "", nil
-  for _, line in ipairs(data.lines) do
+  local body = ""   -- texte de l'infobulle sans le nom de l'objet (boisson : mana sans vie)
+  for li, line in ipairs(data.lines) do
     local text = line.leftText
     if type(text) == "string" and not (issecretvalue and issecretvalue(text)) then
       text = NormSpaces(text:lower())
+      if li > 1 then body = body .. " " .. text end
       local isFedLine, fedPos = false, nil
       for _, w in ipairs(FED_WORDS) do
         local fp = text:find(w, 1, true)
@@ -634,9 +719,24 @@ local function ItemFoodInfo(itemID)
       end
     end
   end
-  local info = { fed = found, total = total, delay = delay, stats = found and ParseStats(fedText) or nil, line = fedLine }
+  local function Has(words)
+    for _, w in ipairs(words) do
+      if type(w) == "string" and w ~= "" and body:find(w:lower(), 1, true) then return true end
+    end
+    return false
+  end
+  local isDrink = Has({ _G.MANA, "mana" }) and not Has({ _G.HEALTH, "health", "points de vie" })
+  local info = { fed = found, total = total, delay = delay, stats = found and ParseStats(fedText) or nil, line = fedLine,
+                 drink = isDrink }
   eligibleCache[itemID] = info
   return info
+end
+
+-- Boisson reperee apres le debut de son aura (baisse du stock en sac) : son icone dans le petit cercle
+lateDrink = function(id)
+  if not (drinkInst and GetTime() - drinkStart <= 4) then return end
+  local icon = C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(id)
+  if icon then drinkIcon = icon; DrinkIcon() end
 end
 
 -- Objet repere apres le debut du repas (baisse du stock en sac, plus lente que l'aura) : icone, et nourriture sans buff
@@ -696,7 +796,7 @@ local function Scan()
         fedExp = tonumber(a.expirationTime) or 0
         fedInst = inst
         fedNameSeen = tostring(name) .. " #" .. tostring(sid)
-      elseif withDrinks and not drink and (DRINK_IDS[sid] or (name and drinkNames[name])) then
+      elseif not drink and (DRINK_IDS[sid] or (name and drinkNames[name])) then
         drink = a
       elseif inst then
         fresh[inst] = true
@@ -707,7 +807,8 @@ local function Scan()
   knownAuras = fresh
   -- Boisson seule : traitee comme un repas (drinkOnly = jamais "Bien nourri" sauf objet qui l'annonce)
   local drinkOnly = false
-  if not eating and drink then
+  local sideDrink = eating and drink or nil   -- on mange ET on boit : la boisson va dans le petit cercle
+  if not eating and drink and withDrinks then
     eating, drinkOnly = true, true
     eatNameSeen = tostring(drink.name) .. " #" .. tostring(drink.spellId)
     eatIcon, eatInst = drink.icon, drink.auraInstanceID
@@ -716,7 +817,7 @@ local function Scan()
       eatDur, eatExp = d, e
     end
   end
-  return eating, fed, icon, newBuffIcon, fedExp, eatDur, eatExp, eatIcon, fedInst, eatInst, drinkOnly
+  return eating, fed, icon, newBuffIcon, fedExp, eatDur, eatExp, eatIcon, fedInst, eatInst, drinkOnly, sideDrink
 end
 
 -- Pour les Buffs manquants (sans effet de bord sur le suivi du repas) : buff "Bien nourri" actif ? en train de manger ?
@@ -763,10 +864,11 @@ function WellFedCircle.Refresh(updateInfo)
     if state then SetState(nil) end
     return
   end
-  local eating, fed, icon, newBuffIcon, fedExp, eatDur, eatExp, eatIcon, fedInst, eatInst, drinkOnly = Scan()
+  local eating, fed, icon, newBuffIcon, fedExp, eatDur, eatExp, eatIcon, fedInst, eatInst, drinkOnly, sideDrink = Scan()
   if not eating then
     skipEat, sessionNoBuff = false, false
     sessionEatInst, sessionEatExp = nil, nil
+    sessionDrinkOnly = false
     if state then SetState(nil) end
     return
   end
@@ -780,7 +882,11 @@ function WellFedCircle.Refresh(updateInfo)
   if skipEat then return end
   if state == nil then
     -- Nourriture sans buff (tooltip sans "Bien nourri") : pas de cercle pour ce repas
-    local info = lastItemID and GetTime() - lastItemAt < 4 and ItemFoodInfo(lastItemID) or nil
+    -- Objet du repas : la boisson pour une boisson seule, sinon la nourriture (jamais la boisson prise a cote)
+    local itemID, itemAt = lastItemID, lastItemAt
+    if drinkOnly and lastDrinkID and GetTime() - lastDrinkAt < 4 then itemID, itemAt = lastDrinkID, lastDrinkAt end
+    sessionDrinkOnly = drinkOnly and true or false
+    local info = itemID and GetTime() - itemAt < 4 and ItemFoodInfo(itemID) or nil
     sessionNoBuff = false
     if info and info.fed == false then
       if cfg.showWithoutBuff then sessionNoBuff = true else skipEat = true; return end
@@ -793,16 +899,17 @@ function WellFedCircle.Refresh(updateInfo)
     sessionTotal = eatDur or (info and info.total) or EAT_TOTAL
     pendingTotal, pendingExp = eatDur, eatExp
     -- Icone de l'objet mange si on l'a reperé, sinon celle de l'aura de repas
-    foodIcon = (lastItemID and GetTime() - lastItemAt < 4 and C_Item and C_Item.GetItemIconByID
-      and C_Item.GetItemIconByID(lastItemID)) or eatIcon
+    foodIcon = (itemID and GetTime() - itemAt < 4 and C_Item and C_Item.GetItemIconByID
+      and C_Item.GetItemIconByID(itemID)) or eatIcon
     SetState("eating")
     fedExpAtStart = fed and fedExp or 0   -- deja bien nourri : seule une relance du buff compte
     WFDBG("REPAS : objet=%s  tooltip buff=%s delai=%s total=%s  aura repas duree=%s fin dans=%s  debut repas=-%.1f s  bien nourri deja=%s",
-      tostring(lastItemID), tostring(info and info.fed), tostring(info and info.delay), tostring(info and info.total),
+      tostring(itemID), tostring(info and info.fed), tostring(info and info.delay), tostring(info and info.total),
       tostring(eatDur), eatExp and string.format("%.1f", eatExp - GetTime()) or "nil", GetTime() - eatStart,
       fed and tostring(fedNameSeen) or "non")
     WFDBG("  aura de repas : %s  |  ligne tooltip : %s", tostring(eatNameSeen), tostring(info and info.line))
   end
+  UpdateDrink(sideDrink)
   if state == "eating" and not sessionNoBuff then
     local elapsed = GetTime() - eatStart
     local dur = sessionDelay
@@ -824,7 +931,8 @@ function WellFedCircle.Refresh(updateInfo)
     if not fedEvent and updateInfo and elapsed >= dur - 1.5 and elapsed <= dur + 4 then
       pcall(function()
         for _, a in ipairs(updateInfo.addedAuras or {}) do
-          if not (EAT_IDS[a.spellId] or (a.name and eatNames[a.name])) then fedEvent = true; fedIcon = a.icon end
+          if not (EAT_IDS[a.spellId] or (a.name and eatNames[a.name])
+                  or DRINK_IDS[a.spellId] or (a.name and drinkNames[a.name])) then fedEvent = true; fedIcon = a.icon end
         end
         for _, id in ipairs(updateInfo.updatedAuraInstanceIDs or {}) do
           if knownAuras[id] then fedEvent = true end
@@ -871,11 +979,25 @@ local function RenderVisual(cfg)
   ApplyArcAngles()
 end
 
+-- Petit cercle de boisson : meme rendu a DRINK_RATIO de la taille, pose en bas a droite du cercle principal
+local function RenderDrink(cfg)
+  if not drinkBar then return end
+  OnDrink(RenderVisual, setmetatable({ size = (cfg.size or 28) * DRINK_RATIO }, { __index = cfg }))
+  local s = cfg.size or 28
+  drinkBar:ClearAllPoints()
+  drinkBar:SetPoint("CENTER", bar, "CENTER", s * 0.42, -s * 0.42)
+  if drinkBar:IsShown() then
+    OnDrink(ApplyColor, cfg.eatingColor)
+    DrinkIcon()
+  end
+end
+
 function WellFedCircle.ApplySettings()
   if not bar then return end
   local cfg = Cfg()
   local size = cfg.size or 28
   RenderVisual(cfg)
+  RenderDrink(cfg)
   ApplyFoodIcon()
   if bar._lastSize ~= size then
     bar._lastSize = size
@@ -962,7 +1084,29 @@ function WellFedCircle.Create(parent)
   bar:SetScript("OnUpdate", OnBarUpdate)
   bar:Hide()
 
-  bar:SetScript("OnHide", function() StopPlus(); ff:Hide() end)
+  bar:SetScript("OnHide", function()
+    StopPlus(); ff:Hide()
+    if drinkBar then drinkBar:Hide(); drinkInst = nil end
+  end)
+
+  -- Petit cercle de boisson : meme construction (cf. EnsureGhost), enfant du cercle principal, au-dessus de ses calques
+  local real = bar
+  bar, ghostBuild = nil, true
+  local okD, d = pcall(WellFedCircle.Create, real)
+  bar, ghostBuild = real, false
+  if okD then
+    local levels = {}
+    local function collect(f)
+      levels[#levels + 1] = { f, f:GetFrameLevel() }
+      for _, c in ipairs({ f:GetChildren() }) do collect(c) end
+    end
+    collect(d)
+    for _, e in ipairs(levels) do e[1]:SetFrameLevel(e[2] + 3) end
+    d:Hide()
+    drinkBar = d
+  else
+    geterrorhandler()(d)
+  end
 
   local ev = CreateFrame("Frame")
   ev:RegisterUnitEvent("UNIT_AURA", "player")
@@ -989,6 +1133,7 @@ function WellFedCircle.SetPreview(on, forced)
   previewMode, previewState = on and true or false, on and forced or nil
   StopPreviewTicker()
   if not bar then return end
+  UpdateDrink(nil)
   if not on then
     StopPlus()
     state = nil

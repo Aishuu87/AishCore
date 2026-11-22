@@ -306,6 +306,7 @@ ns.SpellClassificationOverridesForever = {
     [20186]   = { source = "debuff" }, -- Jugement de sagesse
     [21183]   = { source = "debuff" }, -- Jugement du Croise
     [21553]   = { source = "debuff" }, -- Frappe mortelle
+    [22959]   = { source = "debuff" }, -- Vulnerabilite au Feu
     [23694]   = { source = "debuff" }, -- Brise-genou ameliore
     [25360]   = { source = "totem" }, -- Grace aerienne
     [31935]   = { deleted = true }, -- Bouclier du vengeur
@@ -314,6 +315,7 @@ ns.SpellClassificationOverridesForever = {
     [190456]  = { deleted = true }, -- Dur au mal
     [275779]  = { deleted = true }, -- Jugement
     [383346]  = { deleted = true }, -- Expurgation
+    [400573]  = { source = "debuff" }, -- Deflagration des arcanes
     [412538]  = { source = "debuff" }, -- Enflammer
     [412609]  = { source = "debuff" }, -- Blessure profonde
     [431380]  = { deleted = true }, -- Aubastre
@@ -329,6 +331,7 @@ ns.SpellClassificationOverridesForever = {
     [1260251] = { source = "debuff", deleted = true }, -- Condamnation a mort
     [1277038] = { deleted = true }, -- Arbitrage
     [1277455] = { source = "debuff" }, -- Eclair deconcertant
+    [1293696] = { source = "debuff" }, -- Marque demoniaque
     [1310703] = { source = "debuff" }, -- Toxine
     [1320379] = { source = "debuff" }, -- Metamorphose
     [1324401] = { source = "debuff" }, -- Contresort  Silence

@@ -482,8 +482,9 @@ local function ShouldShowBar(frame)
     -- Survol : prime sur les "Cacher" (monture, repos), mais reste apres les masquages durs (skyriding, vehicule,
     -- pet battle), qui ne se rouvrent pas a la souris
     if r.hover and ubHovered[frame._def.key] then return true end
-    -- Debuff dissipable (cf. UpdateDispel) : la barre se montre pour que sa lueur soit visible
-    if frame._dispelOn then return true end
+    -- Debuff dissipable (cf. UpdateDispel) : la barre se montre pour que sa lueur soit visible. Sauf joueur et
+    -- familier : hors combat, leur cercle de vie porte deja le halo (cf. AttachCircleDispel)
+    if frame._dispelOn and frame._def.key ~= "player" and frame._def.key ~= "pet" then return true end
     -- Furtivite : la visibilite du Mode furtif remplace les regles ci-dessous (joueur et cible)
     local key = frame._def.key
     if (key == "player" or key == "target") and ns.StealthVisOverride then
@@ -1330,6 +1331,86 @@ local function UpdateDispel(frame, fromAura)
     dg:Show()
 end
 
+-- Lueur de dissipation des cercles de vie hors combat (joueur, familier) : memes reglages que les barres. Halo rond
+-- pose derriere le fond du cercle, creuse par un masque inverse (seul l'anneau exterieur reste, meme pendant les fondus).
+-- Meme texture que la lueur du cercle central (degrade radial) : assez grande pour que son fondu deborde du fond.
+do
+local CG = { list = {},
+             TEX  = "Interface\\AddOns\\AishCore\\Media\\Wheel\\Circle_Smooth2.tga",
+             HOLE = "Interface\\AddOns\\AishCore\\Media\\UI\\CircleHoleMask.tga" }
+
+--- Branche la lueur sur un cercle (`bar.bgLarge` = disque de fond), suivi de `unit`.
+function UnitBars.AttachCircleDispel(bar, unit)
+    if not (bar and bar.bgLarge) or bar._dispelRing then return end
+    local g = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
+    ns.SetSmoothTexture(g, CG.TEX)
+    g:SetPoint("CENTER", bar.bgLarge, "CENTER", 0, 0)
+    local m = bar:CreateMaskTexture()
+    m:SetTexture(CG.HOLE, "CLAMPTOWHITE", "CLAMPTOWHITE")
+    m:SetPoint("CENTER", bar.bgLarge, "CENTER", 0, 0)
+    g:AddMaskTexture(m)
+    g:Hide()
+    bar._dispelRing, bar._dispelRingMask, bar._dispelUnit = g, m, unit
+    CG.list[#CG.list + 1] = bar
+    UnitBars.UpdateCircleDispel(bar)
+end
+
+function UnitBars.UpdateCircleDispel(bar)
+    local g = bar and bar._dispelRing
+    if not g then return end
+    local db = ns.GetCfg("unitBars") or {}
+    if db.dispelGlow == false then g:Hide(); return end
+    local bgW = bar.bgLarge:GetWidth() or 0
+    local s = db.dispelGlowSize or 5
+    -- Taille de lueur 2..16 -> halo de 2,37 a 3,77 fois le fond (5 par defaut : 2,67 fois, ~53 % d'opacite au bord du fond)
+    local D = bgW * (2.17 + s * 0.1)
+    g:SetSize(D, D)
+    bar._dispelRingMask:SetSize(math.max(bgW, 1), math.max(bgW, 1))
+    local pt = DISPEL_TYPES[dispelPreview]
+    if pt then
+        local c = DispelColor(pt)
+        g:SetVertexColor(c[1], c[2], c[3], 1)
+    else
+        local unit = bar._dispelUnit
+        local aura = FirstDispellable(unit)
+        if not aura then g:Hide(); return end
+        local dn = aura.dispelName
+        if dn ~= nil and not (issecretvalue and issecretvalue(dn)) then
+            if not DISPEL_ENUM[dn] then g:Hide(); return end
+            local c = DispelColor(dn)
+            g:SetVertexColor(c[1], c[2], c[3], 1)
+        else
+            local curve = GetDispelCurve()
+            local okC = curve and C_UnitAuras.GetAuraDispelTypeColor and pcall(function()
+                local col = C_UnitAuras.GetAuraDispelTypeColor(unit, aura.auraInstanceID, curve)
+                g:SetVertexColor(col:GetRGBA())
+            end)
+            if not okC then g:Hide(); return end
+        end
+    end
+    g:SetAlpha(db.dispelGlowAlpha or 1)
+    g:Show()
+end
+
+function UnitBars.RefreshCircleDispel(unit)
+    for _, b in ipairs(CG.list) do
+        if not unit or b._dispelUnit == unit then UnitBars.UpdateCircleDispel(b) end
+    end
+end
+
+local ev = CreateFrame("Frame")
+ev:RegisterUnitEvent("UNIT_AURA", "player", "pet")
+ev:RegisterUnitEvent("UNIT_PET", "player")
+ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+ev:RegisterEvent("PLAYER_REGEN_ENABLED")   -- auras illisibles en combat : relecture a la sortie
+ev:SetScript("OnEvent", function(_, event, unit)
+    if #CG.list == 0 then return end
+    if event == "UNIT_AURA" then UnitBars.RefreshCircleDispel(unit)
+    elseif event == "UNIT_PET" then UnitBars.RefreshCircleDispel("pet")
+    else UnitBars.RefreshCircleDispel() end
+end)
+end
+
 -- Met à jour la couleur de la barre (target = classe, autres = config/Colors)
 local function UpdateBarColor(frame)
     local def = frame._def
@@ -2009,6 +2090,7 @@ function UnitBars.IsPvPPreview() return pvpPreview end
 function UnitBars.CycleDispelPreview()
     dispelPreview = (dispelPreview + 1) % (#DISPEL_TYPES + 1)
     for _, f in pairs(bars) do UpdateDispel(f) end
+    UnitBars.RefreshCircleDispel()
     return DISPEL_TYPES[dispelPreview]
 end
 function UnitBars.GetDispelPreview() return DISPEL_TYPES[dispelPreview] end
@@ -2276,6 +2358,7 @@ function UnitBars.ApplySettings()
         -- plein combat (condition Furtivite des couleurs thematiques, par exemple) attendait la fin du combat
         if InCombatLockdown() then pcall(UpdateBarColor, frame) end
     end
+    UnitBars.RefreshCircleDispel()   -- lueur des cercles de vie hors combat : memes reglages
     UnitBars.NotifyPlayerBarMoved()
 end
 
@@ -2427,6 +2510,7 @@ function UnitBars.Create(parent)
                 pvpPreview = false      -- apercu JcJ : seulement GUI ouvert
                 dispelPreview = 0       -- idem apercu des debuffs dissipables
                 for _, f in pairs(bars) do UpdateDispel(f) end
+                UnitBars.RefreshCircleDispel()
                 UnitBars.HideHitbox()   -- l'apercu de hitbox n'a plus lieu d'etre
                 for _, f in pairs(bars) do
                     UpdateBarName(f)

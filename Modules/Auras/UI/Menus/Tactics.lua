@@ -825,7 +825,7 @@ function ns.SettingsPanel.BuildTacticsMenu(p, cw)
                 if primaryUsable and sid ~= primary then skipDuplicate = true end
             end
             -- Un sort supprime (mode admin) reste dans la liste (annulable) mais cache hors mode admin.
-            if not skipDuplicate and info.source ~= "equipment" and not (info._adminDeleted and not ns._adminMode) then  -- skip items WG dans ce menu
+            if not skipDuplicate and info.source ~= "equipment" and not info._unlearned and not (info._adminDeleted and not ns._adminMode) then  -- skip items WG dans ce menu
                 if not info.destinations then info.destinations=ns.DeepCopy and ns.DeepCopy(ns.SpellDefaults.destinations) or {iconlist=false,freebars=false,circlebars=false,icons=false,totems=false} end
                 if info.glow==nil then info.glow=false end
                 if info.desat==nil then info.desat=false end

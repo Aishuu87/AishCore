@@ -235,6 +235,8 @@ function PetHealthCircle.ApplySettings()
   end
   lastVisState = nil
   RenderVisual(cfg)
+  local UB = ns.Modules.UnitBars
+  if UB and UB.UpdateCircleDispel then UB.UpdateCircleDispel(bar) end   -- taille du halo suit le fond
   Reposition()
   if previewMode then
     PetHealthCircle.SetPreview(true)
@@ -308,6 +310,9 @@ function PetHealthCircle.Create(parent)
   if ghostBuild then return bar end
 
   Reposition()
+  -- Lueur des debuffs dissipables : reglages des barres d'unites (cf. UnitBars.AttachCircleDispel)
+  local UB = ns.Modules.UnitBars
+  if UB and UB.AttachCircleDispel then UB.AttachCircleDispel(bar, UNIT) end
   local si = 0.04
   _animElems[1] = { element = bar.bgLarge,      delay = 0 }
   _animElems[2] = { element = bar.text,         delay = si }

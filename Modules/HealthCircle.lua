@@ -624,6 +624,8 @@ function HealthCircle.ApplySettings()
   lastHealthVisState = nil
 
   RenderVisual(cfg)
+  local UB = ns.Modules.UnitBars
+  if UB and UB.UpdateCircleDispel then UB.UpdateCircleDispel(bar) end   -- taille du halo suit le fond
   local sw = UIParent:GetWidth()
   local sh = UIParent:GetHeight()
   bar:ClearAllPoints()
@@ -838,6 +840,9 @@ function HealthCircle.Create(parent)
   -- Copie d'apercu : ni zone de clic, ni animations, ni reference pour les animations 3D
   if ghostBuild then ApplyArcAngles(); return bar end
   ns.healthRingTextFrame = textFrame
+  -- Lueur des debuffs dissipables : reglages des barres d'unites (cf. UnitBars.AttachCircleDispel)
+  local UB = ns.Modules.UnitBars
+  if UB and UB.AttachCircleDispel then UB.AttachCircleDispel(bar, "player") end
 
   -- Zone de clic : bouton securise pose sur le cercle, jamais le cercle lui-meme. Seul un
   -- SecureUnitButton peut cibler et ouvrir le menu d'unite.

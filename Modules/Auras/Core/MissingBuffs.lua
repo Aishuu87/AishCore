@@ -1368,14 +1368,17 @@ local function BuildAppearAnimGroup()
     return group
 end
 
---- Clic droit sur l'alerte : la masque tant que la meme alerte (meme signature) revient au rescan ;
---- levee quand elle change, se resout, au prochain ecran de chargement, changement de zone ou sortie de combat. Champ du module, pas une
---- locale (limite des 200 locales du chunk).
+--- Clic droit sur l'alerte : masque CETTE alerte (sa signature) tant qu'elle revient au rescan ; l'alerte suivante
+--- de la liste prend sa place. Levee quand elle change ou se resout, au prochain ecran de chargement, changement de
+--- zone ou sortie de combat. Champs du module, pas des locales (limite des 200 locales du chunk).
+MissingBuffs._dismissedSigs = {}
+MissingBuffs._passSeen = {}   -- signatures masquees rencontrees pendant la passe en cours (cf. CheckForMissings)
 function MissingBuffs.DismissAlert(_, button, down)
     if button ~= "RightButton" or down or not currentSig then return end
-    MissingBuffs._dismissedSig = currentSig
+    MissingBuffs._dismissedSigs[currentSig] = true
     GameTooltip:Hide()
     MissingBuffs.HideAlert()
+    MissingBuffs.RequestCheck()
 end
 
 --- Rappel "Clic droit : masquer" sous le texte, quand la meme alerte reste affichee plus de 15 s.
@@ -1904,7 +1907,7 @@ function MissingBuffs.ShowAlertChoices(choices, text)
         MissingBuffs.HideAlert()
         return
     end
-    if not choices or #choices == 0 then MissingBuffs.HideAlert(); return end
+    if not choices or #choices == 0 then MissingBuffs.HideAlert(); return true end
     -- Signature de la rangee (cles + nombre d'icones) : alerte masquee au clic droit ou relance des combos
     local n = #choices
     local keys = {}
@@ -1912,10 +1915,8 @@ function MissingBuffs.ShowAlertChoices(choices, text)
         if c.key then keys[#keys + 1] = tostring(c.key) end
     end
     local sig = table.concat(keys, ",") .. "#" .. n
-    if MissingBuffs._dismissedSig then
-        if MissingBuffs._dismissedSig == sig then MissingBuffs.HideAlert(); return end
-        MissingBuffs._dismissedSig = nil
-    end
+    -- Alerte masquee au clic droit : false, l'appelant passe a l'alerte suivante
+    if MissingBuffs._dismissedSigs[sig] then MissingBuffs._passSeen[sig] = true; return false end
     local cfg = Cfg()
     EnsureFrame()
     -- Ne joue le slide-in que pour une VRAIE reapparition (frame cache), pas a chaque simple
@@ -2006,6 +2007,7 @@ function MissingBuffs.ShowAlertChoices(choices, text)
         appearAnimGroup:Play()
     end
     NotifySpellEffects()
+    return true
 end
 
 --- Compat : alerte a une seule icone (apercu des reglages, appels historiques).
@@ -2057,7 +2059,7 @@ function MissingBuffs.SetPreview(on, spellId)
     if on and InCombatLockdown() then return end
     previewMode = on and true or false
     if on then
-        MissingBuffs._dismissedSig = nil
+        wipe(MissingBuffs._dismissedSigs)
         local entry
         local resolvedId = spellId
         if resolvedId == ns.MISSING_PET_PASSIVE_KEY then
@@ -2827,9 +2829,21 @@ end
 -- d'utilisation d'un objet des sacs, ou nom qui parle de flacon / d'elixir (objet bu puis epuise dans les sacs).
 -- Un flacon couvre les elixirs et inversement (on boit l'un OU les autres). Une icone par objet (au plus 4).
 local FLASK_SUB, ELIXIR_SUB = 3, 2
--- Elixirs de respiration aquatique (sort d'utilisation a l'aura WATER_BREATHING, via wago) : proposes seulement
--- sous l'eau, barre de souffle affichee (MIRROR_TIMER_START / STOP relancent la verification).
-MissingBuffs.WATER_BREATHING = { [7178] = true, [11789] = true, [22807] = true, [44235] = true, [48719] = true, [175844] = true }
+-- Breuvages aquatiques (sort d'utilisation a l'aura WATER_BREATHING 82, MOD_SWIM_SPEED 58 ou WATER_WALK 104 ; potions et
+-- elixirs, Retail + Forever, via wago) : proposes seulement en nage (cf. SwimChoices), jamais comme elixir de combat.
+MissingBuffs.WATER_BREATHING = {
+    [7178] = true, [11789] = true, [22807] = true, [44235] = true, [48719] = true, [175844] = true,   -- respiration
+    [44467] = true, [91722] = true,
+    [7840] = true, [50809] = true, [105707] = true, [175790] = true, [448856] = true,                -- vitesse de nage
+    [11319] = true, [139492] = true, [175841] = true, [251143] = true, [423637] = true,              -- marche sur l'eau
+}
+-- Elixirs de detection du camouflage / de l'invisibilite (aura 17 / 19, via wago) : gardes pour des moments precis,
+-- jamais proposes ni comptes comme elixir actif (Oeil de chat, Detection superieure, Predatory Senses...).
+MissingBuffs.SITUATIONAL_ELIXIRS = { [12608] = true, [28496] = true, [6512] = true, [1250889] = true }
+-- Buffs d'elixir hors combat : ignores pour "elixir actif" (flacon bloque, "Un seul elixir suffit")
+function MissingBuffs.NonCombatElixir(sid)
+    return sid and (MissingBuffs.WATER_BREATHING[sid] or MissingBuffs.SITUATIONAL_ELIXIRS[sid]) or false
+end
 local FLASK_WORDS = { "flacon", "fiole", "flask", "phial", "fläschchen", "phiole", "frasco", "vial", "фляг", "флакон" }
 local ELIXIR_WORDS = { "lixir", "lixier", "elisir", "эликсир", "Эликсир" }
 local function BagConsumables(subClass)
@@ -2854,10 +2868,10 @@ local function BagConsumables(subClass)
 end
 
 -- Un buff du joueur (cache, cf. PlayerBuffs) vient-il d'un de ces sorts, ou porte-t-il un de ces mots ?
-local function ConsumableBuffActive(spellIDs, words)
+local function ConsumableBuffActive(spellIDs, words, skipNonCombat)
     for i = 1, PlayerBuffs() do
         local sid, name = bSid[i], bName[i]
-        if not (IsSecret(sid) or IsSecret(name)) then
+        if not (IsSecret(sid) or IsSecret(name)) and not (skipNonCombat and MissingBuffs.NonCombatElixir(sid)) then
             if spellIDs[sid] then return true end
             local low = type(name) == "string" and name:lower() or ""
             for _, w in ipairs(words) do
@@ -2882,8 +2896,7 @@ local function FlaskChoices()
     local items, spellIDs = BagConsumables(FLASK_SUB)
     if #items == 0 or ConsumableBuffActive(spellIDs, FLASK_WORDS) then return nil end
     local _, elixirIDs = BagConsumables(ELIXIR_SUB)
-    for sid in pairs(MissingBuffs.WATER_BREATHING) do elixirIDs[sid] = nil end   -- respiration aquatique : pas un elixir de combat
-    if ConsumableBuffActive(elixirIDs, ELIXIR_WORDS) then return nil end
+    if ConsumableBuffActive(elixirIDs, ELIXIR_WORDS, true) then return nil end   -- respiration aquatique, detection : pas des elixirs de combat
     return ConsumableChoices(items, ns.MISSING_FLASK_KEY)
 end
 
@@ -2898,15 +2911,59 @@ function MissingBuffs.Underwater()
     return false
 end
 
+-- Breuvages aquatiques des sacs (toutes sous-classes de consommables), memorises par generation des sacs
+function MissingBuffs.AquaticBagItems()
+    local M = MissingBuffs
+    if M._aquatic and M._aquaticGen == bagGen then return M._aquatic end
+    local out = {}
+    for bag = 0, (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4) do
+        for s = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local id = C_Container.GetContainerItemID(bag, s)
+            if id and not out[id] then
+                local okS, sname, sid = pcall(C_Item.GetItemSpell, id)
+                if okS and sid and MissingBuffs.WATER_BREATHING[sid] then out[id] = { sid = sid, name = sname } end
+            end
+        end
+    end
+    M._aquatic, M._aquaticGen = out, bagGen
+    return out
+end
+
+-- En nage : une icone par breuvage aquatique (respiration, vitesse de nage, marche sur l'eau) dont le buff manque
+function MissingBuffs.SwimChoices()
+    if not ((IsSwimming and IsSwimming()) or MissingBuffs.Underwater()) then return nil end
+    local bagItems = MissingBuffs.AquaticBagItems()
+    local ids = {}
+    for id in pairs(bagItems) do ids[#ids + 1] = id end
+    if #ids == 0 then return nil end
+    table.sort(ids, function(a, b) return a > b end)
+    local n, out, seenSpell = PlayerBuffs(), {}, {}
+    for _, id in ipairs(ids) do
+        local info = bagItems[id]
+        local active = false
+        for i = 1, n do
+            local bs, bn = bSid[i], bName[i]
+            if (not IsSecret(bs) and bs == info.sid) or (not IsSecret(bn) and info.name and bn == info.name) then
+                active = true; break
+            end
+        end
+        if not active and not seenSpell[info.sid] and #out < 4 then
+            seenSpell[info.sid] = true   -- meme sort (rangs / variantes d'objet) : une seule icone
+            out[#out + 1] = { key = (#out == 0) and ns.MISSING_ELIXIR_KEY or nil, icon = C_Item.GetItemIconByID(id),
+                              item = id, macro = "/use item:" .. id, stackHide = true }
+        end
+    end
+    return (#out > 0) and out or nil
+end
+
 local function ElixirChoices()
     local items, spellIDs = BagConsumables(ELIXIR_SUB)
     if #items == 0 then return nil end
-    local underwater = MissingBuffs.Underwater()
     local _, flaskIDs = BagConsumables(FLASK_SUB)
     if ConsumableBuffActive(flaskIDs, FLASK_WORDS) then return nil end
     local n = PlayerBuffs()
     table.sort(items, function(a, b) return a > b end)
-    local out = { anyActive = ConsumableBuffActive({}, ELIXIR_WORDS) }
+    local out = { anyActive = ConsumableBuffActive({}, ELIXIR_WORDS, true) }
     for _, id in ipairs(items) do
         local okS, sname, sid = pcall(C_Item.GetItemSpell, id)
         local active = false
@@ -2918,10 +2975,12 @@ local function ElixirChoices()
                 end
             end
         end
-        if active then
-            if not (sid and MissingBuffs.WATER_BREATHING[sid]) then out.anyActive = true end
-        elseif okS and sid and MissingBuffs.WATER_BREATHING[sid] and not underwater then
-            -- Hors de l'eau : inutile, ne pas le reproposer
+        if okS and sid and MissingBuffs.SITUATIONAL_ELIXIRS[sid] then
+            -- Detection du camouflage : reserve aux moments voulus, jamais propose
+        elseif active then
+            if not MissingBuffs.NonCombatElixir(sid) then out.anyActive = true end
+        elseif okS and sid and MissingBuffs.WATER_BREATHING[sid] then
+            -- Breuvage aquatique : propose en nage seulement (cf. SwimChoices)
         elseif okS and MissingBuffs.ConsumableBlocked(sid) then
             -- Buff plus puissant deja actif sur la meme caracteristique (parchemin...) : refuse par le serveur
         elseif #out < 4 then
@@ -3176,17 +3235,15 @@ end
 -- forme de voyage / Loup fantome (Forever, option ignoreTravelForms), qui masque tout le reste.
 function MissingBuffs.ShowPointsAlert(cfg)
     if not cfg.ignoreTalentPoints and not TalentFrameOpen() and UnspentTalentPoints() then
-        MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_TALENTS_KEY, icon = "Interface\\Icons\\Ability_Marksmanship",
-            macro = TalentsMacro() } }, ns.MISSING_TEXT.SPEND_TALENTS)
-        return true
+        if MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_TALENTS_KEY, icon = "Interface\\Icons\\Ability_Marksmanship",
+            macro = TalentsMacro() } }, ns.MISSING_TEXT.SPEND_TALENTS) then return true end
     end
     if not cfg.ignoreLegacyPoints and not TalentFrameOpen() and UnspentLegacyPoints() then
-        MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_LEGACY_KEY, icon = "Interface\\Icons\\INV_Misc_Book_11",
+        if MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_LEGACY_KEY, icon = "Interface\\Icons\\INV_Misc_Book_11",
             -- Mode manette : pas de clic. Le /run taint le FrameControlsManager (cf. ns.IsGamepadUI) et aucun
             -- bouton Blizzard n'ouvre ce panneau pour passer par un /click securise
             macro = (not _addon.IsGamepadUI()) and "/run if LegacySystemFrame then ShowUIPanel(LegacySystemFrame) elseif ToggleLegacySystemUI then ToggleLegacySystemUI() end" or nil } },
-            ns.MISSING_TEXT.SPEND_LEGACY)
-        return true
+            ns.MISSING_TEXT.SPEND_LEGACY) then return true end
     end
     return false
 end
@@ -3204,6 +3261,7 @@ function MissingBuffs.CheckForMissings()
     MissingBuffs.HideCombatPet()
     MissingBuffs.ArmPetCombatButton()
     if previewMode then return end
+    wipe(MissingBuffs._passSeen)
     -- Cle Mythique+ active : payloads d'aura secrets (anti-triche), meme la lecture sur soi peut
     -- rater un buff pourtant actif. Plutot que fiabiliser la lecture secrete (fragile), on coupe
     -- simplement le module pendant la cle -- on est cense arriver deja buffe avant le compte a rebours.
@@ -3221,7 +3279,7 @@ function MissingBuffs.CheckForMissings()
     Probe("0")
     if _addon.IsForever and not cfg.ignoreWellRested and not MissingBuffs.SelfAurasBlind() then
         local choices, text = WellRestedChoices(cfg)
-        if choices then MissingBuffs.ShowAlertChoices(choices, text); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, text) then return end end
     end
     -- Canne a peche en main : on peche, seul l'appat est rappele (et le sac de couchage, ci-dessus)
     if MissingBuffs.FishingPoleEquipped() then
@@ -3232,7 +3290,7 @@ function MissingBuffs.CheckForMissings()
     -- Paladin en monture : Aura du croise rappelee si absente, avant (et malgre) "Ignorer si monte"
     if (_addon._playerClass or select(2, UnitClass("player"))) == "PALADIN" then
         local crusader = CrusaderMountedChoices()
-        if crusader then MissingBuffs.ShowAlertChoices(crusader, ns.MISSING_TEXT.USE_AURA); return end
+        if crusader then if MissingBuffs.ShowAlertChoices(crusader, ns.MISSING_TEXT.USE_AURA) then return end end
     end
     -- Forme de voyage Druide (783) : IsMounted() renvoie false dessus alors qu'elle sert au meme
     -- usage (deplacement rapide) -- traitee comme une monture pour ce toggle (Retail). Forever : toggle a part,
@@ -3287,22 +3345,22 @@ function MissingBuffs.CheckForMissings()
         -- rien
     elseif class == "WARRIOR" and not cfg.ignoreWarriorStances then
         local choices = ExclusiveGroupAlert(ns.MISSING_WARRIOR_STANCES)
-        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_STANCE); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_STANCE) then return end end
     elseif class == "PALADIN" then
         local choices = ExclusiveGroupAlert(ns.MISSING_PALADIN_AURAS)
-        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_AURA); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_AURA) then return end end
     elseif class == "EVOKER" and _addon._specID == ns.MISSING_AUGMENTATION_EVOKER_SPEC and not cfg.ignoreEvokerAttunements then
         local choices = ExclusiveGroupAlert(ns.MISSING_EVOKER_ATTUNEMENTS)
-        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_ATTUNEMENT); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_ATTUNEMENT) then return end end
     elseif class == "DRUID" and _addon._specID == ns.MISSING_BALANCE_DRUID_SPEC and not cfg.ignoreDruidForms then
         local e = ns.MISSING_BALANCE_MOONKIN
         if IsEntryLearned(e) and not GetSelfAura(e.spellId) then
-            MissingBuffs.ShowAlertChoices(ChoicesFromEntry(e, "player"), ns.MISSING_TEXT.USE_STANCE); return
+            if MissingBuffs.ShowAlertChoices(ChoicesFromEntry(e, "player"), ns.MISSING_TEXT.USE_STANCE) then return end
         end
     elseif class == "PRIEST" and _addon._specID == ns.MISSING_SHADOW_PRIEST_SPEC then
         local e = ns.MISSING_SHADOW_FORM
         if IsEntryLearned(e) and not SelfHasBuff(e) then
-            MissingBuffs.ShowAlertChoices(ChoicesFromEntry(e, "player"), ns.MISSING_TEXT.USE_STANCE); return
+            if MissingBuffs.ShowAlertChoices(ChoicesFromEntry(e, "player"), ns.MISSING_TEXT.USE_STANCE) then return end
         end
     end
 
@@ -3310,7 +3368,7 @@ function MissingBuffs.CheckForMissings()
     -- 2) Poisons Voleur (soi uniquement) : tous les poisons connus en propositions
     if class == "ROGUE" then
         local choices, textKey, text = CheckRoguePoisons()
-        if choices then MissingBuffs.ShowAlertChoices(choices, text or ns.MISSING_TEXT[textKey]); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, text or ns.MISSING_TEXT[textKey]) then return end end
     end
 
     Probe("3")
@@ -3321,10 +3379,10 @@ function MissingBuffs.CheckForMissings()
         -- rien
     elseif class == "HUNTER" and not cfg.ignoreHunterPets then
         local choices, textKey = CheckPetMissing("HUNTER")
-        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT[textKey]); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT[textKey]) then return end end
     elseif class == "WARLOCK" and not cfg.ignoreWarlockPets then
         local choices, textKey = CheckPetMissing("WARLOCK")
-        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT[textKey]); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT[textKey]) then return end end
     end
 
     Probe("3b")
@@ -3333,25 +3391,23 @@ function MissingBuffs.CheckForMissings()
     if not flying and ((class == "HUNTER" and not cfg.ignoreHunterPets) or (class == "WARLOCK" and not cfg.ignoreWarlockPets)) then
         if PetIsPassive() and UnitExists("target") and not UnitIsDeadOrGhost("target")
            and UnitCanAttack("player", "target") then
-            MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_PET_PASSIVE_KEY, icon = PASSIVE_ICON, macro = "/petassist" } },
-                ns.MISSING_TEXT.PET_PASSIVE)
-            return
+            if MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_PET_PASSIVE_KEY, icon = PASSIVE_ICON, macro = "/petassist" } },
+                ns.MISSING_TEXT.PET_PASSIVE) then return end
         end
     end
 
     Probe("3b'")
     -- 3b') Familier mecontent (Forever, Chasseur) : a nourrir
     if not flying and class == "HUNTER" and not cfg.ignoreHunterPets and PetIsUnhappy() then
-        MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_PET_UNHAPPY_KEY, icon = UNHAPPY_ICON } },
-            ns.MISSING_TEXT.PET_UNHAPPY)
-        return
+        if MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_PET_UNHAPPY_KEY, icon = UNHAPPY_ICON } },
+            ns.MISSING_TEXT.PET_UNHAPPY) then return end
     end
 
     Probe("3c")
     -- 3c) Pierre de soins / pierre d'ame (Demoniste)
     if class == "WARLOCK" then
         local choices, text = CheckWarlockStones(cfg)
-        if choices then MissingBuffs.ShowAlertChoices(choices, text); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, text) then return end end
     end
 
     Probe("4")
@@ -3434,15 +3490,13 @@ function MissingBuffs.CheckForMissings()
                 end
             end
             if #choices > 0 then
-                MissingBuffs.ShowAlertChoices(choices, primaryText)
-                return
+                if MissingBuffs.ShowAlertChoices(choices, primaryText) then return end
             end
         end
         if expiringEntry then
             local choices = ChoicesFromEntry(expiringEntry, "player")
             if #choices > 0 then
-                MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.EXPIRING_SOON)
-                return
+                if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.EXPIRING_SOON) then return end
             end
         end
     end
@@ -3457,7 +3511,7 @@ function MissingBuffs.CheckForMissings()
     -- recolter) ; Forever : partout, les donjons ont des herbes et des filons.
     if not cfg.ignoreGatherTracking and (_addon.IsForever or not IsInInstance()) then
         local choices = GatherTrackingChoices()
-        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.TRACKING_OFF); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.TRACKING_OFF) then return end end
     end
 
     -- Consommables (6 a 8) : option "Seulement en instance" = donjon, raid, champ de bataille, scenario
@@ -3471,14 +3525,21 @@ function MissingBuffs.CheckForMissings()
     -- 6) Consommables : pierre a aiguiser / huile a appliquer sur l'arme
     if consumablesOK and not cfg.ignoreWeaponStones and not WeaponEnchantByClass(class) and not ConsumablesBlocked(true) then
         local choices = WeaponStoneChoices()
-        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.APPLY_WEAPON_STONE); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.APPLY_WEAPON_STONE) then return end end
+    end
+
+    Probe("6b")
+    -- 6b) En nage : breuvages aquatiques des sacs (partout, hors option "Seulement en instance")
+    if not blind and not cfg.ignoreElixirs and not ConsumablesBlocked(true) then
+        local choices = MissingBuffs.SwimChoices()
+        if choices then if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_ELIXIR) then return end end
     end
 
     Probe("7")
     -- 7) Consommables : flacon / fiole
     if consumablesOK and not cfg.ignoreFlasks and not ConsumablesBlocked(true) then
         local choices = FlaskChoices()
-        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_FLASK); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_FLASK) then return end end
     end
 
     Probe("7b")
@@ -3486,7 +3547,7 @@ function MissingBuffs.CheckForMissings()
     if consumablesOK and not cfg.ignoreElixirs and not ConsumablesBlocked(true) then
         local choices = ElixirChoices()
         if choices and #choices > 0 and not (cfg.elixirSingle and choices.anyActive) then
-            MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_ELIXIR); return
+            if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.USE_ELIXIR) then return end
         end
     end
 
@@ -3494,7 +3555,7 @@ function MissingBuffs.CheckForMissings()
     -- 8) Consommables : nourriture qui donne "Bien nourri"
     if consumablesOK and not cfg.ignoreWellFedFood and not ConsumablesBlocked(false) then
         local choices = WellFedFoodChoices()
-        if choices then MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.EAT_FOOD); return end
+        if choices then if MissingBuffs.ShowAlertChoices(choices, ns.MISSING_TEXT.EAT_FOOD) then return end end
     end
 
     Probe("9")
@@ -3502,18 +3563,20 @@ function MissingBuffs.CheckForMissings()
     if not cfg.ignoreBagsFull then
         local free = FreeBagSlots()
         if free and free <= (cfg.bagsFreeThreshold or 2) then
-            MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_BAGS_KEY, icon = "Interface\\Icons\\INV_Misc_Bag_08",
+            if MissingBuffs.ShowAlertChoices({ { key = ns.MISSING_BAGS_KEY, icon = "Interface\\Icons\\INV_Misc_Bag_08",
                 -- ToggleAllBags (et non OpenAllBags) : Baganator / EllesmereUIBags le remplacent par leur fenetre, alors que
                 -- Baganator ignore volontairement OpenAllBags (reserve a l'ouverture automatique : marchand...)
                 -- Mode manette : /click (securise) sinon le /run taint le FrameControlsManager (cf. ns.IsGamepadUI)
                 macro = (_addon.IsGamepadUI() and _G.MainMenuBarBackpackButton) and "/click MainMenuBarBackpackButton"
-                    or "/run ToggleAllBags()" } }, string.format("%s (%d)", ns.MISSING_TEXT.BAGS_FULL or "", free))
-            return
+                    or "/run ToggleAllBags()" } }, string.format("%s (%d)", ns.MISSING_TEXT.BAGS_FULL or "", free)) then return end
         end
     end
 
     Probe("hide")
-    MissingBuffs._dismissedSig = nil   -- plus rien de manquant : le clic droit ne vaut plus
+    -- Passe complete : les alertes masquees qui ne sont plus revenues (resolues, changees) sont levees
+    for sig in pairs(MissingBuffs._dismissedSigs) do
+        if not MissingBuffs._passSeen[sig] then MissingBuffs._dismissedSigs[sig] = nil end
+    end
     MissingBuffs.HideAlert()
 end
 
@@ -3698,7 +3761,7 @@ local GROUP_EVENTS = {
     "MINIMAP_UPDATE_TRACKING",
     -- Changement de zone : leve le masquage au clic droit (cf. DismissAlert)
     "ZONE_CHANGED_NEW_AREA",
-    -- Barre de souffle (sous l'eau) : elixirs de respiration aquatique, cf. ElixirChoices
+    -- Barre de souffle (sous l'eau) : breuvages aquatiques, cf. SwimChoices
     "MIRROR_TIMER_START", "MIRROR_TIMER_STOP",
 }
 
@@ -3724,7 +3787,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     -- Alerte masquee au clic droit : reproposee au chargement, au changement de zone (pas de sous-zone)
     -- et a la sortie de combat
     if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_REGEN_ENABLED" then
-        MissingBuffs._dismissedSig = nil
+        wipe(MissingBuffs._dismissedSigs)
     end
     -- Cache des buffs du joueur (cf. PlayerBuffs) ; sortie de combat : des valeurs lues secretes en combat
     -- ne doivent pas survivre dans le cache

@@ -105,7 +105,7 @@ ns.Defaults = {
         fadeIC=1.0, fadeOOC=0.4, fadeDelayIC=0, fadeDelayOOC=0, fadeDuration=0.35,
         iconBorder="square", desatOverride=nil, glowEnabled=true,
         glowOverrideIdx=nil, glowOverrideR=nil, glowOverrideG=nil, glowOverrideB=nil, glowOverrideScale=nil,
-        iconPos="RIGHT", reverse=true, hideIcon=false, desatOutOfRange=true,
+        iconPos="RIGHT", reverse=true, hideIcon=false, desatOutOfRange=true, combatRange=20,
         barBgR=0, barBgG=0, barBgB=0, barBgAlpha=0,
         barColorR=nil, barColorG=nil, barColorB=nil,
         swipeEnabled=false, bannerGrowth="RIGHT",
@@ -386,7 +386,7 @@ end
 local SPELL_IDENTITY = {
     name = true, source = true, priority = true, color = true, colorKey = true, _colorDefault = true,
     linkedSpellIDs = true, _adminDeleted = true, _glowCustom = true, _invalid = true,
-    spellIDs = true, styleAnchorID = true,
+    spellIDs = true, styleAnchorID = true, _unlearned = true,
 }
 local SPELL_GLOW_MIRROR = {
     glow = true, glowIdx = true, glowAlpha = true, glowScale = true, glowColor = true,

@@ -319,6 +319,11 @@ function ns.SettingsPanel.BuildRenderMenu(p, cw, rk)
                         cbRange.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].desatOutOfRange=v end; if ns.RefreshTotemsGrid then pcall(ns.RefreshTotemsGrid) end end
                     end
                     cy=cy+50
+                    -- Portee estimee par la distance au point de pose (repli : buff du totem)
+                    if rk == "totems" then
+                        local scr=SW.CreateSlider(c,L["AURASMENU_RENDER_TOTEM_COMBAT_RANGE"],10,45,1,slW); scr:SetPoint("TOPLEFT",ox,-cy); scr:SetValue(cf.combatRange or 20)
+                        scr.onChanged=function(v) if ns.db and ns.db[rk] then ns.db[rk].combatRange=v end end; cy=cy+60
+                    end
                 end
             end
             local sg=SW.CreateSlider(c,L["AURASMENU_EQUIPMENT_SPACING"],0,150,1,slW); sg:SetPoint("TOPLEFT",ox,-cy); sg:SetValue(cf.gap or 4)

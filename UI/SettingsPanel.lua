@@ -14134,33 +14134,115 @@ function Build.BigCursorSection(ctx, container, W)
   ctx:Depends(cbBC, { slBC })
 end
 
+-- Petit curseur de valeur sous une case de Rendu graphique (meme style que les seuils des Missing Buffs) :
+-- "Valeur : 256 |----o--|". r = { min, max, step } ou { values } (paliers imposes, curseur 1..#values).
+function Build.MiniCVarSlider(container, W, key, r)
+  local CF = ns.Modules and ns.Modules.Comfort
+  local f = CreateFrame("Frame", nil, container)
+  f:SetSize(W, 18)
+  local lbl = f:CreateFontString(nil, "OVERLAY")
+  lbl:SetFont(ns.Media.fontGui or ns.FONT_FALLBACK, 9, "")
+  lbl:SetPoint("LEFT", 26, 0)
+  lbl:SetWidth(80)
+  lbl:SetJustifyH("LEFT")
+  lbl:SetTextColor(unpack(Theme.textDim or Theme.textNormal))
+  local sl = CreateFrame("Slider", nil, f)
+  sl:SetOrientation("HORIZONTAL")
+  sl:SetHeight(12)
+  sl:SetPoint("LEFT", lbl, "RIGHT", 2, 0)
+  sl:SetWidth(math.min(140, W - 120))
+  sl:SetHitRectInsets(-2, -2, -3, -3)
+  local track = sl:CreateTexture(nil, "BACKGROUND")
+  track:SetHeight(2)
+  track:SetPoint("LEFT"); track:SetPoint("RIGHT")
+  track:SetColorTexture(1, 1, 1, 0.22)
+  sl:SetThumbTexture("Interface\\AddOns\\AishCore\\Media\\UI\\SliderThumb.tga")
+  local thumb = sl:GetThumbTexture()
+  thumb:SetSize(10, 10)
+  if thumb.SetSnapToPixelGrid then thumb:SetSnapToPixelGrid(false); thumb:SetTexelSnappingBias(0) end
+  local CLR = ns.Modules and ns.Modules.Colors
+  local g = (CLR and CLR.Get and CLR.Get("powerdotsb")) or Theme.sliderThumb
+  thumb:SetVertexColor(g[1], g[2], g[3], 1)
+  local vals = r.values
+  local minV, maxV, step = r.min, r.max, r.step
+  if vals then minV, maxV, step = 1, #vals, 1 end
+  sl:SetMinMaxValues(minV, maxV)
+  sl:SetValueStep(step)
+  sl:SetObeyStepOnDrag(true)
+  local function ToValue(p)
+    if vals then return vals[math.max(1, math.min(#vals, math.floor(p + 0.5)))] end
+    return math.floor(p / step + 0.5) * step
+  end
+  local function Txt(v) lbl:SetText(string.format(L["SETTINGS_COMFORT_VALUE"], tostring(v))) end
+  local v0 = CF and CF.GetValue(key) or minV
+  local p0 = v0
+  if vals then
+    p0 = 1
+    for i, v in ipairs(vals) do if v <= v0 then p0 = i end end
+  end
+  sl:SetValue(p0); Txt(v0)
+  sl:SetScript("OnValueChanged", function(_, p)
+    local v = ToValue(p)
+    Txt(v)
+    if CF and CF.GetValue(key) ~= v then CF.SetValue(key, v) end
+  end)
+  return f
+end
+
 function Build.ComfortRender(container)
   local ctx = NewLayout(container)
   local W = CONTENT_W
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_RENDER"], W))
-  -- Deux colonnes : les 4 reglages d'origine a gauche, les suivants a droite
+  -- Deux colonnes ; sous chaque case active, un petit curseur de valeur (masque, page reconstruite, quand on decoche)
   local halfW = math.floor((W - 8) / 2)
   local CF = ns.Modules and ns.Modules.Comfort
+  local function Rebuild()
+    local saved = scrollFrame and scrollFrame:GetVerticalScroll()
+    if _invalidateCategory then _invalidateCategory("comfortRender") end
+    if saved then C_Timer.After(0, function() if scrollFrame then scrollFrame:SetVerticalScroll(saved) end end) end
+  end
   local function MakeToggle(t)
     local cb = SW.CreateCheckbox(container, t[2], t[3], halfW)
     -- Reglage du PC, pas du profil (cf. Modules/Comfort.lua) : lecture/ecriture dediees
     cb:SetChecked(CF and CF.GetToggle(t[1]) or false)
-    cb.onChanged = function(val) if CF then CF.SetToggle(t[1], val) end end
+    cb.onChanged = function(val)
+      if CF then CF.SetToggle(t[1], val) end
+      if CF and CF.GetRange(t[1]) then Rebuild() end
+    end
     return cb
+  end
+  local function MakeMini(t)
+    if not (CF and CF.GetToggle(t[1])) then return nil end
+    local r = CF.GetRange(t[1])
+    return r and Build.MiniCVarSlider(container, halfW, t[1], r)
   end
   local leftCol = {
     { "groundDensity", L["SETTINGS_COMFORT_DENSITY"], L["SETTINGS_COMFORT_DENSITY_TT"] },
     { "groundFade",    L["SETTINGS_COMFORT_FADE"],    L["SETTINGS_COMFORT_FADE_TT"] },
     { "groundDist",    L["SETTINGS_COMFORT_DIST"],    L["SETTINGS_COMFORT_DIST_TT"] },
     { "sharpen",       L["SETTINGS_COMFORT_SHARPEN"], L["SETTINGS_COMFORT_SHARPEN_TT"] },
+    { "ripple",        L["SETTINGS_COMFORT_RIPPLE"],  L["SETTINGS_COMFORT_RIPPLE_TT"] },
+    { "sunshafts",     L["SETTINGS_COMFORT_SUNSHAFTS"], L["SETTINGS_COMFORT_SUNSHAFTS_TT"] },
+    { "shadowSize",    L["SETTINGS_COMFORT_SHADOWSIZE"], L["SETTINGS_COMFORT_SHADOWSIZE_TT"] },
   }
   local rightCol = {
     { "objFade",    L["SETTINGS_COMFORT_OBJFADE"],    L["SETTINGS_COMFORT_OBJFADE_TT"] },
     { "objCull",    L["SETTINGS_COMFORT_OBJCULL"],    L["SETTINGS_COMFORT_OBJCULL_TT"] },
     { "terrainLod", L["SETTINGS_COMFORT_TERRAINLOD"], L["SETTINGS_COMFORT_TERRAINLOD_TT"] },
+    { "wmoLod",     L["SETTINGS_COMFORT_WMOLOD"],     L["SETTINGS_COMFORT_WMOLOD_TT"] },
+    { "horizon",    L["SETTINGS_COMFORT_HORIZON_DIST"], L["SETTINGS_COMFORT_HORIZON_DIST_TT"] },
     { "reflection", L["SETTINGS_COMFORT_REFLECTION"], L["SETTINGS_COMFORT_REFLECTION_TT"] },
     { "weather",    L["SETTINGS_COMFORT_WEATHER"],    L["SETTINGS_COMFORT_WEATHER_TT"] },
   }
+  -- CVar absent de ce client : option retiree
+  local function Keep(list)
+    local out = {}
+    for _, t in ipairs(list) do
+      if not (CF and CF.Supported) or CF.Supported(t[1]) then out[#out + 1] = t end
+    end
+    return out
+  end
+  leftCol, rightCol = Keep(leftCol), Keep(rightCol)
   for i = 1, math.max(#leftCol, #rightCol) do
     local a = leftCol[i] and MakeToggle(leftCol[i])
     local b = rightCol[i] and MakeToggle(rightCol[i])
@@ -14171,6 +14253,14 @@ function Build.ComfortRender(container)
     else
       -- Colonne de droite seule : meme x que les widgets de droite des rangees a deux colonnes
       ctx:Manual(b, halfW + 8)
+    end
+    local ma = leftCol[i] and MakeMini(leftCol[i])
+    local mb = rightCol[i] and MakeMini(rightCol[i])
+    if ma or mb then
+      ctx:ManualGroup(function(y)
+        if ma then ma:ClearAllPoints(); ma:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -y); ma:Show() end
+        if mb then mb:ClearAllPoints(); mb:SetPoint("TOPLEFT", container, "TOPLEFT", halfW + 8, -y); mb:Show() end
+      end, 20, { ma or mb, ma and mb or nil })
     end
   end
   ctx:Finalize()

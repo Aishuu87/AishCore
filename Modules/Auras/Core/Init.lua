@@ -270,6 +270,59 @@ local function AddGroupMemberEntries(spells)
     end
 end
 
+-- Forever : totems reconnus par nom (talent sans case CDM). L'ID ne sert qu'a lire le nom localise ; l'entree
+-- prend l'ID du sort appris. Ligne masquee (_unlearned) tant que le talent n'est pas pris.
+ns.TOTEM_SPELLS_BY_NAME = {
+    1293241, -- Invocation de faucon (talent Chasseur)
+}
+
+local function KnownIDByName(name)
+    if C_Spell and C_Spell.GetSpellInfo then
+        local ok, info = pcall(C_Spell.GetSpellInfo, name)
+        return ok and info and info.spellID or nil
+    end
+    local id = GetSpellInfo and select(7, GetSpellInfo(name))
+    return id
+end
+
+local function AddNamedTotemEntries(spells)
+    local changed = false
+    for _, ref in ipairs(ns.TOTEM_SPELLS_BY_NAME) do
+        local n = _LiveSpellName(ref)
+        if n then
+            local id = KnownIDByName(n)
+            if id and spells[id] == nil then
+                local d = ns.NewSpellEntry()
+                d.name = n
+                ns.ApplyAutoColor(d, AishUIAuraDB and AishUIAuraDB.activeProfile, id)
+                d.priority = id
+                d.destinations = { iconlist=false, circlebars=false, icons=false, freebars=false, totems=false }
+                spells[id] = d
+                changed = true
+            end
+            for _, info in pairs(spells) do
+                if type(info) == "table" and info.name == n then
+                    if info.source ~= "totem" then info.source = "totem"; changed = true end
+                    local un = (id == nil) or nil
+                    if info._unlearned ~= un then info._unlearned = un; changed = true end
+                end
+            end
+        end
+    end
+    return changed
+end
+
+-- Talent pris / retire en cours de session
+if _addon.IsForever then
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("SPELLS_CHANGED")
+    f:SetScript("OnEvent", function()
+        local key = ns.db and ns.GetSpecKey and ns.GetSpecKey()
+        local spells = key and ns.db.discoveredSpells and ns.db.discoveredSpells[key]
+        if spells and AddNamedTotemEntries(spells) and ns.BuildWhitelist then pcall(ns.BuildWhitelist) end
+    end)
+end
+
 function ns.GetSpecSpells()
     local key = ns.GetSpecKey()
     if not key or not ns.db then return nil end
@@ -282,7 +335,7 @@ function ns.GetSpecSpells()
     if not _namesSyncedForKey[key] then
         _namesSyncedForKey[key] = true
         ns.RefreshSpellNames(spells)
-        if _addon.IsForever then AddGroupMemberEntries(spells) end
+        if _addon.IsForever then AddGroupMemberEntries(spells); AddNamedTotemEntries(spells) end
         -- Entrées ajoutées hors ns.NewSpellEntry (import, copie) : repose ns.SPELL_MT
         for _, info in pairs(spells) do
             if type(info) == "table" and getmetatable(info) ~= ns.SPELL_MT then setmetatable(info, ns.SPELL_MT) end

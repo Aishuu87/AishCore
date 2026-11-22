@@ -39,6 +39,7 @@ local _totemInstCounter = 0
 local _lastDurObjRefBySlot = {}
 local _placedAtBySlot = {} -- GetTime() de la pose (delai de grace de la portee, cf. TotemInRange)
 local UpdateTotemsRange -- defini plus bas (desaturation hors de portee)
+local SyncRangeTicker   -- idem (suivi de distance en combat)
 local LearnTotemBuff    -- idem (apprentissage du buff pose par le totem)
 local RANGE_GRACE = 2.5
 
@@ -63,9 +64,11 @@ local function RescanActiveTotems()
                 slotSpellID[slot] = nil
                 _lastDurObjRefBySlot[slot] = nil
                 _placedAtBySlot[slot] = nil
+                _posBySlot[slot] = nil
             end
         end
     end
+    if SyncRangeTicker then SyncRangeTicker() end
 end
 
 -- Decouverte + liaison slot<->spellID : comparer les valeurs GetTotemInfo/GetTotemDuration (objet frais a
@@ -96,6 +99,32 @@ local pendingPoses = {} -- [slot] = { name = nom lisible ou nil, time = ... }
 
 local function IsSecret(v) return issecretvalue and issecretvalue(v) end
 
+-- Portee en combat (buffs illisibles) : distance entre le joueur et l'endroit de la pose (le totem tombe
+-- a ses pieds). Position monde en yards via la carte ; nil si illisible (instance, valeur secrete).
+local _posBySlot = {} -- [slot] = { x, y, continent }
+local function GetWorldPos()
+    if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition and C_Map.GetWorldPosFromMapPos) then return nil end
+    local ok, x, y, c = pcall(function()
+        local map = C_Map.GetBestMapForUnit("player")
+        if not map or IsSecret(map) then return nil end
+        local pos = C_Map.GetPlayerMapPosition(map, "player")
+        if not pos or IsSecret(pos) then return nil end
+        local px, py = pos:GetXY()
+        if IsSecret(px) or IsSecret(py) or not px or (px == 0 and py == 0) then return nil end
+        local cont, world = C_Map.GetWorldPosFromMapPos(map, pos)
+        if not world or IsSecret(cont) or IsSecret(world) then return nil end
+        local wx, wy = world:GetXY()
+        if not wx or IsSecret(wx) or IsSecret(wy) then return nil end
+        return wx, wy, cont
+    end)
+    if ok and x then return { x, y, c } end
+end
+
+-- Sorts qui deplacent les totems deja poses. Forever : Appel totemique les ramene aux pieds du joueur.
+-- Retail : Projection totemique les envoie sur un point cible, position inconnue -> plus de reference.
+local TOTEMS_TO_FEET = { [437009] = true }
+local TOTEMS_TO_UNKNOWN = { [108287] = true }
+
 -- spellID de cast change (patch, talent qui remplace le sort) : le nouvel ID etait enregistre comme un
 -- sort neuf, non coche -> totem invisible. On le ramene a l'entree totem cochee de meme nom.
 local function ResolveTotemID(spellID, spells)
@@ -116,7 +145,17 @@ end
 -- porte le nom du sort, parfois suivi d'un rang ; sans correspondance, aucun lien -- sinon un Eclair lance
 -- juste avant le totem etait classe "totem". Nom secret (Retail, en combat) : rien ne distingue le totem
 -- d'un Choc lance juste avant, on ne lie qu'un sort DEJA classe totem.
-local function FindCandidate(name, spells)
+-- Forever : slot fixe par element (feu / terre / eau / air), donc un sort tombe toujours dans le meme slot.
+-- Appris sur une liaison par nom lisible, il filtre la liaison a l'aveugle (nom secret) : sinon un Totem
+-- incendiaire lance pendant la mise a jour d'un autre slot prenait la duree de ce totem (5 min).
+-- Retail : slots attribues a la volee, pas d'apprentissage.
+local function SlotLearnedDB()
+    if not (_addon.IsForever and AishUIAuraDB) then return nil end
+    AishUIAuraDB.totemSlotLearned = AishUIAuraDB.totemSlotLearned or {}
+    return AishUIAuraDB.totemSlotLearned
+end
+
+local function FindCandidate(name, spells, slot)
     if name then
         local lname = name:lower()
         for i, c in ipairs(pendingCastQueue) do
@@ -127,9 +166,12 @@ local function FindCandidate(name, spells)
             end
         end
     else
+        local learned = SlotLearnedDB()
         for i, c in ipairs(pendingCastQueue) do
-            local known = spells[ResolveTotemID(c.spellID, spells)]
-            if known and known.source == "totem" then return i end
+            local rid = ResolveTotemID(c.spellID, spells)
+            local known = spells[rid]
+            local lslot = learned and (learned[rid] or learned[c.spellID])
+            if known and known.source == "totem" and not (lslot and slot and lslot ~= slot) then return i end
         end
     end
 end
@@ -143,13 +185,24 @@ local function PurgeStale(now)
     end
 end
 
-local function BindSlot(slot, spellID, spells)
+local function BindSlot(slot, spellID, spells, byName)
+    local castID = spellID
     spellID = ResolveTotemID(spellID, spells)
+    local learned = byName and SlotLearnedDB()
+    if learned then learned[spellID] = slot; learned[castID] = slot end
+    -- Nouveau rang (Forever : rang appris apres coup) ramene a l'entree cochee : on l'enregistre aussi, il rejoint
+    -- son groupe de meme nom (liste des IDs du menu, style de l'ancre, cf. ResolveHomonymStyles)
+    if castID ~= spellID and not spells[castID] then RegisterTotemSpell(castID) end
     pendingPoses[slot] = nil
+    -- Forever : un sort n'occupe qu'un slot, une ancienne liaison ailleurs est forcement fausse
+    if _addon.IsForever then
+        for s, sid in pairs(slotSpellID) do if s ~= slot and sid == spellID then slotSpellID[s] = nil end end
+    end
     slotSpellID[slot] = spellID
     -- Date de pose (delai de grace de la portee) : ici seulement, sur une pose confirmee. GetTotemDuration
     -- renvoie un objet neuf a chaque appel, le dater au rescan relancait la grace a chaque evenement.
     _placedAtBySlot[slot] = GetTime()
+    _posBySlot[slot] = GetWorldPos()
     C_Timer.After(RANGE_GRACE + 0.1, function() if UpdateTotemsRange then UpdateTotemsRange() end end)
     if LearnTotemBuff then pcall(LearnTotemBuff, spellID) end
     local info = spells[spellID]
@@ -177,8 +230,9 @@ local function MatchPendingPoses(spells)
     for slot in pairs(pendingPoses) do slots[#slots + 1] = slot end
     table.sort(slots, function(a, b) return pendingPoses[a].time < pendingPoses[b].time end)
     for _, slot in ipairs(slots) do
-        local pick = FindCandidate(pendingPoses[slot].name, spells)
-        if pick then BindSlot(slot, table.remove(pendingCastQueue, pick).spellID, spells) end
+        local pname = pendingPoses[slot].name
+        local pick = FindCandidate(pname, spells, slot)
+        if pick then BindSlot(slot, table.remove(pendingCastQueue, pick).spellID, spells, pname ~= nil) end
     end
 end
 
@@ -214,9 +268,9 @@ local function OnTotemSlotChanged(slot)
     local now = GetTime()
     PurgeStale(now)
     local readable = type(name) == "string" and not IsSecret(name) and name ~= "" and name or nil
-    local pick = FindCandidate(readable, spells)
+    local pick = FindCandidate(readable, spells, slot)
     if pick then
-        BindSlot(slot, table.remove(pendingCastQueue, pick).spellID, spells)
+        BindSlot(slot, table.remove(pendingCastQueue, pick).spellID, spells, readable ~= nil)
     else
         -- Cast pas encore recu : la pose attend (cf. pendingPoses).
         pendingPoses[slot] = { name = readable, time = now }
@@ -588,15 +642,46 @@ local OUT_OF_RANGE_DELAY = 3
 local _lastSeenBySlot = {}
 local _recheckPending = false
 
+local DEFAULT_COMBAT_RANGE = 20
+
+-- true / false selon la distance a la pose, nil si pas de reference ou position illisible
+local _lastDistTrace = 0
+local function TraceDistance(msg)
+    if not ns._totemRangeTrace then return end
+    local now = GetTime()
+    if now - _lastDistTrace < 1 then return end
+    _lastDistTrace = now
+    print("|cff33aaff[TotemRange]|r distance : " .. msg)
+end
+
+local function TotemInDistance(entry, cfg)
+    local ref = entry and entry.slot and _posBySlot[entry.slot]
+    if not ref then TraceDistance("slot " .. tostring(entry and entry.slot) .. " sans reference -> buff"); return nil end
+    local cur = GetWorldPos()
+    if not cur or cur[3] ~= ref[3] then TraceDistance("position illisible -> buff"); return nil end
+    local dx, dy = cur[1] - ref[1], cur[2] - ref[2]
+    local limit = (cfg and cfg.combatRange) or DEFAULT_COMBAT_RANGE
+    TraceDistance(string.format("slot %d : %.1f / %d m", entry.slot, math.sqrt(dx * dx + dy * dy), limit))
+    return (dx * dx + dy * dy) <= limit * limit
+end
+
+-- Buffs illisibles ou peu fiables : combat, ou auras secretes (BG / arene)
+local function RangeByDistance()
+    return InCombatLockdown() or UnitAffectingCombat("player") or SelfAurasBlind()
+end
+
 local function TotemInRange(spellID, entry, cfg)
     if cfg and cfg.desatOutOfRange == false then return true end
+    -- Totem sans buff sur le joueur (degats, controle) : jamais grise
     local buffs = BuffsFor(spellID)
     if not buffs then return true end
     local now = GetTime()
     if entry and entry.placedAt and (now - entry.placedAt) < RANGE_GRACE then return true end
-    if SelfAurasBlind() then return true end
-    -- Jamais de test en combat (buffs illisibles ou peu fiables) : couleur
-    if InCombatLockdown() or UnitAffectingCombat("player") then return true end
+    -- Distance a la pose des qu'elle est lisible (reaction immediate) ; sinon buff, sauf en combat /
+    -- auras secretes ou le buff ne tranche pas : couleur
+    local r = TotemInDistance(entry, cfg)
+    if r ~= nil then return r end
+    if RangeByDistance() then return true end
     local slot = entry and entry.slot
     local present = TotemBuffPresent(buffs)
     if present == nil then return true end   -- illisible : couleur
@@ -975,7 +1060,15 @@ totemEventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 totemEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
         -- arg1=unit, arg2=castGUID, arg3=spellID.
-        if arg1 == "player" and arg3 then OnPlayerCastSucceeded(arg3) end
+        if arg1 == "player" and arg3 then
+            if not IsSecret(arg3) and (TOTEMS_TO_FEET[arg3] or TOTEMS_TO_UNKNOWN[arg3]) then
+                -- Totems deplaces : nouvelle reference pour chaque slot pose
+                local pos = TOTEMS_TO_FEET[arg3] and GetWorldPos() or nil
+                for slot in pairs(slotSpellID) do _posBySlot[slot] = pos end
+                if UpdateTotemsRange then pcall(UpdateTotemsRange) end
+            end
+            OnPlayerCastSucceeded(arg3)
+        end
     elseif event == "PLAYER_TOTEM_UPDATE" then
         -- arg1=slot (numero de slot totem qui vient de changer, jamais secret).
         pcall(OnTotemSlotChanged, arg1)
@@ -1009,6 +1102,24 @@ totemRangeFrame:RegisterEvent("PLAYER_REGEN_ENABLED")    -- sortie : le test rep
 totemRangeFrame:SetScript("OnEvent", function()
     if next(activeTotems) then pcall(UpdateTotemsRange) end
 end)
+
+-- Suivi de distance : aucun evenement ne signale un deplacement, d'ou un OnUpdate a 0.25 s, actif
+-- seulement tant qu'un totem est pose (frame cachee sinon).
+local RANGE_TICK = 0.25
+local rangeTicker = CreateFrame("Frame")
+rangeTicker:Hide()
+local rangeAcc = 0
+rangeTicker:SetScript("OnUpdate", function(_, elapsed)
+    rangeAcc = rangeAcc + elapsed
+    if rangeAcc < RANGE_TICK then return end
+    rangeAcc = 0
+    -- Position illisible : pas de tick (le repli par buff suit UNIT_AURA, inutile de le relancer ici)
+    if next(_posBySlot) and GetWorldPos() then pcall(UpdateTotemsRange) end
+end)
+SyncRangeTicker = function()
+    local want = next(activeTotems) ~= nil
+    if want ~= rangeTicker:IsShown() then rangeTicker:SetShown(want) end
+end
 
 -- NETTOYAGE UNIQUE : l'ancienne liaison (slot vide pris pour une pose, candidat le plus ancien) a
 -- classe "totem" des sorts et objets sans rapport (Attaque, Boisson, Eclair, potions...). On retire du

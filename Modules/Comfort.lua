@@ -5,19 +5,29 @@ ns.Modules = ns.Modules or {}
 local Comfort = {}
 ns.Modules.Comfort = Comfort
 
--- Cle de reglage -> CVar, valeur activee, valeur desactivee (defaut Blizzard)
+-- Cle de reglage -> CVar, valeur activee par defaut, valeur desactivee (defaut Blizzard).
+-- min / max / step : petit curseur sous la case (valeur choisie : _device[key .. "Val"]) ; values : paliers imposes
+-- (le curseur va de 1 a #values). Sans min ni values : simple bascule.
 local CVAR_TOGGLES = {
-  { key = "groundDensity", cvar = "groundEffectDensity",   on = 256, off = 48  },
-  { key = "groundFade",    cvar = "groundEffectFade",      on = 370, off = 70  },
-  { key = "groundDist",    cvar = "groundEffectDist",      on = 500, off = 320 },
+  { key = "groundDensity", cvar = "groundEffectDensity",   on = 256, off = 48,  min = 16, max = 256, step = 8 },
+  { key = "groundFade",    cvar = "groundEffectFade",      on = 370, off = 70,  min = 0, max = 510, step = 10 },
+  { key = "groundDist",    cvar = "groundEffectDist",      on = 500, off = 320, min = 70, max = 500, step = 10 },
   { key = "sharpen",       cvar = "ResampleAlwaysSharpen", on = 1,   off = 0   },
   -- off = nil : valeur par defaut du jeu, lue a l'application (C_CVar.GetCVarDefault)
-  { key = "objFade",       cvar = "lodObjectFadeScale",    on = 200 },
-  { key = "objCull",       cvar = "lodObjectCullSize",     on = 8   },
-  { key = "terrainLod",    cvar = "terrainLodDist",        on = 1000 },
-  { key = "reflection",    cvar = "reflectionMode",        on = 3,   off = 1   },
-  { key = "weather",       cvar = "weatherDensity",        on = 3,   off = 1   },
+  { key = "objFade",       cvar = "lodObjectFadeScale",    on = 200, min = 50, max = 400, step = 10 },
+  { key = "objCull",       cvar = "lodObjectCullSize",     on = 8,   min = 0, max = 100, step = 1 },
+  { key = "terrainLod",    cvar = "terrainLodDist",        on = 1000, min = 100, max = 1000, step = 50 },
+  { key = "reflection",    cvar = "reflectionMode",        on = 3,   off = 1,   min = 0, max = 3, step = 1 },
+  { key = "weather",       cvar = "weatherDensity",        on = 3,   off = 1,   min = 0, max = 3, step = 1 },
+  -- Repris de Forever Graphics Enhancer
+  { key = "ripple",        cvar = "rippleDetail",          on = 2,   min = 0, max = 2, step = 1 },
+  { key = "sunshafts",     cvar = "sunshafts",            on = 2,   min = 0, max = 2, step = 1 },
+  { key = "horizon",       cvar = "horizonStart",          on = 4000, min = 400, max = 8000, step = 100 },
+  { key = "wmoLod",        cvar = "wmoLodDist",            on = 800, min = 100, max = 1200, step = 50 },
+  { key = "shadowSize",    cvar = "shadowTextureSize",     on = 2048, values = { 512, 1024, 2048, 4096 } },
 }
+local TOGGLE_BY_KEY = {}
+for _, t in ipairs(CVAR_TOGGLES) do TOGGLE_BY_KEY[t.key] = t end
 
 local function Cfg()
   if not ns.QoLEnabled() then return {} end
@@ -79,15 +89,24 @@ local function DefaultOff(t)
   return ok and tonumber(v) or nil
 end
 
--- Active : pose la valeur "on". Desactive : ne restaure la valeur Blizzard que si la valeur actuelle
+-- Valeur choisie au curseur (sinon la valeur "on" d'origine)
+local function OnValue(t)
+  local v = tonumber(GetDevice()[t.key .. "Val"])
+  return v or t.on
+end
+
+-- Active : pose la valeur choisie. Desactive : ne restaure la valeur Blizzard que si la valeur actuelle
 -- est bien la notre, pour ne jamais ecraser un reglage fait ailleurs.
 local function ApplyCVars()
   local dev = GetDevice()
   for _, t in ipairs(CVAR_TOGGLES) do
     local cur = GetCVarNum(t.cvar)
-    if dev[t.key] then
-      if cur ~= t.on then pcall(C_CVar.SetCVar, t.cvar, t.on) end
-    elseif cur == t.on then
+    local on = OnValue(t)
+    if cur == nil then
+      -- CVar absent de ce client : rien
+    elseif dev[t.key] then
+      if cur ~= on then pcall(C_CVar.SetCVar, t.cvar, on) end
+    elseif cur == on then
       local off = DefaultOff(t)
       if off ~= nil then pcall(C_CVar.SetCVar, t.cvar, off) end
     end
@@ -537,6 +556,32 @@ end
 function Comfort.SetToggle(key, value)
   GetDevice()[key] = value and true or false
   ApplyCVars()
+end
+
+-- Curseur sous la case : bornes { min, max, step, values } ou nil (simple bascule)
+function Comfort.GetRange(key)
+  local t = TOGGLE_BY_KEY[key]
+  if not t or not (t.min or t.values) then return nil end
+  return { min = t.min, max = t.max, step = t.step, values = t.values }
+end
+
+-- CVar connu de ce client ? (sinon l'option n'est pas proposee)
+function Comfort.Supported(key)
+  local t = TOGGLE_BY_KEY[key]
+  return t ~= nil and GetCVarNum(t.cvar) ~= nil
+end
+
+function Comfort.GetValue(key)
+  local t = TOGGLE_BY_KEY[key]
+  return t and OnValue(t)
+end
+
+function Comfort.SetValue(key, v)
+  local t = TOGGLE_BY_KEY[key]
+  if not t then return end
+  local dev = GetDevice()
+  dev[key .. "Val"] = v
+  if dev[key] and GetCVarNum(t.cvar) ~= v then pcall(C_CVar.SetCVar, t.cvar, v) end
 end
 
 -- ── Clic droit sur la minimap : menu de pistage ─────────────────────────────

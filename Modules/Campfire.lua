@@ -95,77 +95,46 @@ local function NearCampfire()
 end
 
 -- ── Sac de couchage (Bien repose) ───────────────────────────────────────────
--- Zone de repos d'un sac (le sien, deja pose ou non, ou celui d'un autre) : un stack de Bien repose toutes les 60 s,
--- jusqu'a 3 (puis rafraichi). Le jeu ne donne pas ce minuteur : il repart a chaque BAG_UPDATE_COOLDOWN (allonge,
--- releve, saut, stack, entree dans la zone du sac) ; sortie de la zone de repos : sac oublie. Reperage : pose du sac (429961),
--- ou BAG_UPDATE_COOLDOWN en zone de repos sans sort lance juste avant (le GCD d'un sort en declenche un aussi).
--- Sans stack 60 s apres le dernier BAG_UPDATE_COOLDOWN (debout, ou fausse alerte en auberge), le sac est oublie,
--- retrouve au suivant. Le HUD montre la minute sur un anneau vert, sous celui du feu.
--- Une seule table (limite des 200 locales du fichier). pos : lieu du sac ; start : debut de la minute en cours ;
--- seen : dernier signal du sac ; castAt : dernier sort du joueur ; radius / forget (metres) : zone du sac / au-dela,
--- sac oublie ; rested : bonus du feu deja gagnes dans ce sac (le feu n'est plus suivi).
--- quietUntil : fin d'un vol ou d'un chargement, qui declenchent aussi BAG_UPDATE_COOLDOWN (faux sac a l'atterrissage
--- en capitale) ; aucun reperage avant cette heure.
-local Bag = { CAST = 429961, DUR = 60, radius = 20, forget = 60, rgb = { 0.3, 0.85, 0.35, 1 }, castAt = 0, quietUntil = 0 }
+-- Dans la zone d'un sac (le sien ou celui d'un autre), le jeu pose une aura "Au repos" (sans ID de sort) : un stack
+-- de Bien repose (429959) toutes les 60 s, jusqu'a 3 (puis rafraichi). Le jeu ne donne pas ce minuteur : il part
+-- a l'apparition de l'aura, repart a chaque stack gagne / rafraichi et a l'arret apres un deplacement.
+-- Le HUD montre la minute sur un anneau vert, sous celui du feu ; en mouvement, rien.
+-- Une seule table (limite des 200 locales du fichier). on : aura presente ; start : debut de la minute en cours ;
+-- stackExp : fin du stack connu (un changement = stack gagne) ; rested : bonus du feu deja gagnes dans ce sac.
+local Bag = { DUR = 60, STACK = 429959, rgb = { 0.3, 0.85, 0.35, 1 } }
 
-function Bag.Mark()
-  local y, x, inst = PlayerPos()
-  Bag.pos = y and { y = y, x = x, inst = inst } or { y = 0, x = 0 }
-end
-
--- Dans le sac : zone de repos ET signal du sac recent (BAG_UPDATE_COOLDOWN accepte ou pose du sac, Bag.seen) ;
--- une zone de repos seule (auberge, ville) ne suffit jamais
--- Zone de repos native (auberge, capitale) : le sac ne peut pas y etre lance, donc jamais de sac.
--- Bag.native : la periode de repos en cours a commence sans signal de sac (cf. PLAYER_UPDATE_RESTING).
--- Pas ns.IsInTown : un village (La Croisee...) n'est pas une zone de repos hors de l'auberge, le sac s'y pose.
-function Bag.NativeRest()
-  return Bag.native == true
-end
-
-function Bag.In()
-  local pos = Bag.pos
-  if not (pos and IsResting()) or Bag.NativeRest() then return false end
-  if not Bag.seen or GetTime() - Bag.seen > Bag.DUR + 2 then Bag.pos, Bag.seen = nil, nil; return false end
-  local y, x, inst = PlayerPos()
-  if not y then return true end   -- position illisible : on se fie a la zone de repos
-  local d2 = (y - pos.y) ^ 2 + (x - pos.x) ^ 2
-  if inst ~= pos.inst or d2 > Bag.forget ^ 2 then Bag.pos = nil; return false end
-  return d2 <= Bag.radius ^ 2
-end
-
--- Vrai si une aura du feu (minute assise, recharge commune du camp) a commence vers l'instant t
-function Bag.CampAuraAt(t)
-  local ids = { COOLDOWN_AURA, unpack(WELCOME_AURAS) }
-  for _, id in ipairs(ids) do
-    local a = HasAura(id)
-    local dur, exp = a and a.duration, a and a.expirationTime
-    if type(dur) == "number" and type(exp) == "number" and dur > 0 and math.abs(exp - dur - t) < 1.5 then
-      return true
+-- Aura du sac : sans ID de sort (repli par nom si un client en donne un)
+local BAG_AURA_NAMES = { ["Au repos"] = true, ["Resting"] = true }
+function Bag.Scan()
+  if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return false end
+  for i = 1, 40 do
+    local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
+    if not ok or not a then break end
+    local id, name = a.spellId, a.name
+    if not (issecretvalue and (issecretvalue(id) or issecretvalue(name))) then
+      if not (type(id) == "number" and id > 0) or BAG_AURA_NAMES[name] then return true end
     end
   end
   return false
 end
 
--- Vrai si un stack de Bien repose (429959) a ete gagne / rafraichi vers l'instant t
-function Bag.StackAt(t)
-  local a = HasAura(429959)
-  local dur, exp = a and a.duration, a and a.expirationTime
-  return type(dur) == "number" and type(exp) == "number" and dur > 0 and math.abs(exp - dur - t) < 1.5
+-- Relu a chaque UNIT_AURA : apparition / perte de l'aura, stack gagne
+function Bag.Update()
+  local on = Bag.Scan()
+  local s = HasAura(Bag.STACK)
+  local exp = s and type(s.expirationTime) == "number" and s.expirationTime or nil
+  if on and (not Bag.on or (exp and exp ~= Bag.stackExp)) then Bag.start = nil end
+  Bag.on, Bag.stackExp = on or nil, exp
 end
 
--- BAG_UPDATE_COOLDOWN vraiment du au sac ? En ville / auberge, n'importe quel objet en declenche un (potion,
--- jouet...) : il faut un stack tout juste gagne, une zone de repos qui vient de commencer (entree dans la zone
--- d'un sac), ou un sac deja repere.
-function Bag.Confirms(t)
-  if Bag.pos and Bag.seen and t - Bag.seen <= Bag.DUR + 2 then return true end
-  if Bag.restAt and t - Bag.restAt < 3 then return true end
-  return Bag.StackAt(t)
+function Bag.In()
+  return Bag.on == true and not Bag.moving
 end
 
 -- Debut de la minute en cours, nil hors du sac
 -- (en mouvement : aucune minute, elle repart de zero a l'arret)
 function Bag.Start()
-  if Bag.moving or not Bag.In() then Bag.start = nil; return nil end
+  if not Bag.In() then Bag.start = nil; return nil end
   Bag.start = Bag.start or GetTime()
   return Bag.start
 end
@@ -2262,7 +2231,6 @@ ns.NewTicker(1, function()
   if not hud or InCombatLockdown() or not ns.IsModuleAvailable("campfire") then return end
   local taxi = UnitOnTaxi("player")
   if campPos or taxi ~= wasTaxi then
-    if wasTaxi and not taxi then Bag.quietUntil = GetTime() + 5 end
     wasTaxi = taxi
     Campfire.Refresh()
   end
@@ -2278,11 +2246,8 @@ ev:RegisterEvent("PLAYER_DEAD")
 ev:RegisterEvent("PLAYER_ALIVE")
 ev:RegisterEvent("PLAYER_UNGHOST")
 ev:RegisterUnitEvent("UNIT_AURA", "player")
-ev:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
-ev:RegisterEvent("PLAYER_UPDATE_RESTING")
 ev:RegisterEvent("PLAYER_STARTED_MOVING")
 ev:RegisterEvent("PLAYER_STOPPED_MOVING")
-ev:RegisterEvent("PLAYER_CONTROL_GAINED")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
 ev:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
@@ -2304,79 +2269,20 @@ ev:SetScript("OnEvent", function(_, event, _, _, spellID)
     end
     return
   end
-  -- Fin de vol (controle rendu) ou chargement : pas de reperage du sac pendant quelques secondes
-  if event == "PLAYER_CONTROL_GAINED" or event == "PLAYER_ENTERING_WORLD" then
-    Bag.quietUntil = GetTime() + 5
-    -- Chargement deja en zone de repos, sans sac connu : zone native (auberge, capitale)
-    if event == "PLAYER_ENTERING_WORLD" then Bag.native = (IsResting() and not Bag.seen) or nil end
-    return
-  end
   -- Recharge d'un objet : swipe des cases (cadres non securises, permis en combat)
   if event == "BAG_UPDATE_COOLDOWN" then
     if slots[1] then Campfire.UpdateItemCooldowns() end
-    if UnitOnTaxi("player") or GetTime() < Bag.quietUntil then return end
-    -- Sac de couchage : la minute repart (allonge, releve, saut, stack gagne) ; sac repere s'il ne l'etait pas.
-    -- Lu un instant plus tard : la minute du feu (et la recharge commune du camp, posee sur les objets de camp des
-    -- sacs) declenche aussi l'evenement, sans rapport avec le sac.
-    -- IsResting lu seulement apres le delai : a l'entree dans la zone du sac, l'evenement peut preceder
-    -- PLAYER_UPDATE_RESTING (signal perdu, puis zone jugee native 3 s plus tard).
-    if not InCombatLockdown() and GetTime() - Bag.castAt > 0.5 then
-      local t = GetTime()
-      C_Timer.After(0.3, function()
-        if InCombatLockdown() or not IsResting() or Bag.CampAuraAt(t) then return end
-        if UnitOnTaxi("player") or GetTime() < Bag.quietUntil or Bag.NativeRest() or not Bag.Confirms(t) then return end
-        Bag.seen = t
-        if not Bag.In() then Bag.Mark() end
-        if not Bag.In() then return end
-        -- Minute en cours gardee (gain des bonus du feu, objets...) : seul un deplacement la relance (cf.
-        -- PLAYER_STARTED_MOVING) ; nouvelle minute au reperage du sac ou au stack qui conclut la precedente
-        if not Bag.start or t - Bag.start >= Bag.DUR - 3 then Bag.start = t end
-        C_Timer.After(Bag.DUR + 2.1, Campfire.Refresh)   -- sans nouveau signal d'ici la : sac oublie (cf. Bag.In)
-        Campfire.Refresh()
-      end)
-    end
-    return
-  end
-  if event == "UNIT_SPELLCAST_SUCCEEDED" then
-    Bag.castAt = GetTime()
-    if spellID == Bag.CAST then
-      Bag.native = nil   -- pose possible : on n'est pas en zone native
-      Bag.Mark()
-      Bag.seen, Bag.start = GetTime(), nil
-      C_Timer.After(Bag.DUR + 2.1, Campfire.Refresh)
-      Campfire.Refresh()
-    end
     return
   end
   -- Sac de couchage : bouger, c'est ne plus profiter du repos. La minute s'arrete, et repart de zero a l'arret.
   if event == "PLAYER_STARTED_MOVING" or event == "PLAYER_STOPPED_MOVING" then
     local moving = event == "PLAYER_STARTED_MOVING" or nil
-    if moving and not Bag.pos then return end
     if Bag.moving == moving then return end
     Bag.moving = moving
-    if Bag.pos then Campfire.Refresh() end
+    if Bag.on then Campfire.Refresh() end
     return
   end
-  -- Zone de repos : sortie = arret (l'entree repart deja de zero : hors du sac, Bag.Start efface la minute).
-  -- Le feu de camp peut aussi declencher l'evenement : la minute du sac n'est pas touchee tant qu'on se repose.
-  if event == "PLAYER_UPDATE_RESTING" then
-    if not IsResting() then Bag.pos, Bag.seen, Bag.start, Bag.restAt, Bag.native = nil, nil, nil, nil, nil
-    elseif not Bag.restAt then
-      -- Debut d'un repos : sans signal de sac (pose, entree dans sa zone) dans les 3 s, c'est une zone native
-      local t = GetTime()
-      Bag.restAt = t
-      C_Timer.After(3, function()
-        -- Pres d'un feu de camp (qui declenche aussi l'evenement) : pas de verdict
-        if Bag.restAt == t and IsResting() and not (Bag.seen and Bag.seen >= t - 1) and not NearCampfire() then
-          Bag.native = true
-          Bag.pos, Bag.start = nil, nil
-          Campfire.Refresh()
-        end
-      end)
-    end
-    if Bag.pos then Campfire.Refresh() end
-    return
-  end
+  if event == "UNIT_AURA" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_REGEN_ENABLED" then Bag.Update() end
   -- Objet pose ou recu : barres d'objets a jour tant que les panneaux sont deplies
   if event == "BAG_UPDATE_DELAYED" then
     if panelOpen and hud and not InCombatLockdown() then SetupItems(); WakeDriver() end
@@ -2432,6 +2338,7 @@ SlashCmdList["AISHCAMP"] = function(msg)
     .. " HUD cree=" .. tostring(hud ~= nil) .. " affiche=" .. tostring(hud and hud:IsShown()) .. " combat=" .. tostring(InCombatLockdown()))
   print(P .. "aura Feu de camp proche=" .. A(NEARBY_AURA) .. " | accueillant=" .. A(WELCOME_AURAS[1]) .. "/" .. A(WELCOME_AURAS[2])
     .. " | recharge=" .. A(COOLDOWN_AURA) .. " | camp retenu=" .. tostring(campPos ~= nil) .. " | pres d'un feu=" .. tostring(NearCampfire()))
+  print(P .. "sac de couchage : aura=" .. tostring(Bag.Scan()) .. " | en mouvement=" .. tostring(Bag.moving == true))
   print(P .. "dernier objet survole=" .. tostring(lastHover) .. " | feu reconnu=" .. tostring(lastHover and IsCampfireName(lastHover) or false))
   local diag = {}
   print(P .. "objets de camp dans les sacs=" .. #CampItems(diag) .. " | mots cherches : " .. table.concat(CampWords(), ", "))

@@ -40,7 +40,7 @@ end
 local HOMONYM_KEEP_OWN = {
     -- Champs propres a chaque spellID : jamais recopies depuis l'ancre.
     name = true, source = true, linkedSpellIDs = true,
-    _invalid = true, _adminDeleted = true, spellIDs = true, styleAnchorID = true,
+    _invalid = true, _adminDeleted = true, spellIDs = true, styleAnchorID = true, _unlearned = true,
 }
 
 -- Score de "personnalisation" : l'ancre est l'entree que l'utilisateur a le plus travaillee, pour ne
