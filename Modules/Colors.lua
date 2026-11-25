@@ -165,14 +165,28 @@ Colors.STANCES = {
     { id = "stance_berserker", name = L["COLORSMOD_STANCE_BERSERKER"], spec = 72, formID = 19, spells = { 386196, 2458 } },
     { id = "stance_defensive", name = L["COLORSMOD_STANCE_DEFENSIVE"], spec = 73, formID = 18, spells = { 386208, 71 } },
 }
-Colors._stanceByID, Colors._stanceBySpell, Colors._stanceByForm = {}, {}, {}
-for _, st in ipairs(Colors.STANCES) do
-    Colors._stanceByID[st.id] = st
-    Colors._stanceByForm[st.formID] = st
-    for _, sid in ipairs(st.spells) do Colors._stanceBySpell[sid] = st end
+-- Mode Formes (Druide) : meme principe, une ligne par forme. formIDs : Retail puis Forever (ours redoutable = 8) ;
+-- noForm = forme humaine (aucune forme). Voyage = voyage (3), aquatique (4), vol (27, 29) ; sans spe liee : couleur de classe.
+Colors.DRUID_FORMS = {
+    { id = "form_moonkin", name = L["COLORSMOD_FORM_MOONKIN"], spec = 102, formIDs = { 31 } },
+    { id = "form_cat",     name = L["COLORSMOD_FORM_CAT"],     spec = 103, formIDs = { 1 } },
+    { id = "form_bear",    name = L["COLORSMOD_FORM_BEAR"],    spec = 104, formIDs = { 5, 8 } },
+    { id = "form_travel",  name = L["COLORSMOD_FORM_TRAVEL"],                formIDs = { 3, 4, 27, 29 } },
+    { id = "form_human",   name = L["COLORSMOD_FORM_HUMAN"],   spec = 105, noForm = true },
+}
+-- Classe -> lignes de posture / forme ; cle DB du mode (coche dans les couleurs thematiques)
+Colors.STANCES_BY_CLASS = { WARRIOR = Colors.STANCES, DRUID = Colors.DRUID_FORMS }
+Colors.STANCE_MODE_KEY = { WARRIOR = "warriorStanceMode", DRUID = "druidFormMode" }
+Colors._stanceByID, Colors._stanceBySpell = {}, {}
+for file, list in pairs(Colors.STANCES_BY_CLASS) do
+    for _, st in ipairs(list) do
+        st.class = file
+        Colors._stanceByID[st.id] = st
+        for _, sid in ipairs(st.spells or {}) do Colors._stanceBySpell[sid] = st end
+    end
 end
 for _, c in ipairs(Colors.CLASSES) do
-    if c.file == "WARRIOR" then c.stances = Colors.STANCES end
+    c.stances = Colors.STANCES_BY_CLASS[c.file]
 end
 
 -- Palette violette par defaut de la condition Furtivite (modifiable element par element dans les options)
@@ -222,9 +236,9 @@ function Colors.Get(element)
     if classKey and Colors.StealthConditionActive(classKey) then
         return Colors.GetForSpec(classKey, Colors.STEALTH_ID, element)
     end
-    -- Mode Posture (Guerrier) : ligne de la posture active ; sans posture, on retombe sur la spe
-    if classKey == "warrior" and Colors.IsStanceMode() then
-        local st = Colors.GetActiveStance()
+    -- Mode Posture (Guerrier) / Formes (Druide) : ligne de la posture ou forme active ; sinon, on retombe sur la spe
+    if Colors.STANCES_BY_CLASS[classFile] and Colors.IsStanceMode(classKey) then
+        local st = Colors.GetActiveStance(classFile)
         if st then return Colors.GetForSpec(classKey, st.id, element) end
     end
     local specID = ns._specID
@@ -272,29 +286,51 @@ function Colors.StealthConditionActive(classKey)
     return Colors._stealthed == true
 end
 
---- Mode Posture du Guerrier (couleurs suivant la posture plutot que la spe). Desactive par defaut.
-function Colors.IsStanceMode()
-    return ns.DB and ns.DB.colors and ns.DB.colors.warriorStanceMode == true or false
+--- Mode Posture du Guerrier / Formes du Druide (couleurs suivant la posture ou la forme plutot que la spe).
+--- classKey : "warrior" (defaut) ou "druid". Desactive par defaut.
+local function ModeKey(classKey)
+    return Colors.STANCE_MODE_KEY[(classKey or "warrior"):upper()]
+end
+function Colors.IsStanceMode(classKey)
+    local k = ModeKey(classKey)
+    return k and ns.DB and ns.DB.colors and ns.DB.colors[k] == true or false
 end
 
-function Colors.SetStanceMode(val)
+function Colors.SetStanceMode(val, classKey)
+    local k = ModeKey(classKey)
+    if not k then return end
     if not ns.DB then ns.DB = {} end
     ns.DB.colors = ns.DB.colors or {}
-    ns.DB.colors.warriorStanceMode = val and true or false
+    ns.DB.colors[k] = val and true or false
     Colors.Broadcast()
 end
 
---- Posture active du joueur (entree de Colors.STANCES) ou nil.
-function Colors.GetActiveStance()
+--- Posture / forme active du joueur (entree de Colors.STANCES_BY_CLASS[classFile]) ou nil.
+function Colors.GetActiveStance(classFile)
+    if not classFile then
+        classFile = ns._playerClass
+        if not classFile or classFile == "" then classFile = select(2, UnitClass("player")) end
+    end
+    local list = Colors.STANCES_BY_CLASS[classFile]
+    if not list then return nil end
     local idx = GetShapeshiftForm and GetShapeshiftForm()
-    if not idx or idx == 0 then return nil end
+    if not idx or idx == 0 then
+        for _, st in ipairs(list) do if st.noForm then return st end end
+        return nil
+    end
     if GetShapeshiftFormInfo then
         local ok, _, _, _, sid = pcall(GetShapeshiftFormInfo, idx)
         local st = ok and sid and Colors._stanceBySpell[sid]
-        if st then return st end
+        if st and st.class == classFile then return st end
     end
     local formID = GetShapeshiftFormID and GetShapeshiftFormID()
-    return formID and Colors._stanceByForm[formID] or nil
+    if not formID then return nil end
+    for _, st in ipairs(list) do
+        for _, f in ipairs(st.formIDs or { st.formID }) do
+            if f == formID then return st end
+        end
+    end
+    return nil
 end
 
 --- Spe par defaut d'une classe (clic droit sur son nom dans les couleurs thematiques), ou nil.
@@ -342,7 +378,7 @@ function Colors.GetForSpec(classKey, specID, element)
         local d = Colors.STEALTH_DEFAULTS[element]
         if d then return d end
     end
-    -- 2b. Posture du Guerrier : couleurs de sa spe liee (overrides compris)
+    -- 2b. Posture du Guerrier / forme du Druide : couleurs de sa spe liee (overrides compris)
     local stance = Colors._stanceByID[specID]
     if stance then return Colors.GetForSpec(classKey, stance.spec, element) end
     -- 2. Défaut de spé (table SPEC_DEFAULTS)
@@ -443,11 +479,11 @@ _stanceEvt:RegisterEvent("PLAYER_ENTERING_WORLD")
 _stanceEvt:SetScript("OnEvent", function()
     local cls = ns._playerClass
     if not cls or cls == "" then cls = select(2, UnitClass("player")) end
-    if cls ~= "WARRIOR" then return end
-    local st = Colors.GetActiveStance()
+    if not Colors.STANCES_BY_CLASS[cls] then return end
+    local st = Colors.GetActiveStance(cls)
     if st == Colors._lastStance then return end
     Colors._lastStance = st
-    if Colors.IsStanceMode() then C_Timer.After(0, Colors.Broadcast) end
+    if Colors.IsStanceMode(cls:lower()) then C_Timer.After(0, Colors.Broadcast) end
 end)
 
 -- Réagir aux changements de spécialisation

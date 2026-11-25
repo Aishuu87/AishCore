@@ -563,6 +563,7 @@ function MovementBuffs.SetDraggable(on)
   root:EnableMouse(can and true or false)
   if can then
     root:RegisterForDrag("LeftButton")
+    if ns.Nudge then ns.Nudge.Attach(root) end   -- fleches = deplacement au pixel
     root:SetScript("OnDragStart", function(self) self:StartMoving() end)
     root:SetScript("OnDragStop", function(self)
       self:StopMovingOrSizing()

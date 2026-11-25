@@ -3040,6 +3040,7 @@ function ResourceCircle.SetDraggable(on)
     bar:SetMovable(true)
     bar:EnableMouse(true)
     bar:RegisterForDrag("LeftButton")
+    if ns.Nudge then ns.Nudge.Attach(bar) end   -- fleches = deplacement au pixel
     bar:SetScript("OnDragStart", function(self)
       -- Verrou relu A CHAUD : le drag est arme des l'ouverture du panneau (plus de bouton dedie),
       -- donc la case "Verrouiller la position" est le seul frein -- meme modele que unitBars.
@@ -4158,6 +4159,9 @@ function ResourceCircle.ShieldCharges(def)
     local function Try(sid)
       local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
       if ok and a then
+        -- Trouvee par ID (nom pas encore charge apres le login) : rang porte et instance retenus comme par le nom
+        def._ids[sid] = true; def._activeId = sid
+        if a.auraInstanceID and Plain(a.auraInstanceID) then def._instID = a.auraInstanceID end
         local c = a.applications
         if Plain(c) then return tonumber(c) or 0 end
         return nil, c
@@ -4245,9 +4249,11 @@ function ResourceCircle.EnsureShieldNative(def)
   -- Meme recette que la grille native des icones (AuraTrackerContainer.lua, EnsureIconsNativeGrid) : conteneur
   -- visible, AddAuraGroup a 1 bouton place par le flow natif, texte des stacks cree SUR le bouton (police posee
   -- avant SetApplicationCount). Le conteneur, jamais "forbidden", est cale sur notre texte secondaire.
-  -- Enfant du cadre du texte secondaire : en herite visibilite, opacite (pops) et plan
-  local parent = bar.secResFrame or UIParent
-  local ok, res = pcall(CreateFrame, "AuraContainer", nil, parent, "CustomAuraContainerTemplate")
+  -- Enfant d'UIParent, toujours affiche : il doit creer son bouton HORS combat. Enfant du cadre du texte secondaire
+  -- (masque hors combat apres un /reload tant que le cercle n'est pas affiche), il ne le creait qu'a l'entree du
+  -- 1er combat, aura deja secrete : bouton inaccessible, aucun compte jusqu'au combat suivant. Visibilite et
+  -- opacite (pops) du cadre recopiees en alpha, cf. SyncShieldNative.
+  local ok, res = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
   if not ok or not res then def._nativeErr = "CreateFrame: " .. tostring(res); return end
   c = res
   def._native = c
@@ -4263,7 +4269,16 @@ function ResourceCircle.EnsureShieldNative(def)
   c:EnableMouse(false)
   pcall(c.SetEnabled, c, true)
   pcall(c.SetUnit, c, "player")
+  c:SetAlpha(0)   -- montre par SyncShieldNative (MirrorShieldNative)
   c:Show()
+  -- Opacite du cadre du texte secondaire suivie a chaque changement (pops, fondus), pas seulement au tick
+  local f = bar.secResFrame
+  if f then
+    local function Mirror() ResourceCircle.MirrorShieldNative(def) end
+    hooksecurefunc(f, "SetAlpha", Mirror)
+    f:HookScript("OnShow", Mirror)
+    f:HookScript("OnHide", Mirror)
+  end
   pcall(c.SetFlowLayoutAnchorPoint, c, "TOPLEFT")
   pcall(c.SetFlowLayoutAxis, c, 0)
   pcall(c.SetFlowLayoutGrowthDirection, c, 1, -1)
@@ -4337,6 +4352,20 @@ function ResourceCircle.StyleShieldNativeDeco(def)
   end)
 end
 
+-- Opacite du conteneur = celle du cadre du texte secondaire quand le bouclier est attendu, 0 sinon. Le conteneur
+-- reste affiche (alpha seulement) : masque, il ne suivrait plus l'aura et perdrait son bouton.
+function ResourceCircle.MirrorShieldNative(def)
+  local c = def and def._native
+  if not c then return end
+  local f = bar and bar.secResFrame
+  local a = 0
+  if def._nativeWanted and f and f:IsVisible() then
+    local pa = UIParent:GetEffectiveAlpha()
+    a = (pa and pa > 0) and (f:GetEffectiveAlpha() / pa) or f:GetAlpha()
+  end
+  c:SetAlpha(a)
+end
+
 -- Le conteneur suit la visibilite et l'opacite du texte secondaire (apparitions / pops compris)
 function ResourceCircle.SyncShieldNative(def, applied)
   local c = def._native
@@ -4346,9 +4375,11 @@ function ResourceCircle.SyncShieldNative(def, applied)
     c:SetFrameStrata(f:GetFrameStrata())
     c:SetFrameLevel(f:GetFrameLevel() + 5)
   end
-  -- Visibilite / opacite heritees du cadre parent (secResFrame) ; seul l'etat "bouclier attendu" est pilote ici
+  -- Seul l'etat "bouclier attendu" est pilote ici ; visibilite et opacite du cadre recopiees par MirrorShieldNative
   local vis = applied and bar:IsVisible() and bar.secResText:IsShown()
-  c:SetShown(vis and true or false)
+  def._nativeWanted = vis and true or false
+  if not c:IsShown() then c:Show() end
+  ResourceCircle.MirrorShieldNative(def)
   -- Police / couleur recopiees hors combat, SEULEMENT quand elles changent : un widget deja lie ne doit pas etre
   -- retouche en continu (cf. AuraTrackerContainer.lua)
   if def._nativeFS and not InCombatLockdown() then
@@ -4907,6 +4938,12 @@ function ResourceCircle.UpdateSecondaryResource()
     return
   elseif secResDef.useShieldStacks then
     -- Forever, chaman : charges du Bouclier de foudre / d'eau (aura reconnue par nom, tous rangs)
+    -- Hors combat, l'aura est lue AVANT de creer le bouton natif : apres un /reload, il etait cree au 1er tick sur
+    -- tous les rangs appris (filtre multi-rangs, compteur vide en combat) puis refiltre au tick suivant, et le
+    -- compte ne s'affichait qu'a partir du 2e combat. Lue d'abord, le rang porte (_activeId) est connu a la creation.
+    local preCount, preRaw
+    local inCombat = InCombatLockdown()
+    if not inCombat then preCount, preRaw = ResourceCircle.ShieldCharges(secResDef) end
     ResourceCircle.EnsureShieldNative(secResDef)
     -- Bouton natif relie : c'est son texte qui affiche les charges ; le notre reste en place, transparent
     bar.secResText:SetAlpha(secResDef._nativeBound and 0 or 1)
@@ -4915,7 +4952,7 @@ function ResourceCircle.UpdateSecondaryResource()
     if bar.secResDashL then bar.secResDashL:SetAlpha(dashA) end
     if bar.secResDashR then bar.secResDashR:SetAlpha(dashA) end
     local applied
-    if InCombatLockdown() then
+    if inCombat then
       -- Combat : on n'ecrit plus rien (Blizzard ecrit le nombre de charges si le bouton natif est lie, sinon le
       -- dernier nombre lu reste affiche) ; texte garde tant que le bouclier etait la a l'entree en combat ou a
       -- ete relance depuis. Repli : lecture directe si le bouclier n'etait pas connu.
@@ -4927,7 +4964,7 @@ function ResourceCircle.UpdateSecondaryResource()
         else applied = raw ~= nil and pcall(bar.secResText.SetText, bar.secResText, raw) or false end
       end
     else
-      local count, raw = ResourceCircle.ShieldCharges(secResDef)
+      local count, raw = preCount, preRaw
       if count then
         applied = count > 0
         if applied then bar.secResText:SetText(count) end

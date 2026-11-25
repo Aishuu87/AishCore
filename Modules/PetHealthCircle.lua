@@ -431,6 +431,7 @@ function PetHealthCircle.SetDraggable(on)
     bar:SetMovable(true)
     bar:EnableMouse(true)
     bar:RegisterForDrag("LeftButton")
+    if ns.Nudge then ns.Nudge.Attach(bar) end   -- fleches = deplacement au pixel
     bar:SetScript("OnDragStart", function(self)
       local c = Cfg()
       if c and c.locked then return end

@@ -92,6 +92,7 @@ function Location.Create(parent)
     frame:SetClampedToScreen(true)
     frame:EnableMouse(false)   -- reactive seulement pendant le drag (sinon capte les clics monde)
     frame:RegisterForDrag("LeftButton")
+    if ns.Nudge then ns.Nudge.Attach(frame) end   -- fleches = deplacement au pixel
     frame:SetScript("OnDragStart", function(self)
         if not dragUnlocked then return end
         self:StartMoving()

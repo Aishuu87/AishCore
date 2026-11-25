@@ -600,7 +600,10 @@ function ns.BuildCastBarsPage(container, W, NewLayout)
   if isPlayer then
     local cbTSpec = Bind(CB(L["CASTBARS_THEMED"], L["SETTINGS_CB_TEXT_SPEC_TT"], 4), "timerUseSpecColor", "bool")
     local cbTSchool = heroicOpt and Bind(CB(L["CASTBARS_SCHOOL"], L["SETTINGS_CB_TEXT_SCHOOL_TT"], 4), "timerUseSchoolColor", "bool") or false
-    Row(4, colTimer, cbTSpec, cbTSchool, false)
+    -- Liste de crafts : le timer donne le temps total de la liste (CastBar.QueueCraft)
+    local cbCraft = Bind(CB(L["CASTBARS_CRAFT_TOTAL"], L["CASTBARS_CRAFT_TOTAL_TT"], 4), "craftTotal", "bool")
+    if Get("craftTotal") == nil then cbCraft:SetChecked(true) end
+    Row(4, colTimer, cbTSpec, cbTSchool, cbCraft)
     ColorTrio(colTimer, cbTSpec, "timerUseSpecColor", cbTSchool or nil, "timerUseSchoolColor")
   else
     Row(4, colTimer, false, false, false)

@@ -390,6 +390,7 @@ local function SyncDBSliders()
     end
   end
 end
+SharedWidgets.SyncDBSliders = SyncDBSliders   -- deplacement au clavier (UI/Nudge.lua)
 function SharedWidgets.TrackDB(w, getter)
   if w and w.slider and w._snap and getter then
     w._dbGet = getter
@@ -516,6 +517,91 @@ function SharedWidgets.CreateSectionHeader(parent, text, width, colorOverride)
   SharedWidgets._sectionHeaders = SharedWidgets._sectionHeaders or {}
   table.insert(SharedWidgets._sectionHeaders, f)
 
+  return f
+end
+
+-- Logo "fx" : lien vers la page Animations 3D (cf. ns.OpenAnim3D, SettingsPanel.lua)
+SharedWidgets.FX_ICON = "Interface\\AddOns\\AishCore\\Media\\UI\\FxIcon.tga"
+
+-- Bouton "fx" d'une ligne de liste : allume (couleur d'accent) quand l'entree a deja un combo.
+-- section / key : cible de ns.OpenAnim3D ; le nombre d'animations est relu a chaque survol / rafraichissement.
+function SharedWidgets.CreateFxButton(parent, size, section, key)
+  local b = CreateFrame("Button", nil, parent)
+  b:SetSize(size or 16, size or 16)
+  local t = b:CreateTexture(nil, "OVERLAY")
+  t:SetAllPoints()
+  t:SetTexture(SharedWidgets.FX_ICON)
+  local function Count() return ns.Anim3DCount and ns.Anim3DCount(section, key) or 0 end
+  function b:Refresh(hover)
+    local n = Count()
+    if hover then
+      local c = SharedWidgets.GlowColor()
+      t:SetVertexColor(c[1], c[2], c[3], 1)
+    elseif n > 0 then
+      local c = Theme.accent or { 1, 0.82, 0.2 }
+      t:SetVertexColor(c[1], c[2], c[3], 1)
+    else
+      t:SetVertexColor(0.42, 0.42, 0.46, 0.55)
+    end
+  end
+  b:Refresh()
+  -- Page mise en cache : l'etat suit les combos edites entre-temps dans Animations 3D
+  b:SetScript("OnShow", function(s) s:Refresh() end)
+  b:SetScript("OnEnter", function(s)
+    s:Refresh(true)
+    local n = Count()
+    GameTooltip:SetOwner(s, "ANCHOR_TOP")
+    GameTooltip:SetText(L["SETTINGS_SEC_3D_ANIMATIONS"], 1, 1, 1)
+    GameTooltip:AddLine(n > 0 and string.format(L["SETTINGS_FX_BTN_ON"], n) or L["SETTINGS_FX_BTN_OFF"], 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+  end)
+  b:SetScript("OnLeave", function(s) s:Refresh(); GameTooltip:Hide() end)
+  b:SetScript("OnClick", function()
+    GameTooltip:Hide()
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    if ns.OpenAnim3D then ns.OpenAnim3D(section, key) end
+  end)
+  return b
+end
+
+-- En-tete "lien" : habillage d'un en-tete de section suivi du logo fx, jamais repliable ; le clic ouvre la
+-- page Animations 3D sur sa section. Hors de toute section de la page (_isGroupTitle) : toujours visible.
+function SharedWidgets.CreateAnim3DLinkHeader(parent, text, width, section)
+  local f = SharedWidgets.CreateSectionHeader(parent, text, width)
+  f._isSectionHeader = nil
+  f._isGroupTitle = true
+  local fx = f:CreateTexture(nil, "OVERLAY")
+  fx:SetSize(14, 14)
+  fx:SetPoint("LEFT", f._lbl, "RIGHT", 6, 0)
+  fx:SetTexture(SharedWidgets.FX_ICON)
+  f._line:SetPoint("LEFT", fx, "RIGHT", 8, 0)
+  local function Tint(hover)
+    local c = hover and SharedWidgets.GlowColor() or Theme.accent or { 1, 0.82, 0.2 }
+    fx:SetVertexColor(c[1], c[2], c[3], 1)
+  end
+  Tint(false)
+  local hit = CreateFrame("Button", nil, f)
+  hit:SetAllPoints(f)
+  hit:SetFrameLevel(f:GetFrameLevel() + 1)
+  local hl = hit:CreateTexture(nil, "BACKGROUND")
+  hl:SetAllPoints()
+  hl:SetColorTexture(1, 1, 1, 0.06)
+  hl:Hide()
+  hit:SetScript("OnEnter", function(s)
+    hl:Show(); Tint(true); SharedWidgets.HoverGlow(f._lbl, true)
+    GameTooltip:SetOwner(s, "ANCHOR_TOP")
+    GameTooltip:SetText(L["SETTINGS_ANIM3D_LINK_TT"], 1, 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  hit:SetScript("OnLeave", function()
+    hl:Hide(); Tint(false); SharedWidgets.HoverGlow(f._lbl, false)
+    GameTooltip:Hide()
+  end)
+  hit:SetScript("OnClick", function()
+    GameTooltip:Hide()
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    if ns.OpenAnim3D then ns.OpenAnim3D(section) end
+  end)
   return f
 end
 
@@ -788,8 +874,10 @@ end
 -- Retourne false si le cadre n'a rien a defiler (l'appelant peut relayer la molette).
 function SharedWidgets.SmoothScroll(sf, delta, step)
   local max = sf:GetVerticalScrollRange() or 0
-  if max <= 0 then return false end
   local cur = sf:GetVerticalScroll() or 0
+  -- Contenu reduit sous le scroll courant (ex. groupe replie) : ramener dans la plage
+  if cur > max then sf:SetVerticalScroll(math.max(0, max)); cur = math.max(0, max) end
+  if max <= 0 then return false end
   local d = sf._ssDriver
   local running = d and d:IsShown() and sf._ssLast and math.abs(cur - sf._ssLast) < 0.5
   local target = math.max(0, math.min(max, (running and sf._ssTarget or cur) - delta * step))
@@ -1022,7 +1110,7 @@ end
 
 -- Dropdown (liste déroulante) — style AishUI : label au-dessus, bouton pleine largeur
 function SharedWidgets.CreateDropdown(parent, label, options, width)
-  -- options = { { value = ..., text = "..." }, ... }
+  -- options = { { value = ..., text = "..." }, ... } ; { separator = true } = filet entre deux groupes
   width = width or 260
   -- Label vide ("") traité comme absent
   local hasLabel = label and label ~= ""
@@ -1100,10 +1188,17 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
   local scrollOffset = 0
   local SB_W = 7                -- barre de defilement (listes de plus de MAX_VISIBLE entrees)
 
+  -- Hauteur des entrees : un separateur est plus bas qu'une option
+  local SEP_H = 7
+  local function OptH(opt) return opt.separator and SEP_H or ITEM_H_PX end
+  local function ListH(from, to)
+    local h = 0
+    for i = from, math.min(to, #container._options) do h = h + OptH(container._options[i]) end
+    return h
+  end
   local function GetMaxScroll()
     local n = #container._options
-    local v = math.min(n, MAX_VISIBLE)
-    return math.max(0, (n - v) * ITEM_H_PX)
+    return math.max(0, ListH(1, n) - ListH(1, MAX_VISIBLE))
   end
 
   -- Barre de defilement cliquable : clic sur la piste = saut a cet endroit, poignee a glisser.
@@ -1215,17 +1310,29 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
     scrollOffset = 0
 
     local numOpts  = #container._options
-    local visCount = math.min(numOpts, MAX_VISIBLE)
-    local menuH    = visCount * ITEM_H_PX + TOP_PAD * 2
+    local menuH    = ListH(1, MAX_VISIBLE) + TOP_PAD * 2
     menu:SetHeight(math.max(menuH, BTN_H))
     -- Liste plus longue que la zone visible : place pour la barre de defilement a droite
     local itemW = (numOpts > MAX_VISIBLE) and (width - 2 - SB_W) or (width - 2)
     menuContent:SetWidth(itemW)
-    menuContent:SetHeight(numOpts * ITEM_H_PX + TOP_PAD * 2)
+    menuContent:SetHeight(ListH(1, numOpts) + TOP_PAD * 2)
     ApplyScroll()
 
     local yOff = 0
     for _, opt in ipairs(container._options) do
+     if opt.separator then
+      local item = CreateFrame("Frame", nil, menuContent)
+      item:SetSize(itemW, SEP_H)
+      item:SetPoint("TOPLEFT", menuContent, "TOPLEFT", 1, yOff)
+      local line = item:CreateTexture(nil, "ARTWORK")
+      line:SetHeight(1)
+      line:SetPoint("LEFT", 6, 0)
+      line:SetPoint("RIGHT", -6, 0)
+      local c = Theme.separator or { 1, 1, 1, 0.15 }
+      line:SetColorTexture(c[1], c[2], c[3], math.min(1, (c[4] or 0.15) * 2))
+      container._items[#container._items + 1] = item
+      yOff = yOff - SEP_H
+     else
       local item = CreateFrame("Button", nil, menuContent)
       item:SetSize(itemW, ITEM_H_PX)
       item:SetPoint("TOPLEFT", menuContent, "TOPLEFT", 1, yOff)
@@ -1261,6 +1368,7 @@ function SharedWidgets.CreateDropdown(parent, label, options, width)
 
       container._items[#container._items + 1] = item
       yOff = yOff - ITEM_H_PX
+     end
     end
   end
 

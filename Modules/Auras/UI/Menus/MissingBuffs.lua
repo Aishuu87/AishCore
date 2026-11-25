@@ -50,8 +50,51 @@ local function Existing(list)
     return out
 end
 
--- Ligne "buff a ignorer" : case a cocher (coche = trace) + icone + nom
-local function CreateBuffRow(parent, entry, y, W)
+-- Cle du combo Animations 3D (section "Buffs manquants") d'une ligne d'alerte : la premiere candidate que la
+-- liste de cette section propose pour le personnage (MissingBuffs.GetTriggerSpells), sinon nil (pas de logo fx).
+local DBKEY_ANIM = {
+    ignoreBagsFull = "MISSING_BAGS_KEY", ignoreGatherTracking = "MISSING_TRACKING_HERBS_KEY",
+    ignoreTalentPoints = "MISSING_TALENTS_KEY", ignoreLegacyPoints = "MISSING_LEGACY_KEY",
+    ignoreWellRested = "MISSING_WELL_RESTED_KEY", ignoreWellFedFood = "MISSING_FOOD_KEY",
+    ignoreFlasks = "MISSING_FLASK_KEY", ignoreElixirs = "MISSING_ELIXIR_KEY",
+    ignoreWeaponStones = "MISSING_WEAPON_STONE_KEY", ignoreFishingLures = "MISSING_FISHING_LURE_KEY",
+    ignorePoisonStock = "MISSING_POISON_STOCK_KEY",
+}
+local DBKEY_LIST = {
+    ignoreWarriorStances = "MISSING_WARRIOR_STANCES", ignoreWarlockPets = "MISSING_WARLOCK_ALL_PETS",
+    ignoreHunterPets = "MISSING_HUNTER_ALL_PETS", ignoreEvokerAttunements = "MISSING_EVOKER_ATTUNEMENTS",
+}
+local KIND_ANIM = { item = "MISSING_LOW_SHARDS_KEY", ammo = "MISSING_LOW_AMMO_KEY", petHappiness = "MISSING_PET_UNHAPPY_KEY" }
+
+local function AnimKeyOf(entry, triggers)
+    if not triggers or entry.lureId then return nil end
+    local cand = {}
+    local function addEntry(e)
+        if not e then return end
+        if e.spellId then cand[#cand + 1] = e.spellId end
+        for _, v in ipairs(e.casts or {}) do if type(v) == "number" then cand[#cand + 1] = v end end
+    end
+    local k = entry.dbKey or entry.dbKeyOn
+    if KIND_ANIM[entry.kind] then cand[#cand + 1] = ns[KIND_ANIM[entry.kind]] end
+    if DBKEY_ANIM[k] then cand[#cand + 1] = ns[DBKEY_ANIM[k]] end
+    if DBKEY_LIST[k] then for _, e in ipairs(ns[DBKEY_LIST[k]] or {}) do addEntry(e) end end
+    if k == "ignoreHunterPets" then cand[#cand + 1] = ns.MISSING_HUNTER_PET_DEAD end
+    if k == "ignoreDruidForms" then addEntry(ns.MISSING_BALANCE_MOONKIN) end
+    if k == "ignoreHealthstoneAlert" then cand[#cand + 1] = 6201 end    -- SPELL_CREATE_HEALTHSTONE (Core/MissingBuffs.lua)
+    if k == "ignoreSoulstoneAlert" then cand[#cand + 1] = 20707 end     -- SPELL_SOULSTONE
+    if k == "ignoreLethalPoisons" or k == "ignoreNonlethalPoisons" then
+        if _addon.IsForever then cand[#cand + 1] = ns.MISSING_POISON_APPLY_KEY end
+        local P = ns.MISSING_ROGUE_POISONS
+        for _, e in ipairs(P and P[k == "ignoreLethalPoisons" and "lethal" or "nonlethal"] or {}) do addEntry(e) end
+    end
+    if not k then addEntry(entry) end
+    for _, id in ipairs(cand) do
+        if triggers[id] then return id end
+    end
+end
+
+-- Ligne "buff a ignorer" : case a cocher (coche = trace) + icone + nom (+ logo fx si animKey)
+local function CreateBuffRow(parent, entry, y, W, animKey)
     local Theme = ns.THEME
     local row = CreateFrame("Button", nil, parent)
     row:SetSize(W, 24)
@@ -78,6 +121,13 @@ local function CreateBuffRow(parent, entry, y, W)
     ns.ApplyFont(label, ns.Media.font, 11)
     label:SetPoint("LEFT", icon, "RIGHT", 6, 0)
     label:SetPoint("RIGHT", -4, 0)
+    -- Logo fx en bout de ligne : ouvre le combo de cette alerte dans Animations 3D (allume s'il en a un)
+    local MSW = _addon.SharedWidgets
+    if animKey and MSW and MSW.CreateFxButton then
+        local fx = MSW.CreateFxButton(row, 14, "missingBuffs", animKey)
+        fx:SetPoint("RIGHT", -4, 0)
+        label:SetPoint("RIGHT", fx, "LEFT", -3, 0)
+    end
     label:SetJustifyH("LEFT")
     label:SetWordWrap(false)   -- borne a la ligne : "..." plutot que deborder sur la colonne voisine
     label:SetTextColor(unpack(Theme.textNormal))
@@ -413,6 +463,12 @@ local function BuildAlertsSection(c, w)
             end
         end
     end
+    -- Cles proposees par la section "Buffs manquants" d'Animations 3D pour ce personnage (logo fx)
+    local triggers
+    if ns.MissingBuffs and ns.MissingBuffs.GetTriggerSpells then
+        triggers = {}
+        for _, id in ipairs(ns.MissingBuffs.GetTriggerSpells()) do triggers[id] = true end
+    end
     local colW = math.floor((w - (COLS - 1) * COL_GAP) / COLS)
     local y, lineH = 0, 0
     for i, col in ipairs(columns) do
@@ -428,7 +484,7 @@ local function BuildAlertsSection(c, w)
             cy = cy + MINI_H
         end
         for _, entry in ipairs(col.rows) do
-            CreateBuffRow(holder, entry, cy, colW)
+            CreateBuffRow(holder, entry, cy, colW, AnimKeyOf(entry, triggers))
             cy = cy + ROW_H
             local t = ThresholdOf(entry)
             if t then CreateMiniThreshold(holder, cy - 4, colW, t); cy = cy + MINI_H - 4 end

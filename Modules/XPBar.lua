@@ -1763,7 +1763,7 @@ local function SpellsLearnedAtLevel(lvl)
         if e.id then
           local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(e.id)
           local icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(e.id)
-          if name then out[#out + 1] = { id = e.id, name = name, icon = icon } end
+          if name and XPBar.SpecOK(e) then out[#out + 1] = { id = e.id, name = name, icon = icon } end
         elseif ns.ClassSpellLevelsLocale == GetLocale() then
           out[#out + 1] = { name = e.name, icon = e.icon }
         end
@@ -1788,6 +1788,17 @@ local function SpellsLearnedAtLevel(lvl)
     for _, w in ipairs(XPBar.WeaponUnlocks(lvl, lvl)) do out[#out + 1] = w end
   end
   return out
+end
+
+-- Sort reserve a une specialisation (champ spec des donnees livrees, ex. Estropier du Voleur Assassinat)
+function XPBar.SpecOK(e)
+  if not e.spec then return true end
+  local sid = ns._specID
+  if not sid and ns.GetSpecialization then
+    local i = ns.GetSpecialization()
+    sid = i and ns.GetSpecializationInfo and ns.GetSpecializationInfo(i)
+  end
+  return sid == e.spec
 end
 
 -- Pour le toast de niveau (Modules/LevelUpToast.lua) : memes sorts et meme format de nombres que l'apercu
@@ -2372,6 +2383,7 @@ function NL.CollectTrainable()
         else
           known = true      -- nom francais inutilisable dans une autre langue : on ne l'affiche pas
         end
+        if not XPBar.SpecOK(e) then known = true end   -- sort d'une autre specialisation
         if not known and name then
           out[#out + 1] = { name = name, icon = icon, rank = rank, cost = e.cost }
           if e.cost then total = total + e.cost end
@@ -3654,9 +3666,11 @@ local function CreateXPBar_LayoutTools()
   tfCoordText  = MakeCoordText(tooltipFrame)
   tfResizeHandle = MakeResizeHandle(tooltipFrame, OnTfResizeStop)
 
+  if ns.Nudge then ns.Nudge.Attach(levelBg) end   -- fleches = deplacement au pixel
   levelBg:SetScript("OnDragStart", OnLevelBgDragStart)
   levelBg:SetScript("OnDragStop",  OnLevelBgDragStop)
 
+  if ns.Nudge then ns.Nudge.Attach(tooltipFrame) end   -- fleches = deplacement au pixel
   tooltipFrame:SetScript("OnDragStart", OnTooltipDragStart)
   tooltipFrame:SetScript("OnDragStop",  OnTooltipDragStop)
 end

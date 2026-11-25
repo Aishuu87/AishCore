@@ -446,6 +446,7 @@ local function Create()
     if WelcomeAura() then return end
     DoEmote("SIT")
   end)
+  if ns.Nudge then ns.Nudge.Attach(hud) end   -- fleches = deplacement au pixel
   hud:SetScript("OnDragStart", function(self)
     if Cfg().locked or self._host then return end
     self._moving = true
@@ -2182,6 +2183,7 @@ function Campfire.UpdateMover()
     mover.label:SetPoint("TOP", mover, "BOTTOM", 0, -4)
     mover.label:SetTextColor(1, 0.82, 0.5, 1)
     mover.label:SetText(ns.L["SETTINGS_SEC_CAMPFIRE_HUD"])
+    if ns.Nudge then ns.Nudge.Attach(mover) end   -- fleches = deplacement au pixel
     mover:SetScript("OnDragStart", function(self) self:StartMoving() end)
     mover:SetScript("OnDragStop", function(self)
       self:StopMovingOrSizing()

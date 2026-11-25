@@ -33,3 +33,12 @@ Refonte d'octobre 2026 (page GUI calquée sur les Barres dynamiques).
 
 Titre + interrupteur du module, sélecteur + interrupteur de barre et aperçu sont épinglés (`ctx:PinnedTitle`,
 `ns.SettingsPin`). Clic droit sur un élément de l'aperçu : `MainFrame:OpenSection`.
+
+## Top Target et auras de la cible
+
+Entrées supplémentaires du sélecteur (`EXTRA_ORDER` : `topTarget`, `taBuffs`, `taDebuffs`), réglages dans
+`topTargetBar` / `targetAuras.<groupe>` (liaisons `XBind`). Chaque jeu de sections est masqué par `ctx:HideIf`
+(appliqué aussi à la section entière : `section.hideIf`, ignorée par `OpenSection`) ; `RefreshAll` redispose quand le
+jeu change. Clés de disposition propres (`_leSecKey` `ttb.*` / `ta.*`). Aperçus : `TopTargetBar.CreatePreview` /
+`StylePreview`, `TargetAuras.CreatePreview` / `StylePreview`. Anciennes pages `topTargetBar` / `targetAuras` :
+redirigées vers `unitBars` (`categoryRedirect` + `UNITBARS_SEL` dans `SettingsPanel.lua`).

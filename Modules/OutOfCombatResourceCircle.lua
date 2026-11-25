@@ -1223,6 +1223,7 @@ function OutOfCombatResourceCircle.SetDraggable(on)
     bar:SetMovable(true)
     bar:EnableMouse(true)
     bar:RegisterForDrag("LeftButton")
+    if ns.Nudge then ns.Nudge.Attach(bar) end   -- fleches = deplacement au pixel
     bar:SetScript("OnDragStart", function(self)
       -- Verrou relu A CHAUD : le drag est arme des l'ouverture du panneau (plus de bouton dedie),
       -- donc la case "Verrouiller la position" est le seul frein -- meme modele que unitBars.

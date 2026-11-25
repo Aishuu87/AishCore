@@ -31,6 +31,7 @@ ns.ProfileTree = {
       } },
   } },
   { id = "combat", label = "SETTINGS_GROUP_COMBAT", panel = "combat", children = {
+    { id = "actionBars", label = "SETTINGS_CAT_ACTION_BARS", core = { "actionBars" }, apply = { "ActionBars" } },
     { id = "resourceCircle", label = "SETTINGS_SEC_RESOURCE_CIRCLE", core = { "resourceCircle" }, apply = { "ResourceCircle" } },
     { id = "priorityBar", label = "SETTINGS_SEC_PRIORITY_BAR", core = { "priorityBar", "prioritySlots" }, apply = { "PriorityBar" } },
     { id = "rotationHelper", label = "SETTINGS_CAT_ROTATION_HELPER", core = { "rotationHelper" }, apply = { "RotationHelper" } },

@@ -28,6 +28,8 @@ local MODULE_RULES = {
   rotationHelper = function() return not ns.IsForever end,   -- Bouton de rotation : inutile sur Forever
   -- Fiche personnage : desactivee le temps d'etre refaite (ne marchait pas bien). Repasser a true pour la rouvrir.
   characterArmory = function() return false end,
+  -- Herbes et minerais sur la minimap : desactive, ne fonctionne plus (balayage ni icones d'infobulle). true pour le rouvrir.
+  minimapNodes = function() return false end,
   cdmLayout    = function() return C_CooldownViewer ~= nil end,
   cdmEssential = function() return C_CooldownViewer ~= nil end,
   cdmUtility   = function() return C_CooldownViewer ~= nil end,

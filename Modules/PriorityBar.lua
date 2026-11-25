@@ -5400,6 +5400,7 @@ function PriorityBar.EnableDrag(enable)
       container:SetAlpha(1)
       container:EnableMouse(true)
       container:RegisterForDrag("LeftButton")
+      if ns.Nudge then ns.Nudge.Attach(container) end   -- fleches = deplacement au pixel
       container:SetScript("OnDragStart", function(self) self:StartMoving() end)
       container:SetScript("OnDragStop", function(self) OnDragStop(self, sideName) end)
       if not container.dragBg then
@@ -5413,6 +5414,7 @@ function PriorityBar.EnableDrag(enable)
         local slot = slotFrames[i]
         if slot and slot:GetParent() == container then
           slot:RegisterForDrag("LeftButton")
+          if ns.Nudge then ns.Nudge.Attach(slot, container) end   -- fleches = deplacement au pixel
           slot:SetScript("OnDragStart", function() container:StartMoving() end)
           slot:SetScript("OnDragStop", function() OnDragStop(container, sideName) end)
         end

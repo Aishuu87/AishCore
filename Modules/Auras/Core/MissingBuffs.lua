@@ -119,6 +119,9 @@ local bSid, bName, bExp, bSrc, bN, bAnySecret = {}, {}, {}, {}, 0, false
 -- Generations des autres sources (sacs, equipement, talents) : les resultats couteux sont memorises tant
 -- qu'elles ne bougent pas (cf. Memo), incrementees par l'eventFrame en bas de fichier.
 local bagGen, invGen, talentGen = 0, 0, 0
+-- Pistage de la minicarte (cf. GatherTrackingChoices) : gen = generation (MINIMAP_UPDATE_TRACKING), puis le
+-- resultat memorise et les generations auxquelles il a ete lu. Champ du module : fichier a la limite des 200 locales.
+MissingBuffs._trackMemo = { gen = 0, track = -1, tal = -1 }
 function MissingBuffs.BumpAuraGen() auraGen = auraGen + 1 end
 local function PlayerBuffs()
     local now = GetTime()
@@ -1408,6 +1411,7 @@ local function EnsureSlot(i)
     sl:EnableMouse(true)
     sl:RegisterForClicks("AnyUp", "AnyDown")
     sl:RegisterForDrag("LeftButton")
+    if _addon.Nudge then _addon.Nudge.Attach(sl, frame) end   -- fleches = deplacement au pixel
     sl:SetScript("OnDragStart", function()
         if not Cfg().locked then frame:StartMoving() end
     end)
@@ -1651,6 +1655,7 @@ local function EnsureFrame()
     frame:EnableMouse(true)
     frame:RegisterForClicks("AnyUp", "AnyDown")
     frame:RegisterForDrag("LeftButton")
+    if _addon.Nudge then _addon.Nudge.Attach(frame) end   -- fleches = deplacement au pixel
     frame:SetScript("OnDragStart", function(s)
         if not Cfg().locked then s:StartMoving() end
     end)
@@ -1797,7 +1802,7 @@ function MissingBuffs.SyncBurningRush()
         -- un premier ShowAlert() classique -- or ce sort ne passe jamais par ShowAlert. Sans
         -- forcer sa creation+position ici, StartMissingBuffSustained retomberait sur UIParent
         -- (mauvaise position/echelle) faute de frame pret. Le frame reste cache dans les deux cas.
-        if active then EnsureFrame(); PositionFrameIfNeeded() end
+        if active and not InCombatLockdown() then EnsureFrame(); PositionFrameIfNeeded() end
         NotifySpellEffects()
     end
 end
@@ -2214,7 +2219,8 @@ function MissingBuffs.HideCombatPet()
 end
 
 local function ShowCombatPet(choices, text, sig)
-    if not frame then EnsureFrame() end
+    -- Pas en combat : EnsureFrame pose un pilote d'etat securise (RegisterStateDriver, protege)
+    if not frame and not InCombatLockdown() then EnsureFrame() end
     local cfg = Cfg()
     local cf = EnsureCombatFrame()
     local iSize = cfg.iconSize or ICON_SIZE
@@ -2846,12 +2852,14 @@ function MissingBuffs.NonCombatElixir(sid)
 end
 local FLASK_WORDS = { "flacon", "fiole", "flask", "phial", "fläschchen", "phiole", "frasco", "vial", "фляг", "флакон" }
 local ELIXIR_WORDS = { "lixir", "lixier", "elisir", "эликсир", "Эликсир" }
+-- Objets jamais proposes comme flacon / elixir (effets fantaisie, pas un buff de combat)
+MissingBuffs.EXCLUDED_CONSUMABLES = { [8529] = true }   -- Elixir de Noggenfogger
 local function BagConsumables(subClass)
     local items, seen, spellIDs = {}, {}, {}
     for bag = 0, (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4) do
         for s = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
             local id = C_Container.GetContainerItemID(bag, s)
-            if id and not seen[id] then
+            if id and not seen[id] and not MissingBuffs.EXCLUDED_CONSUMABLES[id] then
                 seen[id] = true
                 local _, _, _, _, _, classID, subID = C_Item.GetItemInfoInstant(id)
                 if classID == (Enum.ItemClass and Enum.ItemClass.Consumable or 0) and subID == subClass then
@@ -3185,7 +3193,7 @@ local function GatherTrackingChoices()
             end
         end
     end
-    if _addon.IsForever and anyActive then return nil end
+    if _addon.IsForever and anyActive then return nil, true end
     local choices = {}
     for _, f in ipairs(ns.MISSING_GATHER_FINDERS) do
         if state[f.spellId] == false then
@@ -3194,7 +3202,20 @@ local function GatherTrackingChoices()
                     .. f.spellId .. " then C_Minimap.SetTracking(i,true) end end" }
         end
     end
-    return choices[1] and choices or nil
+    return choices[1] and choices or nil, true
+end
+-- Resultat memorise jusqu'au prochain changement de pistage ou de sorts : GetTrackingInfo cree une table par type
+-- de pistage (~12 Ko par evaluation, soit l'essentiel des allocations du module a 1 Hz).
+do
+    local raw = GatherTrackingChoices
+    GatherTrackingChoices = function()
+        local m = MissingBuffs._trackMemo
+        if m.track == m.gen and m.tal == talentGen then return m.value end
+        local v, readable = raw()
+        -- Etat secret (illisible) : pas memorise, relu a l'evaluation suivante
+        if readable then m.value, m.track, m.tal = v, m.gen, talentGen end
+        return v
+    end
 end
 
 -- Ouverture du panneau des talents (meme macro que le raccourci de la barre de menu)
@@ -3797,6 +3818,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit)
     end
     -- Generations des resultats memorises (cf. Memo)
     if event == "BAG_UPDATE_DELAYED" or event == "PLAYER_ENTERING_WORLD" then bagGen = bagGen + 1 end
+    if event == "MINIMAP_UPDATE_TRACKING" or event == "PLAYER_ENTERING_WORLD" then MissingBuffs._trackMemo.gen = MissingBuffs._trackMemo.gen + 1 end
     if (event == "UNIT_INVENTORY_CHANGED" and unit == "player") or event == "PLAYER_EQUIPMENT_CHANGED" then
         invGen = invGen + 1
     end
@@ -3993,7 +4015,9 @@ function MissingBuffs.GetTriggerSpells()
     add(ns.MISSING_BAGS_KEY)
     add(ns.MISSING_TRACKING_HERBS_KEY)
     add(ns.MISSING_TRACKING_ORE_KEY)
-    if not WeaponEnchantByClass(class) then add(ns.MISSING_WEAPON_STONE_KEY) end
+    -- Pierres / huiles : ligne de combo proposee a toutes les classes, meme au chaman / voleur dont l'alerte ne se
+    -- declenche jamais (enchantements d'arme de classe), pour pouvoir regler le combo depuis n'importe quel perso
+    add(ns.MISSING_WEAPON_STONE_KEY)
     add(ns.MISSING_FLASK_KEY)
     add(ns.MISSING_ELIXIR_KEY)
     add(ns.MISSING_FOOD_KEY)

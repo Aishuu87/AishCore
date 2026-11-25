@@ -258,6 +258,7 @@ local function NewRound(name, prefix, secure)
     HideTip(self)
     WakeDriver()
   end)
+  if ns.Nudge then ns.Nudge.Attach(f) end   -- fleches = deplacement au pixel
   f:SetScript("OnDragStart", function(self)
     if preview and not Cfg()[prefix .. "Locked"] and not InCombatLockdown() then self:StartMoving() end
   end)
@@ -891,14 +892,47 @@ local function DuckRecover()
 end
 Fishing.DuckRecover = DuckRecover
 
+-- ── Son en arriere-plan pendant la peche ─────────────────────────────────────
+-- Canne lancee : Sound_EnableSoundWhenGameIsInBG active (entendre le bouchon jeu en arriere-plan). Valeur d'origine
+-- gardee dans AishaddonDB._fishing.bgSound, rendue BG_GRACE s apres l'arret (sauf relance) ou au chargement.
+local BG_CVAR, BG_GRACE = "Sound_EnableSoundWhenGameIsInBG", 5
+local bgGen = 0
+
+local function BgRestore()
+  local s = Store()
+  if s.bgSound == nil then return end
+  pcall(C_CVar and C_CVar.SetCVar or SetCVar, BG_CVAR, s.bgSound)
+  s.bgSound = nil
+end
+
+local function BgStart()
+  bgGen = bgGen + 1
+  if not Cfg().bgSoundEnabled then return end
+  local cur = (C_CVar and C_CVar.GetCVar or GetCVar)(BG_CVAR)
+  if cur == "1" then return end
+  local s = Store()
+  if s.bgSound == nil then s.bgSound = cur or "0" end
+  pcall(C_CVar and C_CVar.SetCVar or SetCVar, BG_CVAR, "1")
+end
+
+local function BgStop()
+  if Store().bgSound == nil then return end
+  bgGen = bgGen + 1
+  local gen = bgGen
+  C_Timer.After(BG_GRACE, function() if gen == bgGen then BgRestore() end end)
+end
+
 -- ── Raccourci lancer / relever ───────────────────────────────────────────────
 -- Touche choisie dans le GUI (fishing.castKey), liee en priorite (override, hors combat) selon la cible d'interaction
--- (ciblage doux) : bouchon ou autre cible -> INTERACTTARGET (relever) ; aucune -> bouton securise Peche (lancer).
+-- (ciblage doux) : canne lancee et bouchon cible -> INTERACTTARGET (relever) ; sinon -> bouton securise Peche (lancer).
+-- Hors peche la liaison ne bouge pas au gre du ciblage doux (PNJ croises) : chaque changement de liaison relance
+-- UPDATE_BINDINGS chez tous les addons (pics de memoire, micro-gels).
 -- Rien de lie monte, en vehicule, mort, en combat ou (Forever) sans canne : la touche garde son action habituelle.
 local CAST_SPELL = ns.IsForever and 7620 or 131474
 local CAST_BTN = "AishCoreFishingCastButton"
 local RANGE_CVAR, RANGE_FISH = "SoftTargetInteractRange", 30
 local castBtn, castState, softChecked
+local channeling = false   -- canne lancee (canalisation de Peche en cours)
 local GetCV = (C_CVar and C_CVar.GetCVar) or GetCVar
 local SetCV = (C_CVar and C_CVar.SetCVar) or SetCVar
 
@@ -928,7 +962,7 @@ function Fishing.UpdateCastKey(off)
   local want
   if key then
     EnsureSoftInteract()
-    if CastReady() then want = (UnitGUID and UnitGUID("softinteract") ~= nil) and "interact" or "cast" end
+    if CastReady() then want = (channeling and UnitGUID and UnitGUID("softinteract") ~= nil) and "interact" or "cast" end
   end
   local sig = want and (want .. key) or nil
   if sig == castState then return end
@@ -948,8 +982,10 @@ function Fishing.UpdateCastKey(off)
   end
 end
 
--- Portee du ciblage doux elargie le temps de la peche (bouchon lointain), rendue a l'arret ; restauree au chargement
--- si l'interface a ete rechargee canne lancee (AishaddonDB._fishing.interactRange)
+-- Portee du ciblage doux elargie tant que le raccourci est actif (bouchon lointain), rendue a sa desactivation
+-- (valeur d'origine dans AishaddonDB._fishing.interactRange). Jamais changee a chaque lancer : un SetCVar d'addon
+-- relance le ciblage doux sur-le-champ, et les barres Blizzard (manette, totems) tournent alors en contexte tainte
+-- (ADDON_ACTION_FORBIDDEN SetPreferredGamepadInteractTarget, valeurs secretes de MultiCastActionBarFrame).
 local function RangeUp()
   if not CastKey() then return end
   local cur = tonumber(GetCV(RANGE_CVAR))
@@ -989,10 +1025,13 @@ function Fishing.ApplySettings()
   Fishing.RefreshLure()
   Fishing.RefreshSwap(IsPlayerMoving and IsPlayerMoving() or nil)
   Fishing.UpdateCastKey()
+  if CastKey() then RangeUp() else RangeDown() end
   -- Option coupee en pleine peche : volumes rendus en fondu
   if not Cfg().duckEnabled and Store().duck and not (duck.stopAt or (duck.from and duck.restore)) then
     DuckTo(1, Cfg().duckFade or 4)
   end
+  -- Son en arriere-plan coupe en pleine peche : valeur d'origine rendue
+  if not Cfg().bgSoundEnabled then bgGen = bgGen + 1; BgRestore() end
 end
 
 local ev = CreateFrame("Frame")
@@ -1025,11 +1064,16 @@ ev:SetScript("OnEvent", function(_, event, a1, _, a3)
   -- Son baisse pendant la peche : tous les clients
   if event == "UNIT_SPELLCAST_CHANNEL_START" or event == "UNIT_SPELLCAST_CHANNEL_STOP" then
     if IsFishingSpell(a3) then
-      if event == "UNIT_SPELLCAST_CHANNEL_START" then DuckStart(); RangeUp() else DuckStop(); RangeDown() end
+      channeling = event == "UNIT_SPELLCAST_CHANNEL_START"
+      if channeling then DuckStart(); BgStart() else DuckStop(); BgStop() end
+      Fishing.UpdateCastKey()
     end
     return
   end
-  if event == "PLAYER_LOGIN" then DuckRecover(); RangeDown() end
+  if event == "PLAYER_LOGIN" then
+    DuckRecover(); BgRestore()
+    if CastKey() then RangeUp() else RangeDown() end
+  end
   if not ns.IsForever then return end
   if event == "PLAYER_LOGIN" then
     Snapshot()

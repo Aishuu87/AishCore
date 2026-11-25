@@ -2208,7 +2208,6 @@ L["MISSINGBUFFS_ALERT_LOW_POISONS"] = "制作毒药" -- @435fe9
 L["MISSINGBUFFS_ALERT_TRACKING_OFF"] = "追踪已关闭" -- @baa374
 
 -- In-game · ModuleHoverOverlay
-L["MODULEHOVER_GEAR_TOOLTIP"] = "打开此模块的设置分区\n（在预览上任意位置右键点击：相同快捷方式）" -- @e1f074
 
 -- In-game · Presets
 L["AURASDATA_PRESET_ERR_NOT_FOUND"] = "未找到预设：%s" -- @086899

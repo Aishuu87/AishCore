@@ -38,31 +38,171 @@ local activeTotems = {}
 local _totemInstCounter = 0
 local _lastDurObjRefBySlot = {}
 local _placedAtBySlot = {} -- GetTime() de la pose (delai de grace de la portee, cf. TotemInRange)
+local _posBySlot = {} -- [slot] = { x, y, continent } : position de la pose (portee en combat, cf. GetWorldPos)
 local UpdateTotemsRange -- defini plus bas (desaturation hors de portee)
 local SyncRangeTicker   -- idem (suivi de distance en combat)
 local LearnTotemBuff    -- idem (apprentissage du buff pose par le totem)
+local ScheduleMultiRescans, SyncMultiTicker -- idem (suivi du faucon sans evenement)
 local RANGE_GRACE = 2.5
+
+-- Sorts qui posent plusieurs instances a la fois, chacune dans son slot (Forever : Invocation de faucon, 2 max).
+-- Reconnus par nom (tous rangs / IDs). Une barre par slot, cf. entry.extras. Valeur = duree (s), repli
+-- quand le client ne donne plus la duree du slot (faucon loin du joueur).
+local MULTI_TOTEM_REFS = { [1293241] = 18 }
+local _multiNames -- [nom] = duree
+local function IsMultiTotem(spellID)
+    if not _multiNames then
+        local t = {}
+        for ref, dur in pairs(MULTI_TOTEM_REFS) do
+            local n = SafeSpellName(ref)
+            if n then t[n] = dur end
+        end
+        if not next(t) then return false end
+        _multiNames = t
+    end
+    local n = SafeSpellName(spellID)
+    return n ~= nil and _multiNames[n] ~= nil
+end
+
+local function Secret(v) return issecretvalue and issecretvalue(v) end
+
+-- Faucon loin du joueur : le client ne donne plus sa duree (objet absent ou nul) alors qu'il vit encore.
+-- Duree reconstituee : temps du slot s'ils sont lisibles, sinon pose + duree connue du sort.
+local _fallbackDur = {} -- [slot] = { obj, start, dur }
+local function DurUsable(durObj)
+    if not durObj then return false end
+    local ok, zero = pcall(durObj.IsZero, durObj)
+    if ok and not Secret(zero) and zero == true then return false end
+    return true
+end
+local function MultiDur(slot, spellID, placedAt, clientDur)
+    local now = GetTime()
+    local st, du
+    local ok, _, _, s0, d0 = pcall(GetTotemInfo, slot)
+    if ok and type(s0) == "number" and type(d0) == "number" and not Secret(s0) and not Secret(d0)
+       and s0 > 0 and d0 > 0 and s0 + d0 > now then
+        st, du = s0, d0
+    elseif DurUsable(clientDur) then
+        return clientDur
+    elseif placedAt then
+        local d = _multiNames and _multiNames[SafeSpellName(spellID) or ""]
+        if d and placedAt + d > now then st, du = placedAt, d end
+    end
+    if not (st and C_DurationUtil and C_DurationUtil.CreateDuration) then return nil end
+    local c = _fallbackDur[slot]
+    if not c then c = { obj = C_DurationUtil.CreateDuration() }; _fallbackDur[slot] = c end
+    if c.start ~= st or c.dur ~= du then
+        c.start, c.dur = st, du
+        pcall(c.obj.SetTimeFromStart, c.obj, st, du)
+    end
+    return c.obj
+end
+
+local SlotMultiSpell -- defini juste apres
+
+-- En combat, le nom du slot est secret : le faucon ne se relie plus par son nom. Repli : cast de faucon recent
+-- (spellID lisible) + slot mis a jour depuis (PLAYER_TOTEM_UPDATE, numero de slot jamais secret). Les slots vides
+-- du chasseur ne recoivent pas d'evenement : jamais pris pour un faucon. Un cast relie un seul slot.
+local MULTI_CAST_WINDOW = 3
+local _multiCasts = {}      -- { { sid, time }, ... } : casts de faucon pas encore relies
+local _slotUpdatedAt = {}   -- [slot] = GetTime() du dernier PLAYER_TOTEM_UPDATE
+local function NoteMultiCast(sid)
+    _multiCasts[#_multiCasts + 1] = { sid = sid, time = GetTime() }
+    if #_multiCasts > 4 then table.remove(_multiCasts, 1) end
+end
+local function TakeMultiCast(slot, spells)
+    local now, upd = GetTime(), _slotUpdatedAt[slot]
+    if not upd then return nil end
+    for i = #_multiCasts, 1, -1 do
+        local c = _multiCasts[i]
+        if now - c.time > MULTI_CAST_WINDOW then
+            table.remove(_multiCasts, i)
+        elseif upd >= c.time - 0.5 then
+            local si = spells[c.sid]
+            if si and si.source == "totem" and si.destinations and si.destinations.totems then
+                table.remove(_multiCasts, i)
+                return c.sid
+            end
+        end
+    end
+end
+
+-- Slot lie a un faucon : nom lisible du faucon -> garde ; nom secret -> garde (repli de duree) ;
+-- tout autre nom (vide, nil = slot vide, autre totem) -> faucon mort / expire, lien libere.
+-- Les slots vides du chasseur (Forever) renvoient une duree mais un nom nil : jamais un faucon.
+local function MultiSlotAlive(slot, spellID, spells)
+    local ok, _, name = pcall(GetTotemInfo, slot)
+    if not ok then return false end
+    if Secret(name) then return true end
+    return SlotMultiSpell(slot, spells) == spellID
+end
+
+-- Sort multi-instances suivi dont le nom correspond au nom lisible du slot ("Faucon" ~ "Invocation de faucon").
+-- Le faucon suit la cible : hors de portee d'affichage du client, son slot perd sa duree un instant puis la
+-- retrouve sans nouveau cast. On le relie donc par son nom, sans attendre de cast.
+SlotMultiSpell = function(slot, spells)
+    if not (spells and GetTotemInfo) then return nil end
+    local ok, have, name = pcall(GetTotemInfo, slot)
+    if not ok then return nil end
+    if Secret(name) then return next(_multiCasts) and TakeMultiCast(slot, spells) or nil end
+    if type(name) ~= "string" or Secret(have) then return nil end
+    if have == false or name == "" then return nil end
+    local lname = name:lower()
+    for sid, si in pairs(spells) do
+        if si.source == "totem" and si.destinations and si.destinations.totems and IsMultiTotem(sid) then
+            local sn = SafeSpellName(sid)
+            local lsn = sn and sn:lower()
+            if lsn and lsn ~= "" and (lname:find(lsn, 1, true) or lsn:find(lname, 1, true)) then return sid end
+        end
+    end
+end
 
 -- Cle par spellID (pas par slot) : si 2 slots sont lies au meme sort, seul le dernier scanne gagne l'affichage
 -- (distinguer par slot cree plus de faux positifs qu'il n'aide, l'identification par nom/valeur n'est pas fiable).
+-- Exception : sorts multi-instances (IsMultiTotem), le 1er slot reste l'entree, les suivants vont dans extras.
 local function RescanActiveTotems()
     wipe(activeTotems)
     if not GetTotemDuration then return end
+    local spells = ns.GetSpecSpells and ns.GetSpecSpells()
     for slot = 1, MAX_TOTEM_SLOTS do
         local spellID = slotSpellID[slot]
+        if not spellID then
+            -- Multi-instances (faucon) revenu apres une perte de duree : relie par son nom
+            spellID = SlotMultiSpell(slot, spells)
+            if spellID then
+                slotSpellID[slot] = spellID
+                _placedAtBySlot[slot] = _placedAtBySlot[slot] or GetTime()
+            end
+        end
         if spellID then
             local ok, durObj = pcall(GetTotemDuration, slot)
-            if ok and durObj then
+            if not ok then durObj = nil end
+            if IsMultiTotem(spellID) then
+                if MultiSlotAlive(slot, spellID, spells) then
+                    durObj = MultiDur(slot, spellID, _placedAtBySlot[slot], durObj)
+                else
+                    durObj = nil
+                end
+            end
+            if durObj then
                 local ref = tostring(durObj)
                 if _lastDurObjRefBySlot[slot] ~= ref then
                     _lastDurObjRefBySlot[slot] = ref
                     _totemInstCounter = _totemInstCounter + 1
                 end
-                activeTotems[spellID] = { durObj = durObj, slot = slot, instID = -_totemInstCounter, placedAt = _placedAtBySlot[slot] }
+                local e = { durObj = durObj, slot = slot, instID = -_totemInstCounter, placedAt = _placedAtBySlot[slot] }
+                local cur = activeTotems[spellID]
+                if cur and IsMultiTotem(spellID) then
+                    cur.extras = cur.extras or {}
+                    cur.extras[#cur.extras + 1] = e
+                else
+                    activeTotems[spellID] = e
+                end
             else
                 -- Plus de duree lisible : le totem est retombe, on libere le lien pour ce slot.
                 slotSpellID[slot] = nil
                 _lastDurObjRefBySlot[slot] = nil
+                _fallbackDur[slot] = nil
                 _placedAtBySlot[slot] = nil
                 _posBySlot[slot] = nil
             end
@@ -101,7 +241,6 @@ local function IsSecret(v) return issecretvalue and issecretvalue(v) end
 
 -- Portee en combat (buffs illisibles) : distance entre le joueur et l'endroit de la pose (le totem tombe
 -- a ses pieds). Position monde en yards via la carte ; nil si illisible (instance, valeur secrete).
-local _posBySlot = {} -- [slot] = { x, y, continent }
 local function GetWorldPos()
     if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition and C_Map.GetWorldPosFromMapPos) then return nil end
     local ok, x, y, c = pcall(function()
@@ -170,8 +309,11 @@ local function FindCandidate(name, spells, slot)
         for i, c in ipairs(pendingCastQueue) do
             local rid = ResolveTotemID(c.spellID, spells)
             local known = spells[rid]
-            local lslot = learned and (learned[rid] or learned[c.spellID])
-            if known and known.source == "totem" and not (lslot and slot and lslot ~= slot) then return i end
+            -- Multi-instances : slot variable, l'apprentissage ne s'applique pas
+            local lslot = learned and not IsMultiTotem(rid) and (learned[rid] or learned[c.spellID])
+            -- Multi-instances : liaison par nom seulement (slots vides a nom nil pris pour des faucons sinon)
+            if known and known.source == "totem" and not IsMultiTotem(rid)
+               and not (lslot and slot and lslot ~= slot) then return i end
         end
     end
 end
@@ -188,14 +330,20 @@ end
 local function BindSlot(slot, spellID, spells, byName)
     local castID = spellID
     spellID = ResolveTotemID(spellID, spells)
-    local learned = byName and SlotLearnedDB()
+    local multi = IsMultiTotem(spellID)
+    local learned = byName and not multi and SlotLearnedDB()
     if learned then learned[spellID] = slot; learned[castID] = slot end
+    -- Slot appris avant la gestion multi-instances : il rejetait les poses dans un autre slot
+    if multi then
+        local db = SlotLearnedDB()
+        if db then db[spellID] = nil; db[castID] = nil end
+    end
     -- Nouveau rang (Forever : rang appris apres coup) ramene a l'entree cochee : on l'enregistre aussi, il rejoint
     -- son groupe de meme nom (liste des IDs du menu, style de l'ancre, cf. ResolveHomonymStyles)
     if castID ~= spellID and not spells[castID] then RegisterTotemSpell(castID) end
     pendingPoses[slot] = nil
-    -- Forever : un sort n'occupe qu'un slot, une ancienne liaison ailleurs est forcement fausse
-    if _addon.IsForever then
+    -- Forever : un sort n'occupe qu'un slot, une ancienne liaison ailleurs est forcement fausse (sauf multi-instances)
+    if _addon.IsForever and not multi then
         for s, sid in pairs(slotSpellID) do if s ~= slot and sid == spellID then slotSpellID[s] = nil end end
     end
     slotSpellID[slot] = spellID
@@ -284,6 +432,7 @@ end
 -- sont lies au meme sort, ils partagent le meme widget (pas de 2e instance affichee).
 local totemsContainer
 local totemWidgets = {} -- [spellID] = frame
+local totemExtraWidgets = {} -- [spellID] = { frame, ... } : instances supplementaires (IsMultiTotem)
 
 -- Preview live (menu "Totems" et page "Auras a tracker") : "totems" ne passe jamais par Scan:Run/BuildPreviewEntries
 -- (rendu 100% manuel), donc geree ici a la main pour ne pas laisser ces pages vides hors combat.
@@ -672,6 +821,8 @@ end
 
 local function TotemInRange(spellID, entry, cfg)
     if cfg and cfg.desatOutOfRange == false then return true end
+    -- Multi-instances (faucon) : suit la cible, la distance au joueur n'a pas de sens
+    if IsMultiTotem(spellID) then return true end
     -- Totem sans buff sur le joueur (degats, controle) : jamais grise
     local buffs = BuffsFor(spellID)
     if not buffs then return true end
@@ -877,6 +1028,10 @@ local function RebuildTotemWidgets()
         f:SetParent(nil)
     end
     wipe(totemWidgets)
+    for _, list in pairs(totemExtraWidgets) do
+        for _, f in ipairs(list) do f:Hide(); f:SetParent(nil) end
+    end
+    wipe(totemExtraWidgets)
 
     local cfg = ns.db and ns.db.totems or ns.Defaults.totems
     local _, iw, gp, bw, bh, ih, _, layout, rowW, rowH = GetTotemsDims(cfg)
@@ -941,6 +1096,7 @@ local function RefreshTotemsGridBody()
         spells = ns.GetSpecSpells and ns.GetSpecSpells()
         if not (order and spells) then
             for _, f in pairs(totemWidgets) do f:Hide() end
+            for _, list in pairs(totemExtraWidgets) do for _, f in ipairs(list) do f:Hide() end end
             return
         end
     end
@@ -951,53 +1107,81 @@ local function RefreshTotemsGridBody()
     local step = isH and (rowW + rg) or (rowH + rg)
 
     local visibleIdx = 0
+    local function HideWidget(f)
+        f:Hide()
+        if f.glowAnchor and ns.HideGlow then pcall(ns.HideGlow, f.glowAnchor) end
+    end
+    -- Place et anime un widget ; entry = nil en preview
+    local function ShowWidget(f, spellID, info, entry)
+        visibleIdx = visibleIdx + 1
+        local offset = (visibleIdx - 1) * step
+        f:ClearAllPoints()
+        if growth == "UP" then PPoint(f, "BOTTOMLEFT", cont, "BOTTOMLEFT", 0, offset)
+        elseif growth == "LEFT" then PPoint(f, "TOPRIGHT", cont, "TOPRIGHT", -offset, 0)
+        elseif growth == "RIGHT" then PPoint(f, "TOPLEFT", cont, "TOPLEFT", offset, 0)
+        else PPoint(f, "TOPLEFT", cont, "TOPLEFT", 0, -offset) end
+
+        f._rgb = { TotemBarColorRGB(cfg, info) }
+        local inRange = isPreview or TotemInRange(spellID, entry, cfg)
+        if not isPreview and f._inRange ~= inRange then TraceRange(spellID, inRange) end
+        ApplyTotemRange(f, inRange)
+
+        -- Preview : pas de vrai durObj disponible (aucun totem
+        -- reellement pose) -- EnsurePreviewTicker() prend le relais
+        -- (icone+barres animees en boucle, cf. sa doc) pour que
+        -- l'utilisateur voie un rendu vivant, pas fige.
+        if isPreview then
+            EnsurePreviewTicker()
+        else
+            if f.cd then pcall(f.cd.SetCooldownFromDurationObject, f.cd, entry.durObj) end
+            local function SetBarDuration(bar)
+                if not bar then return end
+                pcall(bar.SetMinMaxValues, bar, 0, 1)
+                pcall(bar.SetTimerDuration, bar, entry.durObj,
+                    Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.Immediate,
+                    Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime)
+            end
+            SetBarDuration(f.bar); SetBarDuration(f.barL); SetBarDuration(f.barR)
+        end
+
+        if f.glowAnchor then ApplyTotemGlow(f.glowAnchor, cfg, info, iw, cfg.iconH or 19) end
+        StyleTotemTimerText(f, cfg)
+        f:Show()
+    end
+
     for _, spellID in ipairs(order) do
         local isFake = isPreview and spellID >= PREVIEW_IDS[1]
         local info = (not isFake) and spells and spells[spellID] or nil
         local f = totemWidgets[spellID]
-        local active = isPreview or (activeTotems[spellID] ~= nil)
+        local entry = (not isPreview) and activeTotems[spellID] or nil
+        local active = isPreview or (entry ~= nil)
+        local used = 0
         if (isPreview or (info and info.source == "totem")) and f then
             if active and visibleIdx < maxBars then
-                visibleIdx = visibleIdx + 1
-                local offset = (visibleIdx - 1) * step
-                f:ClearAllPoints()
-                if growth == "UP" then PPoint(f, "BOTTOMLEFT", cont, "BOTTOMLEFT", 0, offset)
-                elseif growth == "LEFT" then PPoint(f, "TOPRIGHT", cont, "TOPRIGHT", -offset, 0)
-                elseif growth == "RIGHT" then PPoint(f, "TOPLEFT", cont, "TOPLEFT", offset, 0)
-                else PPoint(f, "TOPLEFT", cont, "TOPLEFT", 0, -offset) end
-
-                f._rgb = { TotemBarColorRGB(cfg, info) }
-                local inRange = isPreview or TotemInRange(spellID, activeTotems[spellID], cfg)
-                if not isPreview and f._inRange ~= inRange then TraceRange(spellID, inRange) end
-                ApplyTotemRange(f, inRange)
-
-                -- Preview : pas de vrai durObj disponible (aucun totem
-                -- reellement pose) -- EnsurePreviewTicker() prend le relais
-                -- (icone+barres animees en boucle, cf. sa doc) pour que
-                -- l'utilisateur voie un rendu vivant, pas fige.
-                if isPreview then
-                    EnsurePreviewTicker()
-                else
-                    local activeEntry = activeTotems[spellID]
-                    if f.cd then pcall(f.cd.SetCooldownFromDurationObject, f.cd, activeEntry.durObj) end
-                    local function SetBarDuration(bar)
-                        if not bar then return end
-                        pcall(bar.SetMinMaxValues, bar, 0, 1)
-                        pcall(bar.SetTimerDuration, bar, activeEntry.durObj,
-                            Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.Immediate,
-                            Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime)
+                ShowWidget(f, spellID, info, entry)
+                -- Instances supplementaires (multi-instances) : une barre chacune, juste apres
+                local extras = entry and entry.extras
+                if extras then
+                    local list = totemExtraWidgets[spellID]
+                    if not list then list = {}; totemExtraWidgets[spellID] = list end
+                    for k, ex in ipairs(extras) do
+                        if visibleIdx >= maxBars then break end
+                        local xf = list[k]
+                        if not xf then
+                            local _, xiw, xgp, xbw, xbh, xih, _, xlayout, xrowW, xrowH = GetTotemsDims(cfg)
+                            xf = BuildTotemWidget(spellID, cfg, xlayout, xrowW, xrowH, xiw, xih, xgp, xbw, xbh)
+                            list[k] = xf
+                        end
+                        ShowWidget(xf, spellID, info, ex)
+                        used = k
                     end
-                    SetBarDuration(f.bar); SetBarDuration(f.barL); SetBarDuration(f.barR)
                 end
-
-                if f.glowAnchor then ApplyTotemGlow(f.glowAnchor, cfg, info, iw, cfg.iconH or 19) end
-                StyleTotemTimerText(f, cfg)
-                f:Show()
             else
-                f:Hide()
-                if f.glowAnchor and ns.HideGlow then pcall(ns.HideGlow, f.glowAnchor) end
+                HideWidget(f)
             end
         end
+        local list = totemExtraWidgets[spellID]
+        if list then for k = used + 1, #list do HideWidget(list[k]) end end
     end
 
     local visible = (cfg.totemsEnabled ~= false) and not (ns.db and ns.db.useNativeCDM)
@@ -1021,6 +1205,13 @@ UpdateTotemsRange = function()
             local inRange = TotemInRange(spellID, entry, cfg)
             if f._inRange ~= inRange then TraceRange(spellID, inRange) end
             ApplyTotemRange(f, inRange)
+        end
+        local list = entry.extras and totemExtraWidgets[spellID]
+        if list then
+            for k, ex in ipairs(entry.extras) do
+                local xf = list[k]
+                if xf and xf:IsShown() then ApplyTotemRange(xf, TotemInRange(spellID, ex, cfg)) end
+            end
         end
     end
 end
@@ -1053,6 +1244,30 @@ function ns.EnsureTotemsGrid()
     ns.RepositionTotemsGrid()
 end
 
+-- Faucon : pose loin du joueur, le slot recoit nom / duree apres PLAYER_TOTEM_UPDATE, sans nouvel
+-- evenement. Rescans differes apres le cast, puis un rescan par seconde tant qu'un faucon est lie
+-- (mort, expiration ou retour de la duree sans evenement).
+local function MultiRefresh()
+    RescanActiveTotems()
+    pcall(ns.RefreshTotemsGrid)
+end
+ScheduleMultiRescans = function()
+    for _, d in ipairs({ 0.2, 0.5, 1, 2 }) do C_Timer.After(d, MultiRefresh) end
+end
+local _multiTicker
+SyncMultiTicker = function()
+    local want = false
+    for _, sid in pairs(slotSpellID) do if IsMultiTotem(sid) then want = true; break end end
+    if want and not _multiTicker then
+        _multiTicker = C_Timer.NewTicker(1, function()
+            MultiRefresh()
+            SyncMultiTicker()
+        end)
+    elseif not want and _multiTicker then
+        _multiTicker:Cancel(); _multiTicker = nil
+    end
+end
+
 -- Evenements
 local totemEventFrame = CreateFrame("Frame")
 totemEventFrame:RegisterEvent("PLAYER_TOTEM_UPDATE")
@@ -1068,13 +1283,19 @@ totemEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
                 if UpdateTotemsRange then pcall(UpdateTotemsRange) end
             end
             OnPlayerCastSucceeded(arg3)
+            if not IsSecret(arg3) and IsMultiTotem(arg3) then
+                NoteMultiCast(ResolveTotemID(arg3, (ns.GetSpecSpells and ns.GetSpecSpells()) or {}))
+                ScheduleMultiRescans()
+            end
         end
     elseif event == "PLAYER_TOTEM_UPDATE" then
         -- arg1=slot (numero de slot totem qui vient de changer, jamais secret).
+        if arg1 then _slotUpdatedAt[arg1] = GetTime() end
         pcall(OnTotemSlotChanged, arg1)
     end
     RescanActiveTotems()
     pcall(ns.RefreshTotemsGrid)
+    SyncMultiTicker()
 end)
 
 -- Fin d'un contexte qui masque les auras (taxi, vehicule, vol dynamique) ou ecran de chargement : le
@@ -1179,9 +1400,11 @@ function ns.DebugDumpTotems()
             if info.source == "totem" then
                 n = n + 1
                 local name = SafeSpellName(spellID) or "?"
-                P(string.format("  %d (%s) enabled=%s destinations.totems=%s priority=%s",
+                local ldb = SlotLearnedDB()
+                P(string.format("  %d (%s) enabled=%s destinations.totems=%s priority=%s multi=%s slot_appris=%s",
                     spellID, name, tostring(info.enabled),
-                    tostring(info.destinations and info.destinations.totems), tostring(info.priority)))
+                    tostring(info.destinations and info.destinations.totems), tostring(info.priority),
+                    tostring(IsMultiTotem(spellID)), tostring(ldb and ldb[spellID])))
             end
         end
         if n == 0 then P("  (aucun)") end
@@ -1209,10 +1432,11 @@ function ns.DebugDumpTotems()
         P("|cffff4444GetTotemInfo/GetTotemDuration indisponibles sur ce client|r")
     else
         for slot = 1, MAX_TOTEM_SLOTS do
-            local ok, have, name, startTime = pcall(GetTotemInfo, slot)
+            local ok, have, name, startTime, dur = pcall(GetTotemInfo, slot)
             local okD, durObj = pcall(GetTotemDuration, slot)
-            P(string.format("  slot %d : pcall_ok=%s name=%s startTime_present=%s durObj_present=%s lie_a_spellID=%s",
-                slot, tostring(ok), tostring(name), tostring(startTime ~= nil), tostring(okD and durObj ~= nil), tostring(slotSpellID[slot])))
+            local function V(v) return Secret(v) and "<secret>" or tostring(v) end
+            P(string.format("  slot %d : pcall_ok=%s have=%s name=%s start=%s dur=%s durObj_present=%s lie_a_spellID=%s",
+                slot, tostring(ok), V(have), V(name), V(startTime), V(dur), tostring(okD and durObj ~= nil), tostring(slotSpellID[slot])))
         end
     end
 
@@ -1220,7 +1444,12 @@ function ns.DebugDumpTotems()
     local n2 = 0
     for spellID, e in pairs(activeTotems) do
         n2 = n2 + 1
-        P(string.format("  spellID=%d slot=%s instID=%s", spellID, tostring(e.slot), tostring(e.instID)))
+        P(string.format("  spellID=%d slot=%s instID=%s multi=%s widget_shown=%s", spellID, tostring(e.slot), tostring(e.instID),
+            tostring(IsMultiTotem(spellID)), tostring(totemWidgets[spellID] and totemWidgets[spellID]:IsShown())))
+        for k, ex in ipairs(e.extras or {}) do
+            local xf = totemExtraWidgets[spellID] and totemExtraWidgets[spellID][k]
+            P(string.format("    instance +%d : slot=%s widget=%s shown=%s", k, tostring(ex.slot), tostring(xf ~= nil), tostring(xf and xf:IsShown())))
+        end
         local buffs = BuffsFor(spellID)
         if buffs then
             local f = totemWidgets[spellID]

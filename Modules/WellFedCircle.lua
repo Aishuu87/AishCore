@@ -1175,6 +1175,7 @@ function WellFedCircle.SetDraggable(on)
   if host then on = false end   -- dans l'apercu du GUI : pas de glisser-deposer (la position enregistree serait faussee)
   if on then
     bar:SetMovable(true); bar:EnableMouse(true); bar:RegisterForDrag("LeftButton")
+    if ns.Nudge then ns.Nudge.Attach(bar) end   -- fleches = deplacement au pixel
     bar:SetScript("OnDragStart", function(self)
       local c = Cfg()
       if c and c.locked then return end
@@ -1260,6 +1261,7 @@ local function EnsureGhost()
   local hl = g:CreateTexture(nil, "OVERLAY", nil, 7)
   hl:SetAllPoints(g); hl:SetColorTexture(1, 1, 1, 0.15); hl:Hide()
   g._dragBorder = hl
+  if ns.Nudge then ns.Nudge.Attach(g) end   -- fleches = deplacement au pixel
   g:SetScript("OnDragStart", function(self)
     if Cfg().locked then return end
     self._dragging = true

@@ -3,7 +3,8 @@
 -- GENERE par generate_class_spell_levels.py a partir des releves faits chez les entraineurs (niveau, cout)
 -- et des tables du jeu de la build Forever (identifiant et rang exacts) : ne pas editer a la main.
 -- Entree avec id : le jeu donne le nom, l'icone et le rang dans la langue du joueur ; r = rang, f = famille
--- (rangs d'un meme sort). Entree sans id : nom francais + icone (valables en frFR seulement).
+-- (rangs d'un meme sort), spec = sort reserve a cette specialisation. Entree sans id : nom francais + icone
+-- (valables en frFR seulement).
 local _, ns = ...
 ns.ClassSpellLevelsLocale = "frFR"
 ns.ClassSpellLevels = {
@@ -123,17 +124,17 @@ ns.ClassSpellLevels = {
     [34] = { { id = 2094, r = 0, f = 28, cost = 14000 }, { id = 8725, r = 3, f = 15, cost = 14000 }, { id = 6510, r = 0, f = 29, cost = 14000 }, { id = 8696, r = 2, f = 10, cost = 14000 } },
     [36] = { { id = 8721, r = 5, f = 2, cost = 16000 }, { id = 8650, r = 3, f = 12, cost = 16000 }, { id = 8691, r = 3, f = 30, cost = 16000 }, { id = 8640, r = 3, f = 17, cost = 16000 } },
     [38] = { { id = 8621, r = 6, f = 4, cost = 18000 }, { id = 8633, r = 4, f = 13, cost = 18000 }, { id = 8694, r = 2, f = 31, cost = 18000 }, { id = 2837, r = 2, f = 32, cost = 18000 } },
-    [40] = { { id = 1786, r = 3, f = 1, cost = 20000 }, { id = 1860, r = 0, f = 33, cost = 20000 }, { id = 399961, r = 2, f = 34, cost = 10000 }, { id = 8624, r = 6, f = 7, cost = 20000 }, { id = 8637, r = 3, f = 14, cost = 20000 }, { id = 13228, r = 2, f = 35, cost = 20000 } },
+    [40] = { { id = 1786, r = 3, f = 1, cost = 20000 }, { id = 1860, r = 0, f = 33, cost = 20000 }, { id = 399961, r = 2, f = 34, cost = 10000, spec = 259 }, { id = 8624, r = 6, f = 7, cost = 20000 }, { id = 8637, r = 3, f = 14, cost = 20000 }, { id = 13228, r = 2, f = 35, cost = 20000 } },
     [42] = { { id = 1768, r = 3, f = 11, cost = 27000 }, { id = 1857, r = 2, f = 18, cost = 27000 }, { id = 6774, r = 2, f = 9, cost = 27000 }, { id = 11267, r = 4, f = 15, cost = 27000 } },
     [44] = { { id = 11279, r = 6, f = 2, cost = 29000 }, { id = 11341, r = 4, f = 36, cost = 29000 }, { id = 11273, r = 4, f = 17, cost = 29000 } },
     [46] = { { id = 11293, r = 7, f = 4, cost = 31000 }, { id = 11197, r = 4, f = 12, cost = 31000 }, { id = 11289, r = 5, f = 13, cost = 31000 }, { id = 11357, r = 3, f = 37, cost = 31000 }, { id = 11285, r = 4, f = 5, cost = 31000 } },
     [48] = { { id = 11297, r = 3, f = 8, cost = 33000 }, { id = 11299, r = 7, f = 7, cost = 33000 }, { id = 13229, r = 3, f = 38, cost = 33000 } },
-    [50] = { { id = 8643, r = 2, f = 24, cost = 35000 }, { id = 11268, r = 5, f = 15, cost = 35000 }, { id = 1241588, r = 3, f = 34, cost = 35000 }, { id = 3421, r = 2, f = 39, cost = 35000 } },
+    [50] = { { id = 8643, r = 2, f = 24, cost = 35000 }, { id = 11268, r = 5, f = 15, cost = 35000 }, { id = 1241588, r = 3, f = 34, cost = 35000, spec = 259 }, { id = 3421, r = 2, f = 39, cost = 35000 } },
     [52] = { { id = 11280, r = 7, f = 2, cost = 46000 }, { id = 11303, r = 4, f = 14, cost = 46000 }, { id = 11400, r = 3, f = 40, cost = 46000 }, { id = 11342, r = 5, f = 41, cost = 46000 }, { id = 11274, r = 5, f = 17, cost = 46000 } },
     [54] = { { id = 11294, r = 8, f = 4, cost = 48000 }, { id = 11290, r = 6, f = 13, cost = 48000 }, { id = 11358, r = 4, f = 42, cost = 48000 } },
     [56] = { { id = 11300, r = 8, f = 7, cost = 50000 }, { id = 11198, r = 5, f = 12, cost = 50000 }, { id = 13230, r = 4, f = 43, cost = 50000 } },
     [58] = { { id = 1769, r = 4, f = 11, cost = 52000 }, { id = 11269, r = 6, f = 15, cost = 52000 }, { id = 11305, r = 3, f = 10, cost = 52000 } },
-    [60] = { { id = 25300, r = 9, f = 2, cost = 54000 }, { id = 1787, r = 4, f = 1, cost = 54000 }, { id = 1241590, r = 4, f = 34, cost = 54000 }, { id = 11343, r = 6, f = 44, cost = 54000 }, { id = 11275, r = 6, f = 17, cost = 54000 }, { id = 11286, r = 5, f = 5, cost = 54000 } },
+    [60] = { { id = 25300, r = 9, f = 2, cost = 54000 }, { id = 1787, r = 4, f = 1, cost = 54000 }, { id = 1241590, r = 4, f = 34, cost = 54000, spec = 259 }, { id = 11343, r = 6, f = 44, cost = 54000 }, { id = 11275, r = 6, f = 17, cost = 54000 }, { id = 11286, r = 5, f = 5, cost = 54000 } },
   },
   PRIEST = {
     [4] = { { id = 589, r = 1, f = 1, cost = 100 }, { id = 2052, r = 2, f = 2, cost = 100 } },

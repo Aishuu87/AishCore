@@ -229,6 +229,26 @@ function ns.BuildMenuBarPage(container, W, NewLayout)
   ctx:AddRowCentered(8, cbMouse, slMouseAlpha)
   ctx:Depends(cbMouse, { slMouseAlpha })
 
+  -- Sacs de Blizzard : jamais / toujours / au survol, opacite (et opacite hors survol)
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateSectionHeader(container, L["MENUBAR_SEC_BAGS"], W))
+  local ddBags = Bind(SW.CreateDropdown(container, L["MENUBAR_BAGS_VIS"], {
+    { value = "never",  text = L["ACTIONBARS_VIS_NEVER"] },
+    { value = "always", text = L["ACTIONBARS_VIS_ALWAYS"] },
+    { value = "hover",  text = L["SETTINGS_UB_VIS_HOVER"] },
+  }, W2), "bagsVis", "string")
+  ctx:Add(ddBags)
+  local slBagsAlpha = Bind(SW.CreateSlider(container, L["SETTINGS_OPACITY"], 0, 1, 0.05, W2), "bagsAlpha", "number")
+  local slBagsMouse = Bind(SW.CreateSlider(container, L["EXTRABARS_MOUSEOVER_ALPHA"], 0, 1, 0.05, W2), "bagsMouseoverAlpha", "number")
+  ctx:AddRow(8, slBagsAlpha, slBagsMouse)
+  local function BagsState()
+    local v = (ns.GetCfg("menuBar") or {}).bagsVis or "always"
+    SW.SetGrayReason(slBagsAlpha, "bags", v == "never")
+    SW.SetGrayReason(slBagsMouse, "bags", v ~= "hover")
+  end
+  local origBags = ddBags.onChanged
+  ddBags.onChanged = function(v) origBags(v); BagsState() end
+
   -- Horloge
   ctx:Spacer(6)
   ctx:Add(SW.CreateSectionHeader(container, L["MENUBAR_SEC_CLOCK"], W))
@@ -267,6 +287,7 @@ function ns.BuildMenuBarPage(container, W, NewLayout)
       end
     end
     for _, t in ipairs(themedPairs) do t.State(cfg[t.key] ~= false) end
+    BagsState()
     RefreshDragBtn()
     RefreshPreview()
   end

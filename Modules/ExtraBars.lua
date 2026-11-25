@@ -561,6 +561,9 @@ function ExtraBars.StyleBackground(holder, bc, w, h, show)
   local xs, ys = { 0, e, bw - e, bw }, { 0, e, bh - e, bh }
   BG_UV[1], BG_UV[2], BG_UV[3], BG_UV[4] = 0, c, 1 - c, 1
   local col = bc.bgColor or { 0, 0, 0, 0.6 }
+  -- bgFlipH / bgFlipV : image en miroir (variation des textures des Barres d'action), chaque morceau prend
+  -- le morceau oppose de la texture, retourne
+  local fh, fv = bc.bgFlipH, bc.bgFlipV
   local k = 0
   for row = 1, 3 do
     for cl = 1, 3 do
@@ -571,7 +574,11 @@ function ExtraBars.StyleBackground(holder, bc, w, h, show)
         t:Hide()
       else
         t:SetTexture(def.file)
-        t:SetTexCoord(BG_UV[cl], BG_UV[cl + 1], BG_UV[row], BG_UV[row + 1])
+        local sc, sr = fh and (4 - cl) or cl, fv and (4 - row) or row
+        local l, r, tp, bt = BG_UV[sc], BG_UV[sc + 1], BG_UV[sr], BG_UV[sr + 1]
+        if fh then l, r = r, l end
+        if fv then tp, bt = bt, tp end
+        t:SetTexCoord(l, r, tp, bt)
         t:ClearAllPoints()
         t:SetPoint("TOPLEFT", bg, "TOPLEFT", xs[cl], -ys[row])
         t:SetSize(tw, th)
@@ -746,6 +753,7 @@ local function GetBar(i)
   bar.mover.label:SetPoint("BOTTOM", bar.mover, "TOP", 0, 3)
   bar.mover:EnableMouse(true)
   bar.mover:RegisterForDrag("LeftButton")
+  if ns.Nudge then ns.Nudge.Attach(bar.mover, bar) end   -- fleches = deplacement au pixel
   bar.mover:SetScript("OnDragStart", function() if not InCombatLockdown() then bar:StartMoving() end end)
   bar.mover:SetScript("OnDragStop", function()
     bar:StopMovingOrSizing()

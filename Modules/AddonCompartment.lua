@@ -376,7 +376,8 @@ end
 local IGNORE = {
   "^Minimap", "^MiniMap", "^GameTime", "^TimeManager", "^ExpansionLanding", "^GarrisonLanding", "^QueueStatus",
   "^AddonCompartment", "^LFG", "^Battlefield", "^HybridMinimap", "^MinimapCluster", "^Hybrid",
-  "Pin%d*$", "Node%d*$", "^HandyNotes", "^GatherMate", "^TomTom", "^Questie.*Note", "^HereBeDragons",
+  "Pin%d*$", "Node%d*$", "^HandyNotes", "^GatherMate", "^TomTom", "^HereBeDragons",
+  "^Questie",   -- icones de quete (QuestieFrameN) ; le vrai bouton passe par LibDBIcon
 }
 
 -- EllesmereUI (module Minimap) cache les boutons qu'il collecte (Hide + alpha 0) et note dans _EBS_AddonVisible

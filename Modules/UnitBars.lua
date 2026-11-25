@@ -1648,6 +1648,7 @@ local function CreateUnitBar(def)
     pad:SetAttribute("*type2", "togglemenu")
     -- Le deplacement depuis la couronne doit saisir la barre, sinon on croit l'avoir
     -- attrapee et rien ne bouge.
+    if ns.Nudge then ns.Nudge.Attach(pad, frame) end   -- fleches = deplacement au pixel
     pad:SetScript("OnDragStart", function()
         local h = frame:GetScript("OnDragStart"); if h then h(frame) end
     end)
@@ -1674,6 +1675,7 @@ local function CreateUnitBar(def)
     -- Show() une seule fois à la création ; visibilité gérée ensuite via SetAlpha() (jamais protégé en combat)
     frame:Show()
     frame:SetAlpha(0)
+    if ns.Nudge then ns.Nudge.Attach(frame) end   -- fleches = deplacement au pixel
     frame:SetScript("OnDragStart", function(self)
         if InCombatLockdown() then return end
         local panel = _G["AishCoreSettingsPanel"]

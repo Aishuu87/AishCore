@@ -627,6 +627,17 @@ local function NewLayout(container)
     return w
   end
 
+  -- Elements ajoutes apres l'index `from` du flux (#ctx.flow avant de les ajouter) : masques tant que fn() est vrai
+  -- (relu a chaque ctx:Relayout). Les sections ouvertes dans la plage le sont entieres (en-tete et contenu, meme
+  -- recompose par le mode disposition), et OpenSection les ignore tant qu'elles sont masquees.
+  function ctx:HideIf(from, fn)
+    for i = from + 1, #self.flow do
+      local item = self.flow[i]
+      item.hideIf = fn
+      if item.kind == "widget" and item.section and item.w == item.section.header then item.section.hideIf = fn end
+    end
+  end
+
   function ctx:Spacer(h)
     h = h or SECTION_GAP
     self.flow[#self.flow + 1] = { kind = "spacer", h = h, section = self._section }
@@ -839,7 +850,8 @@ local function NewLayout(container)
     for _, item in ipairs(self.flow) do
       -- Le header porte sa propre section : il reste visible quand elle est repliee.
       local isHeader = (item.kind == "widget" and item.section and item.w == item.section.header)
-      local hidden = (item.section and item.section.collapsed and not isHeader) and true or false
+      local hidden = ((item.section and item.section.collapsed and not isHeader) or (item.hideIf and item.hideIf())
+        or (item.section and item.section.hideIf and item.section.hideIf())) and true or false
       item._hidNow = hidden
       item._ty = y
       if item.kind == "mark" then
@@ -1213,6 +1225,7 @@ local function GetModKey(dbKey)
     comfort                    = "Comfort",
     location                   = "Location",
     extraBars                  = "ExtraBars",
+    actionBars                 = "ActionBars",
     addonFonts                 = "AddonFonts",
   }
   return map[dbKey]
@@ -2371,6 +2384,9 @@ function Build.ResourceCircle(container)
   Build.EliteDragonsSection(container, ctx, W)
 
   ctx:Spacer(6)
+  -- Lien vers les animations 3D des sorts (jouees sur ce cercle)
+  ctx:Add(SW.CreateAnim3DLinkHeader(container, L["SETTINGS_ANIM3D_LINK_SPELLS"], W, "spells"))
+  ctx:Spacer(6)
 
 
   ctx:Finalize()
@@ -3009,6 +3025,10 @@ function Build.OutOfCombat(container)
       end
     end
     ctx:AddRow(8, ddHCFont, slHCFont, slHCTextBd)
+
+    -- Lien vers les animations 3D du cercle de vie hors combat (regen)
+    ctx:Spacer(6)
+    ctx:Add(SW.CreateAnim3DLinkHeader(container, L["SETTINGS_ANIM3D_LINK_REGEN"], W, "ooc"))
   end
 
   -- Cercle de Ressource -------------------------------------------------------------------------------------------
@@ -3467,6 +3487,9 @@ function Build.WellFed(container)
     end
   end
 
+  -- Lien vers les animations 3D du cercle Bien Nourri
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateAnim3DLinkHeader(container, L["SETTINGS_ANIM3D_LINK_WELLFED"], W, "wellFed"))
   ctx:Finalize()
   return ctx.widgets
 end
@@ -8090,6 +8113,52 @@ function Build.SpellEffects(container)
     if RelayoutSections then RelayoutSections() end
   end
 
+  -- Saut depuis une autre page (bouton fx, en-tete lien, cf. ns.OpenAnim3D) : deplie la section demandee et,
+  -- si une cle est fournie, selectionne sa ligne comme un clic puis la fait defiler en vue.
+  ns.SettingsBuild.SEJump = function(sectionId, key)
+    local idx
+    for i, s in ipairs(seSections) do if s.id == sectionId then idx = i end end
+    if not idx then return end
+    local sec = seSections[idx]
+    if not sec.expanded then ToggleSection(idx) end
+    local list
+    if key ~= nil then
+      if sectionId == "auras" then RefreshAuraList(); list = seAuraList
+      elseif sectionId == "missingBuffs" then RefreshMissingBuffsList(); list = seMissingBuffsList end
+    end
+    local function FindRow()
+      for _, r in ipairs(list and list._rows or {}) do
+        if r.spellID == key and r:IsShown() then return r end
+      end
+    end
+    local row = FindRow()
+    if row then
+      local fn = row:GetScript("OnClick")
+      if fn then fn(row, "LeftButton") end
+      row = FindRow()   -- la liste est reconstruite par la selection
+    end
+    C_Timer.After(0.05, function()
+      -- Panneau principal : amener l'en-tete de la section en vue
+      local sfTop, hTop = scrollFrame:GetTop(), sec.header:GetTop()
+      if sfTop and hTop then
+        local d = sfTop - hTop + scrollFrame:GetVerticalScroll()
+        if d > scrollFrame:GetHeight() * 0.4 then
+          local range = scrollFrame:GetVerticalScrollRange() or 0
+          scrollFrame:SetVerticalScroll(math.max(0, math.min(range, d - 40)))
+        end
+      end
+      -- Liste interne de la section : amener la ligne en vue
+      local sf = row and list:GetParent()
+      if sf and sf.SetVerticalScroll then
+        local lTop, rTop = list:GetTop(), row:GetTop()
+        if lTop and rTop then
+          local range = sf:GetVerticalScrollRange() or 0
+          sf:SetVerticalScroll(math.max(0, math.min(range, lTop - rTop - 60)))
+        end
+      end
+    end)
+  end
+
   -- Rafraîchir la liste des orbes quand l'état de furtivité change
   do
     local stealthFrame = CreateFrame("Frame")
@@ -9748,747 +9817,6 @@ function Build.PriorityBar(container)
   return ctx.widgets
 end
 
--- BUILD : Top Target Bar
-function Build.TopTargetBar(container)
-  local ctx = NewLayout(container)
-  local W   = CONTENT_W
-
-  local function TTBGet(prop)
-    local db  = ns.DB       and ns.DB.topTargetBar
-    local def = ns.Defaults and ns.Defaults.topTargetBar
-    if db  and db[prop]  ~= nil then return db[prop]  end
-    if def and def[prop] ~= nil then return def[prop] end
-  end
-  local function TTBSet(prop, val)
-    if not ns.DB              then ns.DB = {} end
-    if not ns.DB.topTargetBar then ns.DB.topTargetBar = {} end
-    ns.DB.topTargetBar[prop] = val
-    local TTB = ns.Modules and ns.Modules.TopTargetBar
-    if TTB and TTB.ApplySettings then TTB.ApplySettings() end
-  end
-
-  -- Paire de sliders lies a 2 proprietes topTargetBar, placee sur une seule
-  -- ligne (remplace les anciennes paires d'edit box position/taille/decalage).
-  local _ttbSL2 = math.floor((W - 10) / 2)
-  local function MakeTTBSliderRow(propA, propB, labelA, labelB, minA, maxA, stepA, minB, maxB, stepB)
-    local sA = SW.CreateSlider(container, labelA, minA, maxA, stepA, _ttbSL2)
-    sA:SetValue(TTBGet(propA) or 0)
-    sA.onChanged = function(val) TTBSet(propA, val) end
-    local sB = SW.CreateSlider(container, labelB, minB, maxB, stepB, _ttbSL2)
-    sB:SetValue(TTBGet(propB) or 0)
-    sB.onChanged = function(val) TTBSet(propB, val) end
-    SW.TrackDB(sA, function() return TTBGet(propA) end)
-    SW.TrackDB(sB, function() return TTBGet(propB) end)
-    ctx:AddRow(10, sA, sB)
-  end
-
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_TOP_TARGET"], W))
-
-  -- Activer / désactiver le module
-  local cbTTB = ctx:TitleToggle(SW.CreateCheckbox(container, L["SETTINGS_TTB_ENABLE"],
-    L["SETTINGS_TTB_ENABLE_TT"], W))
-  cbTTB.onChanged = function(val)
-    if not ns.DB              then ns.DB = {} end
-    if not ns.DB.topTargetBar then ns.DB.topTargetBar = {} end
-    ns.DB.topTargetBar.enabled = val
-    local TTB = ns.Modules and ns.Modules.TopTargetBar
-    if TTB and TTB.ApplySettings then TTB.ApplySettings() end
-    -- Ce handler ecrit directement en DB (pas de LiveApply/_invalidateCategory
-    -- automatique) -- sans cet appel, la case "Activer" de la page "Modules"
-    -- restait figee sur l'ancien etat apres un toggle ici.
-    if _invalidateCategory then _invalidateCategory("modulesOverview") end
-  end
-  do
-    local db  = ns.DB       and ns.DB.topTargetBar
-    local def = ns.Defaults and ns.Defaults.topTargetBar
-    local v = (db and db.enabled ~= nil) and db.enabled or (def and def.enabled ~= nil and def.enabled or true)
-    cbTTB:SetChecked(v)
-  end
-
-  -- Toggle : afficher la cible de la cible
-  local cbShowTT = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_TTB_SHOW_TOT"],
-    L["SETTINGS_TTB_SHOW_TOT_TT"], W))
-  do
-    local db  = ns.DB       and ns.DB.topTargetBar
-    local def = ns.Defaults and ns.Defaults.topTargetBar
-    local v = (db and db.showTargetOfTarget ~= nil) and db.showTargetOfTarget
-              or (def and def.showTargetOfTarget ~= nil and def.showTargetOfTarget or true)
-    cbShowTT:SetChecked(v)
-  end
-  cbShowTT.onChanged = function(val)
-    if not ns.DB              then ns.DB = {} end
-    if not ns.DB.topTargetBar then ns.DB.topTargetBar = {} end
-    ns.DB.topTargetBar.showTargetOfTarget = val
-    local TTB = ns.Modules and ns.Modules.TopTargetBar
-    if TTB and TTB.ApplySettings then TTB.ApplySettings() end
-    if _invalidateCategory then _invalidateCategory("modulesOverview") end
-  end
-
-  -- Toggle : décoration élite (ornement argent / or sous la barre)
-  local cbEliteDeco = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_TTB_ELITE_DECO"],
-    L["SETTINGS_TTB_ELITE_DECO_TT"], W))
-  do
-    local db = ns.DB and ns.DB.topTargetBar
-    cbEliteDeco:SetChecked(not (db and db.eliteDeco == false))
-  end
-  cbEliteDeco.onChanged = function(val)
-    if not ns.DB              then ns.DB = {} end
-    if not ns.DB.topTargetBar then ns.DB.topTargetBar = {} end
-    ns.DB.topTargetBar.eliteDeco = val
-    local TTB = ns.Modules and ns.Modules.TopTargetBar
-    if TTB and TTB.ApplySettings then TTB.ApplySettings() end
-  end
-
-  -- Toggle : afficher la barre de ressource (énergie / mana / rage…)
-  local cbShowPower = ctx:Add(SW.CreateCheckbox(container,
-    L["SETTINGS_TTB_SHOW_POWER_BAR"],
-    L["SETTINGS_TTB_SHOW_POWER_BAR_TT"], W))
-  do
-    local db  = ns.DB       and ns.DB.topTargetBar
-    local def = ns.Defaults and ns.Defaults.topTargetBar
-    local v = (db and db.showPowerBar ~= nil) and db.showPowerBar
-              or (def and def.showPowerBar ~= nil and def.showPowerBar or false)
-    cbShowPower:SetChecked(v)
-  end
-  cbShowPower.onChanged = function(val)
-    if not ns.DB              then ns.DB = {} end
-    if not ns.DB.topTargetBar then ns.DB.topTargetBar = {} end
-    ns.DB.topTargetBar.showPowerBar = val
-    local TTB = ns.Modules and ns.Modules.TopTargetBar
-    if TTB and TTB.ApplySettings then TTB.ApplySettings() end
-  end
-
-  -- Mode JcJ : comme les barres d'unite (UI/UnitBarsPage.lua), sans le remplacement des points (absents ici)
-  do
-    local W3 = math.floor((W - 20) / 3)
-    local pvpWidgets, blocks = {}, {}
-    local RefreshPvP
-    local function OnChange(w)
-      local orig = w.onChanged
-      w.onChanged = function(...) if orig then orig(...) end; RefreshPvP() end
-      return w
-    end
-    local function Subtitle(text)
-      local f = CreateFrame("Frame", nil, container)
-      f:SetSize(W, 18)
-      local lbl = f:CreateFontString(nil, "OVERLAY")
-      lbl:SetFont(ns.Media.fontGui, 10)
-      lbl:SetPoint("LEFT", f, "LEFT", 0, 0)
-      lbl:SetTextColor(unpack(Theme.textDim))
-      lbl:SetText(text)
-      f._leKind, f._leText = "subheader", text
-      return ctx:Add(f)
-    end
-    ctx:Spacer(4)
-    ctx:Add(SW.CreateSectionHeader(container, L["UNITBARS_SEC_PVP"], W))
-    local cbPvpShow = SW.CreateCheckbox(container, L["UNITBARS_PVP_SHOW"], L["UNITBARS_PVP_SHOW_TT"], W3)
-    BindCheckbox(cbPvpShow, "topTargetBar", "pvpShow")
-    OnChange(cbPvpShow)
-    local cbFaction = SW.CreateCheckbox(container, L["UNITBARS_PVP_FACTION"], L["UNITBARS_PVP_FACTION_TT"], W3)
-    BindCheckbox(cbFaction, "topTargetBar", "pvpFaction")
-    OnChange(cbFaction)
-    local pvpBtn = SW.CreateActionBtn(container, L["UNITBARS_PVP_PREVIEW"], W3)
-    local function PvPBtnLabel()
-      local TTB = ns.Modules and ns.Modules.TopTargetBar
-      local on = TTB and TTB.IsPvPPreview and TTB.IsPvPPreview()
-      pvpBtn._lbl:SetText(on and L["UNITBARS_PVP_PREVIEW_STOP"] or L["UNITBARS_PVP_PREVIEW"])
-    end
-    pvpBtn:SetScript("OnClick", function()
-      local TTB = ns.Modules and ns.Modules.TopTargetBar
-      if not (TTB and TTB.SetPvPPreview) then return end
-      TTB.SetPvPPreview(not TTB.IsPvPPreview())
-      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-      PvPBtnLabel()
-    end)
-    pvpBtn:HookScript("OnShow", PvPBtnLabel)   -- apercu coupe a la fermeture du GUI
-    ctx:AddRow(10, cbPvpShow, cbFaction, pvpBtn)
-    -- Placement libre : point d'ancrage sur le fond + decalage
-    local anchors = {}
-    for _, p in ipairs({ "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" }) do
-      anchors[#anchors + 1] = { value = p, text = L["SETTINGS_ANCHOR_" .. p] }
-    end
-    local ddAnchor = SW.CreateDropdown(container, L["UNITBARS_ANCHOR"], anchors, W3)
-    BindDropdown(ddAnchor, "topTargetBar", "pvpAnchor")
-    local slX = SW.CreateSlider(container, L["SETTINGS_OFFSET_X"], -300, 300, 1, W3)
-    BindSlider(slX, "topTargetBar", "pvpX")
-    local slY = SW.CreateSlider(container, L["SETTINGS_OFFSET_Y"], -200, 200, 1, W3)
-    BindSlider(slY, "topTargetBar", "pvpY")
-    ctx:AddRow(10, ddAnchor, slX, slY)
-    pvpWidgets[#pvpWidgets + 1] = cbFaction
-    for _, w in ipairs({ ddAnchor, slX, slY }) do pvpWidgets[#pvpWidgets + 1] = w end
-    -- Reglages d'une icone (prefixe pvp = epees, pvpF = emblemes Alliance / Horde)
-    local function IconBlock(pre, title, colorModes)
-      Subtitle(title)
-      local rowRot = SW.CreateAlignRow(container, L["SETTINGS_ROTATION"], W3 * 2, {
-        { k = "0", l = "0\194\176" }, { k = "90", l = "90\194\176" },
-        { k = "180", l = "180\194\176" }, { k = "270", l = "270\194\176" },
-      }, true)
-      rowRot:SetValue(DBGet("topTargetBar", pre .. "Rotation") or "0")
-      rowRot.onChanged = function(v) DBSet("topTargetBar", pre .. "Rotation", v); LiveApply("topTargetBar") end
-      local slA = SW.CreateSlider(container, L["SETTINGS_OPACITY"], 0, 1, 0.05, W3)
-      BindSlider(slA, "topTargetBar", pre .. "Alpha")
-      ctx:AddRow(10, rowRot, slA)
-      local rowColor = SW.CreateAlignRow(container, L["UNITBARS_COLOR"], W3 * 2, colorModes, true)
-      rowColor:SetValue(DBGet("topTargetBar", pre .. "ColorMode") or colorModes[1].k)
-      rowColor.onChanged = function(v)
-        DBSet("topTargetBar", pre .. "ColorMode", v); LiveApply("topTargetBar"); RefreshPvP()
-      end
-      local col = SW.CreateColorButton(container, L["SETTINGS_SR_COLOR_CUSTOM"], W3)
-      BindColorButton(col, "topTargetBar", pre .. "Color")
-      ctx:AddRow(10, rowColor, col)
-      local slSize = SW.CreateSlider(container, L["SETTINGS_SIZE"], 4, 60, 1, W3)
-      BindSlider(slSize, "topTargetBar", pre .. "Size")
-      ctx:AddRow(10, slSize)
-      blocks[#blocks + 1] = { pre = pre, ws = { rowRot, slA, rowColor, slSize }, col = col }
-    end
-    local THEMED   = { k = "themed",   l = L["CASTBARS_THEMED"] }
-    local CUSTOM   = { k = "custom",   l = L["SETTINGS_SR_COLOR_CUSTOM"] }
-    local ORIGINAL = { k = "original", l = L["UNITBARS_COLOR_ORIGINAL"] }
-    IconBlock("pvp", L["UNITBARS_PVP_SWORDS"], { THEMED, CUSTOM })
-    IconBlock("pvpF", L["UNITBARS_PVP_EMBLEMS"], { ORIGINAL, THEMED, CUSTOM })
-    -- Grisage : tout sans "Afficher" ; epees grisees quand la faction est distinguee, emblemes grises sinon
-    RefreshPvP = function()
-      local on, fac = DBGet("topTargetBar", "pvpShow"), DBGet("topTargetBar", "pvpFaction")
-      for _, w in ipairs(pvpWidgets) do Build.GrayWidget(w, not on) end
-      for _, b in ipairs(blocks) do
-        local bOn = on and ((b.pre == "pvpF") == (fac and true or false))
-        for _, w in ipairs(b.ws) do Build.GrayWidget(w, not bOn) end
-        Build.GrayWidget(b.col, not bOn or DBGet("topTargetBar", b.pre .. "ColorMode") ~= "custom")
-      end
-    end
-    RefreshPvP()
-  end
-
-  ctx:Spacer(4)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_CONTAINER"], W))
-  MakeTTBSliderRow("x", "y", L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"], -400, 400, 1, -400, 400, 1)
-
-  ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_BLACK_BG"], W))
-  MakeTTBSliderRow("bgW",  "bgH",  L["SETTINGS_WIDTH"],     L["SETTINGS_HEIGHT"],    60, 700, 1, 1, 60, 1)
-  MakeTTBSliderRow("bgOX", "bgOY", L["SETTINGS_OFFSET_X"],  L["SETTINGS_OFFSET_Y"], -50, 50, 1, -50, 50, 1)
-
-  ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_COLORED_BAR"], W))
-  MakeTTBSliderRow("barW",  "barH",  L["SETTINGS_WIDTH"],    L["SETTINGS_HEIGHT"],    60, 700, 1, 1, 20, 0.1)
-  MakeTTBSliderRow("barOX", "barOY", L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"], -50, 50, 1, -50, 50, 1)
-  -- Texture partagee par la barre de vie, la barre de ressource et la barre de la cible de la cible.
-  local ddTTBTex = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_BAR_TEXTURE"], ns.GetBarTextureList(), 220))
-  BindDropdown(ddTTBTex, "topTargetBar", "barTexture")
-
-  ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_NAME_TEXT"], W))
-  local ddTTBNameFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
-  BindDropdown(ddTTBNameFont, "topTargetBar", "nameFont")
-  MakeTTBSliderRow("nameOX", "nameOY", L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"], -50, 50, 1, -50, 50, 1)
-
-  -- Couleur de la difficulte, puis de la reaction : elements colores (niveau, nom, barre ; cible et cible de la cible),
-  -- puis couleurs (cf. TopTargetBar.ResolveUnitColor ; difficulte prioritaire)
-  do
-    local W5 = math.floor((W - 40) / 5)
-    local COLOR_ELEMS = {
-      { "Level", L["UNITBARS_COLOR_ELEM_LEVEL"] }, { "Name", L["UNITBARS_COLOR_ELEM_NAME"] }, { "Bar", L["UNITBARS_COLOR_ELEM_BAR"] },
-    }
-    local function ColorSection(title, tt, pre, colors)
-      ctx:Spacer(8)
-      ctx:Add(SW.CreateSectionHeader(container, title, W))
-      local cbs = {}
-      for i, e in ipairs(COLOR_ELEMS) do
-        local cb = SW.CreateCheckbox(container, e[2], tt, W5)
-        BindCheckbox(cb, "topTargetBar", pre .. e[1])
-        cbs[i] = cb
-      end
-      ctx:AddRow(10, unpack(cbs))
-      local cols = {}
-      for i, c in ipairs(colors) do
-        local col = SW.CreateColorButton(container, c[2], W5)
-        BindColorButton(col, "topTargetBar", pre .. "Color" .. c[1])
-        cols[i] = col
-      end
-      ctx:AddRow(10, unpack(cols))
-      return cbs
-    end
-    local diffCbs = ColorSection(L["UNITBARS_SUB_DIFF_COLOR"], L["UNITBARS_SUB_DIFF_COLOR_TT"], "diff", {
-      { "Trivial", L["UNITBARS_DIFF_TRIVIAL"] }, { "Easy", L["UNITBARS_DIFF_EASY"] }, { "Normal", L["UNITBARS_DIFF_NORMAL"] },
-      { "Hard", L["UNITBARS_DIFF_HARD"] }, { "Skull", L["UNITBARS_DIFF_SKULL"] },
-    })
-    local reactCbs = ColorSection(L["UNITBARS_SUB_REACT_COLOR"], L["UNITBARS_SUB_REACT_COLOR_TT"], "react", {
-      { "Hostile", L["UNITBARS_COLOR_HOSTILE"] }, { "Neutral", L["UNITBARS_COLOR_NEUTRAL"] }, { "Friendly", L["UNITBARS_COLOR_FRIENDLY"] },
-    })
-    -- Une seule couleur par element : cocher Niveau / Nom / Barre dans une section le decoche dans l'autre
-    for i = 1, 3 do
-      for _, pair in ipairs({ { diffCbs[i], reactCbs[i] }, { reactCbs[i], diffCbs[i] } }) do
-        local cb, other = pair[1], pair[2]
-        local orig = cb.onChanged
-        cb.onChanged = function(v)
-          if v and other:GetChecked() then
-            DBSet("topTargetBar", other._subKey, false)
-            other:SetChecked(false)
-          end
-          orig(v)
-        end
-      end
-    end
-  end
-
-  ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TTB_HP_TEXT"], W))
-  local ddTTBHpFont = ctx:Add(SW.CreateDropdown(container, L["SETTINGS_FONT"], ns.GetFontList(), 220))
-  BindDropdown(ddTTBHpFont, "topTargetBar", "hpFont")
-
-  -- Ancrage : widget partage SW.CreateAlignRow (meme widget que "Alignement"
-  -- dans les barres de cast), avec les libelles LEFT/MIDDLE/RIGHT propres a
-  -- l'ancrage plutot que left/center/right generiques.
-  local alignHpAnchor = ctx:Add(SW.CreateAlignRow(container, L["SETTINGS_ANCHOR_COLON"], W, {
-    { k = "LEFT",   l = L["SETTINGS_ALIGN_LEFT"] },
-    { k = "CENTER", l = L["SETTINGS_ANCHOR_MIDDLE"] },
-    { k = "RIGHT",  l = L["SETTINGS_ALIGN_RIGHT"] },
-  }))
-  alignHpAnchor:SetValue(TTBGet("hpAnchor") or "LEFT")
-  alignHpAnchor.onChanged = function(val) TTBSet("hpAnchor", val) end
-
-  local rowTTBHpMode = ctx:Add(SW.CreateAlignRow(container, L["UNITBARS_HP_MODE"], W, {
-    { k = "value", l = L["UNITBARS_HP_MODE_VALUE"] },
-    { k = "pct",   l = L["UNITBARS_HP_MODE_PCT"] },
-  }))
-  rowTTBHpMode:SetValue(TTBGet("hpMode") or "value")
-  rowTTBHpMode.onChanged = function(val) TTBSet("hpMode", val) end
-
-  local slTTBHpSize = ctx:Add(SW.CreateSlider(container, L["SETTINGS_FONT_SIZE"], 6, 28, 1, 200))
-  slTTBHpSize:SetValue(TTBGet("hpFontSize") or 10)
-  slTTBHpSize.onChanged = function(val) TTBSet("hpFontSize", val) end
-
-  MakeTTBSliderRow("hpOX", "hpOY", L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"], -50, 50, 1, -50, 50, 1)
-
-  ctx:Spacer()
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TOT_CONTAINER"], W))
-  MakeTTBSliderRow("ttx", "tty", L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"], -400, 400, 1, -400, 400, 1)
-
-  ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TOT_BLACK_BG"], W))
-  MakeTTBSliderRow("ttBgW",  "ttBgH",  L["SETTINGS_WIDTH"],    L["SETTINGS_HEIGHT"],    20, 300, 1, 1, 60, 1)
-  MakeTTBSliderRow("ttBgOX", "ttBgOY", L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"], -50, 50, 1, -50, 50, 1)
-
-  ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TOT_COLORED_BAR"], W))
-  MakeTTBSliderRow("ttBarW",  "ttBarH",  L["SETTINGS_WIDTH"],    L["SETTINGS_HEIGHT"],    20, 300, 1, 1, 20, 0.1)
-  MakeTTBSliderRow("ttBarOX", "ttBarOY", L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"], -50, 50, 1, -50, 50, 0.1)
-
-  ctx:Spacer(8)
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_SEC_TOT_NAME_TEXT"], W))
-  MakeTTBSliderRow("ttNameOX", "ttNameOY", L["SETTINGS_OFFSET_X"], L["SETTINGS_OFFSET_Y"], -50, 50, 1, -50, 50, 0.1)
-
-  ctx:Finalize()
-end
-
--- BUILD : Buffs / Debuffs de la cible
-function Build.TargetAuras(container)
-  local ctx = NewLayout(container)
-  local W   = CONTENT_W
-
-  -- Liste d'ancres pour les dropdowns de positionnement
-  local ANCHOR_LIST = {
-    { value = "TOPLEFT",     text = "TOPLEFT" },
-    { value = "TOP",         text = "TOP" },
-    { value = "TOPRIGHT",    text = "TOPRIGHT" },
-    { value = "LEFT",        text = "LEFT" },
-    { value = "CENTER",      text = "CENTER" },
-    { value = "RIGHT",       text = "RIGHT" },
-    { value = "BOTTOMLEFT",  text = "BOTTOMLEFT" },
-    { value = "BOTTOM",      text = "BOTTOM" },
-    { value = "BOTTOMRIGHT", text = "BOTTOMRIGHT" },
-  }
-
-  -- DB helpers : root level (enabled, offsetX, offsetY, rowSpacing)
-  local function TAGet(prop)
-    local db  = ns.DB       and ns.DB.targetAuras
-    local def = ns.Defaults and ns.Defaults.targetAuras
-    if db  and db[prop]  ~= nil then return db[prop]  end
-    if def and def[prop] ~= nil then return def[prop] end
-  end
-  local function TASet(prop, val)
-    if not ns.DB             then ns.DB = {} end
-    if not ns.DB.targetAuras then ns.DB.targetAuras = {} end
-    ns.DB.targetAuras[prop] = val
-    local TA = ns.Modules and ns.Modules.TargetAuras
-    if TA and TA.ApplySettings then TA.ApplySettings() end
-  end
-
-  -- DB helpers : group level (buffs / debuffs sub-tables)
-  local function GrpGet(group, prop)
-    local db  = ns.DB       and ns.DB.targetAuras       and ns.DB.targetAuras[group]
-    local def = ns.Defaults and ns.Defaults.targetAuras  and ns.Defaults.targetAuras[group]
-    if db  and db[prop]  ~= nil then return db[prop]  end
-    if def and def[prop] ~= nil then return def[prop] end
-  end
-  local function GrpSet(group, prop, val)
-    if not ns.DB             then ns.DB = {} end
-    if not ns.DB.targetAuras then ns.DB.targetAuras = {} end
-    if not ns.DB.targetAuras[group] then ns.DB.targetAuras[group] = {} end
-    ns.DB.targetAuras[group][prop] = val
-    local TA = ns.Modules and ns.Modules.TargetAuras
-    if TA and TA.ApplySettings then TA.ApplySettings() end
-  end
-
-  -- XY row helper (parametre : parent + largeur, pour pouvoir vivre dans le
-  -- sous-frame indente "detail" d'un groupe pliable, cf. BuildGroupSection)
-  local function MakeTAXYRow(parent, rowWidth, getterFn, setterFn, propA, propB, labelA, labelB)
-    local halfW = math.floor((rowWidth - 8) / 2)
-    local sA = SW.CreateSlider(parent, labelA or L["SETTINGS_OFFSET_X"], -200, 200, 1, halfW)
-    sA:SetValue(getterFn(propA) or 0)
-    sA.onChanged = function(v) setterFn(propA, v) end
-    local sB = SW.CreateSlider(parent, labelB or L["SETTINGS_OFFSET_Y"], -200, 200, 1, halfW)
-    sB:SetValue(getterFn(propB) or 0)
-    sB.onChanged = function(v) setterFn(propB, v) end
-    SW.TrackDB(sA, function() return getterFn(propA) end)
-    SW.TrackDB(sB, function() return getterFn(propB) end)
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetSize(rowWidth, sA:GetHeight())
-    sA:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
-    -- cf. MakeXYRow (Build.UnitBars) : ancrer sur la largeur REELLE du
-    -- slider (plafonnee a MAX_SLIDER_W), pas sur halfW, sinon Décalage X/Y
-    -- se retrouvent ecartes au lieu d'etre cote a cote.
-    sB:SetPoint("TOPLEFT", row, "TOPLEFT", sA:GetWidth() + 8, 0)
-    return row
-  end
-
-  -- Grow direction radio helper (parametre : parent + largeur, meme raison
-  -- que MakeTAXYRow ci-dessus)
-  local function MakeGrowRow(parent, rowWidth, group)
-    local ABTN_W = 90
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetSize(rowWidth, 26)
-    local btns = {}
-    local function Refresh(val)
-      for _, b in ipairs(btns) do
-        if b.key == val then
-          b._lbl:SetTextColor(unpack(ns.Theme.accentText))
-          b:SetBackdropColor(0.20, 0.15, 0.08, 1)
-        else
-          b._lbl:SetTextColor(unpack(ns.Theme.textNormal))
-          b:SetBackdropColor(0.08, 0.08, 0.12, 1)
-        end
-      end
-    end
-    for i, opt in ipairs({ {k="LEFT", l=L["SETTINGS_ALIGN_LEFT"]}, {k="RIGHT", l=L["SETTINGS_ALIGN_RIGHT"]} }) do
-      local b = CreateFrame("Button", nil, row, "BackdropTemplate")
-      b:SetSize(ABTN_W, 22)
-      b:SetPoint("LEFT", row, "LEFT", (i-1) * (ABTN_W + 4), 0)
-      b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-      b:SetBackdropColor(0.08, 0.08, 0.12, 1)
-      b:SetBackdropBorderColor(unpack(ns.Theme.border))
-      local lbl = b:CreateFontString(nil, "OVERLAY")
-      lbl:SetAllPoints()
-      lbl:SetFont(ns.Media.fontGui, 11)
-      lbl:SetJustifyH("CENTER")
-      lbl:SetTextColor(unpack(ns.Theme.textNormal))
-      lbl:SetText(opt.l)
-      b._lbl = lbl
-      b.key = opt.k
-      b:SetScript("OnClick", function()
-        GrpSet(group, "growDirection", opt.k)
-        Refresh(opt.k)
-        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-      end)
-      table.insert(btns, b)
-    end
-    Refresh(GrpGet(group, "growDirection") or "RIGHT")
-    return row
-  end
-
-  -- Etat plie/deplie de chaque groupe (Buffs/Debuffs) -- persiste dans
-  -- ns.DB.targetAuras.uiCollapsed[group], meme mecanisme de rebuild complet
-  -- que AFKMode/CharacterArmory (AFKToggleCollapsed/CAToggleCollapsed) :
-  -- pas de simple Show/Hide car ctx n'est qu'un accumulateur de Y, pas un
-  -- layout reactif. Deplie par defaut (contrairement a AFK/Armory) -- ici
-  -- il n'y a que 2 groupes, pas une quinzaine d'elements a decongestionner.
-  local function TACollapsed(group)
-    local db = ns.DB and ns.DB.targetAuras
-    return db and db.uiCollapsed and db.uiCollapsed[group] and true or false
-  end
-  local function TAToggleCollapsed(group)
-    if not ns.DB then ns.DB = {} end
-    if not ns.DB.targetAuras then ns.DB.targetAuras = {} end
-    if not ns.DB.targetAuras.uiCollapsed then ns.DB.targetAuras.uiCollapsed = {} end
-    ns.DB.targetAuras.uiCollapsed[group] = not TACollapsed(group)
-    local savedScroll = scrollFrame and scrollFrame:GetVerticalScroll()
-    if _invalidateCategory then _invalidateCategory("targetAuras") end
-    if savedScroll then
-      C_Timer.After(0, function()
-        if scrollFrame then scrollFrame:SetVerticalScroll(savedScroll) end
-      end)
-    end
-  end
-  local TA_GROUP_INDENT = 26
-
-  -- Builder : section complète pour un groupe (buffs ou debuffs) -- en-tete
-  -- pliable "+ Buffs"/"- Buffs", contenu indente dans un sous-frame dedie
-  -- ("detail", avec son propre layout dctx) quand deplie.
-  local function BuildGroupSection(group, title)
-    local gGet = function(prop) return GrpGet(group, prop) end
-    local gSet = function(prop, val) GrpSet(group, prop, val) end
-
-    ctx:Spacer(10)
-
-    local collapsed = TACollapsed(group)
-    local header = SW.CreateSectionHeader(container, (collapsed and "+ " or "- ") .. title, W)
-    Build.taHeaders = Build.taHeaders or {}
-    Build.taHeaders[group] = header   -- cible de defilement (survol de la ligne buffs / debuffs, cf. ModuleHoverOverlay)
-    local hitbox = CreateFrame("Button", nil, header)
-    hitbox:SetAllPoints(header)
-    hitbox:SetFrameLevel(header:GetFrameLevel() + 1)
-    local hl = hitbox:CreateTexture(nil, "BACKGROUND")
-    hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.06); hl:Hide()
-    hitbox:SetScript("OnEnter", function() hl:Show() end)
-    hitbox:SetScript("OnLeave", function() hl:Hide() end)
-    hitbox:SetScript("OnClick", function() TAToggleCollapsed(group) end)
-    ctx:Manual(header)
-    if collapsed then return end
-
-    local dw       = W - TA_GROUP_INDENT
-    local dHalfW   = math.floor((dw - 8) / 2)
-    -- Ancre/point relatif = simples mots-clefs Blizzard (TOPLEFT, BOTTOMRIGHT...)
-    -- -- pas besoin de la moitié de la largeur du panneau pour ça.
-    local ANCHOR_DD_W = 100
-    local OFFSET_SL_W = 130
-    local detail   = CreateFrame("Frame", nil, container)
-    detail:SetWidth(dw)
-    local dctx = NewLayout(detail)
-
-    -- Ligne 1 : Taille icone, Decalage X, Decalage Y
-    -- Ligne 2 : Nombre par ligne, Espacement, Nombre de lignes, Espace entre lignes
-    dctx:Add(SW.CreateSectionHeader(detail, L["SETTINGS_TA_SEC_POSITION"], dw))
-
-    local iconRowSL3 = math.floor((dw - 2 * 8) / 3)
-    local slSize = SW.CreateSlider(detail, L["SETTINGS_TA_ICON_SIZE"], 14, 48, 1, iconRowSL3)
-    slSize:SetValue(gGet("iconSize") or 26)
-    slSize.onChanged = function(val) gSet("iconSize", val) end
-    -- Plage = tout l'écran (rangées déplaçables à la souris, ancre TOP d'UIParent)
-    local halfScrW = math.ceil(UIParent:GetWidth() / 2)
-    local scrH     = math.ceil(UIParent:GetHeight())
-    local slOffX = SW.CreateSlider(detail, L["SETTINGS_OFFSET_X"], -halfScrW, halfScrW, 1, iconRowSL3)
-    slOffX:SetValue(gGet("offsetX") or 0)
-    slOffX.onChanged = function(val) gSet("offsetX", val) end
-    local slOffY = SW.CreateSlider(detail, L["SETTINGS_OFFSET_Y"], -scrH, 0, 1, iconRowSL3)
-    slOffY:SetValue(gGet("offsetY") or 0)
-    slOffY.onChanged = function(val) gSet("offsetY", val) end
-    SW.TrackDB(slOffX, function() return gGet("offsetX") end)
-    SW.TrackDB(slOffY, function() return gGet("offsetY") end)
-    dctx:AddRow(8, slSize, slOffX, slOffY)
-
-    local gridSL4 = math.floor((dw - 3 * 8) / 4)
-    local slMax = SW.CreateSlider(detail, L["SETTINGS_TA_MAX_PER_ROW"], 1, 40, 1, gridSL4)
-    slMax:SetValue(gGet("maxAuras") or 16)
-    slMax.onChanged = function(val) gSet("maxAuras", val) end
-    local slSpacing = SW.CreateSlider(detail, L["SETTINGS_SPACING"], 0, 10, 1, gridSL4)
-    slSpacing:SetValue(gGet("iconSpacing") or 2)
-    slSpacing.onChanged = function(val) gSet("iconSpacing", val) end
-    local slNumRows = SW.CreateSlider(detail, L["SETTINGS_TA_NUM_ROWS"], 1, 5, 1, gridSL4)
-    slNumRows:SetValue(gGet("numRows") or 1)
-    slNumRows.onChanged = function(val) gSet("numRows", val) end
-    local slRowSpacing = SW.CreateSlider(detail, L["SETTINGS_TA_ROW_SPACING"], 0, 20, 1, gridSL4)
-    slRowSpacing:SetValue(gGet("rowSpacing") or 2)
-    slRowSpacing.onChanged = function(val) gSet("rowSpacing", val) end
-    dctx:AddRow(8, slMax, slSpacing, slNumRows, slRowSpacing)
-
-    local cbGrowUp = dctx:Add(SW.CreateCheckbox(detail,
-      L["SETTINGS_TA_GROW_UP"],
-      L["SETTINGS_TA_GROW_UP_TT"], dw))
-    cbGrowUp:SetChecked(gGet("growUpward") == true)
-    cbGrowUp.onChanged = function(val) gSet("growUpward", val) end
-
-    -- Option debuff joueur uniquement
-    if group == "debuffs" then
-      local cbOnlyPlayer = dctx:Add(SW.CreateCheckbox(detail,
-        L["SETTINGS_TA_ONLY_PLAYER_DEBUFFS"],
-        L["SETTINGS_TA_ONLY_PLAYER_DEBUFFS_TT"], dw))
-      cbOnlyPlayer:SetChecked(gGet("onlyPlayer") == true)
-      cbOnlyPlayer.onChanged = function(val) gSet("onlyPlayer", val) end
-    end
-
-    -- Ordre de tri
-    dctx:Spacer(4)
-    dctx:Add(SW.CreateSectionHeader(detail, L["SETTINGS_TA_SEC_SORT"], dw))
-    local SORT_MODES = {
-      { key = "playerFirst", label = L["SETTINGS_SORT_PLAYER_FIRST"] },
-      { key = "shortFirst",  label = L["SETTINGS_SORT_SHORT_FIRST"] },
-      { key = "longFirst",   label = L["SETTINGS_SORT_LONG_FIRST"] },
-      { key = "alpha",       label = L["SETTINGS_SORT_ALPHA"] },
-      { key = "index",       label = L["SETTINGS_SORT_BLIZZARD_ORDER"] },
-    }
-    local sortOpts = {}
-    for _, m in ipairs(SORT_MODES) do
-      sortOpts[#sortOpts + 1] = { value = m.key, text = m.label }
-    end
-    local ddSort = dctx:Add(SW.CreateDropdown(detail, L["SETTINGS_SORT"], sortOpts, 200))
-    do
-      local cur = gGet("sortMode") or "playerFirst"
-      ddSort:SetValue(cur)
-    end
-    ddSort.onChanged = function(val)
-      gSet("sortMode", val)
-    end
-
-    local cbReverse = dctx:Add(SW.CreateCheckbox(detail,
-      L["SETTINGS_TA_REVERSE_SORT"], L["SETTINGS_TA_REVERSE_SORT_TT"], dw))
-    cbReverse:SetChecked(gGet("reverseSort") == true)
-    cbReverse.onChanged = function(val) gSet("reverseSort", val) end
-
-    -- Direction croissance
-    dctx:Spacer(4)
-    dctx:Add(SW.CreateSectionHeader(detail, L["SETTINGS_TA_SEC_DIRECTION"], dw))
-    dctx:Add(MakeGrowRow(detail, dw, group))
-
-    -- Bordure
-    dctx:Spacer(4)
-    dctx:Add(SW.CreateSectionHeader(detail, L["SETTINGS_TA_SEC_BORDER"], dw))
-
-    local cbBorder = dctx:Add(SW.CreateCheckbox(detail,
-      L["SETTINGS_SHOW_BORDER"], L["SETTINGS_TA_SHOW_BORDER_TT"], dw))
-    cbBorder:SetChecked(gGet("showBorder") ~= false)
-    cbBorder.onChanged = function(val) gSet("showBorder", val) end
-
-    local slBorderSize = SW.CreateSlider(detail, L["SETTINGS_TA_BORDER_THICKNESS"], 0, 4, 1, dHalfW)
-    slBorderSize:SetValue(gGet("borderSize") or 1)
-    slBorderSize.onChanged = function(val) gSet("borderSize", val) end
-    dctx:Add(slBorderSize)
-
-    local colBorder = dctx:Add(SW.CreateColorButton(detail, L["SETTINGS_BORDER_COLOR"], dw))
-    do
-      local c = gGet("borderColor") or { 1, 1, 1, 0.15 }
-      colBorder:SetColor(c[1], c[2], c[3], c[4])
-    end
-    colBorder.onChanged = function(val) gSet("borderColor", val) end
-
-    -- Cooldown swipe
-    dctx:Spacer(4)
-    dctx:Add(SW.CreateSectionHeader(detail, L["SETTINGS_TA_SEC_COOLDOWN_SWIPE"], dw))
-
-    local cbSwipe = dctx:Add(SW.CreateCheckbox(detail,
-      L["SETTINGS_TA_SHOW_SWIPE"], L["SETTINGS_TA_SHOW_SWIPE_TT"], dw))
-    cbSwipe:SetChecked(gGet("showSwipe") ~= false)
-    cbSwipe.onChanged = function(val) gSet("showSwipe", val) end
-
-    local cbRevSwipe = dctx:Add(SW.CreateCheckbox(detail,
-      L["SETTINGS_TA_REVERSE_SWIPE"], L["SETTINGS_TA_REVERSE_SWIPE_TT"], dw))
-    cbRevSwipe:SetChecked(gGet("reverseSwipe") == true)
-    cbRevSwipe.onChanged = function(val) gSet("reverseSwipe", val) end
-
-    -- Police & couleur durée : police/taille/couleur sur une rangee (pas de
-    -- contour disponible pour la duree -- countOutlineStyle n'existe que
-    -- pour les stacks, cf. section suivante).
-    dctx:Spacer(4)
-    dctx:Add(SW.CreateSectionHeader(detail, L["SETTINGS_TA_SEC_DURATION_TEXT"], dw))
-
-    local durSL3 = math.floor((dw - 2 * 8) / 3)
-    local ddDurFont = SW.CreateDropdown(detail, L["SETTINGS_TA_DURATION_FONT"], ns.GetFontList(), durSL3)
-    do
-      local v = gGet("durationFont")
-      if v then ddDurFont:SetValue(v) end
-    end
-    ddDurFont.onChanged = function(val) gSet("durationFont", val) end
-
-    local slDurSize = SW.CreateSlider(detail, L["SETTINGS_TA_DURATION_SIZE"], 6, 18, 1, durSL3)
-    slDurSize:SetValue(gGet("durationFontSize") or 9)
-    slDurSize.onChanged = function(val) gSet("durationFontSize", val) end
-
-    local colDur = SW.CreateColorButton(detail, L["SETTINGS_TA_DURATION_COLOR"], durSL3)
-    do
-      local c = gGet("durationColor") or { 1, 1, 1, 1 }
-      colDur:SetColor(c[1], c[2], c[3], c[4])
-    end
-    colDur.onChanged = function(val) gSet("durationColor", val) end
-    dctx:AddRow(8, ddDurFont, slDurSize, colDur)
-
-    -- Positionnement durée : ancre + décalage X/Y sur une seule rangée --
-    -- ancre réduite à ANCHOR_DD_W (les valeurs sont de simples mots-clés
-    -- Blizzard type TOPLEFT/BOTTOMRIGHT, pas besoin de la moitié de la largeur).
-    dctx:Spacer(2)
-    local ddDurAnc = SW.CreateDropdown(detail, L["SETTINGS_TA_DURATION_ANCHOR"], ANCHOR_LIST, ANCHOR_DD_W)
-    do local v = gGet("durationAnchor"); if v then ddDurAnc:SetValue(v) end end
-    ddDurAnc.onChanged = function(val) gSet("durationAnchor", val) end
-
-    local slDurOffX = SW.CreateSlider(detail, L["SETTINGS_OFFSET_X"], -200, 200, 1, OFFSET_SL_W)
-    slDurOffX:SetValue(gGet("durationOffX") or 0)
-    slDurOffX.onChanged = function(val) gSet("durationOffX", val) end
-    local slDurOffY = SW.CreateSlider(detail, L["SETTINGS_OFFSET_Y"], -200, 200, 1, OFFSET_SL_W)
-    slDurOffY:SetValue(gGet("durationOffY") or 0)
-    slDurOffY.onChanged = function(val) gSet("durationOffY", val) end
-    dctx:AddRow(8, ddDurAnc, slDurOffX, slDurOffY)
-
-    -- Police & couleur stacks : police/contour/taille/couleur sur une rangée
-    dctx:Spacer(4)
-    dctx:Add(SW.CreateSectionHeader(detail, L["SETTINGS_TA_SEC_STACKS_TEXT"], dw))
-
-    local cntSL4 = math.floor((dw - 3 * 8) / 4)
-    local ddCntFont = SW.CreateDropdown(detail, L["SETTINGS_TA_STACKS_FONT"], ns.GetFontList(), cntSL4)
-    do
-      local v = gGet("countFont")
-      if v then ddCntFont:SetValue(v) end
-    end
-    ddCntFont.onChanged = function(val) gSet("countFont", val) end
-
-    local ddCntOutline = SW.CreateDropdown(detail, L["SETTINGS_TEXT_OUTLINE"], ns.GetTextOutlineStyles(), cntSL4)
-    ddCntOutline:SetValue(gGet("countOutlineStyle") or "OUTLINE")
-    ddCntOutline.onChanged = function(val) gSet("countOutlineStyle", val) end
-
-    local slCntSize = SW.CreateSlider(detail, L["SETTINGS_TA_STACKS_SIZE"], 6, 18, 1, cntSL4)
-    slCntSize:SetValue(gGet("countFontSize") or 10)
-    slCntSize.onChanged = function(val) gSet("countFontSize", val) end
-
-    local colCnt = SW.CreateColorButton(detail, L["SETTINGS_TA_STACKS_COLOR"], cntSL4)
-    do
-      local c = gGet("countColor") or { 1, 1, 1, 1 }
-      colCnt:SetColor(c[1], c[2], c[3], c[4])
-    end
-    colCnt.onChanged = function(val) gSet("countColor", val) end
-    dctx:AddRow(8, ddCntFont, ddCntOutline, slCntSize, colCnt)
-
-    -- Positionnement stacks : ancre + point relatif + décalage X/Y, les 4
-    -- sur une seule rangée (ancre/point relatif réduits à ANCHOR_DD_W).
-    dctx:Spacer(2)
-    local ddCntAnc = SW.CreateDropdown(detail, L["SETTINGS_TA_TEXT_ANCHOR"], ANCHOR_LIST, ANCHOR_DD_W)
-    do local v = gGet("countAnchor"); if v then ddCntAnc:SetValue(v) end end
-    ddCntAnc.onChanged = function(val) gSet("countAnchor", val) end
-    local ddCntRel = SW.CreateDropdown(detail, L["SETTINGS_TA_RELATIVE_POINT"], ANCHOR_LIST, ANCHOR_DD_W)
-    do local v = gGet("countRelPoint"); if v then ddCntRel:SetValue(v) end end
-    ddCntRel.onChanged = function(val) gSet("countRelPoint", val) end
-
-    local slCntOffX = SW.CreateSlider(detail, L["SETTINGS_OFFSET_X"], -200, 200, 1, OFFSET_SL_W)
-    slCntOffX:SetValue(gGet("countOffX") or 0)
-    slCntOffX.onChanged = function(val) gSet("countOffX", val) end
-    local slCntOffY = SW.CreateSlider(detail, L["SETTINGS_OFFSET_Y"], -200, 200, 1, OFFSET_SL_W)
-    slCntOffY:SetValue(gGet("countOffY") or 0)
-    slCntOffY.onChanged = function(val) gSet("countOffY", val) end
-    dctx:AddRow(8, ddCntAnc, ddCntRel, slCntOffX, slCntOffY)
-
-    dctx:Finalize()
-    ctx:Manual(detail, TA_GROUP_INDENT)
-  end
-  -- /BuildGroupSection
-
-  ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_CAT_TARGET_AURAS"], W))
-
-  -- Section globale (enabled, offset, row spacing)
-  local cbEn = ctx:TitleToggle(SW.CreateCheckbox(container,
-    L["SETTINGS_TA_ENABLE"],
-    L["SETTINGS_TA_ENABLE_TT"], W))
-  cbEn:SetChecked(TAGet("enabled") ~= false)
-  cbEn.onChanged = function(val)
-    TASet("enabled", val)
-    -- TASet est generique et ne passe pas par LiveApply/_invalidateCategory.
-    if _invalidateCategory then _invalidateCategory("modulesOverview") end
-  end
-
-  -- Sections par groupe
-  BuildGroupSection("buffs",   L["SETTINGS_BUFFS"])
-  BuildGroupSection("debuffs", L["SETTINGS_DEBUFFS"])
-
-  ctx:Finalize()
-end
-
 -- BUILD : Couleurs par spécialisation
 function Build.Colors(container)
   local Colors = ns.Modules and ns.Modules.Colors
@@ -10804,10 +10132,10 @@ function Build.Colors(container)
         return gy
       end
 
-      -- Mode Posture (Guerrier) : toggle en tete ; coche, les lignes de spe sont grisees et celles des postures actives
+      -- Mode Posture (Guerrier) / Formes (Druide) : toggle en tete ; coche, les lignes de spe sont grisees et celles des postures actives
       local specBlocks, stanceBlocks, cbStance = {}, {}, nil
       local function ApplyStanceGray()
-        local on = Colors.IsStanceMode()
+        local on = Colors.IsStanceMode(cd.key)
         local function SetBlock(b, active)
           b.frame:SetAlpha(active and 1 or 0.3)
           for _, btn in ipairs(b.buttons) do btn:EnableMouse(active) end
@@ -10816,12 +10144,13 @@ function Build.Colors(container)
         for _, b in ipairs(stanceBlocks) do SetBlock(b, on) end
       end
       if cd.stances then
-        cbStance = SW.CreateCheckbox(cFrame, L["SETTINGS_COLORS_STANCE_MODE"], L["SETTINGS_COLORS_STANCE_MODE_TT"],
-          CONTENT_W - SPEC_INDENT)
+        local druid = cd.file == "DRUID"
+        cbStance = SW.CreateCheckbox(cFrame, L[druid and "SETTINGS_COLORS_FORM_MODE" or "SETTINGS_COLORS_STANCE_MODE"],
+          L[druid and "SETTINGS_COLORS_FORM_MODE_TT" or "SETTINGS_COLORS_STANCE_MODE_TT"], CONTENT_W - SPEC_INDENT)
         cbStance:SetPoint("TOPLEFT", cFrame, "TOPLEFT", SPEC_INDENT, -fy)
-        cbStance:SetChecked(Colors.IsStanceMode())
+        cbStance:SetChecked(Colors.IsStanceMode(cd.key))
         cbStance.onChanged = function(val)
-          Colors.SetStanceMode(val)
+          Colors.SetStanceMode(val, cd.key)
           ApplyStanceGray()
         end
         fy = fy + cbStance:GetHeight() + 6
@@ -12698,6 +12027,10 @@ end
 function Build.MenuBar(container)
   if ns.BuildMenuBarPage then ns.BuildMenuBarPage(container, CONTENT_W, NewLayout) end
 end
+-- Barres d'action : page dans UI/ActionBarsPage.lua (hors du chunk principal), apercu epingle en haut
+function Build.ActionBars(container)
+  if ns.BuildActionBarsPage then ns.BuildActionBarsPage(container, CONTENT_W, NewLayout) end
+end
 
 -- Compartiment d'addons : page dans UI/AddonCompartmentPage.lua (hors du chunk principal)
 function Build.AddonCompartment(container)
@@ -12819,6 +12152,7 @@ local MODULE_CATEGORIES = {
   {
     key = "combat", label = L["SETTINGS_GROUP_COMBAT"],
     modules = {
+      ModEntry("actionBars",     L["SETTINGS_CAT_ACTION_BARS"],      "actionBars",     "enabled", L["ACTIONBARS_ENABLE_TT"]),
       ModEntry("resourceCircle", L["SETTINGS_SEC_RESOURCE_CIRCLE"],  "resourceCircle", "enabled"),
       ModEntry("priorityBar",    L["SETTINGS_SEC_PRIORITY_BAR"],     "priorityBar",    "enabled"),
       ModEntry("rotationHelper", L["SETTINGS_CAT_ROTATION_HELPER"],  "rotationHelper", "enabled"),
@@ -14317,19 +13651,7 @@ function Build.ComfortQoL(container)
   end
   -- (Peche au double clic : page HUD > Peche, cf. Build.Fishing)
 
-  -- Barre de totems Blizzard : Forever seulement (cf. Modules/Comfort.lua)
   if ns.IsForever then
-    ctx:Spacer(6)
-    ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_TOTEM_BAR"], W))
-    local cbTotemBar = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_HIDE_TOTEM_BAR"], L["SETTINGS_COMFORT_HIDE_TOTEM_BAR_TT"], W))
-    BindCheckbox(cbTotemBar, "comfort", "hideTotemBar")
-    local cbTotemHover = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_TOTEM_BAR_HOVER"], L["SETTINGS_COMFORT_TOTEM_BAR_HOVER_TT"], W))
-    BindCheckbox(cbTotemHover, "comfort", "totemBarHoverOnly")
-    local slTotemAlpha = ctx:Add(SW.CreateSlider(container, L["SETTINGS_COMFORT_TOTEM_BAR_ALPHA"], 0, 1, 0.05, halfW))
-    BindSlider(slTotemAlpha, "comfort", "totemBarHoverAlpha")
-    ctx:Depends(cbTotemBar, { cbTotemHover, slTotemAlpha }, true)
-    ctx:Depends(cbTotemHover, { slTotemAlpha })
-
     -- Nouveaux rangs de competence : grimoire classique (rangs de sorts), cf. Modules/SpellRanks.lua
     ctx:Spacer(6)
     ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_SPELLRANKS"], W))
@@ -14363,8 +13685,15 @@ function Build.ComfortQoL(container)
   -- Fenetre de metier : ingredients fabricables (detrompeur, infobulle, clic droit), cf. Modules/CraftableReagents.lua
   ctx:Spacer(6)
   ctx:Add(SW.CreateSectionHeader(container, L["SETTINGS_COMFORT_SEC_PROFESSIONS"], W))
-  local cbCraft = ctx:Add(SW.CreateCheckbox(container, L["SETTINGS_COMFORT_CRAFTABLE"], L["SETTINGS_COMFORT_CRAFTABLE_TT"], W))
-  BindCheckbox(cbCraft, "comfort", "craftableReagents")
+  do
+    local w2 = math.floor((W - 16) / 2)
+    local cbCraft = SW.CreateCheckbox(container, L["SETTINGS_COMFORT_CRAFTABLE"], L["SETTINGS_COMFORT_CRAFTABLE_TT"], w2)
+    BindCheckbox(cbCraft, "comfort", "craftableReagents")
+    -- Sacs : clic droit sur un ingredient -> metier + recherche, cf. Modules/ReagentSearch.lua
+    local cbSearch = SW.CreateCheckbox(container, L["SETTINGS_COMFORT_REAGENT_SEARCH"], L["SETTINGS_COMFORT_REAGENT_SEARCH_TT"], w2)
+    BindCheckbox(cbSearch, "comfort", "reagentSearch")
+    ctx:AddRow(8, cbCraft, cbSearch)
+  end
 
   -- Reveler la carte du monde (zones non decouvertes), cf. Modules/MapReveal.lua
   ctx:Spacer(6)
@@ -14715,6 +14044,9 @@ function Build.Campfire(container)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
   end)
   ctx:Add(reset)
+  -- Lien vers les animations 3D du Camping HUD
+  ctx:Spacer(6)
+  ctx:Add(SW.CreateAnim3DLinkHeader(container, L["SETTINGS_ANIM3D_LINK_CAMP"], W, "campfire"))
   ctx:Finalize()
   return ctx.widgets
 end
@@ -14809,6 +14141,9 @@ function Build.Fishing(container)
     BindSlider(slFade, "fishing", "duckFade")
     ctx:AddRow(8, cbDuck, slLvl, slFade)
     ctx:Depends(cbDuck, { slLvl, slFade })
+    local cbBg = SW.CreateCheckbox(container, L["SETTINGS_FISHING_BGSOUND"], L["SETTINGS_FISHING_BGSOUND_TT"], S3)
+    BindCheckbox(cbBg, "fishing", "bgSoundEnabled")
+    ctx:AddRow(8, cbBg)
   end
 
   if not ns.IsForever then
@@ -15758,22 +15093,16 @@ local CATEGORIES = {
     build = Build.Skyriding,
   },
   {
-    id    = "topTargetBar",
-    label = L["SETTINGS_CAT_TOP_TARGET"],
-    icon  = "Interface\\Icons\\ability_hunter_snipershot",
-    build = Build.TopTargetBar,
-  },
-  {
-    id    = "targetAuras",
-    label = L["SETTINGS_CAT_TARGET_AURAS"],
-    icon  = "Interface\\Icons\\spell_holy_divinespirit",
-    build = Build.TargetAuras,
-  },
-  {
     id    = "unitBars",
     label = L["SETTINGS_CAT_HEALTH_BARS"],
     icon  = "Interface\\Icons\\ability_warrior_defensivestance",
     build = Build.UnitBars,
+  },
+  {
+    id    = "actionBars",
+    label = L["SETTINGS_CAT_ACTION_BARS"],
+    icon  = "Interface\\Icons\\Ability_DualWield",
+    build = Build.ActionBars,
   },
   {
     id    = "resourceCircle",
@@ -15976,8 +15305,8 @@ ns.PruneUnavailable(CATEGORIES)
 -- Groupes de la sidebar (style AishUI : headers parchemin + sections cliquables)
 local SIDEBAR_GROUPS = {
   { label = L["SETTINGS_GROUP_GLOBAL"],      ids = { "profiles", "modulesOverview", "colors", "patchNotes", "heroicSupport" } },
-  { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "castBars", "topTargetBar", "targetAuras" } },
-  { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "resourceCircle", "priorityBar", "rotationHelper", "cdmAppearance", "cdmLayout" } },
+  { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "castBars" } },
+  { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "actionBars", "resourceCircle", "priorityBar", "rotationHelper", "cdmAppearance", "cdmLayout" } },
   { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "wellFed", "campfire", "fishing", "stealthMode", "xpBar", "extraBars", "skyriding", "characterArmory" } },
   { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasMissingBuffs", "movementBuffs" } },
   -- Groupes sans sous-section : le clic sur le header ouvre directement la page (single)
@@ -16001,13 +15330,8 @@ local HEROIC_SEARCH_KEYS = {
   SETTINGS_SR_COLOR_MOUNT = true, SETTINGS_SR_COLOR_MOUNT_TT = true,
 }
 
--- Options de la barre de totems (Forever seulement) : hors de la recherche sur les autres clients
-local FOREVER_SEARCH_KEYS = {
-  SETTINGS_COMFORT_SEC_TOTEM_BAR = true,
-  SETTINGS_COMFORT_HIDE_TOTEM_BAR = true, SETTINGS_COMFORT_HIDE_TOTEM_BAR_TT = true,
-  SETTINGS_COMFORT_TOTEM_BAR_HOVER = true, SETTINGS_COMFORT_TOTEM_BAR_HOVER_TT = true,
-  SETTINGS_COMFORT_TOTEM_BAR_ALPHA = true,
-}
+-- Options reservees a Forever : hors de la recherche sur les autres clients (aucune pour l'instant)
+local FOREVER_SEARCH_KEYS = {}
 
 -- Texte cherchable d'une page : libellés de ses clés de locale (Data/SearchIndex.lua, généré par
 -- generate_search_index.py). Ne construit aucune page : construire les 33 pages pour lire leur
@@ -16191,6 +15515,19 @@ local function RefreshSidebar(animated)
 
   sidebar.ApplyLayout(targets, animated)
   ac:SetHeight(math.max(50, y))
+
+  -- Repliage : le scroll courant peut depasser la nouvelle plage (premiers groupes hors vue,
+  -- molette inerte). La plage n'est recalculee qu'a la frame suivante.
+  local sf = sidebar._sbSF
+  if sf then
+    C_Timer.After(0, function()
+      local range = sf:GetVerticalScrollRange() or 0
+      if (sf:GetVerticalScroll() or 0) > range then
+        sf._ssTarget = math.max(0, range)
+        sf:SetVerticalScroll(math.max(0, range))
+      end
+    end)
+  end
 end
 
 -- Couleur du fond actif (TabActiveBackground.tga) de la section selectionnee
@@ -16413,7 +15750,8 @@ local function BuildSidebar()
         -- Label
         local stxt = s:CreateFontString(nil, "OVERLAY")
         stxt:SetFont(ns.Media.fontTitle, 11)
-        -- Nouveaute du dernier patch : icone devant le libelle, decale d'autant (cf. Data/PatchNotes.lua)
+        -- Nouveaute du dernier patch : icone dans la marge, devant le libelle, qui ne bouge pas : toutes les
+        -- premieres lettres restent alignees, seule l'icone depasse a gauche (cf. Data/PatchNotes.lua)
         s._tx = 14
         local newKind = ns.NewInPatch and (ns.NewInPatch.categories[cid] and "new"
           or ns.NewInPatch.containers[cid] and "contains")
@@ -16421,11 +15759,7 @@ local function BuildSidebar()
           local badge = ns.CreateNewBadge(s, 14, newKind == "contains")
           if badge then
             badge:SetPoint("RIGHT", stxt, "LEFT", -2, 0)
-            ns.RegisterNewBadge(badge, function(shown)
-              s._tx = shown and (14 + badge:GetWidth()) or 14
-              stxt:ClearAllPoints()
-              stxt:SetPoint("LEFT", s._tx + 5 * (s._hovV or 0), 0)
-            end)
+            ns.RegisterNewBadge(badge)
           end
         end
         stxt:SetPoint("LEFT", s._tx, 0)
@@ -16704,12 +16038,22 @@ local AURAS_PROCS_CATS = {
 -- Pages devenues des sections d'une autre page : l'ancien id redirige vers la page hote.
 MainFrame.categoryRedirect = { groupNumber = "visibility", bigCursor = "comfortQoL",
                                 castBar = "castBars", targetCastBar = "castBars",
-                                cdmEssential = "cdmAppearance", cdmUtility = "cdmAppearance" }
+                                cdmEssential = "cdmAppearance", cdmUtility = "cdmAppearance",
+                                topTargetBar = "unitBars", targetAuras = "unitBars" }
+-- Top Target et auras de la cible : entrees du selecteur de la page Barres de vie
+local UNITBARS_SEL = { topTargetBar = "topTarget", topTargetBar_tot = "topTargetTot", targetAuras = "taBuffs" }
 
 function MainFrame:SelectCategory(catId)
   -- Anciennes pages des barres de cast : la page commune s'ouvre sur la bonne barre
   if catId == "castBar" then ns._castBarsSelected = "player" elseif catId == "targetCastBar" then ns._castBarsSelected = "target" end
   if catId == "cdmEssential" or catId == "cdmUtility" then ns._cdmSelected = catId end
+  if UNITBARS_SEL[catId] then
+    -- Auras : garde le groupe deja choisi (buffs / debuffs)
+    if not (catId == "targetAuras" and (ns._unitBarsSelected == "taBuffs" or ns._unitBarsSelected == "taDebuffs")) then
+      ns._unitBarsSelected = UNITBARS_SEL[catId]
+    end
+    if ns.UnitBarsPageRefresh then C_Timer.After(0, ns.UnitBarsPageRefresh) end   -- page deja ouverte
+  end
   catId = MainFrame.categoryRedirect[catId] or catId
   -- Ouvre le groupe qui contient la page (la section active peut ensuite etre repliee a la main)
   for _, grp in ipairs(SIDEBAR_GROUPS) do
@@ -17028,7 +16372,7 @@ function MainFrame:OpenSection(catId, label, exclusive)
     if folded then ctx:Relayout(false) end
   end
   for _, sec in ipairs(ctx.sections) do
-    if sec.header._baseText == label then
+    if sec.header._baseText == label and not (sec.hideIf and sec.hideIf()) then
       if sec.collapsed then
         sec.collapsed = false
         if sec.key then _sectionCollapsed[sec.key] = false end
@@ -17049,6 +16393,22 @@ function MainFrame:OpenSection(catId, label, exclusive)
       return
     end
   end
+end
+
+-- Lien vers la page Animations 3D (bouton fx, en-tete lien, cf. SW.CreateFxButton) : ouvre la page puis
+-- deplie `sectionId` ("auras", "missingBuffs", "ooc", "spells", "campfire"...) et y selectionne `key` si fourni.
+function ns.OpenAnim3D(sectionId, key)
+  MainFrame:SelectCategory("spellEffects")
+  local jump = ns.SettingsBuild and ns.SettingsBuild.SEJump
+  if jump then jump(sectionId, key) end
+end
+
+-- Nombre d'animations du combo d'une entree (bouton fx allume des qu'il y en a une)
+function ns.Anim3DCount(sectionId, key)
+  local se = ns.DB and ns.DB.spellEffects
+  local db = se and ((sectionId == "auras" and se.auraCombos) or (sectionId == "missingBuffs" and se.missingBuffsCombos))
+  local list = db and key ~= nil and db[key]
+  return type(list) == "table" and #list or 0
 end
 
 -- Fait defiler le panneau jusqu'a un widget de la page affichee (en haut de la zone visible)
@@ -17089,10 +16449,6 @@ function ns.SettingsCategoryLabel(catId)
   end
 end
 
-function ns.GetTargetAurasSettingsHeader(group)
-  return Build.taHeaders and Build.taHeaders[group]
-end
-
 -- Clic droit sur un module (page Modules) : ouvre ses reglages
 function MainFrame:OpenModuleSettings(entry)
   local page = Build.MODULE_PAGE[entry.id] or entry.id
@@ -17102,6 +16458,10 @@ function MainFrame:OpenModuleSettings(entry)
   local oocSel = ({ healthCircle = "health", outOfCombatResourceCircle = "resource", petHealthCircle = "pet" })[entry.id]
   if oocSel then ns._oocSelected = oocSel end
   if entry.id == "cdmEssential" or entry.id == "cdmUtility" then ns._cdmSelected = entry.id end
+  if UNITBARS_SEL[entry.id] then
+    ns._unitBarsSelected = UNITBARS_SEL[entry.id]
+    if ns.UnitBarsPageRefresh then C_Timer.After(0, ns.UnitBarsPageRefresh) end
+  end
   page = MainFrame.categoryRedirect[page] or page
   local exists = false
   for _, c in ipairs(CATEGORIES) do

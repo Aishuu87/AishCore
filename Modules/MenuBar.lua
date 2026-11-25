@@ -1047,6 +1047,66 @@ local function HideBlizzard(on)
   end
 end
 
+-- Sacs de Blizzard (section Sacs) : jamais (reparentes sous un cadre cache), toujours ou au survol, avec opacite.
+-- Module desactive : rendus tels quels.
+local bagHider, bagAlpha = nil, nil
+local bagFader = CreateFrame("Frame")
+local function BagFrames()
+  if _G.BagsBar then return { _G.BagsBar } end
+  local t = {}
+  for _, n in ipairs({ "MainMenuBarBackpackButton", "CharacterBag0Slot", "CharacterBag1Slot", "CharacterBag2Slot",
+                       "CharacterBag3Slot", "CharacterReagentBag0Slot", "KeyRingButton" }) do
+    if _G[n] then t[#t + 1] = _G[n] end
+  end
+  return t
+end
+local function BagsOver(list)
+  for _, f in ipairs(list) do
+    if f:IsVisible() and ns.IsFrameMouseOver(f) then return true end
+  end
+  return false
+end
+local function SetBagsAlpha(list, a)
+  for _, f in ipairs(list) do f:SetAlpha(a) end
+end
+local function ApplyBags(cfg)
+  local list = BagFrames()
+  local mode = cfg.enabled == true and (cfg.bagsVis or "always") or nil
+  if mode == "never" then
+    bagHider = bagHider or CreateFrame("Frame")
+    bagHider:Hide()
+  end
+  for _, f in ipairs(list) do
+    if mode == "never" then
+      if f:GetParent() ~= bagHider then f._aishBagParent = f:GetParent(); f:SetParent(bagHider) end
+    elseif f._aishBagParent then
+      f:SetParent(f._aishBagParent)
+      f._aishBagParent = nil
+    end
+  end
+  if not mode or mode == "never" then
+    bagFader:SetScript("OnUpdate", nil)
+    if bagAlpha then SetBagsAlpha(list, 1); bagAlpha = nil end
+    return
+  end
+  local function Target()
+    local a = cfg.bagsAlpha or 1
+    if mode == "hover" and not BagsOver(list) then return math.min(a, cfg.bagsMouseoverAlpha or 0) end
+    return a
+  end
+  bagAlpha = bagAlpha or 1
+  bagFader:SetScript("OnUpdate", function(_, el)
+    local target = Target()
+    if math.abs(bagAlpha - target) > 0.002 then
+      bagAlpha = bagAlpha + (target - bagAlpha) * (1 - math.exp(-8 * el))
+    else
+      bagAlpha = target
+    end
+    SetBagsAlpha(list, bagAlpha)
+    if bagAlpha == target and mode ~= "hover" then bagFader:SetScript("OnUpdate", nil) end
+  end)
+end
+
 local function TargetAlpha(cfg)
   if dragUnlocked then return 1 end
   local alpha = cfg.alpha
@@ -1093,6 +1153,7 @@ function MenuBar.Create(parent)
   grip.tex:SetColorTexture(1, 0.82, 0.2, 0.25)
   grip:EnableMouse(true)
   grip:RegisterForDrag("LeftButton")
+  if ns.Nudge then ns.Nudge.Attach(grip, frame) end   -- fleches = deplacement au pixel
   grip:SetScript("OnDragStart", function() frame:StartMoving() end)
   grip:SetScript("OnDragStop", function()
     frame:StopMovingOrSizing()
@@ -1115,6 +1176,7 @@ function MenuBar.ApplySettings()
   local frame = strip.frame
 
   HideBlizzard(cfg.enabled == true and cfg.hideBlizzard ~= false)
+  ApplyBags(cfg)
   if cfg.enabled ~= true then
     if driverOn then UnregisterStateDriver(frame, "visibility"); driverOn = false end
     frame:Hide()

@@ -557,6 +557,7 @@ function TargetCastBar.Create(parent)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
     frame:SetClampedToScreen(true)
+    if ns.Nudge then ns.Nudge.Attach(frame) end   -- fleches = deplacement au pixel
     frame:SetScript("OnDragStart", function(self)
         if not dragUnlocked then return end
         self:StartMoving()

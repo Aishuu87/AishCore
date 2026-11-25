@@ -119,6 +119,83 @@ local function PrintReport()
     end
 end
 
+-- Saccades (/aishdebug ab) : a chaque image anormalement longue, temps passe dans les fonctions des barres d'action
+-- et addons les plus couteux sur cette image (C_AddOnProfiler, Retail)
+local _hitch
+-- Cout du tooltip d'un bouton : de son ancrage (GameTooltip_SetDefaultAnchor) a la fin de son remplissage
+-- (SetAction, ajouts des autres addons compris)
+local _tip = { t = 0, n = 0, t0 = nil, hooked = false }
+local function HookTooltipCost()
+    if _tip.hooked then return end
+    _tip.hooked = true
+    hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tt)
+        if _hitch and tt == GameTooltip then _tip.t0 = debugprofilestop() end
+    end)
+    local function Done()
+        if _hitch and _tip.t0 then
+            _tip.t = _tip.t + debugprofilestop() - _tip.t0
+            _tip.n = _tip.n + 1
+            _tip.t0 = nil
+        end
+    end
+    for _, m in ipairs({ "SetAction", "SetPetAction", "SetShapeshift", "SetSpellByID" }) do
+        if GameTooltip[m] then hooksecurefunc(GameTooltip, m, Done) end
+    end
+end
+function ns.DebugActionBarsHitches()
+    local AB = ns.Modules and ns.Modules.ActionBars
+    local prof = AB and AB._prof
+    if not prof then print("|cff00ccffAishCore Debug|r Barres d'action introuvables.") return end
+    if _hitch then
+        _hitch:SetScript("OnUpdate", nil); _hitch = nil; prof.on = false
+        print("|cff00ccffAishCore Debug|r Saccades : |cffff0000ARRÊTÉ|r.")
+        return
+    end
+    prof.on = true
+    HookTooltipCost()
+    _hitch = CreateFrame("Frame")
+    local avg, lastPrint = nil, 0
+    local P = C_AddOnProfiler
+    local metric = Enum and Enum.AddOnProfilerMetric and Enum.AddOnProfilerMetric.LastTime
+    _hitch:SetScript("OnUpdate", function(_, el)
+        local ms = el * 1000
+        local own = 0
+        for _, v in pairs(prof.t) do own = own + v end
+        if avg and ms > math.max(avg * 1.6, avg + 6) and GetTime() - lastPrint > 0.3 then
+            lastPrint = GetTime()
+            local parts = {}
+            for k, v in pairs(prof.t) do
+                if v >= 0.2 then parts[#parts + 1] = string.format("%s %.1fms x%d", k, v, prof.n[k] or 0) end
+            end
+            local tops = {}
+            if P and P.GetAddOnMetric and metric and C_AddOns then
+                for i = 1, C_AddOns.GetNumAddOns() do
+                    local name = C_AddOns.GetAddOnInfo(i)
+                    if name and C_AddOns.IsAddOnLoaded(i) then
+                        local ok, v = pcall(P.GetAddOnMetric, name, metric)
+                        if ok and type(v) == "number" and v >= 0.5 then tops[#tops + 1] = { name, v } end
+                    end
+                end
+                table.sort(tops, function(a, b) return a[2] > b[2] end)
+            end
+            local t = {}
+            for i = 1, math.min(4, #tops) do t[i] = string.format("%s %.1fms", tops[i][1], tops[i][2]) end
+            print(string.format("|cff00ccffAB|r image %.0fms (moy. %.0f) | AB : %s | tooltip : %.1fms x%d | addons : %s",
+                ms, avg, #parts > 0 and table.concat(parts, ", ") or string.format("%.1fms", own), _tip.t, _tip.n,
+                #t > 0 and table.concat(t, ", ") or (metric and "-" or "profileur indisponible")))
+            if prof.t.LayoutAll and prof.src then
+                local src = prof.src:gsub("Interface[/\\]AddOns[/\\]", ""):gsub("\n", " | ")
+                print("|cff00ccffAB|r mise en page : " .. src)
+            end
+        end
+        avg = avg and (avg * 0.95 + math.min(ms, avg * 3) * 0.05) or ms
+        if prof.t.LayoutAll then prof.src = nil end
+        wipe(prof.t); wipe(prof.n)
+        _tip.t, _tip.n = 0, 0
+    end)
+    print("|cff00ccffAishCore Debug|r Saccades des barres d'action : |cff00ff00DÉMARRÉ|r. /aishdebug ab pour arrêter.")
+end
+
 -- Slash command
 SLASH_AISHDEBUG1 = "/aishdebug"
 SlashCmdList["AISHDEBUG"] = function(msg)
@@ -157,6 +234,50 @@ SlashCmdList["AISHDEBUG"] = function(msg)
         wipe(_afterCounts)
         wipe(_tickerCounts)
         print("|cff00ccffAishCore Debug|r Compteurs remis à zéro.")
+
+    elseif msg == "ab" then
+        ns.DebugActionBarsHitches()
+
+    elseif msg == "abtest noenter" then
+        -- Essai : scripts de survol de Blizzard retires des boutons repris (tooltip, menu volant...). /reload pour les rendre
+        local AB = ns.Modules and ns.Modules.ActionBars
+        if InCombatLockdown() or not (AB and AB.Buttons) then print("|cff00ccffAishCore Debug|r Impossible (combat ?)."); return end
+        local n = 0
+        for b in pairs(AB.Buttons()) do b:SetScript("OnEnter", nil); b:SetScript("OnLeave", nil); n = n + 1 end
+        print(string.format("|cff00ccffAishCore Debug|r Survol de Blizzard retire sur %d boutons (|cffff9900/reload|r pour le rendre).", n))
+
+    elseif msg == "abtest notip" then
+        -- Essai : survol de Blizzard garde, tooltip masque aussitot (/reload pour le rendre)
+        local AB = ns.Modules and ns.Modules.ActionBars
+        if not (AB and AB.Buttons) then return end
+        local n = 0
+        for b in pairs(AB.Buttons()) do
+            b:HookScript("OnEnter", function(self) if GameTooltip:IsOwned(self) then GameTooltip:Hide() end end)
+            n = n + 1
+        end
+        print(string.format("|cff00ccffAishCore Debug|r Tooltip masque au survol sur %d boutons (|cffff9900/reload|r pour le rendre).", n))
+
+    elseif msg == "abtest nohl" then
+        -- Essai : textures de survol des boutons repris rendues invisibles (/reload pour les rendre)
+        local AB = ns.Modules and ns.Modules.ActionBars
+        if not (AB and AB.Buttons) then return end
+        local n = 0
+        for b in pairs(AB.Buttons()) do
+            local hl = b.GetHighlightTexture and b:GetHighlightTexture()
+            if hl then hl:SetAlpha(0); hl:SetTexture(nil); n = n + 1 end
+        end
+        print(string.format("|cff00ccffAishCore Debug|r Surbrillance de survol retiree sur %d boutons (|cffff9900/reload|r pour la rendre).", n))
+
+    elseif msg == "abtest floor" or msg == "abtest instant" or msg == "abtest off" then
+        -- Essais sur le fondu des barres d'action (saccades) : floor = jamais sous 1/255, instant = sans fondu
+        local AB = ns.Modules and ns.Modules.ActionBars
+        if AB then
+            local k = msg:match("abtest (%a+)")
+            AB._test = AB._test or {}
+            if k == "off" then wipe(AB._test) else AB._test[k] = not AB._test[k] end
+            print(string.format("|cff00ccffAishCore Debug|r abtest : floor %s, instant %s",
+                AB._test.floor and "|cff00ff00ON|r" or "off", AB._test.instant and "|cff00ff00ON|r" or "off"))
+        end
 
     elseif msg == "sky" then
         local sky = ns.Modules and ns.Modules.Skyriding

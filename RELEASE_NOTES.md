@@ -1,5 +1,167 @@
 # AishCore
 
+## [v4.8.0](https://github.com/Aishuu87/AishCore/tree/v4.8.0) (2026-11-25)
+
+### General
+- ✨Clickable module outlines are now more subtle, use their Themed Colors and light up on hover. A reminder tells you that a right-click opens the settings of the selected element
+- When an element is unlocked, you can now click it and move it with the arrow keys. SHIFT+Arrows moves it 10 px at a time. (Coming soon: a real, more complete Unlock Mode)
+- The "New" badges now show on the left of the module list, so the module names stay vertically aligned
+- ✨New "Fx" icons give direct access to the options to add, edit or delete the animations linked to auras or missing buffs
+- ✨Clickable sections give quick access to the options to add, edit or delete the animations linked to their modules (Out-of-Combat Health Circle, Well Fed Circle, Camping, Central Circle)
+- Minor patch notes (vX.X.X) are now merged into the next major patch notes (vX.X). E.g. v4.6.1, v4.6.2 and v4.6.3 are merged into v4.7, and removed from the list once v4.7 is released
+
+### Action Bars ✨New!
+- Created the Action Bars module, in the Combat category
+- It covers the 8 Blizzard action bars and their paging (stances, forms, Skyriding)
+- The bars can also use the Themed Colors of your spec or stance
+- Display fades can be set up easily
+- A hover tolerance can also be added around the bars
+- Glows can be customized, with as many choices as for the Priority Bar
+- Also handles the Totem, Stance and Pet bars
+- The Totem bar opens its flyouts by simply hovering the arrows, with a light animation
+- The Visibility & opacity section offers 3 modes for a simpler setup:
+  - Normal mode: shows the bars at full opacity when you are injured, in combat, have a target, are on a flying mount or hover them. The "idle" opacity can be adjusted
+  - Discreet mode: only shows the bars on mouseover
+  - Advanced mode: a new conditions section opens and lets you choose how the bars behave
+- Bars can be gathered into Groups to create "super bars":
+  - The visibility of all the bars of a group is linked. E.g. hovering one bar shows the other bars of the group at the same time
+  - Settings changed on one bar of the group apply to all the other bars (font, colors, etc.)
+  - Groups can be renamed
+
+### Themed Colors
+- New option for Druids: "Form Mode" colors the interface based on your shapeshift form rather than your specialization
+
+### QoL
+- ✨Added an option to set the opacity of party and raid frames out of combat (Party and raid frames opacity)
+- FIX: The buff bar did not show again on hover when its out-of-combat opacity was set to 0
+- ✨Added the Distant terrain, Distant buildings, Horizon distance, Shadow resolution, Water ripples and Sun shafts options
+- Added sliders for the Graphics rendering options
+- The Totem bar is now handled in the Action Bars
+- ✨Right-clicking a crafting reagent in your bags opens the matching profession and automatically filters the recipes craftable with that item (Right-click reagents in bags)
+- ✨New option (on by default) to show the total duration of a crafting queue (Total Craft Time). The bar still fills item by item
+
+### Taxi Mode
+- FIX: Early landings at later stops now work correctly
+- Flight durations have been reworked and should be calculated more accurately. If a flight doesn't have the right duration the first time, the addon should "learn" it for the next trips
+- FIX: Pets shown in the party frames should now also hide during the flight
+- An option switches the Elapsed time to remaining time (Show remaining time). The remaining time also adapts to early landings at stops when needed
+- FIX: Group invites and the ready check window now stay visible in Taxi Mode
+- ♾️FIX: "Rives Claires" is now capitalized
+
+### XP Bar
+- FIX: The Mail, Plate Mail, Parry, Dual Wield and Lockpicking skills could stay listed in the skills to buy even when the player already knew them
+- Hover information now stays displayed a little longer after the cursor leaves
+- ♾️Rogue: Mutilate is no longer listed in the "next skills" outside the Assassination spec
+
+### Well Fed Circle
+- When the player eats and drinks at the same time, a second small circle shows the drink's duration
+
+### Central Circle
+- ♾️Shaman: Added support for Water Shield (Charges)
+- Hovering the mana text now shows the player's exact mana value
+
+### Unit Frames
+- ✨The Top Target and Target Auras are now gathered in the same "Health Bars" module, and share the same settings interface
+- FIX: The Top Target resource bar was no longer working
+- Added options to show the unit's Resource Bar
+- Target Auras (Top Target) can now be moved by drag and drop (while the settings panel is open)
+- The X and Y position sliders of Target Auras now accept much larger values
+- ✨Added a new customizable icon for units in PvP mode (PvP Mode)
+- Added a customizable option for the Top Target PvP marker
+- An option lets you swap the decorative shapes for the icon in PvP mode (Replace decorative shapes in PvP mode)
+- ✨Added a new option to show a glow when the player can dispel the debuff (Highlight dispellable debuffs)
+- The Glow also shows on the player's and pet's Out-of-Combat Health Circles
+- FIX: The glow should no longer show on neutral and enemy targets
+- The level on the target, focus, target of target and Top Target health bars now uses the same colors as Platynator:
+  - Gray: the target no longer grants experience
+  - Green: the target is 3 to 8 levels below you
+  - Yellow: -2 to +2
+  - Orange: +3 and +4
+  - Red: +5 and ??
+- New options in the Health Bars (and Top Target) color the level, the name and the bar by difficulty
+- New options in the Health Bars (and Top Target) color the level, the name and the bar by reaction (hostile, friendly, neutral)
+- Reaction and difficulty colors can be customized
+
+### Priority Bar
+- FIX: Victory Rush stays grayed out in the Priority Bar until the Victorious buff is active
+
+### 3D Animations
+- Deleting a custom tag is now much easier: the cross on the right of the tag deletes it, after a confirmation message
+- Right-clicking an asset in the library lets you add it to a new tag
+
+### Dynamic Bars
+- Added the other usable equipment to the "Trinkets" category. Some armor pieces work the same way (helm, etc.)
+- ♾️FIX: The Greater Healthstone was not recognized
+- 🌀FIX: Better detection of Profession knowledge items (thanks TheDooft!)
+
+### Camping HUD
+- ✨Added tracking of the time needed to get the Well Rested buffs (Sleeping Bag)
+- This tracking is shown as a green bar on the Camping HUD
+- The Sleeping Bag bar can show at the same time as the time needed to gain the camp buffs
+- Well Rested stacks show at the bottom of the diamond by default
+- ♾️FIX: Some cases where the Sleeping Bag HUD did not start (some villages)
+- ♾️Added the Campfire Kit to the list of camping items
+- ♾️FIX: Higher items that can replace lower ones (Tanning Rack > Camp Tent) now show their real names in the buff tooltips
+- ♾️FIX: Sleeping Bag detection is now much more reliable (Blizzard added a "buff" for this specific condition)
+
+### Fishing ✨New!
+- New "Fishing" page in the HUD category
+- When a fishing pole is equipped, only the Well Rested (Sleeping Bag) alert is offered
+- Fishing accessories are offered in the Missing buffs alerts. A dedicated column enables or disables specific lures
+- FIX: Missing buffs alerts also offered fishing gear that cannot be used at your current Fishing skill
+- The "Double right-click: fish" option moved to the new Fishing section
+- An option lowers music and ambience volumes while fishing. Volume returns to normal after an adjustable fade duration
+- Added an option to set a shortcut key to cast your line and reel it in (Cast / reel in shortcut)
+- Added an option to enable background sound while fishing. Once you stop fishing, background sound goes back to its original behavior
+- An adjustable bubble shows the lure duration, and hovering it shows the lure's information
+- The bubble also shows your Fishing skill and the total of the applied bonuses
+- The bubble can float like a fishing bobber
+- The buff bubble shows when you have usable lures in your bags, with a "+" inside
+- Hovering the buff bubble shows every available and usable lure in your bags, including the one already applied, so you can refresh the buff
+- When you start moving, a round button re-equips the weapons you had before the fishing pole
+
+### Auras to Track
+- A tracked aura without a duration now shows a full bar instead of an empty one
+- Circle Bars now show at the same time as the Central Circle. Previously, they only showed in combat
+- 🌀Rogue: Circle Bars shifted when using Shadow Dance
+- ♾️Shaman: Added support for Strength of Earth Totem (Rank 4)
+- ♾️Warlock: Demonic Brand is now treated as a debuff, and its tracking should work properly
+- ♾️Mage: Arcane Blast is now treated as a debuff, and its tracking should work properly
+- Hunter: Aspects can now be tracked correctly
+- ♾️Hunter: Added tracking for Summon Hawk (treated as a Totem)
+- ♾️Hunter: Summon Hawk correctly shows several bars when several hawks are summoned (thanks Lex!)
+- Reworked the look of totems: position, bar height, timer
+- ♾️Shaman: All totems are now colored
+- ♾️Shaman: Totems without a cooldown have been removed from the utility CDs (shown at the bottom of the screen, normally meant for spells on cooldown)
+- A new technique finally shows whether the player is in range of their totems, in combat too. Out-of-range totems are desaturated. In instances, the distance to your totems still cannot always be known
+- Hovering the icons or bars of tracked auras shows them at 100% opacity
+- Totem bars are now "pixel perfect" (all the same size, and display correctly even when very thin)
+
+### Missing buffs
+- The Sleeping Bag alert now shows first, and even shows in rested areas when the "Ignore in rested areas" option is enabled
+- The Sleeping Bag alert no longer shows when your Sleeping Bag is on cooldown and you are not in a group (to borrow one)
+- 🌀FIX: The Soulstone alert no longer shows while the spell is on cooldown
+- ♾️Added the Soul Link alert. It only shows when you have a demon summoned
+- ♾️Added an independent duration threshold for the following buffs:
+  - Well Rested
+  - Thorns (Druid)
+  - Inner Fire (Priest)
+- ♾️Shaman: Added Water Shield to the missing buff alerts
+- Right-clicking to hide an alert now only hides the first alert, the next ones show one after another
+- Water Breathing and Swim Speed elixirs are now only suggested while the player is swimming
+- Cat's Eye elixirs (stealth detection) are no longer suggested as regular elixirs
+- Noggenfogger Elixir is no longer suggested by the Missing buffs alerts
+
+### Fixes
+- FIX: Revenge, Overpower, Riposte, Counterattack and Mongoose Bite showed as available in the Priority Bar even though the spells did not meet their usability conditions
+- FIX: Some disabled modules could block mouse clicks even when hidden
+- FIX: Errors related to some tooltip reading conditions when leaving combat
+- FIX: The tracking menu now opens on the minimap, even when the minimap has been moved
+- FIX: Performance optimization when shapeshifting (Druid) and entering Stealth (Rogue), which could sometimes cause slowdowns
+- ♾️Shaman: Water Shield / Lightning Shield charges now show correctly during the first fight after a UI reload
+- Optimized the minimap tooltips, which could cause slowdowns when hovering repeatedly
+- Support for Questie, which added dozens of fake entries to the Addon Compartment
+
 ## [v4.7.6](https://github.com/Aishuu87/AishCore/tree/v4.7.6) (2026-11-22)
 
 ### Well Fed Circle

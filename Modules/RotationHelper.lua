@@ -220,6 +220,7 @@ local function CreateSpellIcon(spellID)
   frame:EnableMouse(true)
   -- Relais de glisser/deposer vers containerFrame (l'icone visible recoit le clic, pas le containerFrame invisible/1x1)
   frame:RegisterForDrag("LeftButton")
+  if ns.Nudge then ns.Nudge.Attach(frame, containerFrame) end   -- fleches = deplacement au pixel
   frame:SetScript("OnDragStart", OnRHDragStart)
   frame:SetScript("OnDragStop", OnRHDragStop)
   frame:SetScript("OnEnter", function(self)
@@ -732,6 +733,7 @@ function RotationHelper.EnableDrag(enable)
   if enable then
     containerFrame:SetSize(200, 60)
     containerFrame:RegisterForDrag("LeftButton")
+    if ns.Nudge then ns.Nudge.Attach(containerFrame) end   -- fleches = deplacement au pixel
     containerFrame:SetScript("OnDragStart", OnRHDragStart)
     containerFrame:SetScript("OnDragStop", OnRHDragStop)
     if not containerFrame.dragBg then

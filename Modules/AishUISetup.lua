@@ -10,7 +10,7 @@ local L = ns.L
 -- Modules gardés actifs ; tout autre enfant de la suite est désactivé (y compris les futurs modules).
 -- KEEP + SKIP sont dupliquées dans l'installeur (EllesmereKeep, InstallService.cs) : les garder synchronisées.
 local KEEP = {
-  EllesmereUIActionBars   = true,
+  -- EllesmereUIActionBars : désactivé, AishCore a ses propres barres d'action (Modules/ActionBars.lua)
   EllesmereUIUnitFrames   = true,
   EllesmereUIResourceBars = true,
   EllesmereUIRaidFrames   = true,
@@ -587,24 +587,57 @@ SlashCmdList["AISHUISWITCH"] = function()
 end
 
 -- ── Profils ElvUI / EllesmereUI par rôle et barres d'action ──────────────────────────────────────────
--- Profils livrés avec le pack : un par rôle, en deux variantes (barres montrées / cachées). Les noms
--- diffèrent entre les deux UI, et EllesmereUI n'a pas de soigneur vertical (repli sur le soigneur).
+-- Profils livrés avec le pack : un par rôle. EllesmereUI n'a pas de soigneur vertical (repli sur le
+-- soigneur). Les barres d'action sont celles d'AishCore : montrées / cachées = réglage des barres 1-3.
 local ROLES = { "DPS", "HEALER", "HEALER_V", "TANK" }
-local PROFILE_FMT = {
+local PROFILE_NAME = {
   ElvUI = {
-    DPS = "AishUI - DPS - %s", HEALER = "AishUI - HEALER - %s",
-    HEALER_V = "AishUI - HEALER Vertical - %s", TANK = "AishUI - TANK - %s",
+    DPS = "AishUI - DPS", HEALER = "AishUI - HEALER",
+    HEALER_V = "AishUI - HEALER Vertical", TANK = "AishUI - TANK",
   },
   Ellesmere = {
-    DPS = "AishUI - DPS %s", HEALER = "AishUI - Healer %s",
-    HEALER_V = "AishUI - Healer %s", TANK = "AishUI - Tank %s",
+    DPS = "AishUI - DPS", HEALER = "AishUI - HEALER",
+    HEALER_V = "AishUI - HEALER", TANK = "AishUI - TANK",
   },
 }
-local BARS_SUFFIX = { [true] = "Show Bars", [false] = "Hide Bars" }
 
-local function ProfileName(flavor, role, show)
-  local fmt = PROFILE_FMT[flavor] and PROFILE_FMT[flavor][role]
-  return fmt and string.format(fmt, BARS_SUFFIX[show and true or false])
+local function ProfileName(flavor, role)
+  return PROFILE_NAME[flavor] and PROFILE_NAME[flavor][role]
+end
+
+-- Barres 1-3 d'AishCore : cachées = Discret, opacité quand cachée 0 ; montrées = Normal, 0.15
+local BAR_KEYS = { "bar1", "bar2", "bar3" }
+local BARS_PRESET = {
+  [true]  = { visMode = "normal",   mouseoverAlpha = 0.15 },
+  [false] = { visMode = "discreet", mouseoverAlpha = 0 },
+}
+
+-- true / false : barres 1-3 sur l'un des deux réglages ; nil : réglage personnalisé
+local function BarsState()
+  local AB = ns.Modules and ns.Modules.ActionBars
+  if not (AB and AB.BV and ns.DB) then return end
+  for _, show in ipairs({ true, false }) do
+    local p, ok = BARS_PRESET[show], true
+    for _, key in ipairs(BAR_KEYS) do
+      local a = tonumber(AB.BV(key, "mouseoverAlpha")) or 0
+      if (AB.BV(key, "visMode") or "normal") ~= p.visMode or math.abs(a - p.mouseoverAlpha) > 0.001 then
+        ok = false; break
+      end
+    end
+    if ok then return show end
+  end
+end
+
+local function ApplyBars(show)
+  local AB = ns.Modules and ns.Modules.ActionBars
+  if not (AB and AB.SetBV and ns.DB) then return end
+  local p = BARS_PRESET[show and true or false]
+  for _, key in ipairs(BAR_KEYS) do
+    AB.SetBV(key, "visMode", p.visMode)
+    AB.SetBV(key, "mouseoverAlpha", p.mouseoverAlpha)
+  end
+  if AB.ApplySettings then pcall(AB.ApplySettings) end
+  if ns.ActionBarsPageRefresh then pcall(ns.ActionBarsPageRefresh) end
 end
 
 -- Accès au profil de l'UI chargée : { flavor, current(), exists(n), apply(n) }, ou nil.
@@ -672,45 +705,28 @@ local function Choices()
   return AishUISetupCharDB.roleChoice
 end
 
--- Profil actif -> rôle + barres de la spé courante, seulement si un choix existe déjà (profil changé à la
--- main ou par /aish show|hide bars). Garde le soigneur vertical quand EllesmereUI ne le distingue pas.
+-- Profil actif + barres -> choix de la spé courante, seulement si un choix existe déjà (profil changé à
+-- la main, /aish show|hide bars). Garde le soigneur vertical quand EllesmereUI ne le distingue pas.
 local function RecordCurrent()
   local api, specID = GetUiApi(), CurrentSpec()
   local entry = specID and Choices()[specID]
   if not (api and entry) then return end
+  local bars = BarsState()
+  if bars ~= nil then entry.show = bars end
   local cur = api.current()
-  for _, show in ipairs({ true, false }) do
-    if ProfileName(api.flavor, entry.role, show) == cur then entry.show = show; return end
-  end
+  if ProfileName(api.flavor, entry.role) == cur then return end
   for _, role in ipairs(ROLES) do
-    for _, show in ipairs({ true, false }) do
-      if ProfileName(api.flavor, role, show) == cur then entry.role, entry.show = role, show; return end
-    end
+    if ProfileName(api.flavor, role) == cur then entry.role = role; return end
   end
 end
 
--- /aish show bars | hide bars : profil actif vers sa variante opposée (remplacement du suffixe).
-local function BarsTarget(current, show)
-  if not current then return end
-  local from, to = BARS_SUFFIX[not show], BARS_SUFFIX[show]
-  if current:sub(-#to) == to then return nil, "already" end
-  if current:sub(-#from) ~= from then return nil, "nomatch" end
-  return current:sub(1, -#from - 1) .. to
-end
-
+-- /aish show bars | hide bars : barres 1-3 d'AishCore montrées / cachées
 function ns.SwitchBarsProfile(show)
   local P = "|cff00ccff[AishCore]|r "
   if InCombatLockdown() then print(P .. L["UISWITCH_COMBAT"]); return end
-  local api = GetUiApi()
-  if not api then print(P .. L["BARS_NO_UI"]); return end
-  local current = api.current()
-  local target, why = BarsTarget(current, show)
-  if why == "already" then print(P .. string.format(L["BARS_ALREADY"], current)); return end
-  if not target then print(P .. string.format(L["BARS_NOMATCH"], tostring(current))); return end
-  if not api.exists(target) then print(P .. string.format(L["BARS_MISSING"], target)); return end
-  api.apply(target)
-  RecordCurrent()
-  print(P .. string.format(L["BARS_DONE"], target))
+  ApplyBars(show)
+  pcall(RecordCurrent)
+  print(P .. L[show and "BARS_DONE_SHOW" or "BARS_DONE_HIDE"])
 end
 
 -- Alias /aishui show bars | hide bars (même chose que /aish show bars | hide bars)
@@ -740,8 +756,13 @@ local function PickLabel(flavor, role)
   return L[ROLE_LABEL[role]]
 end
 
-local function ApplyChoice(api, entry)
-  local name = ProfileName(api.flavor, entry.role, entry.show)
+-- force : barres réappliquées quoi qu'il arrive (choix fait à l'instant). Sinon seulement si elles sont
+-- sur l'autre réglage (changement de spé) : un réglage personnalisé des barres n'est jamais écrasé.
+local function ApplyChoice(api, entry, force)
+  local show = entry.show and true or false
+  local bars = BarsState()
+  if force or (bars ~= nil and bars ~= show) then ApplyBars(show) end
+  local name = ProfileName(api.flavor, entry.role)
   if not api.exists(name) then
     print("|cff00ccff[AishCore]|r " .. string.format(L["BARS_MISSING"], name))
     return
@@ -758,11 +779,11 @@ local function AskBars(specID, role)
     local entry = { role = role, show = show }
     Choices()[specID] = entry
     if InCombatLockdown() then pendingRoleCheck = true; return end
-    if CurrentSpec() == specID then ApplyChoice(api, entry) end
+    if CurrentSpec() == specID then ApplyChoice(api, entry, true) end
   end
   local buttons = {
     { L["ROLE_BARS_HIDE"], false, function() Choose(false) end },
-    { api.flavor == "ElvUI" and L["ROLE_BARS_SHOW_ELVUI"] or L["ROLE_BARS_SHOW_EUI"], false, function() Choose(true) end },
+    { L["ROLE_BARS_SHOW"], false, function() Choose(true) end },
     width = 240, height = 44,
   }
   ShowSetupPopup("AishCoreRoleBars", L["ROLE_TITLE"], L["ROLE_BARS_PROMPT"], buttons)
@@ -772,10 +793,10 @@ local function AskOther(specID, suggested)
   local api = GetUiApi()
   if not api then return end
   -- Autres profils existants, sans doublon (EllesmereUI : soigneur vertical = soigneur)
-  local seen, buttons = { [ProfileName(api.flavor, suggested, true)] = true }, {}
+  local seen, buttons = { [ProfileName(api.flavor, suggested)] = true }, {}
   for _, role in ipairs(ROLES) do
-    local name = ProfileName(api.flavor, role, true)
-    if not seen[name] and (api.exists(name) or api.exists(ProfileName(api.flavor, role, false))) then
+    local name = ProfileName(api.flavor, role)
+    if not seen[name] and api.exists(name) then
       seen[name] = true
       buttons[#buttons + 1] = { PickLabel(api.flavor, role), false, function() AskBars(specID, role) end }
     end

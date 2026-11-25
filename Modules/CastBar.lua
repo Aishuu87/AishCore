@@ -546,6 +546,7 @@ local function UpdateProgress()
         -- Timer
         local remaining = state.endTime - now
         if remaining < 0 then remaining = 0 end
+        if not state.preview then remaining = remaining + (state.extra or 0) end   -- liste de crafts : temps total
         frame.timerTxt:SetText(FormatTime(remaining))
 
         -- Fin naturelle : masquer sauf en preview (qui boucle)
@@ -561,6 +562,36 @@ local function UpdateProgress()
                 HideAnimated()
             end
         end
+    end
+end
+
+-- File de craft (QoL) : une liste de N crafts garde une barre par objet, mais le timer donne le temps restant de
+-- toute la liste. Nombre demande lu en accrochant les fonctions de craft du jeu (cf. fin du fichier).
+local craftQ = { left = 0 }
+function CastBar.QueueCraft(spellID, num)
+    num = tonumber(num) or 1
+    craftQ.left = num > 1 and num or 0
+    -- DoTradeSkill (Forever) donne un index de recette : le sort est repris au premier cast
+    craftQ.spell = spellID
+    craftQ.at, craftQ.started = GetTime(), false
+end
+-- Temps des crafts restants apres celui-ci (0 hors liste ou option coupee)
+local function CraftExtra(spellId, dur)
+    if craftQ.left <= 0 or Cfg().craftTotal == false or type(dur) ~= "number" or dur <= 0 then return 0 end
+    if craftQ.spell ~= spellId then
+        -- Premier cast juste apres la demande : on adopte son sort ; sinon c'est un autre sort, la liste est finie
+        if craftQ.started or GetTime() - (craftQ.at or 0) > 2 then craftQ.left = 0; return 0 end
+        craftQ.spell = spellId
+    end
+    craftQ.started = true
+    return (craftQ.left - 1) * dur
+end
+function CastBar.CraftEvent(event, spellID)
+    if craftQ.left <= 0 or spellID ~= craftQ.spell then return end
+    if event == "UNIT_SPELLCAST_SUCCEEDED" then
+        craftQ.left = craftQ.left - 1
+    else
+        craftQ.left = 0   -- interrompu / echoue : le jeu abandonne le reste de la liste
     end
 end
 
@@ -580,6 +611,7 @@ local function StartCast(name, startTimeMS, endTimeMS, spellId, spellIcon, castG
     state.spellIcon  = spellIcon
     state.castGUID   = castGUID
     state.completed  = false
+    state.extra      = CraftExtra(spellId, state.endTime - state.startTime)
 
     -- Restaurer couleurs normales (au cas où un interrupt était en cours)
     ApplyTextColor(spellId)
@@ -608,6 +640,7 @@ local function StartChannel(name, startTimeMS, endTimeMS, spellId, spellIcon, ca
     state.spellIcon  = spellIcon
     state.castGUID   = castGUID
     state.completed  = false
+    state.extra      = 0
 
     -- Restaurer couleurs normales
     ApplyTextColor(spellId)
@@ -797,6 +830,7 @@ function CastBar.Create(parent)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
     frame:SetClampedToScreen(true)
+    if ns.Nudge then ns.Nudge.Attach(frame) end   -- fleches = deplacement au pixel
     frame:SetScript("OnDragStart", function(self)
         if not dragUnlocked then return end
         self:StartMoving()
@@ -924,6 +958,9 @@ function CastBar.Create(parent)
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
     ev:SetScript("OnEvent", function(self, event, unit, castGUID, spellID)
         if unit and unit ~= "player" then return end
+        if event == "UNIT_SPELLCAST_SUCCEEDED" or event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_FAILED" then
+            CastBar.CraftEvent(event, spellID)
+        end
 
         -- TryStart : tente cast normal, canal, puis fallback C_Spell.
         -- Retourne true si un cast a pu être lancé.
@@ -1198,5 +1235,22 @@ function CastBar.SetPreview(on)
             frame.timerTxt:SetText("")
             HideAnimated()
         end
+    end
+end
+
+-- Fonctions de craft du jeu : nombre d'objets demandes (cf. CastBar.QueueCraft). Retail : le 1er argument est le sort
+-- de la recette ; Forever : DoTradeSkill(index, nombre).
+do
+    local T = C_TradeSkillUI
+    for _, fn in ipairs({ "CraftRecipe", "CraftEnchant", "CraftSalvage" }) do
+        if T and type(T[fn]) == "function" then
+            hooksecurefunc(T, fn, function(spellID, num) CastBar.QueueCraft(spellID, num) end)
+        end
+    end
+    if T and type(T.StopRecast) == "function" then
+        hooksecurefunc(T, "StopRecast", function() CastBar.QueueCraft(nil, 0) end)
+    end
+    if type(DoTradeSkill) == "function" then
+        hooksecurefunc("DoTradeSkill", function(_, num) CastBar.QueueCraft(nil, num) end)
     end
 end

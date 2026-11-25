@@ -336,6 +336,7 @@ local function CreateTargetBar()
     f:SetPoint("TOP", WorldFrame, "TOP", ox, oy)
 
     -- Drag : disponible seulement quand le panel est ouvert et hors combat
+    if ns.Nudge then ns.Nudge.Attach(f) end   -- fleches = deplacement au pixel
     f:HookScript("OnDragStart", function(self)
         if InCombatLockdown() then return end
         local panel = _G["AishCoreSettingsPanel"]
@@ -497,6 +498,7 @@ local function CreateTargetTargetBar()
     local tty = (db and db.tty) or -75
     f:SetPoint("CENTER", UIParent, "TOP", ttx, tty)
 
+    if ns.Nudge then ns.Nudge.Attach(f) end   -- fleches = deplacement au pixel
     f:HookScript("OnDragStart", function(self)
         if InCombatLockdown() then return end
         local panel = _G["AishCoreSettingsPanel"]
@@ -1044,6 +1046,178 @@ end
 function TopTargetBar.PreviewHPText()
     local db = ns.GetCfg("topTargetBar")
     return (db and db.hpMode == "pct") and "75%" or "75K"
+end
+
+-- ── Apercu du GUI (page Barres de vie) : copie non securisee de la barre et de la cible de la cible ──────────
+-- Meme geometrie que ApplySettings ; la cible de la cible est placee par rapport au conteneur de la cible.
+local function HexText(c, text)
+    return string.format("|cff%02x%02x%02x%s|r", math.floor(c[1] * 255), math.floor(c[2] * 255), math.floor(c[3] * 255), text)
+end
+
+function TopTargetBar.CreatePreview(parent)
+    local p = CreateFrame("Frame", nil, parent)
+    local t = CreateFrame("Frame", nil, p)
+    t:SetSize(530, 35)
+    t.bgFull = t:CreateTexture(nil, "BACKGROUND", nil, -1)
+    t.bgFull:SetColorTexture(DARK, DARK, DARK, 1)
+    t.bar = CreateFrame("StatusBar", nil, t)
+    t.bar:SetMinMaxValues(0, 1); t.bar:SetValue(0.75)
+    t.barBg = t:CreateTexture(nil, "BACKGROUND", nil, 0)
+    t.barBg:SetColorTexture(DARK, DARK, DARK, 1)
+    t.barBg:SetPoint("TOPLEFT", t.bar, "TOPLEFT", -1, 1)
+    t.barBg:SetPoint("BOTTOMRIGHT", t.bar, "BOTTOMRIGHT", 1, -1)
+    t.powerBar = CreateFrame("StatusBar", nil, t)
+    t.powerBar:SetMinMaxValues(0, 1); t.powerBar:SetValue(0.6)
+    t.powerBarBg = t:CreateTexture(nil, "BACKGROUND", nil, 0)
+    t.powerBarBg:SetColorTexture(DARK, DARK, DARK, 1)
+    t.powerBarBg:SetPoint("TOPLEFT", t.powerBar, "TOPLEFT", -1, 1)
+    t.powerBarBg:SetPoint("BOTTOMRIGHT", t.powerBar, "BOTTOMRIGHT", 1, -1)
+    local over = CreateFrame("Frame", nil, t)
+    over:SetAllPoints(t)
+    over:SetFrameLevel(t.bar:GetFrameLevel() + 5)
+    t.nameTxt = over:CreateFontString(nil, "OVERLAY")
+    t.nameTxt:SetJustifyH("CENTER")
+    t.nameTxt:SetShadowColor(0, 0, 0, 1)
+    t.nameTxt:SetShadowOffset(1, -1)
+    t.nameTxt:SetWidth(420)
+    t.hpTxt = over:CreateFontString(nil, "OVERLAY")
+    t.hpTxt:SetShadowColor(0, 0, 0, 1)
+    t.hpTxt:SetShadowOffset(1, -1)
+    t.deco = over:CreateTexture(nil, "OVERLAY")
+    t.deco:SetSize(76, 24)
+    t.deco:SetPoint("CENTER", t.bgFull, "BOTTOM", 0, -2)
+    t.pvp = over:CreateTexture(nil, "OVERLAY", nil, 2)
+    p.target = t
+
+    local tt = CreateFrame("Frame", nil, p)
+    tt.bgTex = tt:CreateTexture(nil, "BACKGROUND", nil, -1)
+    tt.bgTex:SetColorTexture(DARK, DARK, DARK, 1)
+    tt.bar = CreateFrame("StatusBar", nil, tt)
+    tt.bar:SetMinMaxValues(0, 1); tt.bar:SetValue(0.5)
+    local ttOver = CreateFrame("Frame", nil, tt)
+    ttOver:SetAllPoints(tt)
+    ttOver:SetFrameLevel(tt.bar:GetFrameLevel() + 2)
+    tt.nameTxt = ttOver:CreateFontString(nil, "OVERLAY")
+    tt.nameTxt:SetJustifyH("CENTER")
+    tt.nameTxt:SetShadowColor(0, 0, 0, 1)
+    tt.nameTxt:SetShadowOffset(1, -1)
+    tt.nameTxt:SetWidth(109)
+    p.tot = tt
+    return p
+end
+
+--- part : "target" (barre de la cible seule) ou "tot" (cible de la cible seule)
+function TopTargetBar.StylePreview(p, part)
+    local G = TTBGet
+    local t, tt = p.target, p.tot
+    local tex = BarTex()
+    -- Cible
+    local bgW, bgH, bgOX, bgOY = G("bgW") or 530, G("bgH") or 35, G("bgOX") or 0, G("bgOY") or 0
+    t:ClearAllPoints()
+    t:SetPoint("TOP", p, "TOP", 0, 0)
+    t.bgFull:SetSize(bgW, bgH)
+    t.bgFull:ClearAllPoints()
+    t.bgFull:SetPoint("CENTER", t, "CENTER", bgOX, bgOY)
+    local bw, bh, box, boy = G("barW") or 525, G("barH") or 2, G("barOX") or 0, G("barOY") or -22
+    local showPower = G("showPowerBar")
+    t.bar:SetSize(bw, bh)
+    t.bar:SetStatusBarTexture(tex)
+    t.bar:ClearAllPoints()
+    t.bar:SetPoint("TOP", t, "TOP", box, showPower and (boy + bh + 1) or boy)
+    local c = ElemColor("target", "Bar", true)
+    t.bar:SetStatusBarColor(c[1], c[2], c[3], 1)
+    t.powerBar:SetShown(showPower and true or false)
+    t.powerBarBg:SetShown(showPower and true or false)
+    if showPower then
+        t.powerBar:SetSize(bw, bh)
+        t.powerBar:SetStatusBarTexture(tex)
+        t.powerBar:ClearAllPoints()
+        t.powerBar:SetPoint("TOP", t, "TOP", box, boy)
+        local pc = POWER_COLORS.ENERGY
+        t.powerBar:SetStatusBarColor(pc[1], pc[2], pc[3], 1)
+    end
+    -- Nom + niveau
+    t.nameTxt:SetFont(G("nameFont") or DEFAULT_FONT, 15, "")
+    t.nameTxt:ClearAllPoints()
+    t.nameTxt:SetPoint("TOP", t, "TOP", G("nameOX") or 0, G("nameOY") or -5)
+    local nc = ElemColor("target", "Name", true)
+    local lc = ResolveUnitColor("target", "Level", TTBGet, true) or nc
+    t.nameTxt:SetText(HexText(lc, "90 " .. BULLET .. " ") .. HexText(nc, L["TOPTARGET_PREVIEW_NAME"]))
+    -- Texte de vie
+    local anchor = G("hpAnchor") or "LEFT"
+    if not t.hpTxt:SetFont(G("hpFont") or DEFAULT_HP_FONT, G("hpFontSize") or 10, "") then
+        t.hpTxt:SetFont("Fonts\\FRIZQT__.TTF", G("hpFontSize") or 10, "")
+    end
+    t.hpTxt:SetJustifyH(anchor)
+    t.hpTxt:ClearAllPoints()
+    t.hpTxt:SetPoint(anchor, t.bgFull, anchor, G("hpOX") or 5, G("hpOY") or -19)
+    t.hpTxt:SetTextColor(c[1], c[2], c[3], 1)
+    t.hpTxt:SetText(TopTargetBar.PreviewHPText())
+    -- Decoration elite
+    if G("eliteDeco") ~= false then
+        t.deco:SetTexture(DECO_PATH .. "golddetailtop.png")
+        t.deco:Show()
+    else
+        t.deco:Hide()
+    end
+    -- Mode JcJ (bouton "Apercu JcJ")
+    local pv = t.pvp
+    if G("pvpShow") and pvpPreview then
+        local faction = G("pvpFaction") and TargetPvPFaction(true)
+        local pre = faction and "pvpF" or "pvp"
+        local atlas = faction and PVP_FACTION_ATLAS[faction]
+        local size, ratio = G(pre .. "Size") or 18, PVP_RATIO
+        if atlas then
+            local info = C_Texture.GetAtlasInfo(atlas)
+            ratio = (info and info.height and info.height > 0) and info.width / info.height or 1
+            pv:SetAtlas(atlas)
+        else
+            pv:SetTexture(PVP_TEX)
+            pv:SetTexCoord(0, 1, 0, 1)
+        end
+        local deg = tonumber(G(pre .. "Rotation")) or 0
+        local w, h = size * ratio, size
+        if deg == 90 or deg == 270 then w, h = h, w end
+        pv:SetRotation(math.rad(deg))
+        pv:SetSize(w, h)
+        pv:ClearAllPoints()
+        pv:SetPoint("CENTER", t.bgFull, G("pvpAnchor") or "LEFT", G("pvpX") or 0, G("pvpY") or 0)
+        local mode = G(pre .. "ColorMode")
+        local pc = (mode == "custom" and G(pre .. "Color")) or (mode == "original" and { 1, 1, 1 }) or c
+        pv:SetVertexColor(pc[1], pc[2], pc[3], G(pre .. "Alpha") or 1)
+        pv:Show()
+    else
+        pv:Hide()
+    end
+    -- Cible de la cible : apercu a part (centree), montree meme si elle est masquee en jeu
+    local showTT = part == "tot"
+    t:SetShown(not showTT)
+    tt:SetShown(showTT)
+    local ttW, ttH = G("ttBgW") or 125, G("ttBgH") or 24
+    tt:SetSize(125, 24)
+    tt:ClearAllPoints()
+    tt:SetPoint("CENTER", p, "CENTER", 0, 0)
+    tt.bgTex:SetSize(ttW, ttH)
+    tt.bgTex:ClearAllPoints()
+    tt.bgTex:SetPoint("CENTER", tt, "CENTER", G("ttBgOX") or 0, G("ttBgOY") or 0)
+    tt.bar:SetSize(G("ttBarW") or 124, G("ttBarH") or 1.7)
+    tt.bar:SetStatusBarTexture(tex)
+    tt.bar:ClearAllPoints()
+    tt.bar:SetPoint("CENTER", tt, "CENTER", G("ttBarOX") or 0, G("ttBarOY") or -10.161)
+    local tc = ElemColor("targettarget", "Bar", "Friendly")
+    tt.bar:SetStatusBarColor(tc[1], tc[2], tc[3], 1)
+    tt.nameTxt:SetFont(G("nameFont") or DEFAULT_FONT, 12, "")
+    tt.nameTxt:ClearAllPoints()
+    tt.nameTxt:SetPoint("CENTER", tt, "CENTER", G("ttNameOX") or 0, G("ttNameOY") or 0.860)
+    tt.nameTxt:SetText(HexText(ElemColor("targettarget", "Name", "Friendly"), L["TOPTARGET_PREVIEW_TT_NAME"]))
+    -- Encombrement, pour la mise a l'echelle de l'apercu
+    if showTT then
+        p:SetSize(math.max(125, ttW + 2 * math.abs(G("ttBgOX") or 0)) + 4, math.max(24, ttH + 2 * math.abs(G("ttBgOY") or 0)) + 30)
+        return
+    end
+    local w = math.max(530, bgW + 2 * math.abs(bgOX), bw + 2 * math.abs(box))
+    local bottom = math.min(-35, -17.5 + bgOY - bgH / 2)
+    p:SetSize(w, -bottom + 4)
 end
 
 -- Ticker barre de vie : UnitHealth() retourne un "secret number" non convertible en string, mais SetMinMaxValues/SetValue l'acceptent via pcall.

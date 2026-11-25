@@ -26,6 +26,14 @@ local ORDER = { "pet", "player", "target", "targettarget", "focus" }
 -- Barres reglables en couleur de difficulte / reaction (Modules/UnitBars.lua, COLOR_KEYS)
 local COLOR_BARS = { target = true, focus = true, targettarget = true }
 local NOT_COPIED = { enabled = true, x = true, y = true, layout = true, mirrorOf = true, collapsed = true, fillColor = true }
+-- Autres elements de la cible, choisis dans le meme selecteur : Top Target (Modules/TopTargetBar.lua) et auras de la
+-- cible (Modules/TargetAuras.lua). Leurs sections remplacent celles des barres quand l'un d'eux est selectionne.
+local EXTRA_ORDER = { "topTarget", "topTargetTot", "taBuffs", "taDebuffs" }
+local EXTRA_LABEL = { topTarget = "SETTINGS_CAT_TOP_TARGET", topTargetTot = "TTB_TOT_LABEL",
+                      taBuffs = "UNITBARS_TARGET_BUFFS", taDebuffs = "UNITBARS_TARGET_DEBUFFS" }
+local function IsTTB(k) return k == "topTarget" or k == "topTargetTot" end
+local TA_GROUP = { taBuffs = "buffs", taDebuffs = "debuffs" }
+local function IsExtra(k) return EXTRA_LABEL[k] ~= nil end
 
 local function UB() return ns.Modules and ns.Modules.UnitBars end
 local function DB()
@@ -223,6 +231,18 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
   toggle:SetPoint("LEFT", barDD, "RIGHT", 12, 0)
   barDD.onChanged = function(v) ns._unitBarsSelected = v; RefreshAll() end
   toggle.onChanged = function(v)
+    if IsExtra(Sel()) then
+      local key = IsTTB(Sel()) and "topTargetBar" or "targetAuras"
+      ns.DB[key] = ns.DB[key] or {}
+      -- Cible de la cible du Top Target : son affichage, pas le module
+      ns.DB[key][Sel() == "topTargetTot" and "showTargetOfTarget" or "enabled"] = v and true or false
+      if ns.InvalidateSettingsPage then ns.InvalidateSettingsPage("modulesOverview") end
+      local m = ns.Modules[IsTTB(Sel()) and "TopTargetBar" or "TargetAuras"]
+      RefreshPreview()
+      if m and m.ApplySettings then m.ApplySettings() end
+      if m and m.SetPreview then m.SetPreview(true) end   -- auras : apercu a l'ecran relance (ou coupe)
+      return
+    end
     Bar().enabled = v and true or false
     if ns.InvalidateSettingsPage then ns.InvalidateSettingsPage("modulesOverview") end
     Changed()
@@ -284,6 +304,7 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
   container:HookScript("OnHide", function() if ns.SettingsUnpin then ns.SettingsUnpin(pin) end end)
 
   -- Copie des reglages vers une autre barre ---------------------------------------------------------------------
+  local ubStart = #ctx.flow   -- sections des barres : masquees quand un autre element est selectionne
   ctx:Spacer(8)
   local copyBtn = SW.CreateActionBtn(container, L["EXTRABARS_COPY_TO"], Cols(4))
   copyBtn:SetScript("OnClick", function()
@@ -883,6 +904,302 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
     dispelWidgets[#dispelWidgets + 1] = col
   end
   Row(5, unpack(dispelCols))
+  ctx:HideIf(ubStart, function() return IsExtra(Sel()) end)
+
+  -- Autres elements : liaisons vers leur propre table (topTargetBar, targetAuras.<groupe>) ---------------------------
+  local xbound = {}
+  local RefreshExtraStates
+  local xPending = false
+  local function ExtraChanged()
+    if xPending then return end
+    xPending = true
+    C_Timer.After(0, function()
+      xPending = false
+      local M = ns.Modules
+      if IsTTB(Sel()) then
+        if M.TopTargetBar and M.TopTargetBar.ApplySettings then M.TopTargetBar.ApplySettings() end
+      elseif M.TargetAuras and M.TargetAuras.ApplySettings then
+        M.TargetAuras.ApplySettings()
+      end
+      RefreshExtraStates()
+      RefreshPreview()
+    end)
+  end
+  local function TGet(key)
+    local v = ns.DB.topTargetBar and ns.DB.topTargetBar[key]
+    if v == nil and ns.Defaults.topTargetBar then v = ns.Defaults.topTargetBar[key] end
+    return v
+  end
+  local function AGet(key)
+    local g = TA_GROUP[Sel()] or "buffs"
+    local db = ns.DB.targetAuras and ns.DB.targetAuras[g]
+    local v = db and db[key]
+    if v == nil then
+      local d = ns.Defaults.targetAuras and ns.Defaults.targetAuras[g]
+      v = d and d[key]
+    end
+    return v
+  end
+  local function XSet(set, key, v)
+    local t
+    if set == "ttb" then
+      ns.DB.topTargetBar = ns.DB.topTargetBar or {}
+      t = ns.DB.topTargetBar
+    else
+      local g = TA_GROUP[Sel()] or "buffs"
+      ns.DB.targetAuras = ns.DB.targetAuras or {}
+      ns.DB.targetAuras[g] = ns.DB.targetAuras[g] or {}
+      t = ns.DB.targetAuras[g]
+    end
+    t[key] = v
+    ExtraChanged()
+  end
+  local function XBind(set, w, key, kind)
+    xbound[#xbound + 1] = { set = set, w = w, key = key, kind = kind }
+    w.onChanged = function(v)
+      if kind == "number" then v = tonumber(v) or v end
+      XSet(set, key, v)
+    end
+    return w
+  end
+  local function TB(w, key, kind) return XBind("ttb", w, key, kind) end
+  local function TAB(w, key, kind) return XBind("ta", w, key, kind) end
+  -- Section d'un autre element : cle propre en mode disposition (libelles communs avec les sections des barres)
+  local function XHeader(labelKey, leKey)
+    ctx:Spacer(6)
+    local h = SW.CreateSectionHeader(container, L[labelKey], W)
+    h._leSecKey = leKey
+    ctx:Add(h)
+  end
+  local function XSub(text) ctx:Add(Subtitle(container, text, W)) end
+
+  -- Top Target -----------------------------------------------------------------------------------------------------
+  local ttbStart = #ctx.flow
+  XHeader("TTB_SEC_DISPLAY", "ttb.display")
+  Row(4,
+    TB(CB(L["SETTINGS_TTB_ELITE_DECO"], L["SETTINGS_TTB_ELITE_DECO_TT"], 4), "eliteDeco", "bool"),
+    TB(CB(L["SETTINGS_TTB_SHOW_POWER_BAR"], L["SETTINGS_TTB_SHOW_POWER_BAR_TT"], 4), "showPowerBar", "bool"),
+    TB(DD(L["SETTINGS_BAR_TEXTURE"], ns.GetBarTextureList(), 4), "barTexture", "string"), false)
+
+  XHeader("UNITBARS_SEC_POSITION", "ttb.position")
+  local slTtbX = SW.TrackDB(TB(SL(L["SETTINGS_OFFSET_X"], -400, 400, 1, 4), "x", "number"), function() return TGet("x") end)
+  local slTtbY = SW.TrackDB(TB(SL(L["SETTINGS_OFFSET_Y"], -400, 400, 1, 4), "y", "number"), function() return TGet("y") end)
+  Row(4, slTtbX, slTtbY, false, false)
+  XSub(L["SETTINGS_SEC_TTB_BLACK_BG"])
+  Row(4, TB(SL(L["SETTINGS_WIDTH"], 60, 700, 1, 4), "bgW", "number"), TB(SL(L["SETTINGS_HEIGHT"], 1, 60, 1, 4), "bgH", "number"),
+    TB(SL(L["SETTINGS_OFFSET_X"], -50, 50, 1, 4), "bgOX", "number"), TB(SL(L["SETTINGS_OFFSET_Y"], -50, 50, 1, 4), "bgOY", "number"))
+  XSub(L["SETTINGS_SEC_TTB_COLORED_BAR"])
+  Row(4, TB(SL(L["SETTINGS_WIDTH"], 60, 700, 1, 4), "barW", "number"), TB(SL(L["SETTINGS_HEIGHT"], 1, 20, 0.1, 4), "barH", "number"),
+    TB(SL(L["SETTINGS_OFFSET_X"], -50, 50, 1, 4), "barOX", "number"), TB(SL(L["SETTINGS_OFFSET_Y"], -50, 50, 1, 4), "barOY", "number"))
+
+  XHeader("UNITBARS_SEC_NAME", "ttb.name")
+  Row(4, TB(DD(L["SETTINGS_FONT"], ns.GetFontList(), 4), "nameFont", "string"),
+    TB(SL(L["SETTINGS_OFFSET_X"], -50, 50, 1, 4), "nameOX", "number"), TB(SL(L["SETTINGS_OFFSET_Y"], -50, 50, 1, 4), "nameOY", "number"), false)
+  -- Couleur de la difficulte, puis de la reaction (meme rendu que les barres, cf. TopTargetBar.ResolveUnitColor)
+  local ttbColorBlocks = {}
+  local function TTBColorBlock(title, tt, pre, colors)
+    ctx:Spacer(4)
+    ctx:Add(SubDivider(container, title, W))
+    local b = { cbs = {}, cols = {} }
+    for i, e in ipairs(COLOR_ELEMS) do
+      b.cbs[i] = TB(CB(e[2], tt, 5), pre .. e[1], "bool")
+      b.cbs[i]._colorKey = pre .. e[1]
+    end
+    Row(5, b.cbs[1], b.cbs[2], b.cbs[3], false, false)
+    local cells = {}
+    for i = 1, 5 do
+      local c = colors[i]
+      if c then b.cols[i] = TB(COL(c[2], 5), pre .. "Color" .. c[1], "color") end
+      cells[i] = b.cols[i] or false
+    end
+    Row(5, unpack(cells, 1, 5))
+    ttbColorBlocks[#ttbColorBlocks + 1] = b
+  end
+  TTBColorBlock(L["UNITBARS_SUB_DIFF_COLOR"], L["UNITBARS_SUB_DIFF_COLOR_TT"], "diff", {
+    { "Trivial", L["UNITBARS_DIFF_TRIVIAL"] }, { "Easy", L["UNITBARS_DIFF_EASY"] }, { "Normal", L["UNITBARS_DIFF_NORMAL"] },
+    { "Hard", L["UNITBARS_DIFF_HARD"] }, { "Skull", L["UNITBARS_DIFF_SKULL"] },
+  })
+  TTBColorBlock(L["UNITBARS_SUB_REACT_COLOR"], L["UNITBARS_SUB_REACT_COLOR_TT"], "react", {
+    { "Hostile", L["UNITBARS_COLOR_HOSTILE"] }, { "Neutral", L["UNITBARS_COLOR_NEUTRAL"] }, { "Friendly", L["UNITBARS_COLOR_FRIENDLY"] },
+  })
+  -- Une seule couleur par element : cocher Niveau / Nom / Barre dans une section le decoche dans l'autre
+  for i = 1, 3 do
+    local a, b = ttbColorBlocks[1].cbs[i], ttbColorBlocks[2].cbs[i]
+    for _, pair in ipairs({ { a, b }, { b, a } }) do
+      local cb, other = pair[1], pair[2]
+      local orig = cb.onChanged
+      cb.onChanged = function(v)
+        if v and TGet(other._colorKey) then
+          ns.DB.topTargetBar[other._colorKey] = false
+          other:SetChecked(false)
+        end
+        orig(v)
+      end
+    end
+  end
+
+  XHeader("SETTINGS_SEC_HP_TEXT", "ttb.hp")
+  Row(4, TB(DD(L["SETTINGS_FONT"], ns.GetFontList(), 4), "hpFont", "string"),
+    TB(SL(L["SETTINGS_FONT_SIZE"], 6, 28, 1, 4), "hpFontSize", "number"),
+    TB(AR(L["SETTINGS_ANCHOR_COLON"], {
+      { k = "LEFT",   l = L["SETTINGS_ALIGN_LEFT"] },
+      { k = "CENTER", l = L["SETTINGS_ANCHOR_MIDDLE"] },
+      { k = "RIGHT",  l = L["SETTINGS_ALIGN_RIGHT"] },
+    }, 4), "hpAnchor", "string"),
+    TB(AR(L["UNITBARS_HP_MODE"], {
+      { k = "value", l = L["UNITBARS_HP_MODE_VALUE"] },
+      { k = "pct",   l = L["UNITBARS_HP_MODE_PCT"] },
+    }, 4), "hpMode", "string"))
+  Row(4, TB(SL(L["SETTINGS_OFFSET_X"], -50, 50, 1, 4), "hpOX", "number"), TB(SL(L["SETTINGS_OFFSET_Y"], -50, 50, 1, 4), "hpOY", "number"), false, false)
+
+  -- Mode JcJ : comme les barres, sans le remplacement des points (absents ici)
+  XHeader("UNITBARS_SEC_PVP", "ttb.pvp")
+  local ttbPvpShow = TB(CB(L["UNITBARS_PVP_SHOW"], L["UNITBARS_PVP_SHOW_TT"], 4), "pvpShow", "bool")
+  local ttbPvpFaction = TB(CB(L["UNITBARS_PVP_FACTION"], L["UNITBARS_PVP_FACTION_TT"], 4), "pvpFaction", "bool")
+  local ttbPvpBtn = SW.CreateActionBtn(container, L["UNITBARS_PVP_PREVIEW"], Cols(4))
+  ttbPvpBtn._leId = "topTargetBar.pvpPreview"
+  local function TTBPvPLabel()
+    local m = ns.Modules.TopTargetBar
+    ttbPvpBtn._lbl:SetText((m and m.IsPvPPreview and m.IsPvPPreview()) and L["UNITBARS_PVP_PREVIEW_STOP"] or L["UNITBARS_PVP_PREVIEW"])
+  end
+  ttbPvpBtn:SetScript("OnClick", function()
+    local m = ns.Modules.TopTargetBar
+    if not (m and m.SetPvPPreview) then return end
+    m.SetPvPPreview(not m.IsPvPPreview())
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    TTBPvPLabel()
+    RefreshPreview()
+  end)
+  ttbPvpBtn:HookScript("OnShow", TTBPvPLabel)   -- apercu coupe a la fermeture du GUI
+  Row(4, ttbPvpShow, ttbPvpFaction, false, ttbPvpBtn)
+  local ttbPvpPlace = {
+    TB(DD(L["UNITBARS_ANCHOR"], AnchorOptions(), 4), "pvpAnchor", "string"),
+    TB(SL(L["SETTINGS_OFFSET_X"], -300, 300, 1, 4), "pvpX", "number"),
+    TB(SL(L["SETTINGS_OFFSET_Y"], -200, 200, 1, 4), "pvpY", "number"),
+  }
+  Row(4, ttbPvpPlace[1], ttbPvpPlace[2], ttbPvpPlace[3], false)
+  local ttbPvpBlocks = {}
+  local function TTBPvPBlock(pre, title, colorModes)
+    XSub(title)
+    local rowRot = TB(AR(L["SETTINGS_ROTATION"], {
+      { k = "0", l = "0" .. DEG }, { k = "90", l = "90" .. DEG }, { k = "180", l = "180" .. DEG }, { k = "270", l = "270" .. DEG },
+    }, 4), pre .. "Rotation", "string")
+    local slA = TB(SL(L["SETTINGS_OPACITY"], 0, 1, 0.05, 4), pre .. "Alpha", "number")
+    local rowColor = TB(AR(L["UNITBARS_COLOR"], colorModes, 4, 2), pre .. "ColorMode", "string")
+    local col = TB(COL(L["SETTINGS_SR_COLOR_CUSTOM"], 4), pre .. "Color", "color")
+    local slSize = TB(SL(L["SETTINGS_SIZE"], 4, 60, 1, 4), pre .. "Size", "number")
+    Row(4, rowRot, slA, false, false)
+    Row(4, rowColor, col, false)
+    Row(4, slSize, false, false, false)
+    ttbPvpBlocks[#ttbPvpBlocks + 1] = { pre = pre, ws = { rowRot, slA, rowColor, slSize }, col = col }
+  end
+  TTBPvPBlock("pvp", L["UNITBARS_PVP_SWORDS"], { THEMED, CUSTOM })
+  TTBPvPBlock("pvpF", L["UNITBARS_PVP_EMBLEMS"], { ORIGINAL, THEMED, CUSTOM })
+  ctx:HideIf(ttbStart, function() return Sel() ~= "topTarget" end)
+
+  -- Cible de la cible du Top Target (entree a part du selecteur)
+  local totStart = #ctx.flow
+  XHeader("UNITBARS_SEC_POSITION", "ttb.tot")
+  local slTotX = SW.TrackDB(TB(SL(L["SETTINGS_OFFSET_X"], -400, 400, 1, 4), "ttx", "number"), function() return TGet("ttx") end)
+  local slTotY = SW.TrackDB(TB(SL(L["SETTINGS_OFFSET_Y"], -400, 400, 1, 4), "tty", "number"), function() return TGet("tty") end)
+  Row(4, slTotX, slTotY, false, false)
+  XSub(L["SETTINGS_SEC_TTB_BLACK_BG"])
+  Row(4, TB(SL(L["SETTINGS_WIDTH"], 20, 300, 1, 4), "ttBgW", "number"), TB(SL(L["SETTINGS_HEIGHT"], 1, 60, 1, 4), "ttBgH", "number"),
+    TB(SL(L["SETTINGS_OFFSET_X"], -50, 50, 1, 4), "ttBgOX", "number"), TB(SL(L["SETTINGS_OFFSET_Y"], -50, 50, 1, 4), "ttBgOY", "number"))
+  XSub(L["SETTINGS_SEC_TTB_COLORED_BAR"])
+  Row(4, TB(SL(L["SETTINGS_WIDTH"], 20, 300, 1, 4), "ttBarW", "number"), TB(SL(L["SETTINGS_HEIGHT"], 1, 20, 0.1, 4), "ttBarH", "number"),
+    TB(SL(L["SETTINGS_OFFSET_X"], -50, 50, 1, 4), "ttBarOX", "number"), TB(SL(L["SETTINGS_OFFSET_Y"], -50, 50, 0.1, 4), "ttBarOY", "number"))
+  XSub(L["SETTINGS_SEC_TTB_NAME_TEXT"])
+  Row(4, TB(SL(L["SETTINGS_OFFSET_X"], -50, 50, 0.1, 4), "ttNameOX", "number"), TB(SL(L["SETTINGS_OFFSET_Y"], -50, 50, 0.1, 4), "ttNameOY", "number"), false, false)
+  ctx:HideIf(totStart, function() return Sel() ~= "topTargetTot" end)
+
+  -- Auras de la cible (buffs / debuffs : memes reglages, groupe selon la selection) ---------------------------------
+  local taStart = #ctx.flow
+  local halfScrW = math.ceil(UIParent:GetWidth() / 2)
+  local scrH = math.ceil(UIParent:GetHeight())
+  XHeader("UNITBARS_SEC_POSITION", "ta.position")
+  local slTaX = TAB(SL(L["SETTINGS_OFFSET_X"], -halfScrW, halfScrW, 1, 4), "offsetX", "number")
+  local slTaY = TAB(SL(L["SETTINGS_OFFSET_Y"], -scrH, 0, 1, 4), "offsetY", "number")
+  SW.TrackDB(slTaX, function() return AGet("offsetX") end)
+  SW.TrackDB(slTaY, function() return AGet("offsetY") end)
+  Row(4, TAB(SL(L["SETTINGS_TA_ICON_SIZE"], 14, 48, 1, 4), "iconSize", "number"), slTaX, slTaY, false)
+  Row(4, TAB(SL(L["SETTINGS_TA_MAX_PER_ROW"], 1, 40, 1, 4), "maxAuras", "number"),
+    TAB(SL(L["SETTINGS_SPACING"], 0, 10, 1, 4), "iconSpacing", "number"),
+    TAB(SL(L["SETTINGS_TA_NUM_ROWS"], 1, 5, 1, 4), "numRows", "number"),
+    TAB(SL(L["SETTINGS_TA_ROW_SPACING"], 0, 20, 1, 4), "rowSpacing", "number"))
+  -- Debuffs du joueur uniquement : debuffs seulement, invisible (et inerte) sur les buffs
+  local cbOnlyPlayer = TAB(CB(L["SETTINGS_TA_ONLY_PLAYER_DEBUFFS"], L["SETTINGS_TA_ONLY_PLAYER_DEBUFFS_TT"], 4), "onlyPlayer", "bool")
+  Row(4, TAB(AR(L["SETTINGS_TA_SEC_DIRECTION"], {
+      { k = "LEFT", l = L["SETTINGS_ALIGN_LEFT"] }, { k = "RIGHT", l = L["SETTINGS_ALIGN_RIGHT"] },
+    }, 4), "growDirection", "string"),
+    TAB(CB(L["SETTINGS_TA_GROW_UP"], L["SETTINGS_TA_GROW_UP_TT"], 4), "growUpward", "bool"),
+    cbOnlyPlayer, false)
+
+  XHeader("SETTINGS_TA_SEC_SORT", "ta.sort")
+  local sortOpts = {}
+  for _, m in ipairs({ { "playerFirst", "SETTINGS_SORT_PLAYER_FIRST" }, { "shortFirst", "SETTINGS_SORT_SHORT_FIRST" },
+                       { "longFirst", "SETTINGS_SORT_LONG_FIRST" }, { "alpha", "SETTINGS_SORT_ALPHA" },
+                       { "index", "SETTINGS_SORT_BLIZZARD_ORDER" } }) do
+    sortOpts[#sortOpts + 1] = { value = m[1], text = L[m[2]] }
+  end
+  Row(4, TAB(DD(L["SETTINGS_SORT"], sortOpts, 4), "sortMode", "string"),
+    TAB(CB(L["SETTINGS_TA_REVERSE_SORT"], L["SETTINGS_TA_REVERSE_SORT_TT"], 4), "reverseSort", "bool"), false, false)
+
+  XHeader("SETTINGS_TA_SEC_BORDER", "ta.border")
+  local taBorderWs = {
+    TAB(SL(L["SETTINGS_TA_BORDER_THICKNESS"], 0, 4, 1, 4), "borderSize", "number"),
+    TAB(COL(L["SETTINGS_BORDER_COLOR"], 4), "borderColor", "color"),
+  }
+  Row(4, TAB(CB(L["SETTINGS_SHOW_BORDER"], L["SETTINGS_TA_SHOW_BORDER_TT"], 4), "showBorder", "bool"), taBorderWs[1], taBorderWs[2], false)
+
+  XHeader("SETTINGS_TA_SEC_COOLDOWN_SWIPE", "ta.swipe")
+  local cbRevSwipe = TAB(CB(L["SETTINGS_TA_REVERSE_SWIPE"], L["SETTINGS_TA_REVERSE_SWIPE_TT"], 4), "reverseSwipe", "bool")
+  Row(4, TAB(CB(L["SETTINGS_TA_SHOW_SWIPE"], L["SETTINGS_TA_SHOW_SWIPE_TT"], 4), "showSwipe", "bool"), cbRevSwipe, false, false)
+
+  XHeader("SETTINGS_TA_SEC_DURATION_TEXT", "ta.duration")
+  Row(4, TAB(DD(L["SETTINGS_TA_DURATION_FONT"], ns.GetFontList(), 4), "durationFont", "string"),
+    TAB(SL(L["SETTINGS_TA_DURATION_SIZE"], 6, 18, 1, 4), "durationFontSize", "number"),
+    TAB(COL(L["SETTINGS_TA_DURATION_COLOR"], 4), "durationColor", "color"), false)
+  Row(4, TAB(DD(L["SETTINGS_TA_DURATION_ANCHOR"], AnchorOptions(), 4), "durationAnchor", "string"),
+    TAB(SL(L["SETTINGS_OFFSET_X"], -200, 200, 1, 4), "durationOffX", "number"),
+    TAB(SL(L["SETTINGS_OFFSET_Y"], -200, 200, 1, 4), "durationOffY", "number"), false)
+
+  XHeader("SETTINGS_TA_SEC_STACKS_TEXT", "ta.stacks")
+  Row(4, TAB(DD(L["SETTINGS_TA_STACKS_FONT"], ns.GetFontList(), 4), "countFont", "string"),
+    TAB(DD(L["SETTINGS_TEXT_OUTLINE"], ns.GetTextOutlineStyles(), 4), "countOutlineStyle", "string"),
+    TAB(SL(L["SETTINGS_TA_STACKS_SIZE"], 6, 18, 1, 4), "countFontSize", "number"),
+    TAB(COL(L["SETTINGS_TA_STACKS_COLOR"], 4), "countColor", "color"))
+  Row(4, TAB(DD(L["SETTINGS_TA_TEXT_ANCHOR"], AnchorOptions(), 4), "countAnchor", "string"),
+    TAB(DD(L["SETTINGS_TA_RELATIVE_POINT"], AnchorOptions(), 4), "countRelPoint", "string"),
+    TAB(SL(L["SETTINGS_OFFSET_X"], -200, 200, 1, 4), "countOffX", "number"),
+    TAB(SL(L["SETTINGS_OFFSET_Y"], -200, 200, 1, 4), "countOffY", "number"))
+  ctx:HideIf(taStart, function() return TA_GROUP[Sel()] == nil end)
+
+  -- Grisages des autres elements
+  RefreshExtraStates = function()
+    local off = title._moduleOff
+    if Sel() == "topTarget" then
+      local on, fac = TGet("pvpShow"), TGet("pvpFaction")
+      Gray(ttbPvpFaction, not on, off)
+      for _, w in ipairs(ttbPvpPlace) do Gray(w, not on, off) end
+      for _, b in ipairs(ttbPvpBlocks) do
+        local bOn = on and ((b.pre == "pvpF") == (fac and true or false))
+        for _, w in ipairs(b.ws) do Gray(w, not bOn, off) end
+        Gray(b.col, not bOn or TGet(b.pre .. "ColorMode") ~= "custom", off)
+      end
+      for _, b in ipairs(ttbColorBlocks) do
+        local any = false
+        for _, cb in ipairs(b.cbs) do if TGet(cb._colorKey) then any = true end end
+        for _, w in pairs(b.cols) do Gray(w, not any, off) end
+      end
+    elseif TA_GROUP[Sel()] then
+      local debuffs = TA_GROUP[Sel()] == "debuffs"
+      Gray(cbOnlyPlayer, not debuffs, true)
+      cbOnlyPlayer:SetAlpha(debuffs and (off and GRAY or 1) or 0)
+      for _, w in ipairs(taBorderWs) do Gray(w, AGet("showBorder") == false, off) end
+      Gray(cbRevSwipe, AGet("showSwipe") == false, off)
+    end
+  end
 
   ctx:Spacer()
   ctx:Finalize()
@@ -895,9 +1212,10 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
     local panel = ns.SettingsPanel
     if panel and panel.OpenSection then panel:OpenSection("unitBars", L[labelKey]:upper(), true) end
   end
-  local function NewZone(labelKey, level)
-    local z = CreateFrame("Button", nil, pf)
-    z:SetFrameLevel(pf:GetFrameLevel() + level)
+  local function NewZone(labelKey, level, parent)
+    parent = parent or pf
+    local z = CreateFrame("Button", nil, parent)
+    z:SetFrameLevel(parent:GetFrameLevel() + level)
     z:RegisterForClicks("RightButtonUp")
     local hl = z:CreateTexture(nil, "OVERLAY")
     hl:SetAllPoints()
@@ -993,7 +1311,72 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
   end)
   if pf then pf:SetFrameLevel(preview:GetFrameLevel() + 5) end
 
+  -- Apercus des autres elements : Top Target (et cible de la cible), rangee d'auras
+  local TTBm, TAm = ns.Modules.TopTargetBar, ns.Modules.TargetAuras
+  local ttbPf = TTBm and TTBm.CreatePreview and TTBm.CreatePreview(preview)
+  local taPf = TAm and TAm.CreatePreview and TAm.CreatePreview(preview)
+  if ttbPf then
+    ttbPf:SetFrameLevel(preview:GetFrameLevel() + 5)
+    local t = ttbPf.target
+    local tz = {}   -- zones de la barre de la cible (masquees sur l'apercu de la cible de la cible)
+    ttbPf._targetZones = tz
+    local z = NewZone("UNITBARS_SEC_POSITION", 20, ttbPf)
+    tz[#tz + 1] = z
+    z:SetPoint("TOPLEFT", t.bgFull, "TOPLEFT", -2, 2)
+    z:SetPoint("BOTTOMRIGHT", t.bgFull, "BOTTOMRIGHT", 2, -2)
+    z = NewZone("UNITBARS_SEC_NAME", 30, ttbPf)
+    tz[#tz + 1] = z
+    z:SetPoint("TOPLEFT", t.nameTxt, "TOPLEFT", -3, 2)
+    z:SetPoint("BOTTOMRIGHT", t.nameTxt, "BOTTOMRIGHT", 3, -2)
+    z = NewZone("SETTINGS_SEC_HP_TEXT", 30, ttbPf)
+    tz[#tz + 1] = z
+    z:SetPoint("TOPLEFT", t.hpTxt, "TOPLEFT", -3, 2)
+    z:SetPoint("BOTTOMRIGHT", t.hpTxt, "BOTTOMRIGHT", 3, -2)
+    z = NewZone("UNITBARS_SEC_PVP", 35, ttbPf)
+    z:SetPoint("TOPLEFT", t.pvp, "TOPLEFT", -2, 2)
+    z:SetPoint("BOTTOMRIGHT", t.pvp, "BOTTOMRIGHT", 2, -2)
+    ttbPf._pvpZone = z
+    z = NewZone("UNITBARS_SEC_POSITION", 30, ttbPf)
+    z:SetPoint("TOPLEFT", ttbPf.tot.bgTex, "TOPLEFT", -2, 2)
+    z:SetPoint("BOTTOMRIGHT", ttbPf.tot.bgTex, "BOTTOMRIGHT", 2, -2)
+    ttbPf._totZone = z
+  end
+  if taPf then
+    taPf:SetFrameLevel(preview:GetFrameLevel() + 5)
+    local z = NewZone("UNITBARS_SEC_POSITION", 30, taPf)
+    z:SetPoint("TOPLEFT", taPf.row, "TOPLEFT", -2, 2)
+    z:SetPoint("BOTTOMRIGHT", taPf.row, "BOTTOMRIGHT", 2, -2)
+  end
+  -- Mise a l'echelle : l'element le plus grand possible dans l'encart, sans depasser x2
+  local function FitPreview(f)
+    local pw = preview:GetWidth()
+    if not pw or pw < 50 then pw = W end
+    f:SetScale(math.max(0.2, math.min(PREVIEW_MAX_SCALE, (pw - 60) / math.max(1, f:GetWidth()),
+      (PREVIEW_H - 30) / math.max(1, f:GetHeight()))))
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", preview, "CENTER", 0, 0)
+  end
+
   RefreshPreview = function()
+    local sel = Sel()
+    if pf then pf:SetShown(not IsExtra(sel)) end
+    if ttbPf then ttbPf:SetShown(IsTTB(sel)) end
+    if taPf then taPf:SetShown(TA_GROUP[sel] ~= nil) end
+    lockBtn:SetShown(not IsExtra(sel))
+    if IsTTB(sel) then
+      if not ttbPf then return end
+      TTBm.StylePreview(ttbPf, sel == "topTargetTot" and "tot" or "target")
+      for _, z in ipairs(ttbPf._targetZones) do z:SetShown(sel == "topTarget") end
+      ttbPf._pvpZone:SetShown(sel == "topTarget" and ttbPf.target.pvp:IsShown())
+      ttbPf._totZone:SetShown(ttbPf.tot:IsShown())
+      FitPreview(ttbPf)
+      return
+    elseif TA_GROUP[sel] then
+      if not taPf then return end
+      TAm.StylePreview(taPf, TA_GROUP[sel])
+      FitPreview(taPf)
+      return
+    end
     local m = UB()
     if not (m and pf) then return end
     m.StylePreview(pf, Sel())
@@ -1039,6 +1422,7 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
   -- Etats dependants : grises selon d'autres reglages
   RefreshStates = function()
     local key, off = Sel(), title._moduleOff
+    if IsExtra(key) then return RefreshExtraStates() end
     local layout = BV("layout")
     local mirror = layout == "mirror"
     Gray(ddMirror, layout == "free", off)
@@ -1104,7 +1488,8 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
   -- Valeurs X / Y suivies apres un glisser-deposer de la barre a l'ecran (UnitBars, OnDragStop)
   local function RefreshPos()
     local m = UB()
-    if not m then return end
+    for k, t in pairs(prevToggles) do t:SetValue(DB()[k] ~= false) end
+    if not m or IsExtra(Sel()) then return end
     local x, y
     if BV("layout") == "parent" and m.IsLinked(Sel()) then
       x, y = BV("relX") or 0, BV("relY") or 0
@@ -1114,20 +1499,52 @@ function ns.BuildUnitBarsPage(container, W, NewLayout)
     slX:SetValue(math.floor(x + 0.5))
     slY:SetValue(math.floor(y + 0.5))
     lockBtn._lbl:SetText(GV("locked") and L["UNITBARS_UNLOCK"] or L["UNITBARS_LOCK"])
-    for k, t in pairs(prevToggles) do t:SetValue(DB()[k] ~= false) end
   end
 
+  local shownSet
   RefreshAll = function()
+    -- Jeu de sections de l'element selectionne (barres, Top Target, auras) : redisposition quand il change
+    local set = (Sel() == "topTarget" and "ttb") or (Sel() == "topTargetTot" and "tot") or (TA_GROUP[Sel()] and "ta") or "bars"
+    if set ~= shownSet and ctx._finalized then
+      shownSet = set
+      ctx:Relayout(false)
+    end
     local opts, mirrorOpts = {}, {}
     for _, k in ipairs(ORDER) do
       opts[#opts + 1] = { value = k, text = L[BAR_LABEL[k]] }
       if k ~= Sel() then mirrorOpts[#mirrorOpts + 1] = { value = k, text = L[BAR_LABEL[k]] } end
     end
+    opts[#opts + 1] = { separator = true }
+    for _, k in ipairs(EXTRA_ORDER) do opts[#opts + 1] = { value = k, text = L[EXTRA_LABEL[k]] } end
     barDD:SetOptions(opts)
     barDD:SetValue(Sel())
+    cbModule:SetChecked(GV("enabled") ~= false)   -- a pu changer depuis la page Modules
+    if IsExtra(Sel()) then
+      local root = IsTTB(Sel()) and "topTargetBar" or "targetAuras"
+      local onKey = Sel() == "topTargetTot" and "showTargetOfTarget" or "enabled"
+      toggle:SetValue(not (ns.DB[root] and ns.DB[root][onKey] == false))
+      for _, e in ipairs(xbound) do
+        if (e.set == "ttb") == IsTTB(Sel()) then
+          local v = e.set == "ttb" and TGet(e.key) or AGet(e.key)
+          if e.kind == "bool" then
+            -- Cases "vraies par defaut" (eliteDeco, showBorder, showSwipe, showTargetOfTarget) : nil = cochee
+            if v == nil then v = (e.key == "eliteDeco") end
+            if e.w.SetChecked then e.w:SetChecked(v and true or false) else e.w:SetValue(v and true or false) end
+          elseif e.kind == "color" then
+            if type(v) == "table" then e.w:SetColor(v[1], v[2], v[3], v[4]) end
+          elseif v ~= nil then
+            e.w:SetValue(v)
+          end
+        end
+      end
+      TTBPvPLabel()
+      for k, t in pairs(prevToggles) do t:SetValue(DB()[k] ~= false) end
+      RefreshStates()
+      RefreshPreview()
+      return
+    end
     ddMirror:SetOptions(mirrorOpts)
     toggle:SetValue(BV("enabled") ~= false)
-    cbModule:SetChecked(GV("enabled") ~= false)   -- a pu changer depuis la page Modules
     for _, e in ipairs(bound) do
       local v = BV(e.key)
       if e.kind == "bool" then

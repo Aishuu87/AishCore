@@ -757,6 +757,7 @@ local function CreateRowMover(row, group)
   m:EnableMouse(true)
   m:RegisterForDrag("LeftButton")
   m:Hide()
+  if ns.Nudge then ns.Nudge.Attach(m, row) end   -- fleches = deplacement au pixel
   m:SetScript("OnDragStart", function()
     if InCombatLockdown() then return end
     local panel = _G["AishCoreSettingsPanel"]
@@ -921,6 +922,39 @@ function TargetAuras.SetPreview(on)
     TargetAuras.UpdateVisibility()
     RefreshAuras()
   end
+end
+
+-- Apercu du GUI (page Barres de vie) : une rangee de fausses auras du groupe, meme rendu que l'apercu a l'ecran.
+-- Icones inertes a la souris (les zones de l'apercu recoivent le clic droit).
+local PREVIEW_FILL = 12   -- icones montrees au plus (modeles repetes)
+function TargetAuras.CreatePreview(parent)
+  local p = CreateFrame("Frame", nil, parent)
+  p.row = CreateFrame("Frame", nil, p)
+  p.row:SetPoint("CENTER")
+  p.pools = { buffs = {}, debuffs = {} }
+  return p
+end
+
+function TargetAuras.StylePreview(p, group)
+  local grp = GrpCfg(group)
+  local isDebuff = group == "debuffs"
+  local pool = p.pools[group]
+  local other = p.pools[isDebuff and "buffs" or "debuffs"]
+  for _, icon in ipairs(other) do icon:Hide() end
+  local perRow = math.max(1, grp.maxAuras or 16)
+  local count = math.min(perRow * (grp.numRows or 1), PREVIEW_FILL)
+  local base = MakePreviewAuras(isDebuff and PREVIEW_DEBUFF_TEMPLATES or PREVIEW_BUFF_TEMPLATES)
+  SortAuras(base, grp.sortMode, grp.reverseSort)
+  local n = #pool
+  EnsureIcons(pool, p.row, count, isDebuff and "TAPreviewDebuff" or "TAPreviewBuff")
+  for i = n + 1, #pool do pool[i]:EnableMouse(false) end
+  for i = 1, count do ApplyAuraToIcon(pool[i], base[(i - 1) % #base + 1], "player", isDebuff, grp) end
+  StyleIcons(pool, grp)
+  local size, spacing, rowSpace = grp.iconSize or 26, grp.iconSpacing or 2, grp.rowSpacing or 2
+  local cols, rows = math.min(count, perRow), math.ceil(count / perRow)
+  p.row:SetSize(math.max(1, cols * (size + spacing) - spacing), math.max(1, rows * (size + rowSpace) - rowSpace))
+  LayoutRow(pool, count, p.row, grp)
+  p:SetSize(p.row:GetWidth(), p.row:GetHeight())
 end
 
 -- Init

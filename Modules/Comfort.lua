@@ -660,71 +660,6 @@ local function ApplyHideErrors()
   if want then f:UnregisterEvent("UI_ERROR_MESSAGE") else f:RegisterEvent("UI_ERROR_MESSAGE") end
 end
 
--- Barre de totems Blizzard (MultiCastActionBarFrame, Forever seulement) : boutons securises, donc pas de SetParent en combat
--- (repris a la sortie). Jamais de SetAlpha / Show / Hide sur la barre elle-meme : le client marque alors ses boutons
--- (ForceTaint_Strong) et leurs temps de recharge (valeurs secretes) levent des erreurs. On change seulement son parent :
--- - masquee : un cadre cache, Blizzard peut continuer a faire ses Show() sans la reafficher ;
--- - mode survol : un cadre d'AishCore pose sur le parent d'origine (meme rectangle, meme echelle), dont on regle l'opacite.
-local totemHider = CreateFrame("Frame")
-totemHider:Hide()
-local totemFader
-local totemOrigParent, totemPending = nil, false
-local function ApplyTotemBar()
-  if not ns.IsForever then return end
-  local bar = _G.MultiCastActionBarFrame
-  if not bar then return end
-  if InCombatLockdown() then totemPending = true; return end
-  totemPending = false
-  local cfg = Cfg()
-  if not totemOrigParent then totemOrigParent = bar:GetParent() end
-  local want = totemOrigParent
-  if cfg.hideTotemBar then
-    want = totemHider
-  elseif cfg.totemBarHoverOnly and totemOrigParent then
-    if not totemFader then
-      totemFader = CreateFrame("Frame", nil, totemOrigParent)
-      totemFader:SetAllPoints(totemOrigParent)
-    end
-    want = totemFader
-  end
-  if want and bar:GetParent() ~= want then bar:SetParent(want) end
-  if want ~= totemFader and totemFader then totemFader:SetAlpha(1) end
-end
-
--- Mode survol : opacite du cadre parent (pas de la barre). Le menu de totems (MultiCastFlyoutFrame) garde la barre visible.
-local TOTEM_FADE_SPEED, TOTEM_TICK = 8, 0.02
-local totemAlpha       -- opacite courante, nil tant que le mode survol ne pilote pas la barre
-local totemAcc = 0
-local totemTicker = ns.IsForever and CreateFrame("Frame")
-if totemTicker then totemTicker:SetScript("OnUpdate", function(_, elapsed)
-  local bar = _G.MultiCastActionBarFrame
-  if not bar or not totemFader then return end
-  local cfg = Cfg()
-  if not cfg.totemBarHoverOnly or cfg.hideTotemBar or bar:GetParent() ~= totemFader then
-    if totemAlpha then
-      totemFader:SetAlpha(1)
-      totemAlpha = nil
-    end
-    return
-  end
-  totemAcc = totemAcc + elapsed
-  if totemAcc < TOTEM_TICK then return end
-  local dt = totemAcc
-  totemAcc = 0
-  local flyout = _G.MultiCastFlyoutFrame
-  local target = (bar:IsMouseOver() or (flyout and flyout:IsShown())) and 1 or (cfg.totemBarHoverAlpha or 0)
-  local cur = totemAlpha or 1
-  if math.abs(cur - target) > 0.002 then
-    cur = cur + (target - cur) * (1 - math.exp(-TOTEM_FADE_SPEED * dt))
-  else
-    cur = target
-  end
-  if cur ~= totemAlpha then
-    totemFader:SetAlpha(cur)
-    totemAlpha = cur
-  end
-end) end
-
 -- Panneau de gestion du raid Blizzard (CompactRaidFrameManager, bord gauche de l'ecran) : attenue a raidManagerAlpha,
 -- opacite pleine au survol (deplie compris : le cadre s'agrandit avec son contenu). SetAlpha n'est pas bloque en combat.
 local RM_FADE_SPEED, RM_TICK = 8, 0.02
@@ -895,6 +830,7 @@ local function EnsureTurnBox()
     RefreshTurnBox()
     if self:IsMouseOver() then self:GetScript("OnEnter")(self) end
   end)
+  if ns.Nudge then ns.Nudge.Attach(b) end   -- fleches = deplacement au pixel
   b:SetScript("OnDragStart", function(self) self:StartMoving() end)
   b:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
@@ -969,7 +905,6 @@ function Comfort.ApplySettings()
   lastQoL = qol
   MigrateFromProfile()
   ApplyHideErrors()
-  ApplyTotemBar()
   ApplyCtrlFocus()
   ApplyDoubleClickFish()
   ApplyTurnBox()
@@ -977,6 +912,7 @@ function Comfort.ApplySettings()
   if ns.Modules.MapQuests then ns.Modules.MapQuests.ApplySettings() end
   if ns.Modules.SpellRanks then ns.Modules.SpellRanks.ApplySettings() end
   if ns.Modules.CraftableReagents then ns.Modules.CraftableReagents.ApplySettings() end
+  if ns.Modules.ReagentSearch then ns.Modules.ReagentSearch.ApplySettings() end
   ApplyMinimapTracking()
   ApplyCVars()
   ApplySlashes()
@@ -1000,7 +936,6 @@ ev:SetScript("OnEvent", function(_, event)
   elseif event == "PLAYER_REGEN_DISABLED" then FishDisarm()   -- dernier instant avant le verrouillage
   elseif event == "PLAYER_REGEN_ENABLED" then
     if focusPending then ApplyCtrlFocus() end   -- liaison differee : posee a la sortie du combat
-    if totemPending then ApplyTotemBar() end
     if Cfg().doubleClickFish and not fishBtn then ApplyDoubleClickFish() end
   else Comfort.ApplySettings() end
 end)

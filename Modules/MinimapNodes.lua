@@ -9,6 +9,8 @@
 local addonName, ns = ...
 
 ns.Modules = ns.Modules or {}
+-- Module desactive (cf. MODULE_RULES, Core.lua) : rien n'est charge, ni accroche a l'infobulle
+if not ns.IsModuleAvailable("minimapNodes") then return end
 local MN = {}
 ns.Modules.MinimapNodes = MN
 
@@ -143,7 +145,7 @@ end
 
 -- Pistages actifs : nombre total, et genre du seul pistage actif s'il s'agit d'un Denicher
 -- Renvoie nil si le client ne dit rien (on cherche alors quand meme).
-local function Trackers()
+local function TrackersRaw()
   if not (C_Minimap and C_Minimap.GetNumTrackingTypes and C_Minimap.GetTrackingInfo) then return nil end
   local active, finders, only, sawSpell = 0, 0, nil, false
   for i = 1, C_Minimap.GetNumTrackingTypes() do
@@ -158,6 +160,20 @@ local function Trackers()
   end
   if not sawSpell then return nil end              -- le client ne donne pas les sorts de pistage : on cherche quand meme
   return active, finders, (active == 1 and finders == 1) and only or nil, (finders == 1) and only or nil
+end
+
+-- Memorise : GetTrackingInfo cree une table par pistage, et l'infobulle de la minimap la redemande a chaque image.
+-- Invalide par MINIMAP_UPDATE_TRACKING / PLAYER_ENTERING_WORLD (MN._trackDirty), et au plus tard apres 5 s.
+MN._trackDirty = true
+local trackMemo = {}
+local function Trackers()
+  local now = GetTime()
+  if MN._trackDirty or now > (trackMemo.t or 0) then
+    MN._trackDirty = false
+    trackMemo.t = now + 5
+    trackMemo[1], trackMemo[2], trackMemo[3], trackMemo[4] = TrackersRaw()
+  end
+  return trackMemo[1], trackMemo[2], trackMemo[3], trackMemo[4]
 end
 
 -- Position ---------------------------------------------------------------------------------------------
@@ -667,6 +683,7 @@ end
 
 function MN.ApplySettings()
   local cfg = Cfg()
+  MN._tipCache = nil
   if cfg.enabled == true and MN.Available() and not MN._dead then
     for _, f in ipairs(pool) do f._styled = nil end
     if Minimap.SetIconScale then Minimap:SetIconScale((cfg.dotScale or 100) / 100) end
@@ -688,6 +705,8 @@ ev:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 ev:RegisterEvent("MINIMAP_UPDATE_TRACKING")
 ev:RegisterEvent("MINIMAP_UPDATE_ZOOM")
 ev:SetScript("OnEvent", function(_, event)
+  MN._tipCache = nil
+  if event ~= "GET_ITEM_INFO_RECEIVED" and event ~= "MINIMAP_UPDATE_ZOOM" then MN._trackDirty = true end
   if event == "GET_ITEM_INFO_RECEIVED" then
     if indexMissing then BuildIndex() end
   elseif event == "PLAYER_ENTERING_WORLD" then
@@ -739,6 +758,11 @@ local function DecorateTooltip(tt)
     local fs = _G[base .. "TextLeft" .. i]
     local text = fs and fs:GetText()
     if text and not IsSecret(text) and decorated[fs] ~= text then
+      -- Texte deja analyse (l'infobulle de la minimap est reecrite a chaque image) : resultat repris tel quel
+      local cache = MN._tipCache
+      if not cache or cache.n > 300 then cache = { n = 0 }; MN._tipCache = cache end
+      local hit = cache[text]
+      if hit == nil then
       local out, any = {}, false
       for piece in (text .. "\n"):gmatch("(.-)\n") do
         local c = Clean(piece)
@@ -755,10 +779,13 @@ local function DecorateTooltip(tt)
           out[#out + 1] = piece
         end
       end
-      if any then
-        local new = table.concat(out, "\n")
-        fs:SetText(new)
-        decorated[fs] = new
+      hit = any and table.concat(out, "\n") or false
+      cache[text] = hit
+      cache.n = cache.n + 1
+      end
+      if hit then
+        fs:SetText(hit)
+        decorated[fs] = hit
         changed = true
       end
     end

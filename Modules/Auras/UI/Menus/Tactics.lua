@@ -321,7 +321,7 @@ local function CreateSpellRow(par,sid,info,y,W,onChg,rebuildFn)
     -- Mode admin : reserve la place des 2 controles ajoutes (reclassification
     -- + suppression, cf. plus bas) en reduisant la largeur dispo pour le nom.
     local nm = row:CreateFontString(nil,"OVERLAY"); ns.ApplyFont(nm,FONT,11)
-    nm:SetPoint("LEFT",rx,0); nm:SetPoint("RIGHT",row,"RIGHT",adminMode and -345 or -205,0)
+    nm:SetPoint("LEFT",rx,0); nm:SetPoint("RIGHT",row,"RIGHT",adminMode and -367 or -227,0)
     nm:SetJustifyH("LEFT"); nm:SetWordWrap(false)
     nm:SetTextColor(unpack(Theme.textNormal))
     -- Toutes les variantes du buff dans la meme parenthese : l'utilisateur voit d'un coup d'oeil que
@@ -489,6 +489,16 @@ local function CreateSpellRow(par,sid,info,y,W,onChg,rebuildFn)
             end)
             btn:SetScript("OnLeave",function() Ref(); GameTooltip:Hide() end)
             prevAnchor = btn
+        end
+    end
+
+    -- Logo fx a gauche des badges : ouvre le combo de cette aura dans Animations 3D (allume s'il en a un)
+    do
+        local MSW0 = _addon.SharedWidgets
+        if MSW0 and MSW0.CreateFxButton then
+            local fx = MSW0.CreateFxButton(row, 16, "auras", sid)
+            fx:SetPoint("RIGHT", prevAnchor, "LEFT", -6, 0)
+            prevAnchor = fx
         end
     end
 

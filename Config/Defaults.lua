@@ -80,6 +80,45 @@ local function UnitBarDefaults(o)
   return t
 end
 
+-- Barres d'action (Modules/ActionBars.lua) : reglages communs a toutes les barres, `o` = surcharges de la barre
+local function ActionBarDefaults(o)
+  local F = ns.FONT_FALLBACK
+  local t = {
+    enabled = true, count = 12, perRow = 12, width = 36, height = 36, spacingX = 2, spacingY = 2,
+    growH = "RIGHT", growV = "DOWN", x = 0, y = 0,
+    -- visibilite : mode "normal" / "discreet" / "advanced" (regles cumulables, cf. ActionBars RuleShow)
+    visMode = "normal",
+    visAlways = true, visHover = false, visCombat = false, visFriendly = false, visAttackable = false, visGroup = false,
+    visInstance = false, visInjured = false, hideMounted = false, hideResting = false,
+    hideVehicle = true, hideSkyriding = false, showEmpty = false,
+    -- opacite : alpha quand montree, mouseoverAlpha quand cachee (Normal / Discret ; Avance : barres "Au survol")
+    alpha = 1, mouseoverAlpha = 0,
+    -- boutons
+    shape = "square", iconZoom = true, borderSize = 1, borderColor = { 0, 0, 0, 1 }, borderThemed = false,
+    slotColor = { 0, 0, 0, 0.5 }, hoverColor = { 1, 1, 1, 0.25 }, pushedColor = { 1, 0.82, 0, 0.35 },
+    checkedColor = { 1, 1, 1, 0.35 },
+    cdNumbers = true, cdFont = F, cdSize = 14, cdOutline = "OUTLINE", cdColor = { 1, 1, 1, 1 }, swipeAlpha = 0.8,
+    hkShow = true, hkShort = true, hkFont = F, hkSize = 11, hkOutline = "OUTLINE", hkColor = { 1, 1, 1, 1 },
+    hkAnchor = "TOPRIGHT", hkX = -1, hkY = -2,
+    ctShow = true, ctFont = F, ctSize = 12, ctOutline = "OUTLINE", ctColor = { 1, 1, 1, 1 },
+    ctAnchor = "BOTTOMRIGHT", ctX = -1, ctY = 2,
+    nmShow = false, nmFont = F, nmSize = 10, nmOutline = "OUTLINE", nmColor = { 1, 1, 1, 1 },
+    nmAnchor = "BOTTOM", nmX = 0, nmY = 2,
+    -- fond de barre (textures du Compartiment d'addons)
+    bgTexture = "none", bgColor = { 0, 0, 0, 0.6 }, bgPadX = 6, bgPadY = 6, bgEdge = 16,
+    bgBorderSize = 0, bgBorderColor = { 0, 0, 0, 1 }, bgAlpha = 0.6,
+    -- surbrillance des procs (glow d'AishCore a la taille de l'icone) : "auto" = style Blizzard du client, "none"
+    glowStyle = "auto", glowColor = { 1, 1, 1, 1 }, glowThemed = false, procStart = "auto",
+    -- couleurs thematiques des textes ("Texte de puissance" du module Couleurs)
+    cdThemed = false, hkThemed = false, ctThemed = false, nmThemed = false,
+    -- orientation des textures (forme des boutons, fond) variee d'un bouton / d'une barre a l'autre
+    texVariation = false,
+  }
+  for k, v in pairs(o or {}) do t[k] = v end
+  return t
+end
+ns.ActionBarCommon = ActionBarDefaults()
+
 ns.Defaults = {
   -- Cercle de ressource (mana)
   resourceCircle = {
@@ -597,6 +636,8 @@ ns.Defaults = {
     swapAlpha = 0.6, swapHoverAlpha = 1, swapDelay = 3,
     -- Canne lancee : ambiance et musique a duckLevel % de leur volume, remontee en fondu (duckFade s) a l'arret
     duckEnabled = false, duckLevel = 30, duckFade = 4,
+    -- Canne lancee : son actif jeu en arriere-plan (CVar rendue a l'arret)
+    bgSoundEnabled = false,
     -- Raccourci lancer / relever : touche au format des liaisons ("F", "SHIFT-BUTTON4"...), nil = aucune
     castKeyEnabled = false,
   },
@@ -898,6 +939,7 @@ ns.Defaults = {
   castBar = {
     enabled       = true,
     hideBlizzard  = true,    -- masque la barre d'incantation Blizzard du joueur
+    craftTotal    = true,    -- liste de crafts : le timer affiche le temps total de la liste
     locked        = false,
     width         = 260,
     height        = 3,
@@ -1176,6 +1218,27 @@ ns.Defaults = {
     tipCrop = true,       -- bordure de l'icone rognee
   },
 
+  -- Barres d'action, cf. Modules/ActionBars.lua et docs/ACTION_BARS.md. Desactive par defaut : l'activer reprend les
+  -- barres Blizzard (positions relevees a la premiere activation).
+  actionBars = {
+    enabled = false, locked = true,
+    fadeTime = 0.25, hoverDelay = 0.3, hoverPad = 4,
+    rangeTint = true, rangeColor = { 0.9, 0.2, 0.2, 1 }, rangeThemed = false,
+    bars = {
+      bar1 = ActionBarDefaults({ y = -330 }),
+      bar2 = ActionBarDefaults({ y = -292 }),
+      bar3 = ActionBarDefaults({ y = -254 }),
+      bar4 = ActionBarDefaults({ x = 640, perRow = 1 }),
+      bar5 = ActionBarDefaults({ x = 602, perRow = 1 }),
+      bar6 = ActionBarDefaults({ enabled = false, y = -216 }),
+      bar7 = ActionBarDefaults({ enabled = false, y = -178 }),
+      bar8 = ActionBarDefaults({ enabled = false, y = -140 }),
+      pet = ActionBarDefaults({ count = 10, perRow = 10, width = 30, height = 30, x = -170, y = -222 }),
+      stance = ActionBarDefaults({ count = 10, perRow = 10, width = 30, height = 30, x = 170, y = -222 }),
+      totem = ActionBarDefaults({ count = 6, perRow = 6, width = 30, height = 30, y = -184 }),
+    },
+  },
+
   -- Barre de menu, cf. Modules/MenuBar.lua. Les listes de raccourcis (left / right) n'ont volontairement pas de defaut ici :
   -- MergeDefaults ressusciterait les cases retirees (defauts dans MenuBar.DEFAULT_SLOTS).
   menuBar = {
@@ -1188,6 +1251,8 @@ ns.Defaults = {
     bgEnabled = true, bgTexture = "soft", bgColor = { 0, 0, 0, 0.6 }, bgPadX = 12, bgPadY = 8,
     bgEdge = 16, bgBorderSize = 0, bgBorderColor = { 0, 0, 0, 1 },
     hideInCombat = false, alpha = 1, mouseover = false, mouseoverAlpha = 0,
+    -- sacs de Blizzard : "always" / "never" / "hover" ; bagsAlpha, bagsMouseoverAlpha (hors survol)
+    bagsVis = "always", bagsAlpha = 1, bagsMouseoverAlpha = 0,
     clockEnabled = true, clockPos = "center", clock24 = true, clockBlink = true, clockServer = false,
     clockFont = "Fonts\\2002.TTF", clockOutline = "OUTLINE", clockSize = 22, clockColor = { 0.95, 0.78, 0.4, 1 }, clockThemed = true,
   },
@@ -1297,11 +1362,9 @@ ns.Defaults = {
     mapQuestsTurnIn = false,  -- carte du monde : quetes a rendre sur toutes les cartes (Modules/MapQuests.lua)
     mapQuestsProgress = false, -- ... et quetes en cours
     spellIDModifier = "NONE", -- touche requise : NONE / ALT / SHIFT / CTRL
-    hideTotemBar   = false,   -- barre de totems Blizzard masquee
-    totemBarHoverOnly = false, -- ... ou affichee seulement au survol
-    totemBarHoverAlpha = 0,   -- opacite hors survol
     spellRanks     = true,    -- grimoire (Forever) : nouveau rang a poser sur les barres (Modules/SpellRanks.lua)
     craftableReagents = true, -- fenetre de metier : ingredients fabricables marques (Modules/CraftableReagents.lua)
+    reagentSearch  = true,    -- sacs : clic droit sur un ingredient -> metier ouvert sur sa recherche (Modules/ReagentSearch.lua)
   },
 
   -- Barre de cible détaillée (haut d'écran) + cible de la cible

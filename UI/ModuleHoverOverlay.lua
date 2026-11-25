@@ -1,6 +1,6 @@
 -- UI/ModuleHoverOverlay.lua
 -- Survol GUI -> lien direct vers la section de reglages : survoler un module a l'ecran affiche un
--- highlight avec une roue crantee, cliquer (ou clic droit sur le highlight) saute vers sa section.
+-- highlight (lueur, nom, aide "Clic droit : Regler") ; clic droit sur le highlight : saut vers sa section.
 local addonName, ns = ...
 local L = ns.L
 
@@ -31,10 +31,11 @@ local STATIC_ENTRIES = {
   { category = "castBars", mod = "focusCastBar",  name = "SETTINGS_CAT_FOCUS_CAST",
     onGo = function() ns._castBarsSelected = "focus" end, getFrame = function() return G("AishCoreFocusCastBar") end },
   { category = "rotationHelper", getFrame = function() return G("AishCoreRotationHelperBar") end },
-  -- TopTargetBar : roue en bas-droite (le haut-droit tombe hors d'atteinte pres du haut d'ecran).
-  -- 2 entrees (barre cible + barre "cible de la cible", frame separee) sous la meme categorie.
-  { category = "topTargetBar",   gearAnchor = "BOTTOMRIGHT", getFrame = function() return G("AishCoreTopTarget") end },
-  { category = "topTargetBar",   gearAnchor = "BOTTOMRIGHT", mod = "topTargetBar_tot", getFrame = function() return G("AishCoreTopTargetTarget") end },
+  -- TopTargetBar : 2 entrees (barre cible + barre "cible de la cible", frame separee), page Barres de vie
+  { category = "unitBars", mod = "topTargetBar", name = "SETTINGS_CAT_TOP_TARGET",
+    onGo = function() ns._unitBarsSelected = "topTarget" end, getFrame = function() return G("AishCoreTopTarget") end },
+  { category = "unitBars", mod = "topTargetBar_tot", name = "TTB_TOT_LABEL",
+    onGo = function() ns._unitBarsSelected = "topTargetTot" end, getFrame = function() return G("AishCoreTopTargetTarget") end },
   -- XPBar : hoverFrame (zone autour du badge de niveau), pas le container qui reste alpha 0
   -- tant qu'on ne survole pas justement hoverFrame.
   { category = "xpBar", getFrame = function()
@@ -50,13 +51,13 @@ local STATIC_ENTRIES = {
     end },
   -- TargetAuras : buffRow et debuffRow sont positionnees independamment (offsetX/offsetY), donc
   -- potentiellement hors du rectangle englobant : 2 entrees distinctes via GetHoverRows().
-  { category = "targetAuras", name = "SETTINGS_BUFFS", taGroup = "buffs", getFrame = function()
+  { category = "unitBars", mod = "targetAuras", name = "UNITBARS_TARGET_BUFFS", taGroup = "taBuffs", getFrame = function()
       local TA = ns.Modules and ns.Modules.TargetAuras
       if not (TA and TA.GetHoverRows) then return nil end
       local buffRow = TA.GetHoverRows()
       return buffRow
     end },
-  { category = "targetAuras", name = "SETTINGS_DEBUFFS", taGroup = "debuffs", getFrame = function()
+  { category = "unitBars", mod = "targetAuras", name = "UNITBARS_TARGET_DEBUFFS", taGroup = "taDebuffs", getFrame = function()
       local TA = ns.Modules and ns.Modules.TargetAuras
       if not (TA and TA.GetHoverRows) then return nil end
       local _, debuffRow = TA.GetHoverRows()
@@ -83,20 +84,11 @@ local STATIC_ENTRIES = {
     end },
 }
 
--- Auras de la cible : ouvrir la section du groupe clique (buffs ou debuffs), l'autre repliee, et y defiler
+-- Auras de la cible : page Barres de vie, groupe survole selectionne
 for _, e in ipairs(STATIC_ENTRIES) do
   if e.taGroup then
-    local grp = e.taGroup
-    e.onGo = function()
-      local db = ns.DB and ns.DB.targetAuras
-      if db then
-        db.uiCollapsed = db.uiCollapsed or {}
-        db.uiCollapsed.buffs = (grp ~= "buffs")
-        db.uiCollapsed.debuffs = (grp ~= "debuffs")
-      end
-      if ns.InvalidateSettingsPage then ns.InvalidateSettingsPage("targetAuras") end
-    end
-    e.scrollTo = function() return ns.GetTargetAurasSettingsHeader and ns.GetTargetAurasSettingsHeader(grp) end
+    local sel = e.taGroup
+    e.onGo = function() ns._unitBarsSelected = sel end
   end
 end
 
@@ -154,6 +146,24 @@ for i = 1, 5 do
   }
 end
 
+-- Barres d'action : une entree par barre ; onGo selectionne cette barre dans la page avant d'y sauter
+do
+  local AB = ns.Modules and ns.Modules.ActionBars
+  for _, def in ipairs(AB and AB.BARS or {}) do
+    local key = def.key
+    STATIC_ENTRIES[#STATIC_ENTRIES + 1] = {
+      category = "actionBars", name = "ACTIONBARS_BAR_" .. key:upper(),
+      -- Barre masquee par ses regles comprise (comme les autres modules) ; barre desactivee exclue
+      getFrame = function()
+        local m = ns.Modules and ns.Modules.ActionBars
+        if not (m and m.IsEnabled() and m.IsAdopted() and m.BV(key, "enabled") ~= false) then return nil end
+        return m.GetFrame(key)
+      end,
+      onGo = function() ns._actionBarsSelected = key end,
+    }
+  end
+end
+
 -- Auras render frames (4 mises en page distinctes) : registre live cote
 -- Modules/Auras (ns.Auras.renderFrames, alimente par ns.RegisterRender dans
 -- chaque fichier de render -- cf. Modules/Auras/Core/Init.lua).
@@ -206,17 +216,56 @@ local function BuildEntries()
   return list
 end
 
--- WIDGETS : un seul highlight + une seule roue crantee, repositionnes sur la frame survolee.
-local highlight, gearBtn
+-- WIDGETS : un seul highlight (lueur + nom + aide "Clic droit"), repositionne sur la frame survolee.
+local highlight
 local hoveredFrame, hoveredCategory, hoveredEntry
-local HL_PAD   = 6
-local ICON_TC  = 0.08
+local HL_PAD   = 0   -- collé a l'element : la lueur part de la bordure de la hitbox (cf. BoxFor)
+local LVL_TEXT = 40   -- niveau des textes (nom, aide), au-dessus de toutes les lueurs
 
--- Coin d'ancrage de la roue : "TOPRIGHT" par defaut, override via e.gearAnchor pour rester atteignable.
-local GEAR_ANCHORS = {
-  TOPRIGHT    = { point = "TOPRIGHT",    dx = 3, dy = 3  },
-  BOTTOMRIGHT = { point = "BOTTOMRIGHT", dx = 3, dy = -3 },
-}
+-- Couleur "Lueur" des Couleurs Thematiques (spe active), repli sur l'or
+local function GlowRGB()
+  local C = ns.Modules and ns.Modules.Colors
+  local c = C and C.Get and C.Get("glow")
+  if c and c[1] then return c[1], c[2], c[3] end
+  return 1, 0.82, 0.3
+end
+
+-- Nom des hitbox : "texte de puissance" des Couleurs Thematiques ; couleurs de base : bleu des hitbox eclairci
+-- (meme condition que ns.HitboxColor)
+local function NameRGB()
+  local C = ns.Modules and ns.Modules.Colors
+  if C and C.Get and ns.DB and ns.DB.colors and not ns.DB.colors.useClassDefaults then
+    local c = C.Get("powertext")
+    if c and c[1] then return c[1], c[2], c[3] end
+  end
+  local r, g, b = ns.HitboxColor()
+  return r + (1 - r) * 0.5, g + (1 - g) * 0.5, b + (1 - b) * 0.5
+end
+
+-- Lueur exterieure autour de `anchor` : backdrop dont la bordure est GlowTex.tga (technique ElvUI, cf. survol des
+-- barres d'unites), propre dans les coins. Rien n'est lu de la taille du cadre (souvent secrete pour les conteneurs
+-- d'auras) : tout est accroche a ses bords. glow:SetGlowColor(r, g, b) la recolore.
+local GLOW_TEX = "Interface\\AddOns\\AishCore\\Media\\UI\\GlowTex.tga"
+local function BuildGlow(parent, anchor, G, A)
+  local glow = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+  glow:SetPoint("TOPLEFT", anchor, "TOPLEFT", -G, G)
+  glow:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", G, -G)
+  glow:SetBackdrop({ edgeFile = GLOW_TEX, edgeSize = G })
+  function glow:SetGlowColor(r, g, b)
+    if self._r == r and self._g == g and self._b == b then return end
+    self._r, self._g, self._b = r, g, b
+    self:SetBackdropBorderColor(r, g, b, A)
+  end
+  return glow
+end
+
+-- Texte a contour SLUG (police 2002 par defaut, cf. ns.FONT_FALLBACK)
+local function SlugText(parent, size)
+  local fs = parent:CreateFontString(nil, "OVERLAY")
+  local ring = ns.CreateSlugRing(parent, fs, "ARTWORK")
+  ns.ApplyTextOutlineStyle(fs, ring, ns.FONT_FALLBACK, size, "SLUG")
+  return fs
+end
 
 -- Nom affiche d'une entree : son nom propre, sinon celui de sa section, sinon celui de sa page.
 local function EntryName(e)
@@ -226,7 +275,7 @@ local function EntryName(e)
   return (ns.SettingsCategoryLabel and ns.SettingsCategoryLabel(e.category)) or e.category or ""
 end
 
--- Saut vers la section de reglages du module survole (page ouverte, section depliee), roue et clic droit.
+-- Saut vers la section de reglages du module survole (page ouverte, section depliee), clic droit.
 local function GoToSettings()
   if not hoveredCategory then return end
   -- Pre-selection propre a l'entree (ex. quelle Extra Barre), avant d'ouvrir la page
@@ -243,13 +292,14 @@ local function GoToSettings()
   if hoveredCategory == "extraBars" and ns.ExtraBarsPageRefresh then ns.ExtraBarsPageRefresh() end
   if hoveredCategory == "unitBars" and ns.UnitBarsPageRefresh then ns.UnitBarsPageRefresh() end
   if hoveredCategory == "castBars" and ns.CastBarsPageRefresh then ns.CastBarsPageRefresh() end
+  if hoveredCategory == "actionBars" and ns.ActionBarsPageRefresh then ns.ActionBarsPageRefresh() end
   if hoveredCategory == "outOfCombat" and ns.OOCPageRefresh then ns.OOCPageRefresh() end
 end
 
 local function EnsureWidgets()
   if highlight then return end
 
-  -- "Button" (pas "Frame") pour capter le clic droit sur tout le highlight, cible plus large que la roue.
+  -- "Button" (pas "Frame") pour capter le clic droit sur tout le highlight.
   highlight = CreateFrame("Button", "AishCoreModuleHoverHighlight", UIParent, "BackdropTemplate")
   highlight:SetFrameStrata("TOOLTIP")
   highlight:EnableMouse(true)
@@ -262,71 +312,70 @@ local function EnsureWidgets()
   highlight:SetScript("OnMouseDown", function(self, button)
     self:SetPropagateMouseClicks(button == "LeftButton")
   end)
-  highlight:SetBackdrop({
-    bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 12,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 },
-  })
-  highlight:SetBackdropColor(0.2, 0.6, 1, 0.16)
-  highlight:SetBackdropBorderColor(0.35, 0.75, 1, 0.9)
-  -- Nom de l'element, en petit, au-dessus du coin haut-gauche (a l'exterieur du cadre)
-  highlight.nameText = highlight:CreateFontString(nil, "OVERLAY")
-  highlight.nameText:SetFont(ns.Media.font, 9, "OUTLINE")
-  highlight.nameText:SetPoint("BOTTOMLEFT", highlight, "TOPLEFT", 2, 1)
-  highlight.nameText:SetTextColor(0.55, 0.85, 1, 1)
+  highlight:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+  -- Niveaux : fond (1) < lueur (2) < cadres de la page Modules (10) < textes (LVL_TEXT). La lueur, additive, ne doit
+  -- jamais passer sur un texte : elle eclaircirait l'anneau noir du contour SLUG.
+  highlight:SetFrameLevel(1)
+  -- Lueur "Lueur" (Couleurs Thematiques) autour de l'element survole
+  highlight._glow = BuildGlow(highlight, highlight, 6, 0.9)
+  highlight._glow:SetFrameLevel(2)
+  -- Nom de l'element, au-dessus du coin haut-gauche (a l'exterieur du cadre). Sur la page Modules, le cadre de
+  -- chaque element porte deja son nom (cf. BoxFor) : celui-ci est alors masque.
+  local txt = CreateFrame("Frame", nil, highlight)
+  txt:SetAllPoints(highlight)
+  txt:SetFrameLevel(LVL_TEXT)
+  highlight.nameText = SlugText(txt, 10)
+  highlight.nameText:SetPoint("BOTTOMLEFT", highlight, "TOPLEFT", 2, 2)
+  -- Aide "Clic droit : Regler" au centre de l'element (sous lui s'il est trop petit), en fondu a chaque survol
+  -- (cadre propre : l'anneau SLUG suit l'alpha)
+  local hint = CreateFrame("Frame", nil, highlight)
+  hint:SetAllPoints(highlight)
+  hint:SetFrameLevel(LVL_TEXT)
+  hint.text = SlugText(hint, 8)
+  hint.text:SetText(L["MODULEHOVER_HINT"])
+  hint.text:SetTextColor(0.9, 0.9, 0.9, 1)
+  local ag = hint:CreateAnimationGroup()
+  local fade = ag:CreateAnimation("Alpha")
+  fade:SetFromAlpha(0); fade:SetToAlpha(0.85); fade:SetDuration(0.35); fade:SetSmoothing("OUT")
+  ag:SetToFinalAlpha(true)
+  highlight._hint, highlight._hintAG = hint, ag
   highlight:Hide()
-
-  gearBtn = CreateFrame("Button", "AishCoreModuleHoverGearButton", highlight)
-  gearBtn:SetSize(22, 22)
-  -- Point initial, repositionne par ShowHighlight selon e.gearAnchor a chaque survol.
-  gearBtn:SetPoint("TOPRIGHT", highlight, "TOPRIGHT", 3, 3)
-  gearBtn:SetFrameStrata("TOOLTIP")
-  gearBtn:SetFrameLevel(highlight:GetFrameLevel() + 5)
-
-  local gBg = gearBtn:CreateTexture(nil, "BACKGROUND")
-  gBg:SetAllPoints(); gBg:SetColorTexture(0.06, 0.06, 0.08, 0.95)
-  local gBorder = gearBtn:CreateTexture(nil, "BORDER")
-  gBorder:SetPoint("TOPLEFT", -1, 1); gBorder:SetPoint("BOTTOMRIGHT", 1, -1)
-  gBorder:SetColorTexture(0.35, 0.75, 1, 0.9)
-  highlight._gBorder = gBorder
-  local gIcon = gearBtn:CreateTexture(nil, "ARTWORK")
-  gIcon:SetPoint("TOPLEFT", 3, -3); gIcon:SetPoint("BOTTOMRIGHT", -3, 3)
-  gIcon:SetTexture("Interface\\Icons\\Trade_Engineering")
-  gIcon:SetTexCoord(ICON_TC, 1 - ICON_TC, ICON_TC, 1 - ICON_TC)
-
-  gearBtn:SetScript("OnEnter", function(self)
-    gIcon:SetVertexColor(1, 1, 0.6)
-    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:SetText(L["MODULEHOVER_GEAR_TOOLTIP"], 1, 1, 1)
-    GameTooltip:Show()
-  end)
-  gearBtn:SetScript("OnLeave", function()
-    gIcon:SetVertexColor(1, 1, 1)
-    GameTooltip:Hide()
-  end)
-  gearBtn:SetScript("OnClick", GoToSettings)
 end
 
-local function ShowHighlight(frame, category, gearAnchor)
+local function ShowHighlight(frame, category, onModulesPage)
   EnsureWidgets()
   hoveredFrame    = frame
   hoveredCategory = category
   highlight.nameText:SetText(EntryName(hoveredEntry))
-  -- Couleur des hitbox : "cercle de puissance" des Couleurs Thematiques, sinon le bleu d'origine (ns.HitboxColor)
+  highlight.nameText:SetShown(not onModulesPage)
+  -- Fond noir a 50 % (masque l'element, l'aide "Clic droit" reste lisible) ; nom : couleur des hitbox
+  -- (ns.HitboxColor) ; liseré et lueur : "Lueur" des Couleurs Thematiques
   local r, g, b = ns.HitboxColor()
-  highlight:SetBackdropColor(r, g, b, 0.16)
-  highlight:SetBackdropBorderColor(r, g, b, 0.9)
-  highlight._gBorder:SetColorTexture(r, g, b, 0.9)
-  highlight.nameText:SetTextColor(r + (1 - r) * 0.35, g + (1 - g) * 0.35, b + (1 - b) * 0.35, 1)   -- un ton plus clair
+  local gr, gg, gb = GlowRGB()
+  highlight:SetBackdropColor(0, 0, 0, 0.5)
+  highlight:SetBackdropBorderColor(r, g, b, 1)
+  highlight._glow:SetGlowColor(gr, gg, gb)
+  highlight.nameText:SetTextColor(NameRGB())
   highlight:ClearAllPoints()
   highlight:SetPoint("TOPLEFT", frame, "TOPLEFT", -HL_PAD, HL_PAD)
   highlight:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", HL_PAD, -HL_PAD)
   highlight:Show()
-
-  local a = GEAR_ANCHORS[gearAnchor] or GEAR_ANCHORS.TOPRIGHT
-  gearBtn:ClearAllPoints()
-  gearBtn:SetPoint(a.point, highlight, a.point, a.dx, a.dy)
+  -- Au centre si le cadre a la place (taille lisible : celle des conteneurs d'auras peut etre secrete), sinon dessous
+  local hintText = highlight._hint.text
+  local inside = false
+  pcall(function()
+    local w, h = frame:GetSize()
+    inside = w >= hintText:GetStringWidth() + 12 and h >= hintText:GetStringHeight() + 8
+  end)
+  hintText:ClearAllPoints()
+  if inside then
+    hintText:SetPoint("CENTER", frame, "CENTER", 0, 0)
+  else
+    hintText:SetPoint("TOP", highlight, "BOTTOM", 0, -3)
+  end
+  highlight._hint:SetAlpha(0)
+  highlight._hintAG:Stop()
+  highlight._hintAG:Play()
 end
 
 local function HideHighlight()
@@ -338,7 +387,7 @@ end
 -- IsVisible() ne regarde QUE la chaine Show/Hide -- il reste vrai a alpha 0. Or la plupart des modules
 -- de cet addon se masquent par SetAlpha(0) et jamais par Hide() (seul moyen sur pour une frame securisee
 -- en combat, cf. PriorityBar.SafeHideContainers). Un module desactive gardait donc sa hitbox de survol :
--- highlight et roue crantee apparaissaient sur du vide. On exige donc aussi une opacite effective.
+-- le highlight apparaissait sur du vide. On exige donc aussi une opacite effective.
 -- Seuil bas (pas > 0) : plusieurs modules ont un fondu hors combat legitime a 0.3/0.4, il ne faut pas
 -- les rendre insurvolables. A l'inverse un module desactive est exactement a 0.
 local MIN_HOVER_ALPHA = 0.05
@@ -366,41 +415,18 @@ local function BoxFor(i)
   b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
   b:SetBackdropColor(0.2, 0.6, 1, 0.05)
   b:SetBackdropBorderColor(0.35, 0.75, 1, 0.55)
+  b:SetFrameLevel(10)
 
-  -- Lueur exterieure (module survole dans la liste) : 4 bandes en degrade sur la LONGUEUR des bords, plus 4 coins
-  -- en quart de disque doux (Circle_Smooth2), qui se raccordent sans se chevaucher. Rien n'est lu de la taille du
-  -- cadre (souvent secrete pour les conteneurs d'auras) : tout est accroche a ses bords. Pulsation douce.
-  local G, R, Gc, B, A = 10, 1, 0.82, 0.3, 0.55
-  local glow = CreateFrame("Frame", nil, b)
-  glow:SetAllPoints(b)
-  local function Strip(p1, rel1, x1, y1, p2, rel2, x2, y2, orient, inner, outer)
-    local t = glow:CreateTexture(nil, "BACKGROUND")
-    t:SetPoint(p1, b, rel1, x1, y1)
-    t:SetPoint(p2, b, rel2, x2, y2)
-    t:SetColorTexture(1, 1, 1, 1)
-    t:SetBlendMode("ADD")
-    -- SetGradient : 1re couleur = bas / gauche, 2e = haut / droite
-    t:SetGradient(orient, CreateColor(R, Gc, B, inner), CreateColor(R, Gc, B, outer))
-  end
-  Strip("BOTTOMLEFT", "TOPLEFT", 0, 0, "TOPRIGHT", "TOPRIGHT", 0, G, "VERTICAL", A, 0)          -- haut
-  Strip("TOPLEFT", "BOTTOMLEFT", 0, 0, "BOTTOMRIGHT", "BOTTOMRIGHT", 0, -G, "VERTICAL", 0, A)    -- bas
-  Strip("TOPRIGHT", "TOPLEFT", 0, 0, "BOTTOMLEFT", "BOTTOMLEFT", -G, 0, "HORIZONTAL", 0, A)      -- gauche
-  Strip("TOPLEFT", "TOPRIGHT", 0, 0, "BOTTOMRIGHT", "BOTTOMRIGHT", G, 0, "HORIZONTAL", A, 0)     -- droite
-  -- Coins : quart du disque doux dont le centre (le plus lumineux) tombe sur le coin du cadre
-  local DISC = "Interface\\AddOns\\AishCore\\Media\\Wheel\\Circle_Smooth2.tga"
-  local function Corner(point, dx, dy, l, r, t, bo)
-    local c = glow:CreateTexture(nil, "BACKGROUND")
-    c:SetSize(G, G)
-    c:SetPoint(point, b, point, dx, dy)
-    c:SetTexture(DISC)
-    c:SetTexCoord(l, r, t, bo)
-    c:SetBlendMode("ADD")
-    c:SetVertexColor(R, Gc, B, A)
-  end
-  Corner("TOPLEFT",     -G,  G, 0,   0.5, 0,   0.5)
-  Corner("TOPRIGHT",     G,  G, 0.5, 1,   0,   0.5)
-  Corner("BOTTOMLEFT",  -G, -G, 0,   0.5, 0.5, 1)
-  Corner("BOTTOMRIGHT",  G, -G, 0.5, 1,   0.5, 1)
+  -- Nom de l'element, toujours affiche au-dessus du coin haut-gauche (au-dessus des lueurs, cf. LVL_TEXT)
+  local txt = CreateFrame("Frame", nil, b)
+  txt:SetAllPoints(b)
+  txt:SetFrameLevel(LVL_TEXT + 1)
+  b._name = SlugText(txt, 10)
+  b._name:SetPoint("BOTTOMLEFT", b, "TOPLEFT", 1, 2)
+
+  -- Lueur "Lueur" (module survole dans la liste de la page), pulsation douce
+  local glow = BuildGlow(b, b, 6, 0.8)
+  glow:SetFrameLevel(11)
   local ag = glow:CreateAnimationGroup()
   ag:SetLooping("BOUNCE")
   local fade = ag:CreateAnimation("Alpha")
@@ -427,22 +453,24 @@ local function EntryMatches(e, id)
   return false
 end
 
+-- Cadre "cercle de puissance", nom "texte de puissance", lueur (module mis en avant depuis la liste) "Lueur".
+-- Reappliques seulement si une couleur change (spe, reglage).
 local function StyleBox(b, lit)
-  if lit then
-    if b._lit == true then return end
-    b._lit, b._cr = true, nil
-    b:SetBackdropColor(1, 0.85, 0.3, 0.22)
-    b:SetBackdropBorderColor(1, 0.85, 0.3, 1)
-    b._glow:Show(); b._glowAG:Play()
-    return
-  end
-  -- Etat normal : couleur des hitbox (Couleurs Thematiques, sinon bleu), reappliquee si elle change (spe, reglage)
   local r, g, bl = ns.HitboxColor()
-  if b._lit == false and b._cr == r and b._cg == g and b._cb == bl then return end
-  if b._lit then b._glowAG:Stop(); b._glow:Hide() end
-  b._lit, b._cr, b._cg, b._cb = false, r, g, bl
-  b:SetBackdropColor(r, g, bl, 0.05)
-  b:SetBackdropBorderColor(r, g, bl, 0.55)
+  local tr, tg, tb = NameRGB()
+  local key = string.format("%s|%.3f%.3f%.3f|%.3f%.3f%.3f", tostring(lit), r, g, bl, tr, tg, tb)
+  if b._styleKey == key then return end
+  b._styleKey = key
+  b:SetBackdropColor(r, g, bl, lit and 0.15 or 0.05)
+  b:SetBackdropBorderColor(r, g, bl, lit and 1 or 0.55)
+  b._name:SetTextColor(tr, tg, tb, 1)
+  if lit and not b._lit then
+    b._glow:SetGlowColor(GlowRGB())
+    b._glow:Show(); b._glowAG:Play()
+  elseif not lit and b._lit then
+    b._glowAG:Stop(); b._glow:Hide()
+  end
+  b._lit = lit and true or false
 end
 
 local function HideBoxes()
@@ -458,8 +486,10 @@ local function ModuleOn(e)
 end
 
 -- Renvoie l'entree survolee (cadre le plus petit) parmi tous les elements, visibles ou non (modules coupes exclus).
-local function UpdateBoxes()
-  local best, bestArea, bestE
+-- Opacite : 30 % au repos, 100 % pour la hitbox survolee (ou mise en avant depuis la liste de la page).
+local BOX_IDLE_ALPHA = 0.3
+local function UpdateBoxes(overPanel)
+  local best, bestArea, bestE, bestBox
   local n = 0
   for _, e in ipairs(BuildEntries()) do
     local ok, frame = pcall(e.getFrame)
@@ -471,16 +501,22 @@ local function UpdateBoxes()
         b:ClearAllPoints()
         pcall(b.SetAllPoints, b, frame)
       end
+      local nm = EntryName(e)
+      if b._nameStr ~= nm then b._nameStr = nm; b._name:SetText(nm) end
       b:Show()
       StyleBox(b, EntryMatches(e, focusMod))
-      if b:IsMouseOver() then
+      if not overPanel and b:IsMouseOver() then
         local okS, w, h = pcall(b.GetSize, b)
         local area = (okS and type(w) == "number" and type(h) == "number") and (w * h) or math.huge
-        if not best or area < bestArea then best, bestArea, bestE = frame, area, e end
+        if not best or area < bestArea then best, bestArea, bestE, bestBox = frame, area, e, b end
       end
     end
   end
   for i = n + 1, #boxes do boxes[i]:Hide(); boxes[i]._target = nil end
+  for i = 1, n do
+    local b = boxes[i]
+    b:SetAlpha((b == bestBox or b._lit) and 1 or BOX_IDLE_ALPHA)
+  end
   return best, bestE
 end
 
@@ -498,19 +534,13 @@ local function Tick()
   end
   local modulesPage = ModulesPageActive()
   local boxBest, boxBestE
-  if modulesPage then boxBest, boxBestE = UpdateBoxes() else HideBoxes() end
+  if modulesPage then boxBest, boxBestE = UpdateBoxes(ns.IsFrameMouseOver(panel)) else HideBoxes() end
   -- Ne pas "survoler" un module a travers le panneau d'options lui-meme :
   -- le curseur est au-dessus de la fenetre GUI, pas du jeu en dessous.
   if ns.IsFrameMouseOver(panel) then
     HideHighlight()
     return
   end
-  -- La roue est un enfant du highlight : la survoler (pour cliquer dessus)
-  -- ne doit jamais faire disparaitre le highlight en cours.
-  if gearBtn and ns.IsFrameMouseOver(gearBtn) then
-    return
-  end
-
   -- Quand 2 frames survolables se chevauchent, on garde celle avec la plus petite aire :
   -- la plus specifique/imbriquee gagne, conforme a l'intuition visuelle.
   local best, bestArea, bestE
@@ -533,7 +563,7 @@ local function Tick()
   if best then
     if hoveredFrame ~= best then
       hoveredEntry = bestE
-      ShowHighlight(best, bestE.category, bestE.gearAnchor)
+      ShowHighlight(best, bestE.category, modulesPage)
     end
   else
     HideHighlight()

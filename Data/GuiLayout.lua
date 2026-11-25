@@ -414,36 +414,6 @@ ns.GUI_LAYOUT = {
       ["slider:$SETTINGS_SR_ORB_START_ANGLE"] = { frFR = "Angle de départ", enUS = "Start angle" },
     } },
   },
-  topTargetBar = {
-    ["SETTINGS_SEC_TOT_BLACK_BG"] = { cols = 5, rows = {
-      { [1] = "slider:$SETTINGS_AFK_ELEMENT_WIDTH#3", [2] = "slider:$SETTINGS_AFK_ELEMENT_HEIGHT#3", [3] = "slider:$SETTINGS_OFFSET_X#7", [4] = "slider:$SETTINGS_OFFSET_Y#7" },
-    } },
-    ["SETTINGS_SEC_TOT_COLORED_BAR"] = { cols = 5, rows = {
-      { [1] = "slider:$SETTINGS_AFK_ELEMENT_WIDTH#4", [2] = "slider:$SETTINGS_AFK_ELEMENT_HEIGHT#4", [3] = "slider:$SETTINGS_OFFSET_X#8", [4] = "slider:$SETTINGS_OFFSET_Y#8" },
-    } },
-    ["SETTINGS_SEC_TOT_CONTAINER"] = { cols = 5, rows = {
-      { [1] = "slider:$SETTINGS_OFFSET_X#6", [2] = "slider:$SETTINGS_OFFSET_Y#6" },
-    } },
-    ["SETTINGS_SEC_TOT_NAME_TEXT"] = { cols = 5, rows = {
-      { [1] = "slider:$SETTINGS_OFFSET_X#9", [2] = "slider:$SETTINGS_OFFSET_Y#9" },
-    } },
-    ["SETTINGS_SEC_TTB_BLACK_BG"] = { cols = 5, rows = {
-      { [1] = "slider:$SETTINGS_AFK_ELEMENT_WIDTH", [2] = "slider:$SETTINGS_AFK_ELEMENT_HEIGHT", [3] = "slider:$SETTINGS_OFFSET_X#2", [4] = "slider:$SETTINGS_OFFSET_Y#2" },
-    } },
-    ["SETTINGS_SEC_TTB_COLORED_BAR"] = { cols = 5, rows = {
-      { [1] = "slider:$SETTINGS_AFK_ELEMENT_WIDTH#2", [2] = "slider:$SETTINGS_AFK_ELEMENT_HEIGHT#2", [3] = "slider:$SETTINGS_OFFSET_X#3", [4] = "slider:$SETTINGS_OFFSET_Y#3", [5] = "topTargetBar.barTexture" },
-    } },
-    ["SETTINGS_SEC_TTB_CONTAINER"] = { cols = 5, rows = {
-      { [1] = "slider:$SETTINGS_OFFSET_X", [2] = "slider:$SETTINGS_OFFSET_Y" },
-    } },
-    ["SETTINGS_SEC_TTB_HP_TEXT"] = { cols = 5, rows = {
-      { [1] = "topTargetBar.hpFont", [2] = "slider:$SETTINGS_OFFSET_X#5", [3] = "slider:$SETTINGS_OFFSET_Y#5" },
-      { [1] = "slider:$SETTINGS_FONT_SIZE", [2] = "align:?" },
-    } },
-    ["SETTINGS_SEC_TTB_NAME_TEXT"] = { cols = 5, rows = {
-      { [1] = "topTargetBar.nameFont", [2] = "slider:$SETTINGS_OFFSET_X#4", [3] = "slider:$SETTINGS_OFFSET_Y#4" },
-    } },
-  },
   wellFed = {
     ["SETTINGS_SEC_SIZE_POSITION"] = { cols = 4, rows = {
       { [1] = "wellFedCircle.locked" },
