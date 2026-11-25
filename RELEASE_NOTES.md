@@ -1,5 +1,11 @@
 # AishCore
 
+## [v4.8.1](https://github.com/Aishuu87/AishCore/tree/v4.8.1) (2026-11-25)
+
+### Action Bars
+- FIX: Some textures were larger than the icon itself (trinket activation, highlight while assigning keybindings, new spell, etc.)
+- FIX: Some texts could stay white even with the Themed Colors option enabled
+
 ## [v4.8.0](https://github.com/Aishuu87/AishCore/tree/v4.8.0) (2026-11-25)
 
 ### General

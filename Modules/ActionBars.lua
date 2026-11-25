@@ -340,7 +340,54 @@ local function Parts(b)
     autoCastable = b.AutoCastable or G("AutoCastable"),
     autoShine = b.AutoCastShine or G("Shine") or G("AutoCastShine"),
     flash = b.Flash or G("Flash"),   -- clignotement rouge (attaque automatique, familier qui attaque)
+    -- Calques de taille fixe (atlas prevus pour un bouton Blizzard) : bordure verte d'objet equipe, nouveau sort,
+    -- sort mis en evidence, cadenas
+    border = b.Border or G("Border"),
+    overlays = { b.NewActionTexture, b.SpellHighlightTexture, b.QuickKeybindHighlightTexture },
+    lockIcon = b.LevelLinkLockIcon,
+    -- Effets (Retail) : cadres de 128 px dont les textures ont la taille de l'atlas, prevus pour un bouton de 45 px
+    fxFrames = { b.SpellCastAnimFrame, b.InterruptDisplay, b.TargetReticleAnimFrame },
+    cdFlash = b.CooldownFlash,
   }
+end
+
+-- Calques et effets de Blizzard recales sur l'icone (sinon a la taille d'un bouton Blizzard, ancres au coin)
+local FX_BASE = 45
+local function FitOverlays(b, P, ref, iw, ih)
+  local bd = P.border
+  if bd and bd.ClearAllPoints then
+    bd:ClearAllPoints()
+    if ns.IsForever then
+      -- Forever : UI-ActionButton-Border, 62 px (halo compris) pour 36 px de bouton
+      bd:SetPoint("CENTER", ref, "CENTER", 0, 0)
+      bd:SetSize(iw * 62 / 36, ih * 62 / 36)
+    else
+      bd:SetAllPoints(ref)
+    end
+  end
+  for _, t in pairs(P.overlays) do
+    if t and t.ClearAllPoints then t:ClearAllPoints(); t:SetAllPoints(ref) end
+  end
+  if P.lockIcon and P.lockIcon.ClearAllPoints then
+    P.lockIcon:ClearAllPoints()
+    P.lockIcon:SetPoint("CENTER", ref, "CENTER", 0, 0)
+  end
+  -- Cadres enfants d'un bouton protege : hors combat seulement (rattrape a la mise en page suivante)
+  if InCombatLockdown() then return end
+  local sc = math.max(0.1, math.min(iw, ih) / FX_BASE)
+  for _, f in pairs(P.fxFrames) do
+    if f and f.SetScale then
+      f:SetScale(sc)
+      f:ClearAllPoints()
+      f:SetPoint("CENTER", ref, "CENTER", 0, 0)
+      if f ~= b.InterruptDisplay then f:SetSize(128, 128) else f:SetSize(FX_BASE, FX_BASE) end
+    end
+  end
+  local cf = P.cdFlash
+  if cf and cf.ClearAllPoints then
+    cf:ClearAllPoints()
+    cf:SetAllPoints(ref)
+  end
 end
 
 -- Autocast : tailles d'origine prevues pour un bouton Blizzard de 30 px, recalees sur l'icone du bouton.
@@ -410,6 +457,7 @@ local function StyleText(s, fs, ringKey, get, pre, w, key)
   ns.ApplyTextOutlineStyle(fs, ring, get(pre .. "Font") or DEFAULT_FONT, get(pre .. "Size") or 12, style, true)
   -- Texte de l'anneau apres sa police (SetText sans police : "Font not set")
   if ring and not ring._texted then ring._texted = true; ns.SetSlugRingText(ring, fs:GetText()) end
+  if fs.SetVertexColor then fs:SetVertexColor(1, 1, 1, 1) end   -- teinte de Blizzard (portee) neutralisee
   fs:SetTextColor(ThemedOr(key, pre .. "Themed", pre .. "Color", "powertext"))
   local pt = get(pre .. "Anchor") or "CENTER"
   fs:ClearAllPoints()
@@ -577,6 +625,7 @@ function AB.StyleButton(b, key, w, h)
   s.glow:SetAllPoints(icon or b)
   s.iw, s.ih = math.max(1, w - 2 * bs), math.max(1, h - 2 * bs)
   if P.autoOverlay or P.autoCastable or P.autoShine then FitAutoCast(P, icon or b, s.iw, s.ih) end
+  FitOverlays(b, P, icon or b, s.iw, s.ih)
   local fl = P.flash
   if fl and fl.SetAllPoints then
     fl:ClearAllPoints()
@@ -641,6 +690,12 @@ end
 local function OnRange(b, checksRange, inRange)
   local s = skins[b]
   if not (s and owner[b]) then return end
+  -- Blizzard teinte le raccourci (blanc / rouge) selon la portee : couleur de la barre reappliquee
+  local hk = s.p.hotkey
+  if hk then
+    hk:SetVertexColor(1, 1, 1, 1)
+    hk:SetTextColor(ThemedOr(owner[b], "hkThemed", "hkColor", "powertext"))
+  end
   if IsSecret(checksRange) or IsSecret(inRange) then return end
   s.oor = (checksRange and inRange == false) and true or false
   ApplyTint(b)

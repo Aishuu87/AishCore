@@ -8,6 +8,14 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.8.1", date = "2026-11-25",
+    lines = {
+      { k = "h", link = { page = "actionBars" }, t = "Action Bars", fr = "Barres d’actions" },
+      { k = "li", lvl = 1, link = { page = "actionBars" }, t = "FIX: Some textures were larger than the icon itself (trinket activation, highlight while assigning keybindings, new spell, etc.)", fr = "FIX : Certaines textures étaient plus larges que l’icone elle-même (activation de trinket, illumination lors de l’assignation de raccourcis, nouveau sort, etc)" },
+      { k = "li", lvl = 1, link = { page = "actionBars" }, t = "FIX: Some texts could stay white even with the Themed Colors option enabled", fr = "FIX : Certains textes pouvaient rester en blanc même si l’option Couleurs Thématiques était activée" },
+    },
+  },
+  {
     version = "4.8", date = "2026-11-25",
     lines = {
       { k = "h", t = "General", fr = "Général" },
