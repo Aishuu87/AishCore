@@ -253,32 +253,14 @@ local function WeaponInSlot(slot)
 end
 
 -- Etat de l'enchantement temporaire d'une arme : renvoie has (true/false, nil = illisible) et le temps
--- restant en ms (ou nil). Forever : une arme porte a la fois une imprégnation (poisons, imprégnations de chaman :
--- Enum.ItemEnchantType.Imbue) et un enchantement temporaire (pierres, huiles : Temporary). GetWeaponEnchantInfo n'en
--- renvoie qu'un (l'imprégnation en priorite) ; C_Item.GetWeaponEnchantInfo les liste tous, tries ici par type :
--- temp = true -> pierres / huiles, sinon imprégnations / poisons. Retail : GetWeaponEnchantInfo.
+-- restant en ms (ou nil). Forever : une arme porte a la fois un poison / une imprégnation et une pierre / huile.
+-- GetWeaponEnchantInfo ne voit que la pierre / huile ; C_Item.GetWeaponEnchantInfo liste tout (permanents exclus ici).
+-- temp = true -> pierre / huile, sinon poison / imprégnation. Tri par Enum.ItemEnchantType.Imbue quand la liste le
+-- porte, sinon la pierre (vue par GetWeaponEnchantInfo) est retiree de la liste. Retail : GetWeaponEnchantInfo.
+local WeaponEnchantState
+do
 local ENCHANT_PERMANENT = (Enum and Enum.ItemEnchantType and Enum.ItemEnchantType.Permanent) or 1
-local function WeaponEnchantState(hand, temp)
-    local ENCHANT_IMBUE = Enum and Enum.ItemEnchantType and Enum.ItemEnchantType.Imbue
-    if _addon.IsForever and C_Item and C_Item.GetWeaponEnchantInfo and Enum and Enum.WeaponSlot and ENCHANT_IMBUE then
-        local ws = hand == "off" and Enum.WeaponSlot.OffHand or Enum.WeaponSlot.MainHand
-        local ok, list = pcall(C_Item.GetWeaponEnchantInfo, ws)
-        if not ok or IsSecret(list) then return nil end
-        if type(list) == "table" then
-            local has, exp = false, nil
-            for _, e in ipairs(list) do
-                if type(e) == "table" then
-                    local h, kind, t = e.hasEnchant, e.enchantType, e.timeLeft
-                    if IsSecret(h) or IsSecret(kind) then return nil end
-                    if h and kind ~= ENCHANT_PERMANENT and (kind == ENCHANT_IMBUE) ~= (temp == true) then
-                        has = true
-                        if type(t) == "number" and not IsSecret(t) and t > 0 then exp = math.max(exp or 0, t) end
-                    end
-                end
-            end
-            return has, exp
-        end
-    end
+local function LegacyEnchantState(hand)
     if not GetWeaponEnchantInfo then return nil end
     local ok, hasMain, mainExp, _, _, hasOff, offExp = pcall(GetWeaponEnchantInfo)
     if not ok then return nil end
@@ -287,6 +269,54 @@ local function WeaponEnchantState(hand, temp)
     if IsSecret(has) then return nil end
     if type(exp) ~= "number" or IsSecret(exp) then exp = nil end
     return has == true, exp
+end
+function WeaponEnchantState(hand, temp)
+    if _addon.IsForever and C_Item and C_Item.GetWeaponEnchantInfo and Enum and Enum.WeaponSlot then
+        local ENCHANT_IMBUE = Enum.ItemEnchantType and Enum.ItemEnchantType.Imbue
+        local ws = hand == "off" and Enum.WeaponSlot.OffHand or Enum.WeaponSlot.MainHand
+        local ok, list = pcall(C_Item.GetWeaponEnchantInfo, ws)
+        if not ok or IsSecret(list) then return nil end
+        if type(list) == "table" then
+            local entries, typed = {}, false
+            for _, e in ipairs(list) do
+                if type(e) == "table" then
+                    local h, kind, t = e.hasEnchant, e.enchantType, e.timeLeft
+                    if IsSecret(h) or IsSecret(kind) then return nil end
+                    if h and kind ~= ENCHANT_PERMANENT then
+                        local imbue = ENCHANT_IMBUE ~= nil and kind == ENCHANT_IMBUE
+                        if imbue then typed = true end
+                        entries[#entries + 1] = { imbue = imbue, t = (type(t) == "number" and not IsSecret(t) and t > 0) and t or 0 }
+                    end
+                end
+            end
+            if not typed then
+                -- Pas de type Imbue dans la liste : la pierre / huile est celle que voit GetWeaponEnchantInfo
+                if temp then return LegacyEnchantState(hand) end
+                local gh, ge = LegacyEnchantState(hand)
+                if gh == nil then return nil end
+                if gh and #entries > 0 then
+                    ge = ge or 0
+                    local best
+                    for i, e in ipairs(entries) do
+                        if not best or math.abs(e.t - ge) < math.abs(entries[best].t - ge) then best = i end
+                    end
+                    table.remove(entries, best)
+                end
+            end
+            local has, exp = false, nil
+            for _, e in ipairs(entries) do
+                if typed and e.imbue == (temp == true) then
+                    -- autre categorie : ignoree
+                else
+                    has = true
+                    if e.t > 0 then exp = math.max(exp or 0, e.t) end
+                end
+            end
+            return has, exp
+        end
+    end
+    return LegacyEnchantState(hand)
+end
 end
 
 -- Apprentissage
@@ -2609,6 +2639,7 @@ do
         poisonCache[itemID] = c
         return c
     end
+    Poisons.IsItem = IsPoisonItem
 
     -- Poisons des sacs : objets distincts (tries) et quantite totale
     Poisons.Bag = Memo(function()
@@ -2734,7 +2765,8 @@ local function WeaponStoneChoices()
             local id = C_Container.GetContainerItemID(bag, s)
             if id and not seen[id] then
                 seen[id] = true
-                if EB.IsWeaponEnhancementItem(id) then
+                -- Poisons (Forever) : rappel a part, jamais proposes comme pierre / huile
+                if EB.IsWeaponEnhancementItem(id) and not (Poisons.IsItem and Poisons.IsItem(id)) then
                     -- Pierre d'un autre type que l'arme (aiguiser sur une masse, lester sur une epee) : ignoree
                     local stone = StoneKind(id)
                     if not (stone and weapon and stone ~= weapon) then items[#items + 1] = id end
@@ -4201,6 +4233,51 @@ if _addon.IsForever then
             local to, teo = WeaponEnchantState("off", true)
             print(P .. string.format("pierre / huile (C_Item) : main=%s (%s ms) off=%s (%s ms)",
                 tostring(tm), tostring(tem), tostring(to), tostring(teo)))
+            -- Brut : types d'enchantement du client et liste de chaque arme
+            local et = Enum and Enum.ItemEnchantType
+            if et then
+                local parts = {}
+                for k, v in pairs(et) do parts[#parts + 1] = tostring(k) .. "=" .. tostring(v) end
+                print(P .. "Enum.ItemEnchantType : " .. table.concat(parts, ", "))
+            else
+                print(P .. "Enum.ItemEnchantType : ABSENT")
+            end
+            print(P .. "Enum.WeaponSlot : " .. tostring(Enum and Enum.WeaponSlot ~= nil))
+            if C_Item and C_Item.GetWeaponEnchantInfo and Enum and Enum.WeaponSlot then
+                for _, hand in ipairs({ "MainHand", "OffHand" }) do
+                    local ok, list = pcall(C_Item.GetWeaponEnchantInfo, Enum.WeaponSlot[hand])
+                    print(P .. hand .. " : ok=" .. tostring(ok) .. " type=" .. type(list))
+                    if ok and type(list) == "table" then
+                        for i, e in pairs(list) do
+                            local fields = {}
+                            if type(e) == "table" then
+                                for k, v in pairs(e) do fields[#fields + 1] = tostring(k) .. "=" .. tostring(v) end
+                            else
+                                fields[1] = tostring(e)
+                            end
+                            print(P .. "   [" .. tostring(i) .. "] " .. table.concat(fields, ", "))
+                        end
+                    end
+                end
+            end
+            -- Resultat des rappels poison / pierre et filtres qui peuvent les masquer
+            local function ids(choices)
+                if not choices then return "aucun" end
+                local out = {}
+                for _, c in ipairs(choices) do out[#out + 1] = tostring(c.item or c.key) end
+                return table.concat(out, ", ")
+            end
+            if class == "ROGUE" then
+                local pc, pk = Poisons.Check()
+                print(P .. "rappel poison : " .. ids(pc) .. " (" .. tostring(pk) .. ")")
+            end
+            print(P .. "rappel pierre : " .. ids(WeaponStoneChoices()))
+            local cfg = Cfg()
+            local dis = {}
+            for k in pairs(MissingBuffs._dismissedSigs) do dis[#dis + 1] = tostring(k) end
+            print(P .. string.format("repos=%s ignoreWhileResting=%s instanceOnly=%s ignoreLethal=%s ignoreStones=%s masques=%s",
+                tostring(_addon.IsRestArea()), tostring(cfg.ignoreWhileResting), tostring(cfg.consumablesInstanceOnly),
+                tostring(cfg.ignoreLethalPoisons), tostring(cfg.ignoreWeaponStones), #dis > 0 and table.concat(dis, " | ") or "-"))
         end
         -- Auras actuelles du joueur : pour comparer les noms reels a ceux attendus
         local have = {}

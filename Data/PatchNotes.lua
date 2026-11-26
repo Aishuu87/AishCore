@@ -8,6 +8,17 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.8.4", date = "2026-11-26",
+    lines = {
+      { k = "h", link = { page = "actionBars" }, t = "Action Bars", fr = "Barres d’action" },
+      { k = "li", lvl = 1, link = { page = "actionBars" }, t = "FIX: Upward flyouts no longer showed if their direction had been changed before", fr = "FIX : Les tiroirs vers le haut ne s’affichaient plus si on avait modifié leur sens plus tôt" },
+      { k = "h", link = { page = "aurasMissingBuffs" }, t = "Missing buffs", fr = "Buffs manquants" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "FIX: Poisons and Sharpening Stones alerts now behave correctly", fr = "FIX : Les alertes pour les Poisons et les Pierres à Aiguiser se comportent correctement" },
+      { k = "h", link = { page = "taxiMode" }, t = "Taxi Mode", fr = "Mode Taxi" },
+      { k = "li", lvl = 1, link = { page = "taxiMode" }, t = "FIX: Delayed stops should be more reliable (the flight could stop earlier than planned)", fr = "FIX : Les arrêts différés devraient être plus fiables (le voyage pouvait s’arrêter plus tôt que prévu)" },
+    },
+  },
+  {
     version = "4.8.3", date = "2026-11-26",
     lines = {
       { k = "h", link = { page = "actionBars" }, t = "Action Bars", fr = "Barres d’action" },

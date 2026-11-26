@@ -1225,10 +1225,10 @@ local function OrientTotemFlyout(frame)
   local parent = frame and frame.parent
   if not (parent and type(frame.buttons) == "table") then return end
   local d = AB.FLY_DIRS[AB.FlyoutDir("totem")]
-  local up = d[2] == 1   -- vers le haut : disposition de Blizzard
+  -- Haut compris : Blizzard ne repose pas les ancrages qu'un autre sens a modifies. Fond vertical garde vers le haut.
+  local up = d[2] == 1
   if frame.top then frame.top:SetAlpha(up and 1 or 0) end
   if frame.middle then frame.middle:SetAlpha(up and 1 or 0) end
-  if up then return end
   local vert, prev, len = d[1] == 0, parent, 0
   for _, b in ipairs(frame.buttons) do
     if b:IsShown() then
@@ -1258,7 +1258,6 @@ local function OrientTotemOpenButton(btn, _, parent)
   for _, t in ipairs({ btn:GetNormalTexture(), btn:GetHighlightTexture(), btn:GetPushedTexture() }) do
     if t and t.SetRotation then t:SetRotation(rot) end
   end
-  if d[2] == 1 then return end
   btn:ClearAllPoints()
   btn:SetPoint(d[3], parent, d[4])
 end

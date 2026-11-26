@@ -35,6 +35,7 @@ local DEFAULT_HOP   = 60     -- secondes, troncon sans position connue
 local DEFAULT_PATH_SPEED = 30.4 -- verges/s le long du trace reel (Data/TaxiPaths.lua)
 local ANIM_TIME     = 0.45   -- entree / sortie des bandes et fondu de l'interface
 local REVEAL_GRACE  = 0.6    -- un element survole reste visible ce temps apres le depart de la souris
+local PASS_WINDOW   = 45     -- passage d'etape (hors contact direct) refuse plus tot que ce delai avant l'heure estimee
 local UI_FADE       = 1.6    -- fondu de l'interface au decollage / a l'atterrissage
 local FADE_IN       = 0.35   -- un element qui reapparait
 local FADE_OUT      = 1.4    -- un element qui redevient transparent
@@ -1137,7 +1138,11 @@ local function Track(f, el)
     -- Trace lisse (Retail) : la route coupe le virage et peut passer loin du maitre de vol de l'etape ;
     -- tolerance proportionnelle a la longueur du troncon
     local near = max(120, min(600, (Dist(f.nodes[f.reached], f.nodes[nextI]) or 0) * 0.2))
-    if d < 40 or (f.minD < near and d > f.minD + 20) then return Pass(f, el, true) end
+    if d < 40 then return Pass(f, el, true) end
+    -- Criteres approches (virage, trace qui s'eloigne) : pas avant PASS_WINDOW s de l'heure estimee de l'etape,
+    -- sinon un arret differe (+1) serait demande trop tot et l'atterrissage se ferait a l'etape precedente
+    if el < f.times[f.reached] + hopT - PASS_WINDOW then return end
+    if f.minD < near and d > f.minD + 20 then return Pass(f, el, true) end
     -- Deja plus pres de l'etape d'apres que l'etape attendue ne l'est elle-meme : franchie
     local d2 = Dist(p, f.nodes[nextI + 1])
     local hop2 = Dist(f.nodes[nextI], f.nodes[nextI + 1])

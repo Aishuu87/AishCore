@@ -1,5 +1,16 @@
 # AishCore
 
+## [v4.8.4](https://github.com/Aishuu87/AishCore/tree/v4.8.4) (2026-11-26)
+
+### Action Bars
+- FIX: Upward flyouts no longer showed if their direction had been changed before
+
+### Missing buffs
+- FIX: Poisons and Sharpening Stones alerts now behave correctly
+
+### Taxi Mode
+- FIX: Delayed stops should be more reliable (the flight could stop earlier than planned)
+
 ## [v4.8.3](https://github.com/Aishuu87/AishCore/tree/v4.8.3) (2026-11-26)
 
 ### Action Bars
