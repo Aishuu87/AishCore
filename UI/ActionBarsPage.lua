@@ -350,7 +350,11 @@ function ns.BuildActionBarsPage(container, W, NewLayout)
   Row(4, slW, slH, slSpX, slSpY)
   local slX = Bind(SL(L["SETTINGS_OFFSET_X"], -1600, 1600, 1, 4), "x", "number")
   local slY = Bind(SL(L["SETTINGS_OFFSET_Y"], -900, 900, 1, 4), "y", "number")
-  Row(4, slX, slY, false, false)
+  local rowFly = Bind(AR(L["ACTIONBARS_FLYOUT_DIR"], {
+    { k = "UP", l = L["ACTIONBARS_GROW_UP"] }, { k = "DOWN", l = L["ACTIONBARS_GROW_DOWN"] },
+    { k = "LEFT", l = L["ACTIONBARS_GROW_LEFT"] }, { k = "RIGHT", l = L["ACTIONBARS_GROW_RIGHT"] },
+  }, 4, 2), "flyoutDir", "string")
+  Row(4, slX, slY, rowFly)
 
   -- Visibilite et opacite : Normal / Discret / Avance (regles cumulables, affichees en Avance seulement) -----------
   Section(L["ACTIONBARS_SEC_VISIBILITY"])

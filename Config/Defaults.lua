@@ -86,6 +86,7 @@ local function ActionBarDefaults(o)
   local t = {
     enabled = true, count = 12, perRow = 12, width = 36, height = 36, spacingX = 2, spacingY = 2,
     growH = "RIGHT", growV = "DOWN", x = 0, y = 0,
+    flyoutDir = "UP",   -- sens d'ouverture des tiroirs (sorts a tiroir, menu des totems)
     -- visibilite : mode "normal" / "discreet" / "advanced" (regles cumulables, cf. ActionBars RuleShow)
     visMode = "normal",
     visAlways = true, visHover = false, visCombat = false, visFriendly = false, visAttackable = false, visGroup = false,

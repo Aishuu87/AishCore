@@ -253,44 +253,30 @@ local function WeaponInSlot(slot)
 end
 
 -- Etat de l'enchantement temporaire d'une arme : renvoie has (true/false, nil = illisible) et le temps
--- restant en ms (ou nil). Forever : GetWeaponEnchantInfo renvoie toujours false pour les imbues et poisons
--- de ce client ; l'API C_Item.GetWeaponEnchantInfo (liste d'enchantements, les permanents exclus) les voit.
--- Retail : comportement d'origine (GetWeaponEnchantInfo).
+-- restant en ms (ou nil). Forever : une arme porte a la fois une imprégnation (poisons, imprégnations de chaman :
+-- Enum.ItemEnchantType.Imbue) et un enchantement temporaire (pierres, huiles : Temporary). GetWeaponEnchantInfo n'en
+-- renvoie qu'un (l'imprégnation en priorite) ; C_Item.GetWeaponEnchantInfo les liste tous, tries ici par type :
+-- temp = true -> pierres / huiles, sinon imprégnations / poisons. Retail : GetWeaponEnchantInfo.
 local ENCHANT_PERMANENT = (Enum and Enum.ItemEnchantType and Enum.ItemEnchantType.Permanent) or 1
-local function WeaponEnchantState(hand)
-    if _addon.IsForever and C_Item and C_Item.GetWeaponEnchantInfo and Enum and Enum.WeaponSlot then
+local function WeaponEnchantState(hand, temp)
+    local ENCHANT_IMBUE = Enum and Enum.ItemEnchantType and Enum.ItemEnchantType.Imbue
+    if _addon.IsForever and C_Item and C_Item.GetWeaponEnchantInfo and Enum and Enum.WeaponSlot and ENCHANT_IMBUE then
         local ws = hand == "off" and Enum.WeaponSlot.OffHand or Enum.WeaponSlot.MainHand
         local ok, list = pcall(C_Item.GetWeaponEnchantInfo, ws)
-        if ok and type(list) == "table" then
-            local temps = {}
-            for _, e in pairs(list) do
+        if not ok or IsSecret(list) then return nil end
+        if type(list) == "table" then
+            local has, exp = false, nil
+            for _, e in ipairs(list) do
                 if type(e) == "table" then
-                    local h, kind = e.hasEnchant, e.enchantType
-                    if IsSecret(h) then return nil end
-                    if h and (IsSecret(kind) or kind ~= ENCHANT_PERMANENT) then
-                        local t = e.timeLeft
-                        temps[#temps + 1] = (type(t) == "number" and not IsSecret(t) and t > 0) and t or 0
+                    local h, kind, t = e.hasEnchant, e.enchantType, e.timeLeft
+                    if IsSecret(h) or IsSecret(kind) then return nil end
+                    if h and kind ~= ENCHANT_PERMANENT and (kind == ENCHANT_IMBUE) ~= (temp == true) then
+                        has = true
+                        if type(t) == "number" and not IsSecret(t) and t > 0 then exp = math.max(exp or 0, t) end
                     end
                 end
             end
-            -- Pierre / huile (cumulable avec un poison) : la seule que voit GetWeaponEnchantInfo -> retiree de la
-            -- liste (entree au temps restant le plus proche), il ne reste que poisons / imprégnations
-            if #temps > 0 and GetWeaponEnchantInfo then
-                local gok, hm, em, _, _, ho, eo = pcall(GetWeaponEnchantInfo)
-                local gh, ge = hm, em
-                if hand == "off" then gh, ge = ho, eo end
-                if gok and gh == true and not IsSecret(gh) then
-                    ge = (type(ge) == "number" and not IsSecret(ge)) and ge or 0
-                    local best
-                    for i, t in ipairs(temps) do
-                        if not best or math.abs(t - ge) < math.abs(temps[best] - ge) then best = i end
-                    end
-                    table.remove(temps, best)
-                end
-            end
-            local exp
-            for _, t in ipairs(temps) do if t > 0 then exp = math.max(exp or 0, t) end end
-            return #temps > 0, exp
+            return has, exp
         end
     end
     if not GetWeaponEnchantInfo then return nil end
@@ -2101,6 +2087,7 @@ function MissingBuffs.SetPreview(on, spellId)
             [ns.MISSING_BAGS_KEY]         = { "Interface\\Icons\\INV_Misc_Bag_08", "BAGS_FULL" },
             [ns.MISSING_TRACKING_HERBS_KEY] = { "Interface\\Icons\\INV_Misc_Flower_02", "TRACKING_OFF" },
             [ns.MISSING_TRACKING_ORE_KEY]   = { "Interface\\Icons\\Spell_Nature_Earthquake", "TRACKING_OFF" },
+            [ns.MISSING_TRACKING_TREASURE_KEY] = { "Interface\\Icons\\Racial_Dwarf_FindTreasure", "TRACKING_OFF" },
             [ns.MISSING_FISHING_LURE_KEY]   = { C_Item.GetItemIconByID(6529) or "Interface\\Icons\\Trade_Fishing", "APPLY_LURE" },
         }
         if _addon.IsForever and MissingBuffs.WellRestedIcon then
@@ -2727,8 +2714,9 @@ end
 local function WeaponStoneChoices()
     local EB = _addon.Modules and _addon.Modules.ExtraBars
     if not (EB and EB.IsWeaponEnhancementItem and GetWeaponEnchantInfo) then return nil end
-    -- Forever : GetWeaponEnchantInfo ne voit que la pierre / huile, pas le poison (les deux se cumulent)
-    local hasMain, _, _, _, hasOff = GetWeaponEnchantInfo()
+    -- Forever : pierre / huile seulement (un poison sur l'arme ne la couvre pas, les deux se cumulent)
+    local hasMain, hasOff = WeaponEnchantState("main", true), WeaponEnchantState("off", true)
+    if hasMain == nil or hasOff == nil then return nil end
     local function IsWeaponSlot(slot)
         local id = GetInventoryItemID("player", slot)
         if not id then return false end
@@ -4032,6 +4020,7 @@ function MissingBuffs.GetTriggerSpells()
     add(ns.MISSING_BAGS_KEY)
     add(ns.MISSING_TRACKING_HERBS_KEY)
     add(ns.MISSING_TRACKING_ORE_KEY)
+    if _addon.IsForever and select(2, UnitRace("player")) == "Dwarf" then add(ns.MISSING_TRACKING_TREASURE_KEY) end
     -- Pierres / huiles : ligne de combo proposee a toutes les classes, meme au chaman / voleur dont l'alerte ne se
     -- declenche jamais (enchantements d'arme de classe), pour pouvoir regler le combo depuis n'importe quel perso
     add(ns.MISSING_WEAPON_STONE_KEY)
@@ -4208,6 +4197,10 @@ if _addon.IsForever then
             local ho, eo = WeaponEnchantState("off")
             print(P .. string.format("etat enchantement (C_Item) : main=%s (%s ms) off=%s (%s ms) | C_Item.GetWeaponEnchantInfo=%s",
                 tostring(hm), tostring(em), tostring(ho), tostring(eo), tostring(C_Item and C_Item.GetWeaponEnchantInfo ~= nil)))
+            local tm, tem = WeaponEnchantState("main", true)
+            local to, teo = WeaponEnchantState("off", true)
+            print(P .. string.format("pierre / huile (C_Item) : main=%s (%s ms) off=%s (%s ms)",
+                tostring(tm), tostring(tem), tostring(to), tostring(teo)))
         end
         -- Auras actuelles du joueur : pour comparer les noms reels a ceux attendus
         local have = {}

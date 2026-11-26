@@ -8,6 +8,16 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.8.3", date = "2026-11-26",
+    lines = {
+      { k = "h", link = { page = "actionBars" }, t = "Action Bars", fr = "Barres d’action" },
+      { k = "li", lvl = 1, link = { page = "actionBars" }, t = "New option: Flyout direction, to unfold some buttons in any direction instead of upward", fr = "Nouvelle option : Sens des tiroirs, qui permet de faire déplier certains boutons dans toutes les directions plutot que vers le haut." },
+      { k = "h", link = { page = "aurasMissingBuffs" }, t = "Missing buffs", fr = "Buffs manquants" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "[Forever] New alert for Find Treasure (Dwarf racial)", fr = "[Forever] Nouvelle alerte pour la Détection des Trésor (Racial Nain)" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "FIX: Weapon enchants (Shaman, Rogue poisons, etc.) no longer hid correctly once the enchant was applied", fr = "FIX : Les enchantements d’armes (chaman, poison du voleur, etc) ne se cachaient plus correctement une fois l’enchantement appliqué" },
+    },
+  },
+  {
     version = "4.8.2", date = "2026-11-26",
     lines = {
       { k = "h", link = { page = "actionBars" }, t = "Action Bars", fr = "Barres d’action" },

@@ -219,6 +219,7 @@ ns.MISSING_LEGACY_KEY      = 9000034  -- Forever : points d'Heritage
 ns.MISSING_BAGS_KEY        = 9000035  -- sacs pleins
 ns.MISSING_TRACKING_HERBS_KEY = 9000036  -- Decouverte des herbes desactivee
 ns.MISSING_TRACKING_ORE_KEY   = 9000037  -- Decouverte des mineraux desactivee
+ns.MISSING_TRACKING_TREASURE_KEY = 9000043  -- Forever : Decouverte des tresors (racial nain) desactivee
 ns.MISSING_ELIXIR_KEY         = 9000038
 ns.MISSING_POISON_APPLY_KEY   = 9000039  -- Forever : poison des sacs a appliquer sur l'arme
 ns.MISSING_POISON_STOCK_KEY   = 9000040  -- Forever : stock de poisons sous le seuil (a fabriquer)
@@ -245,6 +246,8 @@ ns.MISSING_WELL_RESTED_ICON   = "Interface\\Icons\\INV_Misc_Bag_08"   -- repli s
 ns.MISSING_GATHER_FINDERS = {
     { spellId = 2383, key = ns.MISSING_TRACKING_HERBS_KEY, icon = "Interface\\Icons\\INV_Misc_Flower_02" },     -- Denicher les herbes
     { spellId = 2580, key = ns.MISSING_TRACKING_ORE_KEY,   icon = "Interface\\Icons\\Spell_Nature_Earthquake" }, -- Denicher les mineraux
+    -- Forever : Decouverte des tresors (racial nain), absente de la liste de pistage en Retail
+    { spellId = 2481, key = ns.MISSING_TRACKING_TREASURE_KEY, icon = "Interface\\Icons\\Racial_Dwarf_FindTreasure" },
 }
 ns.MISSING_LOW_SHARDS_KEY = 9000012
 

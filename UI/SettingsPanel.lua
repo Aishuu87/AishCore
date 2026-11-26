@@ -3945,6 +3945,7 @@ local PSEUDO_SPELLS_3D = {
   [9000035] = { name = L["SETTINGS_PSEUDO_MB_BAGS"],    icon = "Interface\\Icons\\INV_Misc_Bag_08" },
   [9000036] = { name = L["SETTINGS_PSEUDO_MB_TRACKING_HERBS"], icon = "Interface\\Icons\\INV_Misc_Flower_02" },
   [9000037] = { name = L["SETTINGS_PSEUDO_MB_TRACKING_ORE"],   icon = "Interface\\Icons\\Spell_Nature_Earthquake" },
+  [9000043] = { name = L["SETTINGS_PSEUDO_MB_TRACKING_TREASURE"], icon = "Interface\\Icons\\Racial_Dwarf_FindTreasure" },
   -- Forever : variations des coups blancs de melee, tirees au hasard a chaque coup (cf. SpellEffects.PlayMeleeSwing)
   [9000020] = { name = string.format(L["SETTINGS_PSEUDO_ATTACK_VAR"], "A"), icon = "Interface\\Icons\\INV_Sword_04", melee = true },
   [9000021] = { name = string.format(L["SETTINGS_PSEUDO_ATTACK_VAR"], "B"), icon = "Interface\\Icons\\INV_Sword_04", melee = true },

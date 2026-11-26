@@ -120,7 +120,7 @@ end
 -- Groupes de barres : les barres d'un meme groupe partagent leurs reglages (groups[id].settings), sauf la
 -- position et la disposition, propres a chaque barre
 local LOCAL_PROPS = { enabled = true, group = true, x = true, y = true, count = true, perRow = true, growH = true,
-                      growV = true, width = true, height = true, spacingX = true, spacingY = true }
+                      growV = true, width = true, height = true, spacingX = true, spacingY = true, flyoutDir = true }
 AB.LOCAL_PROPS = LOCAL_PROPS
 local function GroupOf(key)
   local c = Cfg()
@@ -956,6 +956,7 @@ local function LayoutBar(key, light)
         if b:GetAttribute("statehidden") then b:SetAttributeNoHandler("statehidden", nil) end
         local action = b.action
         if action and not IsSecret(action) and HasAction(action) then b:Show() end
+        AB.ApplyFlyoutDir(b, key)
       end
     else
       b:SetParent(hidden)
@@ -1181,6 +1182,26 @@ end
 -- Menu de choix des totems (MultiCastFlyoutFrame, Lua non securise de Blizzard) : ouvert au survol du triangle,
 -- boutons qui montent un a un depuis l'emplacement (fondu + glissement, animations seulement : rien de deplace)
 local FLY_HOLD, FLY_STEP, FLY_DUR, FLY_RISE = 0.0, 0.03, 0.16, 10
+-- Sens des tiroirs (reglage flyoutDir de la barre) : vecteur d'ouverture et points d'ancrage (bouton, precedent)
+AB.FLY_DIRS = {
+  UP = { 0, 1, "BOTTOM", "TOP" }, DOWN = { 0, -1, "TOP", "BOTTOM" },
+  LEFT = { -1, 0, "RIGHT", "LEFT" }, RIGHT = { 1, 0, "LEFT", "RIGHT" },
+}
+function AB.FlyoutDir(key)
+  local d = BV(key, "flyoutDir")
+  return AB.FLY_DIRS[d] and d or "UP"
+end
+-- Sorts a tiroir (pistage, auras...) : attribut lu par le SpellFlyout securise et par la fleche du bouton.
+-- Hors combat seulement (LayoutBar).
+function AB.ApplyFlyoutDir(b, key)
+  local d = AB.FlyoutDir(key)
+  if b:GetAttribute("flyoutDirection") == d then return end
+  if not b.GetPopupDirection then
+    b.GetPopupDirection = function(self) return self:GetAttribute("flyoutDirection") or "UP" end
+  end
+  b:SetAttribute("flyoutDirection", d)
+  if b.UpdateFlyout then pcall(b.UpdateFlyout, b) end
+end
 local flyAnims = setmetatable({}, { __mode = "k" })
 local function FlyAnim(b)
   local ag = flyAnims[b]
@@ -1189,22 +1210,69 @@ local function FlyAnim(b)
   local hide = ag:CreateAnimation("Alpha")
   hide:SetOrder(1); hide:SetFromAlpha(0); hide:SetToAlpha(0)
   local down = ag:CreateAnimation("Translation")
-  down:SetOrder(1); down:SetOffset(0, -FLY_RISE)
+  down:SetOrder(1)
   local fade = ag:CreateAnimation("Alpha")
   fade:SetOrder(2); fade:SetFromAlpha(0); fade:SetToAlpha(1); fade:SetDuration(FLY_DUR); fade:SetSmoothing("OUT")
   local up = ag:CreateAnimation("Translation")
-  up:SetOrder(2); up:SetOffset(0, FLY_RISE); up:SetDuration(FLY_DUR); up:SetSmoothing("OUT")
+  up:SetOrder(2); up:SetDuration(FLY_DUR); up:SetSmoothing("OUT")
   ag.hold = { hide, down }
+  ag.back, ag.fwd = down, up
   flyAnims[b] = ag
   return ag
 end
+-- Menu des totems tourne vers le sens choisi : boutons enchaines depuis l'emplacement, bouton de fermeture au bout
+local function OrientTotemFlyout(frame)
+  local parent = frame and frame.parent
+  if not (parent and type(frame.buttons) == "table") then return end
+  local d = AB.FLY_DIRS[AB.FlyoutDir("totem")]
+  local up = d[2] == 1   -- vers le haut : disposition de Blizzard
+  if frame.top then frame.top:SetAlpha(up and 1 or 0) end
+  if frame.middle then frame.middle:SetAlpha(up and 1 or 0) end
+  if up then return end
+  local vert, prev, len = d[1] == 0, parent, 0
+  for _, b in ipairs(frame.buttons) do
+    if b:IsShown() then
+      b:ClearAllPoints()
+      b:SetPoint(d[3], prev, d[4], d[1] * 2, d[2] * 2)
+      len = len + (vert and b:GetHeight() or b:GetWidth()) + 2
+      prev = b
+    end
+  end
+  local close = _G.MultiCastFlyoutFrameCloseButton
+  if close then
+    close:ClearAllPoints()
+    close:SetPoint(d[3], prev, d[4])
+    len = len + (vert and close:GetHeight() or close:GetWidth())
+  end
+  frame:ClearAllPoints()
+  frame:SetPoint(d[3], parent, d[4])
+  if vert then frame:SetSize(parent:GetWidth(), len) else frame:SetSize(len, parent:GetHeight()) end
+end
+-- Triangle d'ouverture : du cote du sens choisi
+local function OrientTotemOpenButton(btn, _, parent)
+  parent = parent or (btn and btn.parent)
+  if not parent then return end
+  local dir = AB.FlyoutDir("totem")
+  local d = AB.FLY_DIRS[dir]
+  local rot = ({ DOWN = math.pi, LEFT = math.pi / 2, RIGHT = -math.pi / 2 })[dir] or 0
+  for _, t in ipairs({ btn:GetNormalTexture(), btn:GetHighlightTexture(), btn:GetPushedTexture() }) do
+    if t and t.SetRotation then t:SetRotation(rot) end
+  end
+  if d[2] == 1 then return end
+  btn:ClearAllPoints()
+  btn:SetPoint(d[3], parent, d[4])
+end
 local function AnimateFlyout(frame)
   if not (frame and frame:IsShown() and type(frame.buttons) == "table") then return end
+  OrientTotemFlyout(frame)
+  local d = AB.FLY_DIRS[AB.FlyoutDir("totem")]
   local n = 0
   for _, b in ipairs(frame.buttons) do
     if b:IsShown() then
       local ag = FlyAnim(b)
       ag:Stop()
+      ag.back:SetOffset(-FLY_RISE * d[1], -FLY_RISE * d[2])
+      ag.fwd:SetOffset(FLY_RISE * d[1], FLY_RISE * d[2])
       local d = math.max(0.001, FLY_HOLD + n * FLY_STEP)
       for _, a in ipairs(ag.hold) do a:SetDuration(d) end
       ag:Play()
@@ -1225,9 +1293,12 @@ local function CloseFlyout(fly)
         local a = ag:CreateAnimation("Alpha")
         a:SetFromAlpha(1); a:SetToAlpha(0); a:SetDuration(FLY_OUT); a:SetSmoothing("IN")
         local t = ag:CreateAnimation("Translation")
-        t:SetOffset(0, -FLY_RISE); t:SetDuration(FLY_OUT); t:SetSmoothing("IN")
+        t:SetDuration(FLY_OUT); t:SetSmoothing("IN")
+        ag.t = t
         flyOut[b] = ag
       end
+      local d = AB.FLY_DIRS[AB.FlyoutDir("totem")]
+      ag.t:SetOffset(-FLY_RISE * d[1], -FLY_RISE * d[2])
       if flyAnims[b] then flyAnims[b]:Stop() end
       ag:SetScript("OnFinished", nil)
       ag:Play()
@@ -1263,6 +1334,9 @@ local function HookTotemFlyout()
   end
   if type(_G.MultiCastFlyoutFrame_ToggleFlyout) == "function" then
     hooksecurefunc("MultiCastFlyoutFrame_ToggleFlyout", function(frame) AnimateFlyout(frame) end)
+  end
+  if type(_G.MultiCastFlyoutFrameOpenButton_Show) == "function" then
+    hooksecurefunc("MultiCastFlyoutFrameOpenButton_Show", OrientTotemOpenButton)
   end
   if fly and open then
     open:HookScript("OnEnter", function(self)

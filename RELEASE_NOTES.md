@@ -1,5 +1,14 @@
 # AishCore
 
+## [v4.8.3](https://github.com/Aishuu87/AishCore/tree/v4.8.3) (2026-11-26)
+
+### Action Bars
+- New option: Flyout direction, to unfold some buttons in any direction instead of upward
+
+### Missing buffs
+- ♾️New alert for Find Treasure (Dwarf racial)
+- FIX: Weapon enchants (Shaman, Rogue poisons, etc.) no longer hid correctly once the enchant was applied
+
 ## [v4.8.2](https://github.com/Aishuu87/AishCore/tree/v4.8.2) (2026-11-26)
 
 ### Action Bars
