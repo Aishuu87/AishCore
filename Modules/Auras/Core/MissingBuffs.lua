@@ -262,19 +262,35 @@ local function WeaponEnchantState(hand)
         local ws = hand == "off" and Enum.WeaponSlot.OffHand or Enum.WeaponSlot.MainHand
         local ok, list = pcall(C_Item.GetWeaponEnchantInfo, ws)
         if ok and type(list) == "table" then
-            local has, exp = false, nil
+            local temps = {}
             for _, e in pairs(list) do
                 if type(e) == "table" then
                     local h, kind = e.hasEnchant, e.enchantType
                     if IsSecret(h) then return nil end
                     if h and (IsSecret(kind) or kind ~= ENCHANT_PERMANENT) then
-                        has = true
                         local t = e.timeLeft
-                        if type(t) == "number" and not IsSecret(t) and t > 0 then exp = math.max(exp or 0, t) end
+                        temps[#temps + 1] = (type(t) == "number" and not IsSecret(t) and t > 0) and t or 0
                     end
                 end
             end
-            return has, exp
+            -- Pierre / huile (cumulable avec un poison) : la seule que voit GetWeaponEnchantInfo -> retiree de la
+            -- liste (entree au temps restant le plus proche), il ne reste que poisons / imprégnations
+            if #temps > 0 and GetWeaponEnchantInfo then
+                local gok, hm, em, _, _, ho, eo = pcall(GetWeaponEnchantInfo)
+                local gh, ge = hm, em
+                if hand == "off" then gh, ge = ho, eo end
+                if gok and gh == true and not IsSecret(gh) then
+                    ge = (type(ge) == "number" and not IsSecret(ge)) and ge or 0
+                    local best
+                    for i, t in ipairs(temps) do
+                        if not best or math.abs(t - ge) < math.abs(temps[best] - ge) then best = i end
+                    end
+                    table.remove(temps, best)
+                end
+            end
+            local exp
+            for _, t in ipairs(temps) do if t > 0 then exp = math.max(exp or 0, t) end end
+            return #temps > 0, exp
         end
     end
     if not GetWeaponEnchantInfo then return nil end
@@ -2633,9 +2649,9 @@ do
     end
 end
 
--- Forever : le voleur sans poison dans les sacs (metier appris ou non) garde les pierres / huiles
+-- Forever : le voleur garde les pierres / huiles, cumulables avec les poisons (alerte a part, apres les poisons)
 local function WeaponEnchantByClass(class)
-    if class == "ROGUE" then return not _addon.IsForever or #Poisons.Bag().items > 0 end
+    if class == "ROGUE" then return not _addon.IsForever end
     return class == "SHAMAN"
 end
 -- Pierre a aiguiser = arme tranchante seulement, pierre a lester = arme contondante seulement, huile = toute arme.
@@ -2711,6 +2727,7 @@ end
 local function WeaponStoneChoices()
     local EB = _addon.Modules and _addon.Modules.ExtraBars
     if not (EB and EB.IsWeaponEnhancementItem and GetWeaponEnchantInfo) then return nil end
+    -- Forever : GetWeaponEnchantInfo ne voit que la pierre / huile, pas le poison (les deux se cumulent)
     local hasMain, _, _, _, hasOff = GetWeaponEnchantInfo()
     local function IsWeaponSlot(slot)
         local id = GetInventoryItemID("player", slot)

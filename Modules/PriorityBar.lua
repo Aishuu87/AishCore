@@ -4021,6 +4021,14 @@ function PriorityBar.Init()
     RebuildChargeCache()
     RebuildCooldownCache()
   end
+  -- Page de la barre 1 changee par le module Barres d'actions (furtivite, formes) : apres les evenements de Blizzard
+  if ns.CallbackRegistry then
+    ns.CallbackRegistry:Register("ActionBars.PageChanged", function()
+      if _cacheRebuildQueued then return end
+      _cacheRebuildQueued = true
+      C_Timer.After(0.1, FlushCacheRebuild)
+    end)
+  end
 
   -- Frame d'evenements pour reconstruire le cache bouton→sort hors combat
   local eventFrame = CreateFrame("Frame")

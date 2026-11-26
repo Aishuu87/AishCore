@@ -1026,9 +1026,12 @@ function AB.PagingConditions()
   local O = Idx("GetOverrideBarIndex", 14, 14)
   local V = Idx("GetVehicleBarIndex", 12, 12)
   local T = Idx("GetTempShapeshiftBarIndex", 13, 13)
-  return ("[overridebar] %d; [vehicleui][possessbar] %d; [shapeshift] %d; [bonusbar:5] 11; [bonusbar:1] 7; "
+  -- Druide : en Rôder, la forme de félin garde bonusbar:1 (Retail comme Forever) ; la page 8 est la page Rôder
+  -- (comme ElvUI). Un client qui passerait en bonusbar:2 tombe de toute facon sur la page 8.
+  local prowl = (select(2, UnitClass("player")) == "DRUID") and "[bonusbar:1,stealth] 8; " or ""
+  return ("[overridebar] %d; [vehicleui][possessbar] %d; [shapeshift] %d; [bonusbar:5] 11; %s[bonusbar:1] 7; "
     .. "[bonusbar:2] 8; [bonusbar:3] 9; [bonusbar:4] 10; [bar:2] 2; [bar:3] 3; [bar:4] 4; [bar:5] 5; [bar:6] 6; 1")
-    :format(O, V, T)
+    :format(O, V, T, prowl)
 end
 
 -- Barres securisees ------------------------------------------------------------------------------------------------
@@ -1061,6 +1064,13 @@ local function CreateBar(def, list)
       for _, b in pairs(btns) do b:SetAttribute("actionpage", page) end
     ]])
     RegisterStateDriver(f, "page", AB.PagingConditions())
+    -- La page change une frame apres UPDATE_BONUS_ACTIONBAR (state driver) : l'index des raccourcis (barre de rotation,
+    -- bouton de rotation), reconstruit entre-temps sur l'ancienne page, est invalide une fois les actions relues
+    f:HookScript("OnAttributeChanged", function(_, name)
+      if name ~= "state-page" then return end
+      if ns.InvalidateKeybindCache then ns.InvalidateKeybindCache() end
+      if ns.CallbackRegistry then ns.CallbackRegistry:Trigger("ActionBars.PageChanged") end
+    end)
   end
   return f
 end

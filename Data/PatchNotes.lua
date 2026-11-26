@@ -8,6 +8,16 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.8.2", date = "2026-11-26",
+    lines = {
+      { k = "h", link = { page = "actionBars" }, t = "Action Bars", fr = "Barres d’action" },
+      { k = "li", lvl = 1, link = { page = "actionBars" }, t = "FIX: The new paging could make the Priority Bar keybindings jump in some cases", fr = "FIX : La nouvelle pagination pouvait faire sauter les raccourcis de la Barre de rotation dans certains cas." },
+      { k = "li", lvl = 1, link = { page = "actionBars" }, t = "FIX: Bar 1 now correctly switches to Prowl for Druids in Cat Form", fr = "FIX : La barre 1 basculera maintenant correctement en mode “Rôder” pour les Druides en forme de Félin." },
+      { k = "h", link = { page = "aurasMissingBuffs" }, t = "Missing buffs", fr = "Buffs manquants" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "FIX: Sharpening stones are now always suggested, even when poison is applied to your weapons", fr = "FIX : Les pierres à aiguiser seront toujours proposées même si du poison est appliqué sur les armes." },
+    },
+  },
+  {
     version = "4.8.1", date = "2026-11-25",
     lines = {
       { k = "h", link = { page = "actionBars" }, t = "Action Bars", fr = "Barres d’actions" },
@@ -891,7 +901,7 @@ ns.NewByVersion = {
     headers = {
       "SETTINGS_CAT_CAST_BARS", "SETTINGS_CAT_CAMPFIRE", "SETTINGS_CAT_TAXI_MODE", "SETTINGS_CAT_CDM_APPEARANCE", "SETTINGS_CAT_ADDON_COMPARTMENT",
       "UNITBARS_SEC_FILL", "UNITBARS_SEC_DOTS", "SETTINGS_SEC_XP_RESTED", "ADDONFONTS_SEC_BAGANATOR",
-      "SETTINGS_MVB_SEC_STACKS", "SETTINGS_SEC_VIS_EUI_BARS",
+      "SETTINGS_MVB_SEC_STACKS",
       "SETTINGS_SEC_MANA_REGEN", "SETTINGS_COMFORT_SEC_PROFESSIONS",
     },
   },

@@ -22,7 +22,7 @@ Règles à tenir :
 
 - Barres 2-8 : `actionpage` fixe (6, 5, 3, 4, 13, 14, 15) posé sur la barre et chaque bouton via `Execute`.
 - Barre 1 : state driver `page` (`AB.PagingConditions` : override, véhicule / possession, forme temporaire,
-  vol dynamique 11, bonusbar 1-4 → 7-10, barres 2-6, sinon 1). `_onstate-page` pose `actionpage` sur chaque bouton :
+  vol dynamique 11, bonusbar 1-4 → 7-10 (druide en Rôder : 8), barres 2-6, sinon 1). `_onstate-page` pose `actionpage` sur chaque bouton :
   leur `OnAttributeChanged` relit l'action, en sécurisé.
 
 ## Barres Blizzard

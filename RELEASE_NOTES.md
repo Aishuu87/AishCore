@@ -1,5 +1,14 @@
 # AishCore
 
+## [v4.8.2](https://github.com/Aishuu87/AishCore/tree/v4.8.2) (2026-11-26)
+
+### Action Bars
+- FIX: The new paging could make the Priority Bar keybindings jump in some cases
+- FIX: Bar 1 now correctly switches to Prowl for Druids in Cat Form
+
+### Missing buffs
+- FIX: Sharpening stones are now always suggested, even when poison is applied to your weapons
+
 ## [v4.8.1](https://github.com/Aishuu87/AishCore/tree/v4.8.1) (2026-11-25)
 
 ### Action Bars

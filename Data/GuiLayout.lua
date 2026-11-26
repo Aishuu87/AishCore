@@ -509,12 +509,6 @@ ns.GUI_LAYOUT = {
       { [1] = "visibility.groupFramesEnabled" },
       { [1] = "visibility.groupFramesOocAlpha", [2] = "visibility.groupFramesHoverReveal" },
     } },
-    ["SETTINGS_SEC_VIS_EUI_BARS"] = { cols = 3, rows = {
-      { [1] = "visibility.euiBarsEnabled", [2] = "visibility.euiBarsAlpha" },
-      { [1] = "visibility.euiBars459Enabled", [2] = "visibility.euiBars459Alpha" },
-      { [1] = "visibility.euiPetBarEnabled", [2] = "visibility.euiPetBarAlpha" },
-      { [1] = "__div:1" },
-    } },
   },
   taxiMode = {
     __titles = {

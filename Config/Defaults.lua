@@ -913,13 +913,6 @@ ns.Defaults = {
     elvuiBuffsOocAlpha      = 0.2,  -- opacite hors combat
     elvuiBuffsCombatAlpha   = 1.0,  -- opacite en combat
     elvuiBuffsHoverReveal   = true, -- survol = 100% temporairement
-    -- Barres d'action 1 a 3 d'EllesmereUI attenuees hors situations utiles (cf. Modules/Visibility.lua)
-    euiBarsEnabled          = false,
-    euiBarsAlpha            = 0.2,
-    euiBars459Enabled       = false, -- barres 4, 5 et 9, meme logique
-    euiBars459Alpha         = 0.2,
-    euiPetBarEnabled        = false, -- barre du familier, meme logique
-    euiPetBarAlpha          = 0.2,
     -- Cadres de groupe et de raid (ElvUI, EllesmereUI, Blizzard) attenues hors combat
     groupFramesEnabled      = false,
     groupFramesOocAlpha     = 0.3,

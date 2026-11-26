@@ -1113,9 +1113,6 @@ L["SETTINGS_PSEUDO_MB_POISON_APPLY"] = "缺失增益 - 涂抹毒药" -- @7882bb
 L["SETTINGS_PSEUDO_MB_POISON_STOCK"] = "缺失增益 - 毒药库存" -- @2a84d1
 L["SETTINGS_PSEUDO_MB_TRACKING_HERBS"] = "缺失增益 - 未开启追踪（草药）" -- @b8ba7b
 L["SETTINGS_PSEUDO_MB_TRACKING_ORE"] = "缺失增益 - 未开启追踪（矿物）" -- @a348d5
-L["SETTINGS_SEC_VIS_EUI_BARS"] = "EllesmereUI 动作条" -- @263835
-L["SETTINGS_VIS_EUI_BARS_ENABLE"] = "淡化动作条 1、2 和 3" -- @481ac1
-L["SETTINGS_VIS_EUI_BARS_ENABLE_TT"] = "降低 EllesmereUI 动作条 1、2 和 3 的不透明度。骑乘、战斗中、有目标、悬停其中之一、打开法术书或受伤时，它们会恢复自身的不透明度。" -- @16c539
 
 -- Options · Cooldowns Appearance
 L["SETTINGS_CAT_CDM_ESSENTIAL"] = "重要冷却" -- @bbe4b8
