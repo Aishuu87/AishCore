@@ -3454,8 +3454,412 @@ local SEC_COLORS = {
     default = { 0.55, 0.22, 0.85 },  -- violet infernal
     full    = { 0.80, 0.45, 1.00 },  -- violet brillant quand 2/2
   },
+  -- Armes du Maelstrom (Chaman, buff 408505, 5 stacks max)
+  MAELSTROM_ORBS = {
+    default = { 0.00, 0.55, 1.00 },  -- bleu electrique
+    full    = { 0.45, 0.90, 1.00 },  -- cyan brillant quand 5/5
+  },
 }
 local SEC_DIM = 0.25  -- alpha quand vide/en cd
+
+-- Compteur de stacks d'Armes du Maelstrom (408505). Hors combat : lecture exacte de applications.
+-- En combat (valeur secrete) : chaque gain de stack remet la duree au max, ce qui declenche un SetCooldown
+-- CDM sur la case de l'aura (cf. ns.SubscribeCDMAuraRefresh). Absente -> 0, apparition -> 1, chaque refresh
+-- -> +1 (plafond 5). Necessite que le buff soit suivi par le CDM (buffs suivis).
+-- Bloc do...end + table ResourceCircle._mw : le chunk est deja a la limite des 200 locales.
+do
+-- Tout dans une table : limite des 200 locales du chunk. DEBOUNCE : un seul stack par fenetre (SetCooldown parfois 2x par refresh)
+local mw = { SPELL = 408505, MAX = 5, DEBOUNCE = 0.25, count = 0, present = false, lastRefresh = 0, log = {}, subscribed = nil, ticks = 0 }
+ResourceCircle._mw = mw
+
+function mw.Log(msg)
+  table.insert(mw.log, 1, string.format("%.2f %s (=%d)", GetTime(), msg, mw.count))
+  for i = #mw.log, 21, -1 do mw.log[i] = nil end
+end
+
+-- Lecture exacte (hors combat) : stacks, ou 0 si absente ; nil si illisible (secret)
+function mw.ReadExact()
+  local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, mw.SPELL)
+  if not ok then return nil end
+  if not a then
+    if InCombatLockdown() then return nil end  -- en combat, nil ne prouve pas l'absence
+    return 0
+  end
+  local app = a.applications
+  if app == nil or (issecretvalue and issecretvalue(app)) then return nil end
+  app = tonumber(app) or 0
+  if app < 1 then app = 1 end
+  return math.min(app, mw.MAX)
+end
+
+-- Cases CDM du buff : 408505, plus tout spellID CDM de meme nom (la case peut porter l'ID du talent)
+mw.ids = { [408505] = true }
+function mw.ResolveIDs()
+  local A = ns.Auras
+  local cdmPlayer = A and A.cdmData and A.cdmData.player
+  local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(mw.SPELL)
+  if not (cdmPlayer and name) then return end
+  for sid, e in pairs(cdmPlayer) do
+    if not mw.ids[sid] and e.name == name then
+      mw.ids[sid] = true
+      mw.Log("case CDM " .. sid)
+    end
+  end
+end
+
+-- Presence en combat : canal CDM (SetCooldown / Clear), repli GetPlayerAuraBySpellID
+function mw.Present()
+  local A = ns.Auras
+  if A and A.cdmAuraSwipePresence and A.IsCDMAuraSwipePresent then
+    local seen = false
+    for sid in pairs(mw.ids) do
+      if A.cdmAuraSwipePresence[sid] ~= nil then
+        seen = true
+        if A.IsCDMAuraSwipePresent(sid) then return true end
+      end
+    end
+    if seen then return false end
+  end
+  local ok, a = pcall(C_UnitAuras.GetPlayerAuraBySpellID, mw.SPELL)
+  return ok and a ~= nil
+end
+
+function mw.OnRefresh()
+  local now = GetTime()
+  if now - mw.lastRefresh < mw.DEBOUNCE then return end
+  mw.lastRefresh = now
+  if mw.ReadExact() then return end  -- lisible : le tick fait foi
+  if not mw.present then
+    mw.present, mw.count = true, 1
+    mw.Log("apparition")
+  else
+    mw.count = math.min(mw.count + 1, mw.MAX)
+    mw.Log("refresh +1")
+  end
+end
+
+function mw.EnsureSubscribed()
+  local A = ns.Auras
+  if not (A and A.SubscribeCDMAuraRefresh) then return end
+  local now = GetTime()
+  if now - (mw.lastResolve or 0) > 2 then mw.lastResolve = now; mw.ResolveIDs() end
+  mw.subscribed = mw.subscribed or {}
+  for sid in pairs(mw.ids) do
+    if not mw.subscribed[sid] then
+      A.SubscribeCDMAuraRefresh(sid, "rcMaelstromOrbs", mw.OnRefresh)
+      mw.subscribed[sid] = true
+    end
+  end
+end
+
+function mw.Tick()
+  mw.ticks = mw.ticks + 1
+  mw.EnsureSubscribed()
+  local exact = mw.ReadExact()
+  if exact then
+    if exact ~= mw.count then mw.count = exact; mw.Log("lecture exacte") end
+    mw.present = exact > 0
+    return mw.count
+  end
+  local present = mw.Present()
+  if not present then
+    if mw.present or mw.count ~= 0 then mw.count = 0; mw.Log("disparition") end
+    mw.present = false
+  elseif not mw.present then
+    -- Apparition vue par le tick avant le hook : le SetCooldown qui suit ne compte pas un 2e stack
+    mw.present, mw.count, mw.lastRefresh = true, math.max(mw.count, 1), GetTime()
+    mw.Log("apparition (tick)")
+  end
+  return mw.count
+end
+
+-- Forever, en combat : l'aura est secrete (aucune presence ni refresh lisibles, pas de CDM). Seule voie : des
+-- AuraContainer natifs (meme recette que les charges du bouclier, EnsureShieldNative), filtres sur 408505 ;
+-- Blizzard ecrit le compte dans une FontString via un formateur numerique dont les paliers produisent un glyphe
+-- seulement si compte >= i. Aucune valeur secrete ne passe par Lua. Le formateur refuse les sequences |T : les
+-- orbes sont des glyphes de polices a nous (generate_orb_font.py). Un conteneur par couche et par orbe (une seule
+-- FontString par bouton) : glow doux (AishOrbSoft) sous l'orbe pleine (AishOrb). Le fond des
+-- emplacements vides = nos propres frames d'orbes.
+-- A creer hors combat, une seule fois (bouton "forbidden" ensuite).
+-- Glow : l'opacite du texte n'est pas appliquee et des glyphes empiles ne se melangent pas. Le degrade est dans le
+-- glyphe (AishOrbSoft : anneaux plus fins qu'un pixel, l'anticrenelage fait un degrade continu), l'opacite est
+-- portee par le conteneur. Niveaux : glow (30) sous le fond des emplacements (nos frames, 31), orbe (33) dessus.
+mw.ORDER = { "glow", "orb" }
+mw.layers = { orb = {}, glow = {} }
+mw.native = mw.layers.orb   -- diagnostic /aamw
+mw.LAYER = {
+  orb  = { font = "Interface\\AddOns\\AishCore\\Media\\Fonts\\AishOrb.ttf",     glyph = "A", level = 33 },
+  glow = { font = "Interface\\AddOns\\AishCore\\Media\\Fonts\\AishOrbSoft.ttf", glyph = "A", level = 30, glow = true },
+}
+mw.PFX = "secondaryDots_MAELSTROM_ORBS_"
+
+-- Reglages de la page Cercle (section Armes du Maelstrom)
+function mw.Cfg()
+  local cfg = ns.GetCfg("resourceCircle") or {}
+  local d = SEC_COLORS.MAELSTROM_ORBS.default
+  local color     = cfg[mw.PFX .. "color"] or { d[1], d[2], d[3], 1 }
+  local glowColor = cfg[mw.PFX .. "glowColor"] or { d[1], d[2], d[3], 0.85 }
+  -- Couleurs Thematiques : teinte du module Couleurs (decorations B / lueur), opacite du reglage propre
+  local CLR = ns.Modules and ns.Modules.Colors
+  local function Themed(key, elem, own)
+    if not (cfg[mw.PFX .. key] and CLR and CLR.Get) then return own end
+    local t = CLR.Get(elem)
+    if not t then return own end
+    return { t[1], t[2], t[3], own[4] or 1 }
+  end
+  return {
+    color     = Themed("themed", "powerdotsb", color),
+    bgColor   = cfg[mw.PFX .. "bgColor"] or GetBgColor(),
+    glow      = cfg[mw.PFX .. "glow"] ~= false,
+    glowColor = Themed("glowThemed", "glow", glowColor),
+    glowSize  = cfg[mw.PFX .. "glowSize"] or 2.2,
+  }
+end
+
+-- Paliers de l'orbe i (vide sous i, l'orbe 1 des que l'aura existe) + police / couleur (hors combat seulement)
+function mw.StyleLayer(kind, i, px, c)
+  local n = mw.layers[kind][i]
+  if not (n and n.fmt) then return end
+  local LY = mw.LAYER[kind]
+  local down = Enum.NumericRuleFormatRounding.Down
+  local num = (mw.mode == "num")
+  local fs = n.fs
+  if fs and not InCombatLockdown() then
+    local col = LY.glow and c.glowColor or c.color
+    -- disques = 90 % de l'em (marge anti-rognage) : taille compensee ; glow = glowSize x diametre de l'orbe
+    local em = LY.glow and (px * c.glowSize / 0.9) or (px / 0.9)
+    if num then
+      pcall(fs.SetFont, fs, ns.FONT_FALLBACK, 14, "OUTLINE"); pcall(fs.SetTextColor, fs, 1, 1, 1, 1)
+    else
+      local okF, set = pcall(fs.SetFont, fs, LY.font, math.max(4, math.floor(em + 0.5)), "")
+      if not (okF and set ~= false) then mw.nativeErr = "police " .. kind .. " absente (relancer le jeu)" end
+      pcall(fs.SetTextColor, fs, col[1], col[2], col[3], 1)   -- opacite : portee par le conteneur (SyncNative)
+    end
+  end
+  local bp
+  if num then
+    bp = { { threshold = 0, format = (kind == "orb") and "%d" or " ", step = 1, rounding = down } }
+  else
+    bp = { { threshold = 0, format = (i == 1) and LY.glyph or " ", step = 1, rounding = down } }
+    if i > 1 then bp[#bp + 1] = { threshold = i, format = LY.glyph, step = 1, rounding = down } end
+  end
+  local ok, err = pcall(n.fmt.SetBreakpoints, n.fmt, bp)
+  if not ok then mw.nativeErr = "paliers: " .. tostring(err) end
+end
+
+function mw.CreateLayer(kind, i)
+  local S = 32
+  local ok, c = pcall(CreateFrame, "AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+  if not ok or not c then mw.nativeErr = "CreateFrame: " .. tostring(c); return false end
+  local n = { c = c }
+  mw.layers[kind][i] = n
+  c:SetSize(S, S)
+  c:SetFrameStrata(bar:GetFrameStrata())
+  c:SetFrameLevel(bar:GetFrameLevel() + mw.LAYER[kind].level)
+  c:SetPoint("CENTER", bar, "CENTER", 0, 0)
+  c:EnableMouse(false)
+  pcall(c.SetEnabled, c, true)
+  pcall(c.SetUnit, c, "player")
+  c:SetAlpha(0)
+  c:Show()
+  pcall(c.SetFlowLayoutAnchorPoint, c, "TOPLEFT")
+  pcall(c.SetFlowLayoutAxis, c, 0)
+  pcall(c.SetFlowLayoutGrowthDirection, c, 1, -1)
+  pcall(c.SetFlowLayoutMaximumLineSize, c, S + 2)
+  n.fmt = C_StringUtil.CreateNumericRuleFormatter()
+  mw.StyleLayer(kind, i, 16, mw.Cfg())
+  local okA, errA = pcall(function()
+    c:AddAuraGroup("aishMW" .. kind .. i, "HELPFUL", {
+      maxFrameCount = 1,
+      candidateFilters = { includeSpellIDs = { [mw.SPELL] = true } },
+      initializeFrame = function(btn)
+        local okC, can = pcall(function() return btn.CanBeAccessedInContext and btn:CanBeAccessedInContext() end)
+        if not (okC and can) then mw.nativeErr = "bouton inaccessible"; return end
+        local okB, errB = pcall(function()
+          local icon = btn:CreateTexture(nil, "ARTWORK")
+          icon:SetAllPoints(btn)
+          btn:SetIcon(icon)
+          icon:SetAlpha(0)   -- seul le glyphe (texte du compte) est montre
+          btn:SetSize(S, S)
+          -- Blizzard ne place jamais le bouton natif seul : ancrage manuel
+          btn:ClearAllPoints()
+          btn:SetPoint("CENTER", c, "CENTER", 0, 0)
+          local fs = btn:CreateFontString(nil, "OVERLAY", nil, 7)
+          fs:SetFont(ns.FONT_FALLBACK, 14, "OUTLINE")   -- police avant SetApplicationCount
+          fs:SetJustifyH("CENTER")
+          fs:SetPoint("CENTER", btn, "CENTER", 0, 0)
+          n.btn, n.fs = btn, fs
+          n.sig = nil
+          mw.StyleLayer(kind, i, n.px or 16, mw.Cfg())
+          btn:SetApplicationCount(fs, { formatter = n.fmt })
+        end)
+        if not okB then mw.nativeErr = "init: " .. tostring(errB) end
+      end,
+      layout = { elementSpacing = 0, lineSpacing = 0, elementWidth = S, elementHeight = S, layoutIndex = 1 },
+    })
+  end)
+  if not okA then mw.nativeErr = "AddAuraGroup: " .. tostring(errA) end
+  if c.UpdateAllAuras then pcall(c.UpdateAllAuras, c) end
+  return true
+end
+
+function mw.EnsureNative()
+  if mw.nativeDone or InCombatLockdown() or not bar then return end
+  if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum.NumericRuleFormatRounding) then
+    mw.nativeErr = "formateur indisponible"; mw.nativeDone = true; return
+  end
+  mw.nativeDone = true
+  for i = 1, mw.MAX do
+    for _, kind in ipairs(mw.ORDER) do
+      if not mw.CreateLayer(kind, i) then return end
+    end
+  end
+end
+
+-- Position (home des orbes du cercle), niveau, taille, couleurs et opacite (celle du cercle), chaque tick.
+-- Niveau resynchronise : le cercle peut etre remonte apres la creation (les orbes passaient sous le fond).
+function mw.SyncNative(visible)
+  local c = mw.Cfg()
+  local a = 0
+  if visible and bar and bar:IsVisible() then a = bar:GetEffectiveAlpha() or 1 end
+  local strata, baseLevel = bar:GetFrameStrata(), bar:GetFrameLevel()
+  local styleSig
+  if not InCombatLockdown() then
+    styleSig = string.format("%s|%.2f|%.3f,%.3f,%.3f|%.3f,%.3f,%.3f", tostring(mw.mode), c.glowSize,
+      c.color[1], c.color[2], c.color[3], c.glowColor[1], c.glowColor[2], c.glowColor[3])
+  end
+  local glowA = c.glow and (c.glowColor[4] or 0.85) or 0
+  for kind, list in pairs(mw.layers) do
+    local LY = mw.LAYER[kind]
+    local la = LY.glow and a * glowA or a * (c.color[4] or 1)
+    local lvl = baseLevel + LY.level
+    for i = 1, mw.MAX do
+      local n, f = list[i], secDots[i]
+      if n and f then
+        if n.lvl ~= lvl or n.strata ~= strata then
+          n.lvl, n.strata = lvl, strata
+          n.c:SetFrameStrata(strata)
+          n.c:SetFrameLevel(lvl)
+        end
+        local x, y = f._homeX or 0, f._homeY or 0
+        if n.x ~= x or n.y ~= y then
+          n.x, n.y = x, y
+          n.c:ClearAllPoints()
+          n.c:SetPoint("CENTER", bar, "CENTER", x, y)
+        end
+        local px = math.max(4, math.floor((f:GetWidth() or 16) + 0.5))
+        if styleSig and (n.px ~= px or n.sig ~= styleSig) then
+          n.px, n.sig = px, styleSig
+          mw.StyleLayer(kind, i, px, c)
+        end
+        if n.a ~= la then n.a = la; n.c:SetAlpha(la) end
+      end
+    end
+  end
+end
+
+-- Couche d'apercu sur un frame a nous : meme glyphe, meme police et meme taille que la couche native
+-- (FontString a nous, creee a la demande). kind = "orb" | "glow".
+-- Les FontStrings vivent sur un cadre par couche (glow sous les fonds, orbe au-dessus), pas sur le frame de
+-- l'emplacement : sinon le fond d'un emplacement voisin qui chevauche recouvre l'orbe / le glow du precedent.
+function mw.PreviewHolder(f, kind)
+  local parent = f:GetParent()
+  parent._mwHolders = parent._mwHolders or {}
+  local h = parent._mwHolders[kind]
+  if not h then
+    h = CreateFrame("Frame", nil, parent)
+    h:SetAllPoints(parent)
+    parent._mwHolders[kind] = h
+  end
+  local lvl = f:GetFrameLevel() + ((kind == "glow") and -1 or 2)
+  if h:GetFrameLevel() ~= lvl then h:SetFrameLevel(lvl) end
+  return h
+end
+
+function mw.FrameLayer(f, kind, px, c, show)
+  local key = (kind == "glow") and "mwGlow" or "mwOrb"
+  local g = f[key]
+  if not g then
+    if not show then return end
+    g = mw.PreviewHolder(f, kind):CreateFontString(nil, "OVERLAY")
+    g:SetFont(ns.FONT_FALLBACK, 12, "")
+    g:SetPoint("CENTER", f, "CENTER", 0, 0)
+    g:SetText("A")
+    f[key] = g
+  end
+  -- l'emplacement peut etre masque / en fondu (slide) : la couche suit son etat
+  show = show and f:IsShown()
+  if show then
+    mw.PreviewHolder(f, kind)   -- niveau resynchronise
+    local LY = mw.LAYER[kind]
+    local em = (kind == "glow") and (px * c.glowSize / 0.9) or (px / 0.9)
+    local size = math.max(4, math.floor(em + 0.5))
+    if g._size ~= size then g._size = size; pcall(g.SetFont, g, LY.font, size, "") end
+    local col = (kind == "glow") and c.glowColor or c.color
+    g:SetTextColor(col[1], col[2], col[3], 1)
+    g:SetAlpha(((kind == "glow") and (col[4] or 0.85) or (col[4] or 1)) * (f:GetAlpha() or 1))
+  end
+  g:SetShown(show)
+end
+
+-- Dessin d'apercu d'un emplacement (cercle reel en mode apercu, et faux cercle du haut de page) : fond, orbe et
+-- glow comme en jeu ; la texture de remplissage n'est pas utilisee (le rendu reel est un glyphe).
+function mw.DrawPreviewDot(f, px, c, lit)
+  f.bg:SetVertexColor(c.bgColor[1], c.bgColor[2], c.bgColor[3], c.bgColor[4] or 1)
+  f.fill:SetAlpha(0)
+  mw.FrameLayer(f, "orb", px, c, lit)
+  mw.FrameLayer(f, "glow", px, c, lit and c.glow)
+end
+
+-- Fin d'apercu : couches d'apercu masquees
+function mw.HidePreviewDot(f)
+  if f.mwOrb then f.mwOrb:Hide() end
+  if f.mwGlow then f.mwGlow:Hide() end
+end
+
+-- Apercu du GUI (UpdateSecDots court-circuite) : les conteneurs natifs n'y montrent rien sans l'aura ; nos frames
+-- dessinent 3 stacks factices avec les reglages courants, les conteneurs suivent position / style.
+mw.PREVIEW_STACKS = 3
+function mw.Preview()
+  mw.SyncNative(false)
+  local c = mw.Cfg()
+  for i = 1, secDotCount do
+    local f = secDots[i]
+    if f then mw.DrawPreviewDot(f, f:GetWidth() or 16, c, i <= mw.PREVIEW_STACKS) end
+  end
+end
+
+SLASH_AISHMWORBS1 = "/aamw"
+SlashCmdList["AISHMWORBS"] = function(arg)
+  if arg == "num" or arg == "orb" then
+    if InCombatLockdown() then print("|cff33bbffArmes du Maelstrom|r hors combat seulement"); return end
+    mw.mode = arg   -- applique au prochain tick (signature de style)
+    for _, list in pairs(mw.layers) do
+      for i = 1, mw.MAX do local n = list[i]; if n and n.c.UpdateAllAuras then pcall(n.c.UpdateAllAuras, n.c) end end
+    end
+    print("|cff33bbffArmes du Maelstrom|r mode : " .. arg)
+    return
+  end
+  local A = ns.Auras
+  local ids = {}
+  for sid in pairs(mw.ids) do
+    ids[#ids + 1] = sid .. ":" .. tostring(A and A.cdmAuraSwipePresence and A.cdmAuraSwipePresence[sid])
+  end
+  print(string.format("|cff33bbffArmes du Maelstrom|r count=%d present=%s exact=%s ticks=%d", mw.count,
+    tostring(mw.present), tostring(mw.ReadExact()), mw.ticks))
+  print(string.format("  dotType=%s dots=%d bar=%s visible=%s preview=%s cdm=%s", tostring(secDotType), secDotCount,
+    tostring(bar ~= nil), tostring(lastVisibilityState), tostring(previewMode), table.concat(ids, " ")))
+  local n1 = mw.native[1]
+  local function Clean(v) if issecretvalue and issecretvalue(v) then return "secret" end return v end
+  local okV, vis = pcall(function() return Clean(n1 and n1.btn and n1.btn:IsVisible()) end)
+  local okT, txt = pcall(function() return Clean(n1 and n1.fs and n1.fs:GetText()) end)
+  if okT and type(txt) == "string" then txt = txt:gsub("|", "||") end
+  print(string.format("  natif: conteneurs=%d bouton1=%s visible=%s texte=%s alpha=%s erreur=%s", #mw.native,
+    tostring(n1 and n1.btn ~= nil), okV and tostring(vis) or "secret", okT and tostring(txt) or "secret",
+    tostring(n1 and n1.a), tostring(mw.nativeErr)))
+  for i = 1, #mw.log do print("  " .. mw.log[i]) end
+end
+end
 
 -- Detecte le type de secondary dots selon la classe/forme
 function ResourceCircle.DetectSecondaryDots()
@@ -3513,6 +3917,9 @@ function ResourceCircle.DetectSecondaryDots()
       newType = "ARCANE_CHARGES"
       newCount = 4
     end
+  elseif playerClass == "SHAMAN" and ns.IsForever then  -- Retail : Maelstrom deja affiche comme ressource
+    newType = "MAELSTROM_ORBS"
+    newCount = ResourceCircle._mw.MAX
   -- Warlock Démonologie (Coeur démoniaque) : orbes désactivées, lecture des stacks via GetPlayerAuraBySpellID peu fiable en combat.
   -- Stacks affichés via le texte de ressource secondaire (SecondaryResourceDefs[266]) qui passe par le canal clone-stack CDM à la place.
   end
@@ -3550,7 +3957,7 @@ function ResourceCircle.DetectSecondaryDots()
   -- Cercle masque : 1 passe sur 15 suffit (les cibles d'animation retombent a 0 sans rafale a 60 Hz)
   local secSkip = 0
   secUpdateTicker = ns.NewTicker(0.016, function()
-    if lastVisibilityState ~= true then
+    if lastVisibilityState ~= true and not previewMode then
       secSkip = secSkip + 1
       if secSkip % 15 ~= 0 then return end
     end
@@ -3697,6 +4104,8 @@ function ResourceCircle.UpdateSecDotColors()
     color = SEC_COLORS.ARCANE_CHARGES.default
   elseif secDotType == "DEMONIC_CORE" then
     color = SEC_COLORS.DEMONIC_CORE.default
+  elseif secDotType == "MAELSTROM_ORBS" then
+    color = SEC_COLORS.MAELSTROM_ORBS.default
   else
     color = { 1, 1, 1 }
   end
@@ -3737,7 +4146,11 @@ end
 -- Met a jour le fill des secondary dots (et les cibles d'animation slide)
 function ResourceCircle.UpdateSecDots()
   if secDotCount == 0 then return end
-  if previewMode then return end -- ne pas écraser les valeurs forcées par SetPreview
+  if previewMode then
+    -- Armes du Maelstrom : apercu redessine a chaque tick (reglages de couleur / glow suivis en direct)
+    if secDotType == "MAELSTROM_ORBS" then ResourceCircle._mw.Preview() end
+    return -- ne pas écraser les valeurs forcées par SetPreview
+  end
   -- Ne pas piloter les cibles quand le cercle est en cours de disparition
   local circleVisible = (lastVisibilityState == true)
 
@@ -3928,6 +4341,24 @@ function ResourceCircle.UpdateSecDots()
         else
           oa.target = 0
         end
+      end
+    end
+  elseif secDotType == "MAELSTROM_ORBS" then
+    -- Orbes dessinees par Blizzard (conteneurs natifs, cf. mw.EnsureNative) : nos frames restent cachees
+    local mwt = ResourceCircle._mw
+    mwt.Tick()   -- compteur conserve pour /aamw
+    mwt.EnsureNative()
+    mwt.SyncNative(circleVisible)
+    -- Nos frames d'orbes ne gardent que le fond des 5 emplacements (couleur du reglage, alpha 0 = sans fond)
+    local bgc = mwt.Cfg().bgColor
+    local showBg = circleVisible and (bgc[4] or 1) > 0
+    for i = 1, secDotCount do
+      local f, oa = secDots[i], secDotAnims[i]
+      if f and oa then
+        oa.target = showBg and 1 or 0
+        f.fill:SetAlpha(0)
+        f.bg:SetVertexColor(bgc[1], bgc[2], bgc[3], bgc[4] or 1)
+        mwt.HidePreviewDot(f)   -- couches d'apercu
       end
     end
   end
@@ -6114,8 +6545,15 @@ function ResourceCircle.NewGhost(parent)
       f:SetSize(dotSize, dotSize)
       f:ClearAllPoints()
       f:SetPoint("CENTER", g, "CENTER", math.cos(ang) * radius, math.sin(ang) * radius)
-      f.bg:SetVertexColor(bgC[1], bgC[2], bgC[3], bgC[4] or 1)
-      f.fill:SetVertexColor(col[1], col[2], col[3], 1)
+      if secDotType == "MAELSTROM_ORBS" then
+        -- Armes du Maelstrom (Forever) : meme dessin que l'apercu du cercle reel (glyphes, glow, fond reglables)
+        ResourceCircle._mw.DrawPreviewDot(f, dotSize, ResourceCircle._mw.Cfg(), i <= ResourceCircle._mw.PREVIEW_STACKS)
+      else
+        ResourceCircle._mw.HidePreviewDot(f)
+        f.fill:SetAlpha(1)
+        f.bg:SetVertexColor(bgC[1], bgC[2], bgC[3], bgC[4] or 1)
+        f.fill:SetVertexColor(col[1], col[2], col[3], 1)
+      end
       f:Show()
     end
     for i = n + 1, #g.secDots do g.secDots[i]:Hide() end

@@ -2220,7 +2220,7 @@ function ns.EnsureIconsNativeGridPet()
                 local okAdd, errAdd = pcall(function()
                     c:AddAuraGroup(groupKey, "HELPFUL", {
                         maxFrameCount = 1,
-                        candidateFilters = { includeSpellIDs = { [spellID] = true } },
+                        candidateFilters = { includeSpellIDs = ns.GetPetAuraInclude and ns.GetPetAuraInclude(spellID) or { [spellID] = true } },
                         initializeFrame = function(auraButton)
                             local okCheck, canAccess = pcall(function()
                                 return auraButton.CanBeAccessedInContext and auraButton:CanBeAccessedInContext()
@@ -3388,7 +3388,7 @@ function ns.EnsureCircleBarsNativeGridPet()
                 local okAdd, errAdd = pcall(function()
                     c:AddAuraGroup(groupKey, "HELPFUL", {
                         maxFrameCount = 1,
-                        candidateFilters = { includeSpellIDs = { [spellID] = true } },
+                        candidateFilters = { includeSpellIDs = ns.GetPetAuraInclude and ns.GetPetAuraInclude(spellID) or { [spellID] = true } },
                         layout = {
                             elementSpacing = rowStep,
                             lineSpacing = rowStep,
@@ -4578,7 +4578,7 @@ function ns.EnsureFreeBarsNativeGridPet()
                 local okAdd, errAdd = pcall(function()
                     c:AddAuraGroup(groupKey, "HELPFUL", {
                         maxFrameCount = 1,
-                        candidateFilters = { includeSpellIDs = { [spellID] = true } },
+                        candidateFilters = { includeSpellIDs = ns.GetPetAuraInclude and ns.GetPetAuraInclude(spellID) or { [spellID] = true } },
                         layout = { elementSpacing = rg, lineSpacing = rg, elementWidth = rowW, elementHeight = rowH, layoutIndex = 1 },
                         initializeFrame = function(auraButton)
                             local okCheck, canAccess = pcall(function()
@@ -5742,7 +5742,7 @@ function ns.EnsureIconListNativeGridPet()
                     -- se lier au slot (bug "debuff parasite dans Liste d'icones").
                     c:AddAuraGroup(groupKey, "HELPFUL", {
                         maxFrameCount = 1,
-                        candidateFilters = { includeSpellIDs = { [spellID] = true } },
+                        candidateFilters = { includeSpellIDs = ns.GetPetAuraInclude and ns.GetPetAuraInclude(spellID) or { [spellID] = true } },
                         layout = { elementSpacing = (isDual and pg or rg), lineSpacing = rg, elementWidth = elemW, elementHeight = elemH, layoutIndex = 1 },
                         initializeFrame = function(auraButton)
                             local okCheck, canAccess = pcall(function()

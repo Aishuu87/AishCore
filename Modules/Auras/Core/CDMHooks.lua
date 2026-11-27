@@ -188,6 +188,16 @@ function ns.SubscribeCDMAuraSwipe(spellID, key, cdFrame)
     cdmAuraSwipeSubscribers[spellID][key] = cdFrame
 end
 
+-- Ecouteurs "refresh d'aura" : appeles a chaque SetCooldown CDM d'une aura (pose ou remise a duree max),
+-- sans aucun argument secret. Sert a compter les stacks en combat (ResourceCircle, orbes Armes du Maelstrom).
+ns.cdmAuraRefreshListeners = ns.cdmAuraRefreshListeners or {}  -- [spellID][key] = fn(spellID)
+
+function ns.SubscribeCDMAuraRefresh(spellID, key, fn)
+    if not spellID or not key or type(fn) ~= "function" then return end
+    ns.cdmAuraRefreshListeners[spellID] = ns.cdmAuraRefreshListeners[spellID] or {}
+    ns.cdmAuraRefreshListeners[spellID][key] = fn
+end
+
 function ns.UnsubscribeCDMAuraSwipe(spellID, key)
     if not spellID or not key then return end
     local subs = cdmAuraSwipeSubscribers[spellID]
@@ -376,6 +386,10 @@ local function HookCDMCooldownChild(cdFrame, parentFrame)
             -- affichee "presente" bien apres la fin reelle du buff.
             if not parentFrame.wasSetFromCooldown then
                 ns.cdmAuraSwipePresence[spellID] = GetTime()
+                local rl = ns.cdmAuraRefreshListeners[spellID]
+                if rl then
+                    for _, fn in pairs(rl) do pcall(fn, spellID) end
+                end
             end
             local auraSubs = cdmAuraSwipeSubscribers[spellID]
             if auraSubs then

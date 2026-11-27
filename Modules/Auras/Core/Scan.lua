@@ -110,7 +110,17 @@ local function GetAuraDataForSpell(unit, spellID, name, cdmInstID)
         if ok and auraData then return auraData end
     end
     local filter = (unit == "target") and "HARMFUL" or "HELPFUL"
-    return FindAuraInList(unit, filter, spellID, name)
+    local d = FindAuraInList(unit, filter, spellID, name)
+    if d then return d end
+    -- Aura du familier sous un autre ID que le sort de la liste (ns.PetAuraSpells.auraIDs)
+    local def = ns.PetAuraSpells and ns.PetAuraSpells[spellID]
+    if def and def.auraIDs and unit ~= "player" then
+        for _, id in ipairs(def.auraIDs) do
+            d = FindAuraInList(unit, filter, id, nil)
+            if d then return d end
+        end
+    end
+    return nil
 end
 
 -- Cache "derniere donnee connue" (presence + stacks) : aucun canal CDM (swipe/bar/instID) ne s'est revele

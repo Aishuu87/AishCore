@@ -8,6 +8,25 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.8.5", date = "2026-11-28",
+    lines = {
+      { k = "h", t = "General", fr = "Général" },
+      { k = "li", lvl = 1, link = false, t = "New Interface section: Chat, Health Bars, Cast Bars, AFK Screen, Taxi Mode. \"Unit Frames\" is gone.", fr = "Nouvelle section Interface : Tchat, Barres de vie, Barres de cast, Écran AFK, Mode Taxi. « Cadres d'unités » disparaît." },
+      { k = "h", link = { page = "chat" }, t = "Chat", fr = "Tchat" },
+      { k = "li", lvl = 1, link = { page = "chat" }, t = "Added our own Chat module.", fr = "Ajout de notre propre module de Discussion." },
+      { k = "li", lvl = 1, link = { page = "chat" }, t = "Currently in Beta, it is disabled by default. Test it knowing what you're getting into.", fr = "Pour le moment en Béta, il est désactivé par défaut. Testez le en toutes connaissances de cause" },
+      { k = "h", link = { page = "resourceCircle" }, t = "Central Circle", fr = "Cercle central" },
+      { k = "li", lvl = 1, link = { page = "resourceCircle" }, t = "[Forever] Shaman: New Maelstrom Weapon stacks display as orbs", fr = "[Forever] Chaman : Ajout d’une visualisation des stacks d’Armes de Maelstrom sous forme d’orbes" },
+      { k = "li", lvl = 1, link = false, t = "Coming soon: other classes will benefit from this new technique, previously impossible! Huge!", fr = "À venir : d’autres classes pourront bénéficier de cette nouvelle technique, auparavant impossible ! Huge !" },
+      { k = "h", link = { page = "aurasTracked" }, t = "Auras to Track", fr = "Suivis d'auras" },
+      { k = "li", lvl = 1, link = { page = "aurasTracked" }, t = "[Forever] Hunter: Frenzy now correctly tracks the buff on the pet instead of the player, and should now show up.", fr = "[Forever] Chasseur : la Frénésie suit correctement le buff sur le familier et non plus le joueur et devrait maintenant s’afficher." },
+      { k = "h", link = { page = "aurasMissingBuffs" }, t = "Missing buffs", fr = "Buffs manquants" },
+      { k = "li", lvl = 1, link = { page = "aurasMissingBuffs" }, t = "FIX: Find Treasure (Dwarf racial) is now suggested in addition to Find Herbs/Minerals, not instead of them", fr = "FIX : La Détection des trésors (Racial Nain) sera proposée en plus des Découvertes de minerais et d’herbes, pas à la place" },
+      { k = "h", link = { page = "comfortQoL" }, t = "QoL", fr = "QoL" },
+      { k = "li", lvl = 1, link = { page = "comfortQoL" }, t = "The Command shortcuts option also enables the new /tt command, to whisper the player you are targeting.", fr = "L’option “Raccourcis de commande” permet également d’activer la nouvelle commande /tt qui permet de chuchoter à la personne que vous ciblez." },
+    },
+  },
+  {
     version = "4.8.4", date = "2026-11-26",
     lines = {
       { k = "h", link = { page = "actionBars" }, t = "Action Bars", fr = "Barres d’action" },

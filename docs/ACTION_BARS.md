@@ -24,6 +24,13 @@ Règles à tenir :
 - Barre 1 : state driver `page` (`AB.PagingConditions` : override, véhicule / possession, forme temporaire,
   vol dynamique 11, bonusbar 1-4 → 7-10 (druide en Rôder : 8), barres 2-6, sinon 1). `_onstate-page` pose `actionpage` sur chaque bouton :
   leur `OnAttributeChanged` relit l'action, en sécurisé.
+- **Pagination** (barres 1-8, désactivée par défaut) : `pageEnabled`, `pageShift` / `pageCtrl` / `pageAlt` = clé de la
+  barre affichée tant que le modificateur est maintenu (réglages propres à la barre, `LOCAL_PROPS`, non copiés).
+  `AB.ApplyPaging` (hors combat, appelé par `LayoutBar`) : barres fixes → driver `[mod:shift] p; … ; <page fixe>` ;
+  barre 1 → `[mod:…]` insérés après véhicule / possession / vol dynamique, avant les formes. Barre 1 cible = page 1.
+  Raccourcis automatiques (`AB.ApplyPagingBinds`, hors combat, au `LayoutAll` et à `UPDATE_BINDINGS`) : chaque touche
+  sans modificateur d'un bouton reçoit `MOD-touche` en override binding (cadre `AishCoreActionBarsPagingBinds`) vers la
+  même commande. Signature comparée avant d'écrire : `SetOverrideBinding` relance `UPDATE_BINDINGS`.
 
 ## Barres Blizzard
 

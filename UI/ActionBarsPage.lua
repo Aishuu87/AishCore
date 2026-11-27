@@ -37,7 +37,11 @@ local function Gray(w, on, keepAlpha)
     w._grayBlock = b
   end
   w._grayBlock:SetShown(on)
-  if not keepAlpha then w:SetAlpha(on and GRAY or 1) end
+  if not keepAlpha then
+    -- Base des fondus du pli (NewLayout) aussi : sans elle, le depli d'une section rend la pleine opacite
+    w._aishBaseA = on and GRAY or 1
+    if w:GetAlpha() > 0 then w:SetAlpha(on and GRAY or 1) end
+  end
 end
 
 local function Subtitle(parent, text, width, divider)
@@ -356,6 +360,16 @@ function ns.BuildActionBarsPage(container, W, NewLayout)
   }, 4, 2), "flyoutDir", "string")
   Row(4, slX, slY, rowFly)
 
+  -- Pagination : MAJ / CTRL / ALT maintenu = actions d'une autre barre (barres 1 a 8 seulement) --------------------
+  Section(L["ACTIONBARS_SEC_PAGING"])
+  local cbPage = Bind(CB(L["ACTIONBARS_PAGING_ENABLE"], L["ACTIONBARS_PAGING_ENABLE_TT"], 4), "pageEnabled", "bool")
+  cbPage._noMaster = true
+  local ddPageShift = Bind(DD(L["ACTIONBARS_PAGING_SHIFT"], {}, 4), "pageShift", "string")
+  local ddPageCtrl = Bind(DD(L["ACTIONBARS_PAGING_CTRL"], {}, 4), "pageCtrl", "string")
+  local ddPageAlt = Bind(DD(L["ACTIONBARS_PAGING_ALT"], {}, 4), "pageAlt", "string")
+  Row(4, cbPage, ddPageShift, ddPageCtrl, ddPageAlt)
+  local pageDDs = { ddPageShift, ddPageCtrl, ddPageAlt }
+
   -- Visibilite et opacite : Normal / Discret / Avance (regles cumulables, affichees en Avance seulement) -----------
   Section(L["ACTIONBARS_SEC_VISIBILITY"])
   local rowMode = Bind(AR(L["ACTIONBARS_VIS_MODE"], {
@@ -598,6 +612,9 @@ function ns.BuildActionBarsPage(container, W, NewLayout)
     -- Familier / postures : 10 boutons au plus ; totems : nombre fixe par Blizzard (emplacements appris)
     local def = AB().BAR_BY[Sel()]
     Gray(slCount, def.kind == "totem", off)
+    local pageable = def.kind == nil
+    Gray(cbPage, not pageable, off)
+    for _, w in ipairs(pageDDs) do Gray(w, not pageable or BV("pageEnabled") ~= true, off) end
     if slCount.SetMinMaxValues then slCount:SetMinMaxValues(1, def.count) end
     if slPerRow.SetMinMaxValues then slPerRow:SetMinMaxValues(1, def.count) end
   end
@@ -630,6 +647,12 @@ function ns.BuildActionBarsPage(container, W, NewLayout)
     ddGroup:SetValue(gid or "none")
     toggle:SetValue(BV("enabled") ~= false)
     cbModule:SetChecked(GV("enabled") == true)
+    -- Pagination : barres 1 a 8, sauf la barre affichee
+    local pOpts = { { value = "none", text = L["ACTIONBARS_BG_NONE"] } }
+    for _, def in ipairs(m.BARS) do
+      if def.kind == nil and def.key ~= Sel() then pOpts[#pOpts + 1] = { value = def.key, text = m.Label(def.key) } end
+    end
+    for _, w in ipairs(pageDDs) do w:SetOptions(pOpts); w:SetValue("none") end
     for _, e in ipairs(bound) do
       local v = BV(e.key)
       if e.kind == "bool" then

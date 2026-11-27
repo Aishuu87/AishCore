@@ -246,8 +246,9 @@ ns.MISSING_WELL_RESTED_ICON   = "Interface\\Icons\\INV_Misc_Bag_08"   -- repli s
 ns.MISSING_GATHER_FINDERS = {
     { spellId = 2383, key = ns.MISSING_TRACKING_HERBS_KEY, icon = "Interface\\Icons\\INV_Misc_Flower_02" },     -- Denicher les herbes
     { spellId = 2580, key = ns.MISSING_TRACKING_ORE_KEY,   icon = "Interface\\Icons\\Spell_Nature_Earthquake" }, -- Denicher les mineraux
-    -- Forever : Decouverte des tresors (racial nain), absente de la liste de pistage en Retail
-    { spellId = 2481, key = ns.MISSING_TRACKING_TREASURE_KEY, icon = "Interface\\Icons\\Racial_Dwarf_FindTreasure" },
+    -- Forever : Decouverte des tresors (racial nain), absente de la liste de pistage en Retail. Se cumule avec
+    -- herbes / mineraux (stacks : hors de la regle "un seul pistage a la fois")
+    { spellId = 2481, key = ns.MISSING_TRACKING_TREASURE_KEY, icon = "Interface\\Icons\\Racial_Dwarf_FindTreasure", stacks = true },
 }
 ns.MISSING_LOW_SHARDS_KEY = 9000012
 

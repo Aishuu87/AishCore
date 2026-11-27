@@ -1,5 +1,27 @@
 # AishCore
 
+## [v4.8.5](https://github.com/Aishuu87/AishCore/tree/v4.8.5) (2026-11-28)
+
+### General
+- New **Interface** section: Chat, Health Bars, Cast Bars, AFK Screen, Taxi Mode. "Unit Frames" is gone.
+
+### Chat
+- Added our own Chat module.
+- Currently in Beta, it is disabled by default. Test it knowing what you're getting into.
+
+### Central Circle
+- ♾️Shaman: New Maelstrom Weapon stacks display as orbs
+- *Coming soon: other classes will benefit from this new technique, previously impossible! Huge!*
+
+### Auras to Track
+- ♾️Hunter: Frenzy now correctly tracks the buff on the pet instead of the player, and should now show up.
+
+### Missing buffs
+- FIX: Find Treasure (Dwarf racial) is now suggested in addition to Find Herbs/Minerals, not instead of them
+
+### QoL
+- The Command shortcuts option also enables the new `/tt` command, to whisper the player you are targeting.
+
 ## [v4.8.4](https://github.com/Aishuu87/AishCore/tree/v4.8.4) (2026-11-26)
 
 ### Action Bars

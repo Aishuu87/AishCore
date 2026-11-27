@@ -120,7 +120,8 @@ end
 -- Groupes de barres : les barres d'un meme groupe partagent leurs reglages (groups[id].settings), sauf la
 -- position et la disposition, propres a chaque barre
 local LOCAL_PROPS = { enabled = true, group = true, x = true, y = true, count = true, perRow = true, growH = true,
-                      growV = true, width = true, height = true, spacingX = true, spacingY = true, flyoutDir = true }
+                      growV = true, width = true, height = true, spacingX = true, spacingY = true, flyoutDir = true,
+                      pageEnabled = true, pageShift = true, pageCtrl = true, pageAlt = true }
 AB.LOCAL_PROPS = LOCAL_PROPS
 local function GroupOf(key)
   local c = Cfg()
@@ -963,6 +964,7 @@ local function LayoutBar(key, light)
     end
   end
   placing = placing - 1
+  AB.ApplyPaging(key)
   if light then return end
   for i, b in pairs(list) do
     if i <= n then AB.StyleButton(b, key, w, h); HotkeyText(b) end
@@ -1013,6 +1015,7 @@ LayoutAll = function(light)
   if InCombatLockdown() then pendingLayout = true; return end
   pendingLayout = false
   for _, def in ipairs(AB.BARS) do LayoutBar(def.key, light) end
+  if AB.ApplyPagingBinds then AB.ApplyPagingBinds() end
   if AB.UpdateMovers then AB.UpdateMovers() end
 end
 
@@ -1023,16 +1026,80 @@ local function Idx(fn, alt, def)
   if not ok or type(v) ~= "number" then v = def end
   return v or alt
 end
-function AB.PagingConditions()
+-- mods : conditions de modificateur (Pagination), placees apres vehicule / possession / vol dynamique, avant les formes
+function AB.PagingConditions(mods)
   local O = Idx("GetOverrideBarIndex", 14, 14)
   local V = Idx("GetVehicleBarIndex", 12, 12)
   local T = Idx("GetTempShapeshiftBarIndex", 13, 13)
   -- Druide : en Rôder, la forme de félin garde bonusbar:1 (Retail comme Forever) ; la page 8 est la page Rôder
   -- (comme ElvUI). Un client qui passerait en bonusbar:2 tombe de toute facon sur la page 8.
   local prowl = (select(2, UnitClass("player")) == "DRUID") and "[bonusbar:1,stealth] 8; " or ""
-  return ("[overridebar] %d; [vehicleui][possessbar] %d; [shapeshift] %d; [bonusbar:5] 11; %s[bonusbar:1] 7; "
+  return ("[overridebar] %d; [vehicleui][possessbar] %d; [shapeshift] %d; [bonusbar:5] 11; %s%s[bonusbar:1] 7; "
     .. "[bonusbar:2] 8; [bonusbar:3] 9; [bonusbar:4] 10; [bar:2] 2; [bar:3] 3; [bar:4] 4; [bar:5] 5; [bar:6] 6; 1")
-    :format(O, V, T, prowl)
+    :format(O, V, T, mods or "", prowl)
+end
+
+-- Pagination par modificateur : MAJ / CTRL / ALT maintenu = la barre affiche les actions d'une autre barre (ses
+-- raccourcis restent les siens). Reglages propres a la barre (LOCAL_PROPS) : pageEnabled, pageShift/Ctrl/Alt = cle.
+AB.PAGE_MODS = { { prop = "pageShift", mod = "shift" }, { prop = "pageCtrl", mod = "ctrl" }, { prop = "pageAlt", mod = "alt" } }
+function AB.ModifierConditions(key)
+  if BV(key, "pageEnabled") ~= true then return "" end
+  local s = ""
+  for _, m in ipairs(AB.PAGE_MODS) do
+    local to = BV(key, m.prop)
+    local d = to and to ~= key and BAR_BY[to]
+    local page = d and (d.page or (d.paged and 1))
+    if page then s = s .. ("[mod:%s] %d; "):format(m.mod, page) end
+  end
+  return s
+end
+local pageCond = {}
+function AB.ApplyPaging(key, f)
+  local def = BAR_BY[key]
+  f = f or frames[key]
+  if not (f and def and (def.page or def.paged)) or InCombatLockdown() then return end
+  local mods = AB.ModifierConditions(key)
+  local cond = def.paged and AB.PagingConditions(mods) or (mods .. def.page)
+  if pageCond[key] == cond then return end
+  pageCond[key] = cond
+  RegisterStateDriver(f, "page", cond)
+end
+
+-- Raccourcis automatiques de la Pagination : chaque touche sans modificateur d'un bouton (ex. "1" sur ACTIONBUTTON1)
+-- recoit aussi MOD-touche (ex. "ALT-1") en override binding, vers la meme commande. Hors combat. Signature comparee :
+-- SetOverrideBinding declenche UPDATE_BINDINGS, qui nous rappelle.
+local bindOwner = CreateFrame("Frame", "AishCoreActionBarsPagingBinds")
+local bindSig, pendingBinds = nil, false
+local MOD_KEY = { shift = "SHIFT", ctrl = "CTRL", alt = "ALT" }
+local function HasModifier(k) return k:match("^ALT%-.") or k:match("^CTRL%-.") or k:match("^SHIFT%-.") or k:match("^META%-.") end
+function AB.ApplyPagingBinds()
+  if InCombatLockdown() then pendingBinds = true; return end
+  pendingBinds = false
+  local list = {}
+  if adopted then
+    for _, def in ipairs(AB.BARS) do
+      if def.bind and frames[def.key] and not def.kind and BV(def.key, "pageEnabled") == true then
+        for _, m in ipairs(AB.PAGE_MODS) do
+          local to = BV(def.key, m.prop)
+          if to and to ~= "none" and to ~= def.key and BAR_BY[to] then
+            for i = 1, def.count do
+              local cmd = def.bind .. i
+              for _, k in ipairs({ GetBindingKey(cmd) }) do
+                if type(k) == "string" and not HasModifier(k) then list[#list + 1] = { MOD_KEY[m.mod] .. "-" .. k, cmd } end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  local parts = {}
+  for _, e in ipairs(list) do parts[#parts + 1] = e[1] .. "=" .. e[2] end
+  local sig = table.concat(parts, ";")
+  if sig == bindSig then return end
+  bindSig = sig
+  ClearOverrideBindings(bindOwner)
+  for _, e in ipairs(list) do SetOverrideBinding(bindOwner, false, e[1], e[2]) end
 end
 
 -- Barres securisees ------------------------------------------------------------------------------------------------
@@ -1057,14 +1124,17 @@ local function CreateBar(def, list)
       self:SetAttribute("actionpage", %d)
       for _, b in pairs(btns) do b:SetAttribute("actionpage", %d) end
     ]]):format(def.page, def.page))
-  elseif def.paged then
-    -- Changement de page : attribut pose sur chaque bouton (son OnAttributeChanged relit l'action, en securise)
+  end
+  if def.page or def.paged then
+    -- Changement de page : attribut pose sur chaque bouton (son OnAttributeChanged relit l'action, en securise).
+    -- Barres fixes : driver = leur page, precedee des modificateurs de la Pagination (AB.ApplyPaging)
     f:SetAttribute("_onstate-page", [[
       local page = tonumber(newstate) or 1
       self:SetAttribute("actionpage", page)
       for _, b in pairs(btns) do b:SetAttribute("actionpage", page) end
     ]])
-    RegisterStateDriver(f, "page", AB.PagingConditions())
+    pageCond[def.key] = nil
+    AB.ApplyPaging(def.key, f)
     -- La page change une frame apres UPDATE_BONUS_ACTIONBAR (state driver) : l'index des raccourcis (barre de rotation,
     -- bouton de rotation), reconstruit entre-temps sur l'ancienne page, est invalide une fois les actions relues
     f:HookScript("OnAttributeChanged", function(_, name)
@@ -1892,11 +1962,15 @@ ev:SetScript("OnEvent", function(_, event)
   elseif event == "PLAYER_REGEN_ENABLED" then
     if pendingAdopt then AB.Adopt() end
     if pendingLayout then LayoutAll() elseif adopted then for key in pairs(frames) do ApplyVisibility(key) end end
+    if pendingBinds then AB.ApplyPagingBinds() end
   elseif event == "PLAYER_REGEN_DISABLED" then
     for _, m in pairs(movers) do m:StopMovingOrSizing(); m:SetScript("OnUpdate", nil) end
     if adopted then for key in pairs(frames) do ApplyVisibility(key, true) end end
   elseif event == "UPDATE_BINDINGS" then
-    C_Timer.After(0, function() for b in pairs(owner) do HotkeyText(b) end end)
+    C_Timer.After(0, function()
+      for b in pairs(owner) do HotkeyText(b) end
+      AB.ApplyPagingBinds()   -- raccourcis de la Pagination suivent les touches des boutons
+    end)
   elseif adopted then
     QueueLayout()
   end

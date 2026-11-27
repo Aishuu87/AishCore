@@ -3226,14 +3226,15 @@ local function GatherTrackingChoices()
         for _, f in ipairs(ns.MISSING_GATHER_FINDERS) do
             if t and t.spellID == f.spellId then
                 state[f.spellId] = t.active and true or false
-                if t.active then anyActive = true end
+                if t.active and not f.stacks then anyActive = true end
             end
         end
     end
-    if _addon.IsForever and anyActive then return nil, true end
+    -- Decouverte des tresors (stacks) se cumule : proposee des qu'elle est coupee, sans bloquer les autres
+    local exclusive = _addon.IsForever and anyActive
     local choices = {}
     for _, f in ipairs(ns.MISSING_GATHER_FINDERS) do
-        if state[f.spellId] == false then
+        if state[f.spellId] == false and (f.stacks or not exclusive) then
             choices[#choices + 1] = { key = f.key, icon = f.icon,
                 macro = "/run for i=1,C_Minimap.GetNumTrackingTypes() do local t=C_Minimap.GetTrackingInfo(i) if t and t.spellID=="
                     .. f.spellId .. " then C_Minimap.SetTracking(i,true) end end" }

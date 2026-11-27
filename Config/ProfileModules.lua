@@ -14,7 +14,9 @@ local addonName, ns = ...
 --   misc  : true = toute clé de profil qu'aucun autre nœud ne déclare (filet de sécurité)
 -- Section (1er niveau) : panel = catégorie de la page "Modules" (modulesPanel.categoryOff)
 ns.ProfileTree = {
-  { id = "unitFrames", label = "SETTINGS_GROUP_UNIT_FRAMES", panel = "unitFrames", children = {
+  -- Section "Interface" (id unitFrames garde : etat de la page Modules, listes des colonnes, installeur)
+  { id = "unitFrames", label = "SETTINGS_GROUP_INTERFACE", panel = "unitFrames", children = {
+    { id = "chat", label = "SETTINGS_CAT_CHAT", core = { "chat" }, apply = { "Chat" } },
     { id = "unitBars", label = "SETTINGS_CAT_HEALTH_BARS", core = { { path = "unitBars", except = { "bars" } } },
       apply = { "UnitBars" }, children = {
         { id = "unitBars.player", label = "SETTINGS_UNIT_PLAYER", core = { "unitBars.bars.player" }, apply = { "UnitBars" } },
@@ -29,6 +31,8 @@ ns.ProfileTree = {
     { id = "topTargetBar", label = "SETTINGS_CAT_TOP_TARGET", core = { "topTargetBar" }, apply = { "TopTargetBar" }, children = {
         { id = "targetAuras", label = "SETTINGS_CAT_TARGET_AURAS", core = { "targetAuras" }, apply = { "TargetAuras" } },
       } },
+    { id = "afkMode", label = "SETTINGS_CAT_AFK_MODE", core = { "afkMode" }, apply = { "AFKMode" } },
+    { id = "taxiMode", label = "SETTINGS_CAT_TAXI_MODE", core = { "taxiMode" }, apply = { "TaxiMode" } },
   } },
   { id = "combat", label = "SETTINGS_GROUP_COMBAT", panel = "combat", children = {
     { id = "actionBars", label = "SETTINGS_CAT_ACTION_BARS", core = { "actionBars" }, apply = { "ActionBars" } },
@@ -99,8 +103,6 @@ ns.ProfileTree = {
         { id = "minimapNodes", label = "SETTINGS_MMN_TITLE", core = { "minimapNodes" }, apply = { "MinimapNodes" } },
       } },
     { id = "location", label = "SETTINGS_CAT_LOCATION", core = { "location" }, apply = { "Location" } },
-    { id = "afkMode", label = "SETTINGS_CAT_AFK_MODE", core = { "afkMode" }, apply = { "AFKMode" } },
-    { id = "taxiMode", label = "SETTINGS_CAT_TAXI_MODE", core = { "taxiMode" }, apply = { "TaxiMode" } },
     { id = "menuBar", label = "SETTINGS_CAT_MENU_BAR", core = { "menuBar" }, apply = { "MenuBar" } },
     { id = "addonCompartment", label = "SETTINGS_CAT_ADDON_COMPARTMENT", core = { "addonCompartment" }, apply = { "AddonCompartment" } },
     { id = "visibility", label = "SETTINGS_CAT_VISIBILITY", core = { "visibility", "addonFonts" }, apply = { "Visibility", "AddonFonts" }, children = {

@@ -11,6 +11,7 @@ generate_town_areas.py
 generate_spell_homonyms.py
 generate_totem_buffs.py
 generate_taxi_paths.py
+generate_orb_font.py
 locale_sheet.py
 
 # Feuilles de traduction exportees (echangees avec les traducteurs, hors depot)

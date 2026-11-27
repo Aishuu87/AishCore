@@ -140,12 +140,33 @@ local function SlashCDM()
   if f:IsShown() then HideUIPanel(f) else ShowUIPanel(f) end
 end
 
+-- /tt message : chuchote a la cible (joueur) ; sans message, ouvre la saisie du chuchotement
+local function SlashTellTarget(msg)
+  if not (UnitExists("target") and UnitIsPlayer("target")) then
+    return Say(ERR_GENERIC_NO_TARGET or "No target")
+  end
+  -- Nom-Royaume (royaume sans espaces) ; royaume absent = meme royaume que le joueur
+  local name, realm = UnitName("target")
+  local secret = ns.IsSecret and (ns.IsSecret(name) or ns.IsSecret(realm))
+  if secret or not name or name == "" then return end
+  if realm and realm ~= "" then name = name .. "-" .. realm:gsub("[%s%-]", "") end
+  msg = msg and msg:match("^%s*(.-)%s*$") or ""
+  if msg == "" then
+    local tell = (ChatFrameUtil and ChatFrameUtil.SendTell) or _G.ChatFrame_SendTell
+    if tell then tell(name) end
+    return
+  end
+  local send = (C_ChatInfo and C_ChatInfo.SendChatMessage) or _G.SendChatMessage
+  send(msg, "WHISPER", nil, name)
+end
+
 -- Enregistre / retire les commandes : SlashCmdList est relu a chaque saisie, donc un simple
 -- nil rend la commande a un eventuel autre addon.
 local SLASHES = {
   { name = "AISHCORE_RL",   cmd = "/rl",   fn = SlashReload   },
   { name = "AISHCORE_EDIT", cmd = "/edit", fn = SlashEditMode },
   { name = "AISHCORE_CDM",  cmd = "/cdm",  fn = SlashCDM      },
+  { name = "AISHCORE_TT",   cmd = "/tt",   fn = SlashTellTarget },
 }
 
 local function ApplySlashes()

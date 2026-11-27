@@ -1215,6 +1215,7 @@ local function GetModKey(dbKey)
     characterArmory            = "CharacterArmory",
     afkMode                    = "AFKMode",
     taxiMode                   = "TaxiMode",
+    chat                       = "Chat",
     bigCursor                  = "BigCursor",
     stealthMode                = "StealthMode",
     campfire                   = "Campfire",
@@ -1247,6 +1248,8 @@ local CIRCLE_DRAG_MODULES = {
 }
 
 local function LiveApply(dbKey)
+  -- Apercu du cercle (haut de page) : redessine a l'image suivante, pas au prochain pas de 0,25 s (sliders fluides)
+  if dbKey == "resourceCircle" then ns._rcGhostDirty = true end
   local mod = ns.Modules and ns.Modules[GetModKey(dbKey)]
   if mod and mod.ApplySettings then mod.ApplySettings() end
   local dragModName = CIRCLE_DRAG_MODULES[dbKey]
@@ -1394,6 +1397,7 @@ local DOT_TYPE_LABELS = {
   HOLY_POWER     = L["SETTINGS_HOLY_POWER"],
   ESSENCE        = L["SETTINGS_ESSENCE"],
   ARCANE_CHARGES = L["SETTINGS_ARCANE_CHARGES"],
+  MAELSTROM_ORBS = L["SETTINGS_DOT_MAELSTROM"],
 }
 
 -- Retourne le dotType actif ("RUNES", "COMBO", …) ou nil si aucun.
@@ -1419,6 +1423,8 @@ local function GetActiveDotType()
     return nil
   end
   if cls == "MAGE"        then return specID == 62  and "ARCANE_CHARGES" or nil end
+  -- Forever : Armes du Maelstrom (rune, 408505) en orbes natives ; Retail : deja affichee comme ressource
+  if cls == "SHAMAN" and ns.IsForever then return "MAELSTROM_ORBS" end
   return nil
 end
 
@@ -1633,6 +1639,40 @@ function Build.ResourceCircle(container)
       L["SETTINGS_ORB_REVERSED_ORDER"],
       L["SETTINGS_ORB_REVERSED_ORDER_TT"], W))
     BindCheckbox(cbReversed, "resourceCircle", dp.."reversed", "secondaryDotsReversed")
+
+    -- Armes du Maelstrom (Forever) : orbes dessinees par le jeu (glyphes de police), couleurs a part
+    if dotType == "MAELSTROM_ORBS" then
+      local _w3 = math.floor((W - 16) / 3)
+      local cbOrbThemed = SW.CreateCheckbox(container, L["SETTINGS_RC_THEMED_COLORS"], L["SETTINGS_RC_THEMED_COLORS_TT"], _w3)
+      BindCheckbox(cbOrbThemed, "resourceCircle", dp.."themed")
+      local colOrb = SW.CreateColorButton(container, L["SETTINGS_ORB_COLOR"], _w3)
+      BindColorButton(colOrb, "resourceCircle", dp.."color")
+      if not DBGet("resourceCircle", dp.."color") then colOrb:SetColor(0.00, 0.55, 1.00, 1) end
+      Build.LinkSpecColor(cbOrbThemed, colOrb)
+      local colOrbBg = SW.CreateColorButton(container, L["SETTINGS_RC_BG_COLOR"], _w3)
+      BindColorButton(colOrbBg, "resourceCircle", dp.."bgColor")
+      if not DBGet("resourceCircle", dp.."bgColor") then
+        local bgc = DBGet("resourceCircle", "bgColor")
+        if type(bgc) == "table" then colOrbBg:SetColor(bgc[1], bgc[2], bgc[3], bgc[4]) end
+      end
+      ctx:AddRow(8, cbOrbThemed, colOrb, colOrbBg)
+
+      local cbOrbGlow = SW.CreateCheckbox(container, L["SETTINGS_ORB_GLOW"], L["SETTINGS_ORB_GLOW_TT"], _w3)
+      BindCheckbox(cbOrbGlow, "resourceCircle", dp.."glow")
+      cbOrbGlow:SetChecked(DBGet("resourceCircle", dp.."glow") ~= false)
+      local cbGlowThemed = SW.CreateCheckbox(container, L["SETTINGS_RC_THEMED_COLORS"], L["SETTINGS_RC_THEMED_COLORS_TT"], _w3)
+      BindCheckbox(cbGlowThemed, "resourceCircle", dp.."glowThemed")
+      local colOrbGlow = SW.CreateColorButton(container, L["SETTINGS_GLOW_COLOR"], _w3)
+      BindColorButton(colOrbGlow, "resourceCircle", dp.."glowColor")
+      if not DBGet("resourceCircle", dp.."glowColor") then colOrbGlow:SetColor(0.00, 0.55, 1.00, 0.85) end
+      Build.LinkSpecColor(cbGlowThemed, colOrbGlow)
+      ctx:AddRow(8, cbOrbGlow, cbGlowThemed, colOrbGlow)
+
+      local slOrbGlow = SW.CreateSlider(container, L["SETTINGS_GLOW_SIZE"], 1.2, 4, 0.05, _w3)
+      BindSlider(slOrbGlow, "resourceCircle", dp.."glowSize")
+      if not DBGet("resourceCircle", dp.."glowSize") then slOrbGlow:SetValue(2.2) end
+      ctx:AddRowCentered(8, slOrbGlow)
+    end
   end
 
   -- Section arc de stagger : Moine Brasseur uniquement (spec 268)
@@ -2536,8 +2576,9 @@ function Build.ResourceCircle(container)
     rcBox:SetScript("OnUpdate", function(_, dt)
       if not ghost then return end
       accR, accV = accR + dt, accV + dt
-      if accR >= 0.25 then
+      if accR >= 0.25 or ns._rcGhostDirty then
         accR, accV = 0, 0
+        ns._rcGhostDirty = nil
         ghost.Apply(RcOpts())
         RcLayout()
         ghost.SetValue(RcSweep())
@@ -3678,6 +3719,11 @@ end
 -- BUILD : Barres de cast (joueur, cible, focus) : page dans UI/CastBarsPage.lua (hors du chunk principal)
 function Build.CastBars(container)
   if ns.BuildCastBarsPage then ns.BuildCastBarsPage(container, CONTENT_W, NewLayout) end
+end
+
+-- BUILD : Tchat : page dans UI/ChatPage.lua (hors du chunk principal), logique dans Modules/Chat.lua
+function Build.Chat(container)
+  if ns.BuildChatPage then ns.BuildChatPage(container, CONTENT_W, NewLayout) end
 end
 
 -- BUILD : Numero de Groupe (raid uniquement) : vignette + texte, page separee dans "Cadres d'unites" (pas une sous-section de Barres de Vie).
@@ -12143,8 +12189,10 @@ local MODULE_CATEGORIES = {
     },
   },
   {
-    key = "unitFrames", label = L["SETTINGS_GROUP_UNIT_FRAMES"],
+    -- Cle "unitFrames" gardee (etat replie enregistre, arbre de profils) : la categorie s'appelle desormais Interface
+    key = "unitFrames", label = L["SETTINGS_GROUP_INTERFACE"],
     modules = {
+      ModEntry("chat", L["SETTINGS_CAT_CHAT"], "chat", "enabled", L["CHAT_ENABLE_TT"]),
       (function()
         local m = ModEntry("unitBars", L["SETTINGS_CAT_HEALTH_BARS"], "unitBars", "enabled")
         m.children = {
@@ -12169,6 +12217,8 @@ local MODULE_CATEGORIES = {
         }
         return m
       end)(),
+      ModEntry("afkMode",     L["SETTINGS_CAT_AFK_MODE"],     "afkMode",     "enabled"),
+      ModEntry("taxiMode",    L["SETTINGS_CAT_TAXI_MODE"],    "taxiMode",    "enabled"),
     },
   },
   {
@@ -12257,8 +12307,6 @@ local MODULE_CATEGORIES = {
     modules = {
       ModEntry("qol",         L["SETTINGS_COMFORT_SEC_QOL"],  "comfort",     "enabled", L["SETTINGS_COMFORT_ENABLE_TT"]),
       ModEntry("location",    L["SETTINGS_CAT_LOCATION"],     "location",    "enabled", L["SETTINGS_LOC_ENABLE_TT"]),
-      ModEntry("afkMode",     L["SETTINGS_CAT_AFK_MODE"],     "afkMode",     "enabled"),
-      ModEntry("taxiMode",    L["SETTINGS_CAT_TAXI_MODE"],    "taxiMode",    "enabled"),
       ModEntry("menuBar",     L["SETTINGS_CAT_MENU_BAR"],     "menuBar",     "enabled"),
       ModEntry("addonCompartment", L["SETTINGS_CAT_ADDON_COMPARTMENT"], "addonCompartment", "enabled", L["SETTINGS_CAT_ADDON_COMPARTMENT_TT"]),
     },
@@ -12534,7 +12582,7 @@ function Build.CategoryColumn(container, catKeys, x, colW, yOffset)
   return y
 end
 
--- 3 colonnes : Cadres d'unités + Extras / Combat + Animations 3D / le reste (Monde, Auras & Procs, Divers).
+-- 3 colonnes : Interface + Extras / Combat + Animations 3D / le reste (Monde, Auras & Procs, Divers).
 local MOD_COLUMNS = {
   { "unitFrames", "extras" },
   { "combat", "animations" },
@@ -15134,6 +15182,12 @@ local CATEGORIES = {
     build = Build.ExtraBars,
   },
   {
+    id    = "chat",
+    label = L["SETTINGS_CAT_CHAT"],
+    icon  = "Interface\\Icons\\INV_Letter_15",
+    build = Build.Chat,
+  },
+  {
     id    = "afkMode",
     label = L["SETTINGS_CAT_AFK_MODE"],
     icon  = "Interface\\Icons\\INV_Misc_PocketWatch_01",
@@ -15286,13 +15340,14 @@ ns.PruneUnavailable(CATEGORIES)
 -- Groupes de la sidebar (style AishUI : headers parchemin + sections cliquables)
 local SIDEBAR_GROUPS = {
   { label = L["SETTINGS_GROUP_GLOBAL"],      ids = { "profiles", "modulesOverview", "colors", "patchNotes", "heroicSupport" } },
-  { label = L["SETTINGS_GROUP_UNIT_FRAMES"], ids = { "unitBars", "castBars" } },
+  -- Interface : les gros elements de l'ecran hors HUD / combat (tchat, cadres d'unites, ecrans AFK et taxi)
+  { label = L["SETTINGS_GROUP_INTERFACE"],   ids = { "chat", "unitBars", "castBars", "afkMode", "taxiMode" } },
   { label = L["SETTINGS_GROUP_COMBAT"],      ids = { "actionBars", "resourceCircle", "priorityBar", "rotationHelper", "cdmAppearance", "cdmLayout" } },
   { label = L["SETTINGS_GROUP_WORLD"],       ids = { "outOfCombat", "wellFed", "campfire", "fishing", "stealthMode", "xpBar", "extraBars", "skyriding", "characterArmory" } },
   { label = L["SETTINGS_GROUP_AURAS_PROCS"], ids = { "aurasTracked", "aurasIconlist", "aurasFreebars", "aurasIcons", "aurasCirclebars", "aurasTotems", "aurasMissingBuffs", "movementBuffs" } },
   -- Groupes sans sous-section : le clic sur le header ouvre directement la page (single)
   { label = L["SETTINGS_GROUP_ANIMATIONS"],  ids = { "spellEffects" }, single = true },
-  { label = L["SETTINGS_GROUP_COMFORT"],     ids = { "comfortQoL", "comfortRender", "visibility", "menuBar", "addonCompartment", "location", "afkMode", "taxiMode" } },
+  { label = L["SETTINGS_GROUP_COMFORT"],     ids = { "comfortQoL", "comfortRender", "visibility", "menuBar", "addonCompartment", "location" } },
 }
 for _, grp in ipairs(SIDEBAR_GROUPS) do ns.PruneUnavailable(grp.ids) end
 ns._sidebarGroups = SIDEBAR_GROUPS   -- export du mode disposition (UI/LayoutEditor.lua)

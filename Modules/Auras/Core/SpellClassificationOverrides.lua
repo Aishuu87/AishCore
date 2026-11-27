@@ -365,11 +365,26 @@ ns.SpellClassificationOverridesForever = {
 -- ni scannees. Declarees ici, elles sont enregistrees pour la spec voulue (source "buff", categorie
 -- Buffs) par CDMHooks, et Scan lit leur duree/leurs stacks sur l'unite indiquee.
 -- specKey : cle ns.GetSpecKey() ("CLASSE_SPE", cf. Defaults.lua::SPEC_MAP), nil = toutes les specs.
+-- auraIDs : ID(s) de l'aura reellement posee sur le pet quand elle differe du sort de la liste.
 ns.PetAuraSpells = {
     [1233448] = { unit = "pet", specKey = "DEATHKNIGHT_UNHOLY" }, -- Sombre transformation
 }
+-- Forever : le talent Frenesie (19621) donne au familier le buff 19615, jamais au joueur
+if _addon.IsForever then
+    ns.PetAuraSpells[19621] = { unit = "pet", specKey = "HUNTER_BEASTMASTERY", auraIDs = { 19615 } }
+end
 
 function ns.GetPetAuraUnit(spellID)
     local def = spellID and ns.PetAuraSpells and ns.PetAuraSpells[spellID]
     return def and def.unit or nil
+end
+
+-- IDs d'aura a chercher sur le pet pour ce sort (lui-meme + auraIDs) : filtre des grilles familier
+function ns.GetPetAuraInclude(spellID)
+    local set = { [spellID] = true }
+    local def = spellID and ns.PetAuraSpells and ns.PetAuraSpells[spellID]
+    if def and def.auraIDs then
+        for _, id in ipairs(def.auraIDs) do set[id] = true end
+    end
+    return set
 end

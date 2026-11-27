@@ -1307,6 +1307,41 @@ ns.Defaults = {
     fadeOut  = 0.8,    -- secondes
   },
 
+  -- Tchat, cf. Modules/Chat.lua et docs/CHAT.md : habillage des fenetres de discussion Blizzard (fond, ombres,
+  -- animations, fondu ligne par ligne) et messages epures (butin, argent, XP, reputation, zones...).
+  chat = {
+    enabled = false,   -- beta : desactive par defaut
+    -- Texte
+    font = ns.FONT_FALLBACK, fontSizeCustom = false, fontSize = 14, outline = "NONE",
+    shadow = true, shadowAlpha = 0.9, shadowOffset = 1, spacing = 2,
+    -- Fond : "shadow" (ombre douce derriere chaque ligne), "solid" (panneau), "none" ; bgHover = fond visible seulement au survol
+    bgStyle = "shadow", bgColor = { 0, 0, 0, 0.55 }, bgPad = 10, bgEdge = 24, bgHover = false,
+    bgBorderSize = 0, bgBorderColor = { 0, 0, 0, 1 },
+    -- Elements de Blizzard
+    hideButtons = true, hideScrollBar = true, styleTabs = true, styleEditBox = true,
+    accentColor = { 1, 0.76, 0.25, 1 }, accentThemed = true,   -- onglet actif, cadre de saisie (Couleurs thematiques : cercle de puissance)
+    -- Animations : arrivee des lignes (glissement + fondu), poussee douce des lignes au-dessus
+    animIn = true, animDuration = 0.3, animOffset = 18, animPush = true,
+    -- Fondu ligne par ligne apres `fadeAfter` secondes ; le survol fait reapparaitre l'historique
+    fade = true, fadeAfter = 30, fadeDuration = 3, revealOnHover = true, hoverHold = 1.5,   -- secondes de survol tenu apres la sortie
+    -- Horodatage : colonne a gauche du texte (heure lue dans l'historique du widget), seulement au survol en option
+    timestamps = false, timestampFormat = "%H:%M", timestampHover = false,
+    tabsHover = false,   -- onglets caches hors survol du tchat
+    -- Onglets : disposition ("horizontal" = Blizzard, "vertical" = barre a nous a gauche du dock), police, couleurs
+    tabLayout = "horizontal", tabVStyle = "icon", tabVWidth = 30, tabVTextWidth = 90, tabVSpacing = 4, tabVX = 0, tabVY = 0,   -- vertical : icones (carres) ou texte
+    tabFont = ns.FONT_FALLBACK, tabFontSize = 12, tabOutline = "NONE",
+    tabColorActive = { 1, 0.82, 0, 1 }, tabActiveAccent = false, tabColorInactive = { 0.65, 0.65, 0.65, 1 },
+    tabColorWhisper = { 1, 0.5, 1, 1 }, tabColorBN = { 0.3, 0.78, 1, 1 }, tabColorAlert = { 0.4, 0.8, 1, 1 },
+    tabVBarBg = "none", tabVBarColor = { 0, 0, 0, 0.6 }, tabVBarPad = 6, tabVBtnAlpha = 0.55,   -- vertical : fond de barre, opacite des boutons
+    -- Messages epures
+    cleanMoney = true, cleanLoot = true, lootIcons = true, othersLootQuality = 0,
+    cleanCurrency = true, cleanXP = true, cleanRep = true, cleanSkill = true, cleanHonor = true,
+    cleanZone = true, cleanFriends = true, cleanQuest = true, hideAFK = true, shortChannels = true,
+    copyButton = true, jumpButton = true,
+    -- Onglets
+    groupTab = false, groupTabSelect = true,
+  },
+
   -- Compartiment d'addons, cf. Modules/AddonCompartment.lua : boutons de minimap des addons ranges dans un seul bouton
   addonCompartment = {
     enabled = false,
@@ -1331,7 +1366,7 @@ ns.Defaults = {
     favIconBgBorderSize = 0, favIconBgBorderColor = { 0, 0, 0, 1 },
   },
 
-  -- Confort de jeu, cf. Modules/Comfort.lua : CVars de rendu + raccourcis /rl /edit /cdm.
+  -- Confort de jeu, cf. Modules/Comfort.lua : CVars de rendu + raccourcis /rl /edit /cdm /tt.
   comfort = {
     -- Rendu graphique (groundDensity/groundFade/groundDist/sharpen) : lie au PC/compte et non au profil,
     -- cf. Modules/Comfort.lua (GetDevice) -- jamais dans le profil, donc jamais partage avec lui.
