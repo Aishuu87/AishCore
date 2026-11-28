@@ -8,6 +8,15 @@ local addonName, ns = ...
 
 ns.PatchNotes = {
   {
+    version = "4.8.6", date = "2026-11-28",
+    lines = {
+      { k = "h", link = { page = "actionBars" }, t = "Action Bars", fr = "Barres d'actions" },
+      { k = "li", lvl = 1, link = { page = "actionBars" }, t = "New Paging section. It lets a bar switch to another one while CTRL, ALT or SHIFT is held. The switching bar keeps its keybindings, so the bar's keybindings + CTRL/ALT/SHIFT cast the spells of the switched bar.", fr = "Nouvelle section “Pagination”. Elle permet d’associer un basculement de barre à l’aide des touches CTRL, ALT, ou MAJ. La barre qui bascule conserve ses raccourcis, et donc les combinaisons de touches avec les raccourcis de la barre + CTRL/ALT/MAJ permettent de lancer les sorts de la barre basculée." },
+      { k = "h", link = { page = "aurasTracked" }, t = "Auras to Track", fr = "Suivis d'auras" },
+      { k = "li", lvl = 1, link = { page = "aurasTracked" }, t = "Hunter: Frenzy now correctly tracks the buff on the pet instead of the player, and should now show up (wrong spellID before)", fr = "Chasseur : la Frénésie suit correctement le buff sur le familier et non plus le joueur et devrait maintenant s’afficher (auparavant mauvais spellID)" },
+    },
+  },
+  {
     version = "4.8.5", date = "2026-11-28",
     lines = {
       { k = "h", t = "General", fr = "Général" },

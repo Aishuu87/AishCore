@@ -369,9 +369,9 @@ ns.SpellClassificationOverridesForever = {
 ns.PetAuraSpells = {
     [1233448] = { unit = "pet", specKey = "DEATHKNIGHT_UNHOLY" }, -- Sombre transformation
 }
--- Forever : le talent Frenesie (19621) donne au familier le buff 19615, jamais au joueur
+-- Forever : Frenesie, buff 19615 pose sur le familier (jamais sur le joueur) ; le talent 19621 n'est pas l'aura
 if _addon.IsForever then
-    ns.PetAuraSpells[19621] = { unit = "pet", specKey = "HUNTER_BEASTMASTERY", auraIDs = { 19615 } }
+    ns.PetAuraSpells[19615] = { unit = "pet", specKey = "HUNTER_BEASTMASTERY" }
 end
 
 function ns.GetPetAuraUnit(spellID)

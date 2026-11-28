@@ -1,5 +1,13 @@
 # AishCore
 
+## [v4.8.6](https://github.com/Aishuu87/AishCore/tree/v4.8.6) (2026-11-28)
+
+### Action Bars
+- New Paging section. It lets a bar switch to another one while CTRL, ALT or SHIFT is held. The switching bar keeps its keybindings, so the bar's keybindings + CTRL/ALT/SHIFT cast the spells of the switched bar.
+
+### Auras to Track
+- Hunter: Frenzy now correctly tracks the buff on the pet instead of the player, and should now show up (wrong spellID before)
+
 ## [v4.8.5](https://github.com/Aishuu87/AishCore/tree/v4.8.5) (2026-11-28)
 
 ### General
